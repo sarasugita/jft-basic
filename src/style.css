@@ -506,5 +506,120 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   opacity: 1;
 }
 
+.score-big{
+  display:flex;
+  gap:10px;
+  align-items:baseline;
+  justify-content:center;
+  margin: 10px 0 16px;
+}
+.score-correct{ font-size: 64px; font-weight: 900; }
+.score-slash{ font-size: 44px; font-weight: 900; opacity: .6; }
+.score-total{ font-size: 44px; font-weight: 900; opacity: .85; }
+
+.result-table-wrap{
+  margin-top: 18px;
+  overflow: auto;
+  border: 1px solid rgba(0,0,0,.15);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.result-table{
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 800px; /* 横スクロール許可 */
+}
+
+.result-table th, .result-table td{
+  border-bottom: 1px solid rgba(0,0,0,.08);
+  padding: 10px 12px;
+  vertical-align: top;
+  font-size: 14px;
+}
+
+.result-table th{
+  position: sticky;
+  top: 0;
+  background: #f7f7f7;
+  z-index: 1;
+  text-align: left;
+  font-weight: 900;
+}
+
+.cell-id{ white-space: nowrap; font-weight: 800; }
+.cell-judge{ width: 80px; text-align: center; }
+
+.badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  font-weight: 900;
+  border: 2px solid rgba(0,0,0,.2);
+}
+.badge.ok{ background: #e9f6e6; }
+.badge.ng{ background: #ffe9e9; }
+
+.cell-prompt{
+  display:flex;
+  gap: 10px;
+  align-items:flex-start;
+}
+
+.result-thumb{
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,.15);
+  flex: 0 0 auto;
+}
+
+.prompt-text{ line-height: 1.5; }
+
+/* 列の区切り線（縦線） */
+.result-table th,
+.result-table td{
+  border-bottom: 1px solid rgba(0,0,0,.08);
+  border-right: 1px solid rgba(0,0,0,.08);
+  padding: 10px 12px;
+  vertical-align: top;
+  font-size: 14px;
+}
+.result-table th:last-child,
+.result-table td:last-child{
+  border-right: none;
+}
+
+/* 選んだ答え / 正しい答え の列幅 */
+.result-table .col-choice,
+.result-table .cell-choice{
+  width: 30px;
+}
+
+/* 画像を大きく表示 */
+.result-choice-big{
+  width: 220px;
+  height: 124px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,.15);
+  background: #fff;
+}
+
+.choice-text{
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 6px 4px;
+  text-align: center;
+}
+
+
 
 

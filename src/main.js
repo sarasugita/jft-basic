@@ -13,6 +13,8 @@ const defaultState = {
   showBangla: false,
 
   testStartAt: null,   // ★追加：テスト開始時刻
+  
+  testEndAt: null,   // ★追加：結果表示の時刻（タイマー固定用）
 
   user: { name: "", id: "" },
 };
@@ -36,6 +38,7 @@ function saveState() {
 
 function resetAll() {
   state = { ...defaultState };
+  state.testEndAt = null;
   saveState();
   render();
 }
@@ -46,6 +49,7 @@ function goIntro() {
   state.questionIndexInSection = 0;
   state.showBangla = false;
   state.testStartAt = null; // ★全体タイマーを戻す
+  state.testEndAt = null;
   saveState();
   render();
 }
@@ -91,10 +95,12 @@ function startTestTimer() {
 
 
 function getTotalTimeLeftSec() {
+  const base = state.testEndAt ?? Date.now(); // ★結果なら endAt で固定
   if (!state.testStartAt) return TOTAL_TIME_SEC;
-  const elapsed = Math.floor((Date.now() - state.testStartAt) / 1000);
+  const elapsed = Math.floor((base - state.testStartAt) / 1000);
   return Math.max(0, TOTAL_TIME_SEC - elapsed);
 }
+
 
 
 function formatTime(sec) {
@@ -191,11 +197,13 @@ function goNextSectionOrResult() {
 
   // 最後のセクションが終わったら結果へ
   if (nextSectionIndex >= sections.length) {
-    state.phase = "result";
-    saveState();
-    render();
-    return;
+  state.testEndAt = state.testEndAt ?? Date.now(); // ★固定
+  state.phase = "result";
+  saveState();
+  render();
+  return;
   }
+
 
   // 次セクションへ
   state.sectionIndex = nextSectionIndex;
@@ -725,15 +733,122 @@ function renderSectionEnd(app) {
   });
 }
 
+function getChoiceLabel(q, idx) {
+  if (idx == null || idx === "") return "";
+  if (q.choicesJa?.[idx] != null) return q.choicesJa[idx];
+  // 画像選択肢などchoicesJaが無い場合
+  return `選択肢${Number(idx) + 1}`;
+}
+
+function getQuestionThumb(q) {
+  // 表に出したい代表画像（あれば）
+  return q.image || q.stemImage || q.passageImage || q.tableImage || "";
+}
+
+function pickChoiceImage(q, idx) {
+  if (idx == null) return "";
+  if (Array.isArray(q.choiceImages) && q.choiceImages[idx]) return q.choiceImages[idx];
+  return "";
+}
+function pickPartChoiceImage(part, idx) {
+  if (idx == null) return "";
+  if (Array.isArray(part.choiceImages) && part.choiceImages[idx]) return part.choiceImages[idx];
+  return "";
+}
+
+function getChoiceText(q, idx) {
+  if (idx == null) return "";
+  if (Array.isArray(q.choicesJa) && q.choicesJa[idx] != null) return q.choicesJa[idx];
+  return "";
+}
+
+function getPartChoiceText(part, idx) {
+  if (idx == null) return "";
+  if (Array.isArray(part.choicesJa) && part.choicesJa[idx] != null) return part.choicesJa[idx];
+  return "";
+}
+
+function buildResultRows() {
+  const rows = [];
+
+  for (const q of questions) {
+    // ===== parts（2問セット：LC-3など）=====
+    if (q.parts?.length) {
+      const ans = state.answers[q.id];
+      q.parts.forEach((part, i) => {
+        const chosenIdx = ans?.partAnswers?.[i];
+        const correctIdx = part.answerIndex;
+
+        rows.push({
+          id: `${q.id}-${i + 1}`,
+          thumb: q.image || q.stemImage || q.passageImage || q.tableImage || "",
+          prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
+          isCorrect: chosenIdx === correctIdx,
+
+          chosen: getPartChoiceText(part, chosenIdx),
+          correct: getPartChoiceText(part, correctIdx),
+
+          chosenImg: pickPartChoiceImage(part, chosenIdx),
+          correctImg: pickPartChoiceImage(part, correctIdx),
+        });
+      });
+      continue;
+    }
+
+    // ===== 単問（Script/Vocabなど）=====
+    const chosenIdx = state.answers[q.id];
+    const correctIdx = q.answerIndex;
+
+    // 問題文の表示テキスト（最低限）
+    const promptText =
+      q.type === "mcq_sentence_blank"
+        ? (q.sentenceJa ?? q.promptEn ?? "")
+        : q.type === "mcq_kanji_reading"
+          ? (q.sentencePartsJa?.map((p) => p.text).join("") ?? q.promptEn ?? "")
+          : q.type === "mcq_dialog_with_image"
+            ? (q.dialogJa?.join(" / ") ?? q.promptEn ?? "")
+            : (q.promptEn ?? "");
+
+    rows.push({
+      id: String(q.id),
+      thumb: q.image || q.stemImage || q.passageImage || q.tableImage || "",
+      prompt: promptText,
+      isCorrect: chosenIdx === correctIdx,
+
+      chosen: getChoiceText(q, chosenIdx),
+      correct: getChoiceText(q, correctIdx),
+
+      chosenImg: pickChoiceImage(q, chosenIdx),
+      correctImg: pickChoiceImage(q, correctIdx),
+    });
+  }
+
+  return rows;
+}
+
+
+
+
+
 function renderResult(app) {
   const { correct, total } = scoreAll();
+  const rows = buildResultRows(); // ★ results rows (chosenImg/correctImg を含む想定)
+
+  // ★ Resultに入った瞬間にタイマーを止めたい場合（testEndAt方式を入れてるなら）
+  // state.testEndAt = state.testEndAt ?? Date.now();
+  // saveState();
 
   app.innerHTML = `
     <div class="app">
-      ${topbarHTML({ rightButtonLabel: "Finished", rightButtonId: "disabledBtn" })}
+      ${topbarHTML({ rightButtonLabel: "Finished", rightButtonId: "disabledBtn", hideTimer: true })}
       <main class="result">
         <h1>Result</h1>
-        <p class="result-line"><b>${correct}</b> / ${total} correct</p>
+
+        <div class="score-big">
+          <span class="score-correct">${correct}</span>
+          <span class="score-slash">/</span>
+          <span class="score-total">${total}</span>
+        </div>
 
         <div class="finish-actions">
           <button class="btn" id="exportCsvBtn">Export CSV</button>
@@ -741,6 +856,59 @@ function renderResult(app) {
           <button class="btn btn-primary" id="takeAgainBtn">Take Again</button>
         </div>
 
+        <div class="result-table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>問題</th>
+                <th>正誤</th>
+                <th class="col-choice">選んだ答え</th>
+                <th class="col-choice">正しい答え</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (r) => `
+                <tr>
+                  <td class="cell-id">${escapeHtml(r.id)}</td>
+
+                  <td class="cell-prompt">
+                    ${r.thumb ? `<img class="result-thumb" src="${r.thumb}" alt="q" />` : ""}
+                    <div class="prompt-text">${escapeHtml(r.prompt ?? "")}</div>
+                  </td>
+
+                  <td class="cell-judge">
+                    <span class="badge ${r.isCorrect ? "ok" : "ng"}">
+                      ${r.isCorrect ? "○" : "×"}
+                    </span>
+                  </td>
+
+                  <td class="cell-choice">
+                    ${
+                      r.chosenImg
+                        ? `<img class="result-choice-big" src="${r.chosenImg}" alt="chosen" />`
+                        : `<div class="choice-text">${r.chosen ? escapeHtml(r.chosen) : "—"}</div>`
+
+                    }
+                  </td>
+
+                  <td class="cell-choice">
+                    ${
+                      r.correctImg
+                        ? `<img class="result-choice-big" src="${r.correctImg}" alt="correct" />`
+                        : `<div class="choice-text">${escapeHtml(r.correct ?? "")}</div>`
+                    }
+                  </td>
+
+                </tr>
+              `
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
       </main>
 
       <footer class="bottombar">
@@ -750,13 +918,17 @@ function renderResult(app) {
     </div>
   `;
 
+  // topbar right button disable
+  document.querySelector("#disabledBtn").disabled = true;
 
+  // actions
   document.querySelector("#exportJsonBtn")?.addEventListener("click", exportJSON);
   document.querySelector("#exportCsvBtn")?.addEventListener("click", exportCSV);
   document.querySelector("#takeAgainBtn")?.addEventListener("click", resetAll);
-  document.querySelector("#disabledBtn").disabled = true;
-
 }
+
+
+
 
 function render() {
   const app = document.querySelector("#app");
@@ -774,10 +946,11 @@ setInterval(() => {
 
   if (state.phase !== "quiz") return;
 
-  if (getTotalTimeLeftSec() <= 0) {
-    state.phase = "result";
-    saveState();
-    render();
+  if (left <= 0) {
+  state.testEndAt = state.testEndAt ?? Date.now();
+  state.phase = "result";
+  saveState();
+  render();
   }
 }, 1000);
 
