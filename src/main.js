@@ -523,10 +523,10 @@ function renderIntro(app) {
 
         <div class="intro-form" style="margin-top:16px; max-width:520px;">
           <label class="form-label">Name（任意）</label>
-          <input class="form-input" id="nameInput" placeholder="e.g., Sara" value="${escapeHtml(state.user?.name ?? "")}" />
+          <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
 
           <label class="form-label" style="margin-top:10px;">ID（任意）</label>
-          <input class="form-input" id="idInput" placeholder="e.g., BU123" value="${escapeHtml(state.user?.id ?? "")}" />
+          <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
         </div>
 
         <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">

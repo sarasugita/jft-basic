@@ -21,7 +21,7 @@ export const questions = [
     type: "mcq_image",
     promptEn: "Look at the illustration and choose the correct word.",
     promptBn: "ছবিটি দেখে সঠিক শব্দটি নির্বাচন করুন।",
-    image: "/src/assets/q1.png",
+    image: "/images/q1.png",
     choicesJa: ["なきます", "おこります", "わらいます"],
     answerIndex: 2,
   },
@@ -87,7 +87,7 @@ export const questions = [
       "えみ： そうですね。会社の　人には　だいたい　５０００円ぐらいの　ものですね。",
     ],
     blankStyle: "redBox", // UI用
-    image: "/src/assets/ce1_gift.png",
+    image: "/images/ce1_gift.png",
     choicesJa: ["あげない", "あげよう", "あげるため", "あげるつもり"],
     answerIndex: 1,
   },
@@ -101,7 +101,7 @@ export const questions = [
       "Two people are talking during lunch break at work. Read the dialog and choose the expression that fits the most.",
     promptBn:
       "কর্মস্থলে লাঞ্চ ব্রেকের সময় দুজন কথা বলছে। সংলাপটি পড়ে সবচেয়ে উপযুক্ত অভিব্যক্তিটি নির্বাচন করুন।",
-    image: "/src/assets/ce2_dialog.png",
+    image: "/images/ce2_dialog.png",
     choicesJa: ["こちらこそ", "もう　いちど", "また　こんど"],
     answerIndex: 2,
   },
@@ -120,11 +120,11 @@ export const questions = [
     promptBn:
       "আপনি কর্মস্থলে নববর্ষের ছুটি নিয়ে দুজনের কথা শুনবেন। পুরুষটি বন্ধুর সাথে নববর্ষের ছুটিতে কী করেছে?",
     audio: "/audio/lc1.mp3",
-    stemImage: "/src/assets/lc1_people.png",
+    stemImage: "/images/lc1_people.png",
     choiceImages: [
-      "/src/assets/lc1_a.png",
-      "/src/assets/lc1_b.png",
-      "/src/assets/lc1_c.png",
+      "/images/lc1_a.png",
+      "/images/lc1_b.png",
+      "/images/lc1_c.png",
     ],
     answerIndex: 0,
   },
@@ -139,11 +139,11 @@ export const questions = [
     promptBn:
       "আপনি কনভিনিয়েন্স স্টোরে একজন পুরুষকে দোকানের স্টাফকে পণ্যের বিষয়ে জিজ্ঞেস করতে শুনবেন। কোনটি সে খেতে/পান করতে পারে?",
     audio: "/audio/lc2.mp3",
-    stemImage: "/src/assets/lc2_store.png",
+    stemImage: "/images/lc2_store.png",
     choiceImages: [
-      "/src/assets/lc2_a.png",
-      "/src/assets/lc2_b.png",
-      "/src/assets/lc2_c.png",
+      "/images/lc2_a.png",
+      "/images/lc2_b.png",
+      "/images/lc2_c.png",
     ],
     answerIndex: 2,
   },
@@ -158,15 +158,15 @@ export const questions = [
     promptBn:
       "আপনি কর্মস্থলের জরুরি ফায়ার ড্রিল সম্পর্কে একজন কর্মকর্তার কথা শুনবেন।",
     audio: "/audio/lc3.mp3",
-    stemImage: "/src/assets/lc3_officer.png",
+    stemImage: "/images/lc3_officer.png",
     parts: [
       {
         partLabel: "(1)",
         questionJa: "火事が　おきたら、まず　何を　しますか。",
         choiceImages: [
-          "/src/assets/lc3_1a.png",
-          "/src/assets/lc3_1b.png",
-          "/src/assets/lc3_1c.png",
+          "/images/lc3_1a.png",
+          "/images/lc3_1b.png",
+          "/images/lc3_1c.png",
         ],
         answerIndex: 0,
       },
@@ -174,9 +174,9 @@ export const questions = [
         partLabel: "(2)",
         questionJa: "どこに　ひなん　しますか。",
         choiceImages: [
-          "/src/assets/lc3_2a.png",
-          "/src/assets/lc3_2b.png",
-          "/src/assets/lc3_2c.png",
+          "/images/lc3_2a.png",
+          "/images/lc3_2b.png",
+          "/images/lc3_2c.png",
         ],
         answerIndex: 1,
       },
@@ -196,7 +196,7 @@ export const questions = [
       "You are reading a town's public information magazine. Answer questions (1) and (2).",
     promptBn:
       "আপনি একটি শহরের জনতথ্য ম্যাগাজিন পড়ছেন। (1) এবং (2) প্রশ্নের উত্তর দিন।",
-    passageImage: "/src/assets/rc1_passage.png", // 文章を画像で持つならこれ
+    passageImage: "/images/rc1_passage.png", // 文章を画像で持つならこれ
     parts: [
       {
         partLabel: "(1)",
@@ -226,7 +226,7 @@ export const questions = [
       "Kumaru-san received instructions on medicines at the pharmacy. Read the instructions and answer questions (1) and (2).",
     promptBn:
       "কুমারু-সান ফার্মেসিতে ওষুধের নির্দেশনা পেয়েছেন। নির্দেশনা পড়ে (1) ও (2) প্রশ্নের উত্তর দিন।",
-    tableImage: "/src/assets/rc2_table.png",
+    tableImage: "/images/rc2_table.png",
     parts: [
       {
         partLabel: "(1)",
