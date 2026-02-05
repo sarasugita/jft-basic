@@ -1,17 +1,16 @@
 {
-  "name": "jft-mock",
+  "name": "jft-mock-monorepo",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "devDependencies": {
-    "vite": "^7.2.4"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.94.1"
+    "dev": "npm run dev:student",
+    "build": "npm run build:student && npm run build:admin",
+    "dev:student": "npm -w apps/student run dev",
+    "build:student": "npm -w apps/student run build",
+    "dev:admin": "npm -w apps/admin run dev",
+    "build:admin": "npm -w apps/admin run build"
   }
 }

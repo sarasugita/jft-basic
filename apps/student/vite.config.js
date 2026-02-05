@@ -5,13 +5,16 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  server: {
+    fs: {
+      allow: [resolve(__dirname, "..", "..")]
+    }
+  },
   build: {
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        admin: resolve(__dirname, "admin.html"),
       },
     },
   },
 });
-

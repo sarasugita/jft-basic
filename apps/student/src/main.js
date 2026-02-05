@@ -1,5 +1,5 @@
 import "./style.css";
-import { questions, sections } from "./data/questions.js";
+import { questions, sections } from "../../../packages/shared/questions.js";
 import { supabase } from "./supabaseClient";
 
 const STORAGE_KEY = "jft_mock_state_v3";
