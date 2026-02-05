@@ -976,8 +976,9 @@ function render() {
 
 setInterval(() => {
   // quiz中じゃなくても、topbarを表示する画面なら更新したいならここを調整OK
+  const left = getTotalTimeLeftSec();
   const timerEl = document.querySelector(".timer");
-  if (timerEl) timerEl.textContent = formatTime(getTotalTimeLeftSec());
+  if (timerEl) timerEl.textContent = formatTime(left);
 
   if (state.phase !== "quiz") return;
 
