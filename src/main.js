@@ -1,5 +1,6 @@
 import "./style.css";
 import { questions, sections } from "./data/questions.js";
+import { supabase } from "./supabaseClient";
 
 const STORAGE_KEY = "jft_mock_state_v3";
 
@@ -17,6 +18,7 @@ const defaultState = {
   testEndAt: null,   // ★追加：結果表示の時刻（タイマー固定用）
 
   user: { name: "", id: "" },
+  attemptSaved: false,
 };
 
 
@@ -50,6 +52,7 @@ function goIntro() {
   state.showBangla = false;
   state.testStartAt = null; // ★全体タイマーを戻す
   state.testEndAt = null;
+  state.attemptSaved = false;
   saveState();
   render();
 }
@@ -256,6 +259,35 @@ function exportCSV() {
   }
 
   downloadText("jft-mock-result.csv", rows.join("\n"), "text/csv");
+}
+
+async function saveAttemptIfNeeded() {
+  if (state.attemptSaved) return;
+  const statusEl = document.querySelector("#saveStatus");
+  if (statusEl) statusEl.textContent = "Saving...";
+
+  const { correct, total } = scoreAll();
+  const payload = {
+    display_name: state.user?.name?.trim() || null,
+    student_code: state.user?.id?.trim() || null,
+    test_version: "v1",
+    correct,
+    total,
+    started_at: state.testStartAt ? new Date(state.testStartAt).toISOString() : null,
+    ended_at: state.testEndAt ? new Date(state.testEndAt).toISOString() : new Date().toISOString(),
+    answers_json: state.answers ?? {},
+  };
+
+  const { error } = await supabase.from("attempts").insert(payload);
+  if (error) {
+    console.error("saveAttempt error:", error);
+    if (statusEl) statusEl.textContent = `Save failed: ${error.message}`;
+    return;
+  }
+
+  state.attemptSaved = true;
+  saveState();
+  if (statusEl) statusEl.textContent = "Saved";
 }
 
 /** ===== UI helpers ===== */
@@ -849,6 +881,7 @@ function renderResult(app) {
           <span class="score-slash">/</span>
           <span class="score-total">${total}</span>
         </div>
+        <div class="save-status" id="saveStatus"></div>
 
         <div class="finish-actions">
           <button class="btn" id="exportCsvBtn">Export CSV</button>
@@ -925,6 +958,8 @@ function renderResult(app) {
   document.querySelector("#exportJsonBtn")?.addEventListener("click", exportJSON);
   document.querySelector("#exportCsvBtn")?.addEventListener("click", exportCSV);
   document.querySelector("#takeAgainBtn")?.addEventListener("click", resetAll);
+
+  saveAttemptIfNeeded();
 }
 
 

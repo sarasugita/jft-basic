@@ -513,6 +513,13 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   justify-content:center;
   margin: 10px 0 16px;
 }
+.save-status{
+  text-align:center;
+  font-weight: 700;
+  color: #2f3b1f;
+  min-height: 22px;
+  margin-bottom: 6px;
+}
 .score-correct{ font-size: 64px; font-weight: 900; }
 .score-slash{ font-size: 44px; font-weight: 900; opacity: .6; }
 .score-total{ font-size: 44px; font-weight: 900; opacity: .85; }
@@ -619,7 +626,6 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   padding: 6px 4px;
   text-align: center;
 }
-
 
 
 
