@@ -286,10 +286,21 @@ export default function AdminPage() {
     setStudentMsg("");
     setInviteResults([]);
     const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
+    let accessToken = sessionData?.session?.access_token ?? null;
+    const expiresAt = sessionData?.session?.expires_at ?? 0;
+    if (!accessToken || expiresAt * 1000 < Date.now() + 60_000) {
+      const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+      if (!refreshError) {
+        accessToken = refreshed?.session?.access_token ?? null;
+      }
+    }
+    if (!accessToken) {
+      setStudentMsg("Session expired. Please log in again.");
+      return;
+    }
     const { data, error } = await supabase.functions.invoke("invite-students", {
       body: payload,
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (error) {
       console.error("invite-students error:", error);
