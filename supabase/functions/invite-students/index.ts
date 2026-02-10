@@ -1,6 +1,6 @@
 // Supabase Edge Function: invite-students
 // - Requires an authenticated admin user (checked via public.profiles.role)
-// - Invites users by email and upserts public.profiles with metadata
+// - Creates users with temporary passwords and upserts public.profiles
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.94.1";
@@ -8,7 +8,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.94.1";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const INVITE_REDIRECT_TO = Deno.env.get("INVITE_REDIRECT_TO") ?? "";
 
 function json(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
@@ -35,14 +34,20 @@ function unauthorized(message = "Unauthorized") {
   return json({ error: message }, { status: 401 });
 }
 
+function generateTempPassword() {
+  return Math.random().toString(36).slice(2, 10) + "A1!";
+}
+
 function normalizeStudent(input: any) {
   const email = String(input?.email ?? "").trim().toLowerCase();
   const displayName = String(input?.display_name ?? input?.displayName ?? "").trim();
   const studentCode = String(input?.student_code ?? input?.studentCode ?? "").trim();
+  const tempPassword = String(input?.temp_password ?? input?.tempPassword ?? "").trim();
   return {
     email,
     display_name: displayName || null,
     student_code: studentCode || null,
+    temp_password: tempPassword || null,
   };
 }
 
@@ -90,26 +95,30 @@ serve(async (req) => {
 
   const list = Array.isArray(body?.students) ? body.students : [body];
   const students = list.map(normalizeStudent).filter((s) => s.email);
-  if (students.length === 0) return bad("No students provided");
+  if (students.length == 0) return bad("No students provided");
 
   const results: Array<Record<string, unknown>> = [];
 
   for (const s of students) {
     try {
-      const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(s.email, {
-        redirectTo: INVITE_REDIRECT_TO || undefined,
-        data: {
+      const tempPassword = s.temp_password || generateTempPassword();
+      const { data: createData, error: createError } = await adminClient.auth.admin.createUser({
+        email: s.email,
+        password: tempPassword,
+        email_confirm: true,
+        user_metadata: {
           display_name: s.display_name,
           student_code: s.student_code,
+          force_password_change: true,
         },
       });
 
-      if (inviteError) {
-        results.push({ email: s.email, ok: false, error: inviteError.message });
+      if (createError) {
+        results.push({ email: s.email, ok: false, error: createError.message });
         continue;
       }
 
-      const userId = inviteData.user?.id ?? null;
+      const userId = createData.user?.id ?? null;
 
       if (userId) {
         const { error: upsertError } = await adminClient.from("profiles").upsert(
@@ -119,16 +128,17 @@ serve(async (req) => {
             email: s.email,
             display_name: s.display_name,
             student_code: s.student_code,
+            force_password_change: true,
           },
           { onConflict: "id" },
         );
         if (upsertError) {
-          results.push({ email: s.email, ok: true, user_id: userId, warning: upsertError.message });
+          results.push({ email: s.email, ok: true, user_id: userId, temp_password: tempPassword, warning: upsertError.message });
           continue;
         }
       }
 
-      results.push({ email: s.email, ok: true, user_id: userId });
+      results.push({ email: s.email, ok: true, user_id: userId, temp_password: tempPassword });
     } catch (e) {
       results.push({ email: s.email, ok: false, error: String(e?.message ?? e) });
     }
@@ -136,4 +146,3 @@ serve(async (req) => {
 
   return ok({ ok: true, results });
 });
-

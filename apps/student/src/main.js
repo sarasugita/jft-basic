@@ -12,6 +12,7 @@ let authState = {
   session: null,
   profile: null,
   recoveryMode: false,
+  mustChangePassword: false,
 };
 
 const defaultState = {
@@ -98,13 +99,16 @@ async function refreshAuthState() {
 
   const { data: prof, error: profErr } = await supabase
     .from("profiles")
-    .select("id, role, display_name, student_code")
+    .select("id, role, display_name, student_code, force_password_change")
     .eq("id", authState.session.user.id)
     .single();
+  authState.mustChangePassword = Boolean(authState.recoveryMode);
+
   if (profErr) {
     console.error("fetch profile error:", profErr);
   } else {
     authState.profile = prof;
+    authState.mustChangePassword = Boolean(authState.mustChangePassword || prof?.force_password_change);
     const nextName = (state.user?.name ?? "").trim() || (prof?.display_name ?? "");
     const nextId = (state.user?.id ?? "").trim() || (prof?.student_code ?? "");
     state.user = { name: nextName, id: nextId };
@@ -223,9 +227,19 @@ function renderSetPassword(app) {
       msgEl.textContent = error.message;
       return;
     }
-    msgEl.style.color = "green";
-    msgEl.textContent = "Updated. ログインし直してください。";
-    setTimeout(() => supabase.auth.signOut(), 800);
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ force_password_change: false })
+      .eq("id", authState.session?.user?.id ?? "");
+    if (profileError) {
+      msgEl.textContent = profileError.message;
+      return;
+    }
+    authState.mustChangePassword = false;
+    if (authState.profile) authState.profile.force_password_change = false;
+    state.phase = "intro";
+    saveState();
+    render();
   });
 }
 
@@ -1147,7 +1161,7 @@ function render() {
   const app = document.querySelector("#app");
   if (!state.linkChecked || !authState.checked) return renderLoading(app);
   if (state.linkInvalid) return renderLinkInvalid(app);
-  if (authState.recoveryMode) return renderSetPassword(app);
+  if (authState.session && authState.mustChangePassword) return renderSetPassword(app);
   if (!authState.session && !state.linkId) return renderLogin(app);
   if (state.phase === "login") return renderLogin(app);
   if (state.phase === "intro") return renderIntro(app);

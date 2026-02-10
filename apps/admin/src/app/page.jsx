@@ -127,10 +127,21 @@ export default function AdminPage() {
   const [inviteForm, setInviteForm] = useState({
     email: "",
     display_name: "",
-    student_code: ""
+    student_code: "",
+    temp_password: ""
   });
   const [csvMsg, setCsvMsg] = useState("");
   const [inviteResults, setInviteResults] = useState([]);
+  function generateTempPassword(length = 10) {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    let out = "";
+    for (let i = 0; i < length; i += 1) {
+      out += chars[bytes[i] % chars.length];
+    }
+    return out;
+  }
 
   const selectedAttempt = useMemo(
     () => attempts.find((a) => a.id === selectedId) ?? null,
@@ -304,14 +315,14 @@ export default function AdminPage() {
     });
     if (error) {
       console.error("invite-students error:", error);
-      setStudentMsg(`Invite failed: ${error.message}`);
+      setStudentMsg(`Create failed: ${error.message}`);
       return;
     }
     const results = data?.results ?? [];
     setInviteResults(results);
     const okCount = results.filter((r) => r.ok).length;
     const ngCount = results.length - okCount;
-    setStudentMsg(`Invited: ${okCount} ok / ${ngCount} failed`);
+    setStudentMsg(`Created: ${okCount} ok / ${ngCount} failed`);
     fetchStudents();
   }
 
@@ -322,14 +333,18 @@ export default function AdminPage() {
     const idxEmail = header.indexOf("email");
     const idxName = header.indexOf("display_name");
     const idxCode = header.indexOf("student_code");
+    const idxPass = header.indexOf("temp_password");
     if (idxEmail === -1) throw new Error("CSV must include 'email' header");
     const out = [];
+    const safeCell = (row, idx) => (idx === -1 ? "" : String(row[idx] ?? "").trim());
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(",").map((s) => s.trim());
+      const cols = lines[i].split(",");
+      const tempPassword = safeCell(cols, idxPass);
       out.push({
-        email: cols[idxEmail] ?? "",
-        display_name: idxName === -1 ? "" : (cols[idxName] ?? ""),
-        student_code: idxCode === -1 ? "" : (cols[idxCode] ?? "")
+        email: safeCell(cols, idxEmail),
+        display_name: safeCell(cols, idxName),
+        student_code: safeCell(cols, idxCode),
+        temp_password: tempPassword,
       });
     }
     return out.filter((r) => r.email);
@@ -519,7 +534,7 @@ export default function AdminPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div className="admin-title">Students</div>
-              <div className="admin-help">招待メールで生徒アカウントを追加できます（CSV一括も可）。</div>
+              <div className="admin-help">一時パスワードで生徒アカウントを作成できます。</div>
             </div>
             <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
           </div>
@@ -550,20 +565,38 @@ export default function AdminPage() {
               />
             </div>
             <div className="field small">
+              <label>Temp Password</label>
+              <input
+                value={inviteForm.temp_password}
+                onChange={(e) => setInviteForm((s) => ({ ...s, temp_password: e.target.value }))}
+                placeholder="(optional)"
+              />
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => setInviteForm((s) => ({ ...s, temp_password: generateTempPassword() }))}
+              >
+                Generate
+              </button>
+            </div>
+            <div className="field small">
               <label>&nbsp;</label>
               <button
                 className="btn btn-primary"
                 type="button"
                 onClick={() => inviteStudents(inviteForm)}
               >
-                Invite
+                Create
               </button>
             </div>
           </div>
 
           <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div className="admin-help">
-              CSV headers: <b>email,display_name,student_code</b>
+              CSV: <b>email,display_name,student_code,temp_password</b>
             </div>
             <input
               type="file"
@@ -582,6 +615,7 @@ export default function AdminPage() {
                   <th>Name</th>
                   <th>Code</th>
                   <th>User ID</th>
+                  <th>Temp Password</th>
                 </tr>
               </thead>
               <tbody>
@@ -592,6 +626,7 @@ export default function AdminPage() {
                     <td>{s.display_name ?? ""}</td>
                     <td>{s.student_code ?? ""}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{s.id}</td>
+                    <td></td>
                   </tr>
                 ))}
               </tbody>
@@ -607,6 +642,7 @@ export default function AdminPage() {
                     <th>OK</th>
                     <th>User ID</th>
                     <th>Error/Warning</th>
+                    <th>Temp Password</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -616,6 +652,7 @@ export default function AdminPage() {
                       <td style={{ textAlign: "center" }}>{r.ok ? "OK" : "NG"}</td>
                       <td style={{ whiteSpace: "nowrap" }}>{r.user_id ?? ""}</td>
                       <td>{r.error ?? r.warning ?? ""}</td>
+                      <td>{r.temp_password ?? ""}</td>
                     </tr>
                   ))}
                 </tbody>
