@@ -5,6 +5,7 @@ import { supabase } from "./supabaseClient";
 const STORAGE_KEY = "jft_mock_state_v3";
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
+const TEST_VERSION = "mock_v1";
 
 const defaultState = {
   phase: "intro",
@@ -270,7 +271,7 @@ async function saveAttemptIfNeeded() {
   const payload = {
     display_name: state.user?.name?.trim() || null,
     student_code: state.user?.id?.trim() || null,
-    test_version: "v1",
+    test_version: TEST_VERSION,
     correct,
     total,
     started_at: state.testStartAt ? new Date(state.testStartAt).toISOString() : null,

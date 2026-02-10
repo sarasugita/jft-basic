@@ -104,9 +104,11 @@ export default function AdminPage() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [attempts, setAttempts] = useState([]);
+  const [examLinks, setExamLinks] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
+  const [linkMsg, setLinkMsg] = useState("");
   const [filters, setFilters] = useState({
     code: "",
     name: "",
@@ -116,6 +118,10 @@ export default function AdminPage() {
   });
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
+  const [linkForm, setLinkForm] = useState({
+    testVersion: "mock_v1",
+    expiresAt: ""
+  });
 
   const selectedAttempt = useMemo(
     () => attempts.find((a) => a.id === selectedId) ?? null,
@@ -158,6 +164,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (!session || profile?.role !== "admin") return;
     runSearch();
+    fetchExamLinks();
   }, [session, profile]);
 
   async function runSearch() {
@@ -190,6 +197,60 @@ export default function AdminPage() {
     setSelectedId(null);
     setMsg(data?.length ? "" : "No results.");
     setLoading(false);
+  }
+
+  async function fetchExamLinks() {
+    setLinkMsg("Loading...");
+    const { data, error } = await supabase
+      .from("exam_links")
+      .select("id, test_version, expires_at, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      console.error("exam_links fetch error:", error);
+      setExamLinks([]);
+      setLinkMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    setExamLinks(data ?? []);
+    setLinkMsg(data?.length ? "" : "No links.");
+  }
+
+  async function createExamLink() {
+    setLinkMsg("");
+    if (!linkForm.expiresAt) {
+      setLinkMsg("期限（expires_at）を入力してください。");
+      return;
+    }
+    const payload = {
+      test_version: linkForm.testVersion || "mock_v1",
+      expires_at: new Date(linkForm.expiresAt).toISOString()
+    };
+    const { error } = await supabase.from("exam_links").insert(payload);
+    if (error) {
+      console.error("exam_links insert error:", error);
+      setLinkMsg(`Create failed: ${error.message}`);
+      return;
+    }
+    setLinkMsg("Created.");
+    setLinkForm((s) => ({ ...s, expiresAt: "" }));
+    fetchExamLinks();
+  }
+
+  function getStudentBaseUrl() {
+    return process.env.NEXT_PUBLIC_STUDENT_BASE_URL || "";
+  }
+
+  async function copyLink(id) {
+    const base = getStudentBaseUrl();
+    const url = base ? `${base}/test?link=${id}` : `/test?link=${id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkMsg("Copied.");
+    } catch (e) {
+      console.warn("clipboard error:", e);
+      setLinkMsg(url);
+    }
   }
 
   function exportSummaryCsv(list) {
@@ -352,6 +413,74 @@ export default function AdminPage() {
       </div>
 
       <div className="admin-panel">
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Exam Links</div>
+              <div className="admin-help">期限付きの模試リンクを発行します（A: 期限のみ）。</div>
+            </div>
+            <button className="btn" onClick={() => fetchExamLinks()}>Refresh Links</button>
+          </div>
+
+          <div className="admin-form" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label>Test Version</label>
+              <input
+                value={linkForm.testVersion}
+                onChange={(e) => setLinkForm((s) => ({ ...s, testVersion: e.target.value }))}
+                placeholder="mock_v1"
+              />
+            </div>
+            <div className="field">
+              <label>Expires At</label>
+              <input
+                type="datetime-local"
+                value={linkForm.expiresAt}
+                onChange={(e) => setLinkForm((s) => ({ ...s, expiresAt: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Student Base URL</label>
+              <input value={getStudentBaseUrl()} readOnly />
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn btn-primary" type="button" onClick={createExamLink}>Create Link</button>
+            </div>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Expires</th>
+                  <th>Test</th>
+                  <th>Link ID</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {examLinks.map((l) => {
+                  const expired = l.expires_at && new Date(l.expires_at).getTime() < Date.now();
+                  return (
+                    <tr key={l.id}>
+                      <td>{formatDateTime(l.created_at)}</td>
+                      <td>{formatDateTime(l.expires_at)}{expired ? " (expired)" : ""}</td>
+                      <td>{l.test_version}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{l.id}</td>
+                      <td>
+                        <button className="btn" onClick={() => copyLink(l.id)}>Copy URL</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{linkMsg}</div>
+        </div>
+
         <form
           className="admin-form"
           onSubmit={(e) => {
@@ -523,4 +652,3 @@ export default function AdminPage() {
     </div>
   );
 }
-
