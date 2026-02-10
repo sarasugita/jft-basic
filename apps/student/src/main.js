@@ -20,6 +20,11 @@ const defaultState = {
 
   user: { name: "", id: "" },
   attemptSaved: false,
+  linkId: null,
+  linkExpiresAt: null,
+  linkTestVersion: null,
+  linkChecked: false,
+  linkInvalid: false,
 };
 
 
@@ -232,35 +237,6 @@ function downloadText(filename, text, mime = "text/plain") {
   a.remove();
   URL.revokeObjectURL(url);
 }
-function exportJSON() {
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    answers: state.answers,
-    score: scoreAll(),
-  };
-  downloadText("jft-mock-result.json", JSON.stringify(payload, null, 2), "application/json");
-}
-function exportCSV() {
-  const rows = [];
-  rows.push(["questionId", "sectionKey", "part", "chosenIndex", "correctIndex", "isCorrect"].join(","));
-
-  for (const q of questions) {
-    if (q.parts?.length) {
-      const ans = state.answers[q.id];
-      q.parts.forEach((p, i) => {
-        const chosen = ans?.partAnswers?.[i];
-        const isCorrect = chosen === p.answerIndex ? "1" : "0";
-        rows.push([q.id, q.sectionKey, String(i + 1), chosen ?? "", p.answerIndex, isCorrect].join(","));
-      });
-    } else {
-      const chosen = state.answers[q.id];
-      const isCorrect = chosen === q.answerIndex ? "1" : "0";
-      rows.push([q.id, q.sectionKey, "", chosen ?? "", q.answerIndex, isCorrect].join(","));
-    }
-  }
-
-  downloadText("jft-mock-result.csv", rows.join("\n"), "text/csv");
-}
 
 async function saveAttemptIfNeeded() {
   if (state.attemptSaved) return;
@@ -271,12 +247,13 @@ async function saveAttemptIfNeeded() {
   const payload = {
     display_name: state.user?.name?.trim() || null,
     student_code: state.user?.id?.trim() || null,
-    test_version: TEST_VERSION,
+    test_version: state.linkTestVersion || TEST_VERSION,
     correct,
     total,
     started_at: state.testStartAt ? new Date(state.testStartAt).toISOString() : null,
     ended_at: state.testEndAt ? new Date(state.testEndAt).toISOString() : new Date().toISOString(),
     answers_json: state.answers ?? {},
+    link_id: state.linkId,
   };
 
   const { error } = await supabase.from("attempts").insert(payload);
@@ -560,6 +537,11 @@ function renderIntro(app) {
           <p>• Sections: ${sections.map(s => `<b>${s.title}</b>`).join(" → ")}</p>
           <p>• Each section has a timer.</p>
           <p>• Answers are saved automatically.</p>
+          ${
+            state.linkId
+              ? `<p style="margin-top:6px;"><b>Guest link active</b> (expires: ${state.linkExpiresAt ? new Date(state.linkExpiresAt).toLocaleString() : "—"})</p>`
+              : ""
+          }
         </div>
 
         <div class="intro-form" style="margin-top:16px; max-width:520px;">
@@ -602,6 +584,25 @@ function renderIntro(app) {
   });
 
   document.querySelector("#resetBtn").addEventListener("click", resetAll);
+}
+
+function renderLinkInvalid(app) {
+  app.innerHTML = `
+    <div class="app">
+      ${topbarHTML({ rightButtonLabel: "Not started", rightButtonId: "disabledBtn" })}
+      <main class="content" style="margin:12px;">
+        <h1 class="prompt">Link is invalid / expired</h1>
+        <div style="line-height:1.7; margin-top:10px;">
+          <p>このリンクは無効、または期限切れです。</p>
+        </div>
+        <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="nav-btn" id="backBtn">Back</button>
+        </div>
+      </main>
+    </div>
+  `;
+  document.querySelector("#disabledBtn").disabled = true;
+  document.querySelector("#backBtn").addEventListener("click", goIntro);
 }
 
 function renderSectionIntro(app) {
@@ -885,8 +886,6 @@ function renderResult(app) {
         <div class="save-status" id="saveStatus"></div>
 
         <div class="finish-actions">
-          <button class="btn" id="exportCsvBtn">Export CSV</button>
-          <button class="btn" id="exportJsonBtn">Export JSON</button>
           <button class="btn btn-primary" id="takeAgainBtn">Take Again</button>
         </div>
 
@@ -956,8 +955,6 @@ function renderResult(app) {
   document.querySelector("#disabledBtn").disabled = true;
 
   // actions
-  document.querySelector("#exportJsonBtn")?.addEventListener("click", exportJSON);
-  document.querySelector("#exportCsvBtn")?.addEventListener("click", exportCSV);
   document.querySelector("#takeAgainBtn")?.addEventListener("click", resetAll);
 
   saveAttemptIfNeeded();
@@ -968,6 +965,7 @@ function renderResult(app) {
 
 function render() {
   const app = document.querySelector("#app");
+  if (state.linkInvalid) return renderLinkInvalid(app);
   if (state.phase === "intro") return renderIntro(app);
   if (state.phase === "sectionIntro") return renderSectionIntro(app); // ←追加
   if (state.phase === "quiz") return renderQuiz(app);
@@ -992,4 +990,49 @@ setInterval(() => {
 }, 1000);
 
 
-render();
+async function checkLinkFromUrl() {
+  const url = new URL(window.location.href);
+  const linkId = url.searchParams.get("link");
+  if (!linkId) {
+    state.linkChecked = true;
+    saveState();
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("exam_links")
+      .select("id, test_version, expires_at")
+      .eq("id", linkId)
+      .single();
+
+    if (error || !data) {
+      state.linkInvalid = true;
+      state.linkChecked = true;
+      saveState();
+      return;
+    }
+
+    const expiresAt = new Date(data.expires_at).getTime();
+    if (Number.isNaN(expiresAt) || expiresAt < Date.now()) {
+      state.linkInvalid = true;
+      state.linkChecked = true;
+      saveState();
+      return;
+    }
+
+    state.linkId = data.id;
+    state.linkExpiresAt = data.expires_at;
+    state.linkTestVersion = data.test_version;
+    state.linkInvalid = false;
+    state.linkChecked = true;
+    state.phase = "intro";
+    saveState();
+  } catch {
+    state.linkInvalid = true;
+    state.linkChecked = true;
+    saveState();
+  }
+}
+
+checkLinkFromUrl().finally(render);
