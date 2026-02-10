@@ -285,7 +285,12 @@ export default function AdminPage() {
     setCsvMsg("");
     setStudentMsg("");
     setInviteResults([]);
-    const { data, error } = await supabase.functions.invoke("invite-students", { body: payload });
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    const { data, error } = await supabase.functions.invoke("invite-students", {
+      body: payload,
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    });
     if (error) {
       console.error("invite-students error:", error);
       setStudentMsg(`Invite failed: ${error.message}`);
