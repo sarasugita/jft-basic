@@ -7,6 +7,13 @@ const STORAGE_KEY = "jft_mock_state_v3";
 const TOTAL_TIME_SEC = 60 * 60; // 60分
 const TEST_VERSION = "mock_v1";
 
+let authState = {
+  checked: false,
+  session: null,
+  profile: null,
+  recoveryMode: false,
+};
+
 const defaultState = {
   phase: "intro",
   sectionIndex: 0,
@@ -61,6 +68,165 @@ function goIntro() {
   state.attemptSaved = false;
   saveState();
   render();
+}
+
+function renderLoading(app) {
+  app.innerHTML = `
+    <div class="app">
+      ${topbarHTML({ rightButtonLabel: "Loading", rightButtonId: "disabledBtn" })}
+      <main class="content" style="margin:12px;">
+        <h1 class="prompt">Loading...</h1>
+      </main>
+    </div>
+  `;
+  document.querySelector("#disabledBtn").disabled = true;
+}
+
+async function refreshAuthState() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) console.error("getSession error:", error);
+  authState.session = data?.session ?? null;
+  authState.profile = null;
+
+  const isRecovery = window.location.hash.includes("type=recovery") || window.location.hash.includes("access_token=");
+  authState.recoveryMode = Boolean(isRecovery && authState.session);
+
+  if (!authState.session) {
+    authState.checked = true;
+    return;
+  }
+
+  const { data: prof, error: profErr } = await supabase
+    .from("profiles")
+    .select("id, role, display_name, student_code")
+    .eq("id", authState.session.user.id)
+    .single();
+  if (profErr) {
+    console.error("fetch profile error:", profErr);
+  } else {
+    authState.profile = prof;
+    const nextName = (state.user?.name ?? "").trim() || (prof?.display_name ?? "");
+    const nextId = (state.user?.id ?? "").trim() || (prof?.student_code ?? "");
+    state.user = { name: nextName, id: nextId };
+    saveState();
+  }
+
+  authState.checked = true;
+}
+
+function renderLogin(app) {
+  app.innerHTML = `
+    <div class="app">
+      ${topbarHTML({ rightButtonLabel: "Login", rightButtonId: "disabledBtn" })}
+      <main class="content" style="margin:12px;">
+        <div style="max-width:420px;margin:20px auto;padding:20px;border:1px solid #ddd;border-radius:12px;background:#fff;">
+          <h2 style="margin:0 0 6px;">Student Login</h2>
+          <p style="margin-top:0;line-height:1.6;">
+            メールとパスワードでログインします。
+            ${state.linkId ? `<br/>※このリンクからゲスト受験もできます。` : ""}
+          </p>
+
+          <label>Email</label>
+          <input id="email" type="email" style="width:100%;padding:10px;margin:6px 0 12px;" />
+
+          <label>Password</label>
+          <input id="password" type="password" style="width:100%;padding:10px;margin:6px 0 12px;" />
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="nav-btn" id="loginBtn" style="flex:1; min-width: 160px;">Log in</button>
+            ${state.linkId ? `<button class="nav-btn ghost" id="guestBtn" style="flex:1; min-width: 160px;">Continue as Guest</button>` : ""}
+          </div>
+
+          <button class="nav-btn ghost" id="resetBtn" style="width:100%;margin-top:10px;">Forgot password</button>
+
+          <p id="msg" style="color:#b00;margin-top:12px;min-height:20px;"></p>
+        </div>
+      </main>
+    </div>
+  `;
+
+  document.querySelector("#disabledBtn").disabled = true;
+
+  const emailEl = app.querySelector("#email");
+  const passEl = app.querySelector("#password");
+  const msgEl = app.querySelector("#msg");
+
+  app.querySelector("#loginBtn").addEventListener("click", async () => {
+    msgEl.textContent = "";
+    const email = emailEl.value.trim();
+    const password = passEl.value;
+    if (!email || !password) {
+      msgEl.textContent = "Email / Password を入力してください。";
+      return;
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      msgEl.textContent = error.message;
+      return;
+    }
+  });
+
+  app.querySelector("#resetBtn").addEventListener("click", async () => {
+    msgEl.textContent = "";
+    const email = emailEl.value.trim();
+    if (!email) {
+      msgEl.textContent = "Email を入力してください。";
+      return;
+    }
+    const redirectTo = `${window.location.origin}/reset`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) {
+      msgEl.textContent = error.message;
+      return;
+    }
+    msgEl.style.color = "green";
+    msgEl.textContent = "Reset email sent. メールを確認してください。";
+  });
+
+  if (state.linkId) {
+    app.querySelector("#guestBtn")?.addEventListener("click", () => {
+      goIntro();
+    });
+  }
+}
+
+function renderSetPassword(app) {
+  app.innerHTML = `
+    <div class="app">
+      ${topbarHTML({ rightButtonLabel: "Reset", rightButtonId: "disabledBtn" })}
+      <main class="content" style="margin:12px;">
+        <div style="max-width:420px;margin:20px auto;padding:20px;border:1px solid #ddd;border-radius:12px;background:#fff;">
+          <h2 style="margin:0 0 6px;">Set New Password</h2>
+          <p style="margin-top:0;line-height:1.6;">新しいパスワードを設定します。</p>
+
+          <label>New Password</label>
+          <input id="newPass" type="password" style="width:100%;padding:10px;margin:6px 0 12px;" />
+
+          <button class="nav-btn" id="updateBtn" style="width:100%;">Update password</button>
+          <p id="msg" style="color:#b00;margin-top:12px;min-height:20px;"></p>
+        </div>
+      </main>
+    </div>
+  `;
+  document.querySelector("#disabledBtn").disabled = true;
+  const passEl = app.querySelector("#newPass");
+  const msgEl = app.querySelector("#msg");
+  app.querySelector("#updateBtn").addEventListener("click", async () => {
+    msgEl.textContent = "";
+    const password = passEl.value;
+    if (!password || password.length < 8) {
+      msgEl.textContent = "8文字以上のパスワードを入力してください。";
+      return;
+    }
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      msgEl.textContent = error.message;
+      return;
+    }
+    msgEl.style.color = "green";
+    msgEl.textContent = "Updated. ログインし直してください。";
+    setTimeout(() => supabase.auth.signOut(), 800);
+  });
 }
 
 
@@ -245,6 +411,7 @@ async function saveAttemptIfNeeded() {
 
   const { correct, total } = scoreAll();
   const payload = {
+    student_id: authState.session?.user?.id ?? null,
     display_name: state.user?.name?.trim() || null,
     student_code: state.user?.id?.trim() || null,
     test_version: state.linkTestVersion || TEST_VERSION,
@@ -542,6 +709,11 @@ function renderIntro(app) {
               ? `<p style="margin-top:6px;"><b>Guest link active</b> (expires: ${state.linkExpiresAt ? new Date(state.linkExpiresAt).toLocaleString() : "—"})</p>`
               : ""
           }
+          ${
+            authState.session
+              ? `<p style="margin-top:6px;"><b>Logged in</b> (${escapeHtml(authState.session.user.email ?? "")})</p>`
+              : ""
+          }
         </div>
 
         <div class="intro-form" style="margin-top:16px; max-width:520px;">
@@ -554,6 +726,8 @@ function renderIntro(app) {
 
         <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
           <button class="nav-btn" id="nextBtn">Next</button>
+          ${authState.session ? `<button class="nav-btn ghost" id="signOutBtn">Sign out</button>` : ``}
+          ${!authState.session && !state.linkId ? `<button class="nav-btn ghost" id="loginNavBtn">Log in</button>` : ``}
           <button class="nav-btn ghost" id="resetBtn">Reset</button>
         </div>
       </main>
@@ -583,6 +757,12 @@ function renderIntro(app) {
     render();
   });
 
+  document.querySelector("#signOutBtn")?.addEventListener("click", () => supabase.auth.signOut());
+  document.querySelector("#loginNavBtn")?.addEventListener("click", () => {
+    state.phase = "login";
+    saveState();
+    render();
+  });
   document.querySelector("#resetBtn").addEventListener("click", resetAll);
 }
 
@@ -965,7 +1145,11 @@ function renderResult(app) {
 
 function render() {
   const app = document.querySelector("#app");
+  if (!state.linkChecked || !authState.checked) return renderLoading(app);
   if (state.linkInvalid) return renderLinkInvalid(app);
+  if (authState.recoveryMode) return renderSetPassword(app);
+  if (!authState.session && !state.linkId) return renderLogin(app);
+  if (state.phase === "login") return renderLogin(app);
   if (state.phase === "intro") return renderIntro(app);
   if (state.phase === "sectionIntro") return renderSectionIntro(app); // ←追加
   if (state.phase === "quiz") return renderQuiz(app);
@@ -1035,4 +1219,8 @@ async function checkLinkFromUrl() {
   }
 }
 
-checkLinkFromUrl().finally(render);
+supabase.auth.onAuthStateChange(() => {
+  refreshAuthState().finally(render);
+});
+
+Promise.all([checkLinkFromUrl(), refreshAuthState()]).finally(render);

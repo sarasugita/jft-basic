@@ -122,6 +122,15 @@ export default function AdminPage() {
     testVersion: "mock_v1",
     expiresAt: ""
   });
+  const [students, setStudents] = useState([]);
+  const [studentMsg, setStudentMsg] = useState("");
+  const [inviteForm, setInviteForm] = useState({
+    email: "",
+    display_name: "",
+    student_code: ""
+  });
+  const [csvMsg, setCsvMsg] = useState("");
+  const [inviteResults, setInviteResults] = useState([]);
 
   const selectedAttempt = useMemo(
     () => attempts.find((a) => a.id === selectedId) ?? null,
@@ -165,6 +174,7 @@ export default function AdminPage() {
     if (!session || profile?.role !== "admin") return;
     runSearch();
     fetchExamLinks();
+    fetchStudents();
   }, [session, profile]);
 
   async function runSearch() {
@@ -251,6 +261,82 @@ export default function AdminPage() {
       console.warn("clipboard error:", e);
       setLinkMsg(url);
     }
+  }
+
+  async function fetchStudents() {
+    setStudentMsg("Loading...");
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, email, role, display_name, student_code, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      console.error("profiles fetch error:", error);
+      setStudents([]);
+      setStudentMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const list = (data ?? []).filter((p) => p.role === "student");
+    setStudents(list);
+    setStudentMsg(list.length ? "" : "No students.");
+  }
+
+  async function inviteStudents(payload) {
+    setCsvMsg("");
+    setStudentMsg("");
+    setInviteResults([]);
+    const { data, error } = await supabase.functions.invoke("invite-students", { body: payload });
+    if (error) {
+      console.error("invite-students error:", error);
+      setStudentMsg(`Invite failed: ${error.message}`);
+      return;
+    }
+    const results = data?.results ?? [];
+    setInviteResults(results);
+    const okCount = results.filter((r) => r.ok).length;
+    const ngCount = results.length - okCount;
+    setStudentMsg(`Invited: ${okCount} ok / ${ngCount} failed`);
+    fetchStudents();
+  }
+
+  function parseCsv(text) {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim().length);
+    if (lines.length === 0) return [];
+    const header = lines[0].split(",").map((s) => s.trim());
+    const idxEmail = header.indexOf("email");
+    const idxName = header.indexOf("display_name");
+    const idxCode = header.indexOf("student_code");
+    if (idxEmail === -1) throw new Error("CSV must include 'email' header");
+    const out = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(",").map((s) => s.trim());
+      out.push({
+        email: cols[idxEmail] ?? "",
+        display_name: idxName === -1 ? "" : (cols[idxName] ?? ""),
+        student_code: idxCode === -1 ? "" : (cols[idxCode] ?? "")
+      });
+    }
+    return out.filter((r) => r.email);
+  }
+
+  async function handleCsvFile(file) {
+    setCsvMsg("");
+    if (!file) return;
+    const text = await file.text();
+    let rows = [];
+    try {
+      rows = parseCsv(text);
+    } catch (e) {
+      setCsvMsg(String(e?.message ?? e));
+      return;
+    }
+    if (rows.length === 0) {
+      setCsvMsg("No rows.");
+      return;
+    }
+    setCsvMsg(`Uploading ${rows.length} students...`);
+    await inviteStudents({ students: rows });
+    setCsvMsg("");
   }
 
   function exportSummaryCsv(list) {
@@ -413,6 +499,117 @@ export default function AdminPage() {
       </div>
 
       <div className="admin-panel">
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Students</div>
+              <div className="admin-help">招待メールで生徒アカウントを追加できます（CSV一括も可）。</div>
+            </div>
+            <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
+          </div>
+
+          <div className="admin-form" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label>Email</label>
+              <input
+                value={inviteForm.email}
+                onChange={(e) => setInviteForm((s) => ({ ...s, email: e.target.value }))}
+                placeholder="student@example.com"
+              />
+            </div>
+            <div className="field">
+              <label>Display Name</label>
+              <input
+                value={inviteForm.display_name}
+                onChange={(e) => setInviteForm((s) => ({ ...s, display_name: e.target.value }))}
+                placeholder="Taro"
+              />
+            </div>
+            <div className="field small">
+              <label>Student Code</label>
+              <input
+                value={inviteForm.student_code}
+                onChange={(e) => setInviteForm((s) => ({ ...s, student_code: e.target.value }))}
+                placeholder="ID001"
+              />
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => inviteStudents(inviteForm)}
+              >
+                Invite
+              </button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div className="admin-help">
+              CSV headers: <b>email,display_name,student_code</b>
+            </div>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(e) => handleCsvFile(e.target.files?.[0])}
+            />
+            <div className="admin-help">{csvMsg}</div>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Email</th>
+                  <th>Name</th>
+                  <th>Code</th>
+                  <th>User ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {students.map((s) => (
+                  <tr key={s.id}>
+                    <td>{formatDateTime(s.created_at)}</td>
+                    <td>{s.email ?? ""}</td>
+                    <td>{s.display_name ?? ""}</td>
+                    <td>{s.student_code ?? ""}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{s.id}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {inviteResults.length ? (
+            <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+              <table className="admin-table" style={{ minWidth: 860 }}>
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>OK</th>
+                    <th>User ID</th>
+                    <th>Error/Warning</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inviteResults.map((r, idx) => (
+                    <tr key={`${r.email}-${idx}`}>
+                      <td>{r.email}</td>
+                      <td style={{ textAlign: "center" }}>{r.ok ? "OK" : "NG"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{r.user_id ?? ""}</td>
+                      <td>{r.error ?? r.warning ?? ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          <div className="admin-msg">{studentMsg}</div>
+        </div>
+
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
