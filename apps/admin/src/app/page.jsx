@@ -100,6 +100,21 @@ function formatDateTime(iso) {
   return d.toLocaleString();
 }
 
+async function buildProfileEmailMap(supabase, attemptsList) {
+  const ids = Array.from(new Set((attemptsList ?? []).map((a) => a.student_id).filter(Boolean)));
+  if (ids.length === 0) return {};
+  const { data, error } = await supabase.from("profiles").select("id, email").in("id", ids);
+  if (error) {
+    console.error("profiles lookup error:", error);
+    return {};
+  }
+  const map = {};
+  for (const row of data ?? []) {
+    map[row.id] = row.email ?? "";
+  }
+  return map;
+}
+
 export default function AdminPage() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -132,6 +147,19 @@ export default function AdminPage() {
   });
   const [csvMsg, setCsvMsg] = useState("");
   const [inviteResults, setInviteResults] = useState([]);
+  const [tests, setTests] = useState([]);
+  const [testsMsg, setTestsMsg] = useState("");
+  const [assets, setAssets] = useState([]);
+  const [assetsMsg, setAssetsMsg] = useState("");
+  const [quizMsg, setQuizMsg] = useState("");
+  const [assetForm, setAssetForm] = useState({
+    test_version: "",
+    title: "",
+    type: "mock",
+    pass_rate: "0.6"
+  });
+  const [assetFile, setAssetFile] = useState(null);
+  const [assetUploadMsg, setAssetUploadMsg] = useState("");
   function generateTempPassword(length = 10) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
     const bytes = new Uint8Array(length);
@@ -186,6 +214,8 @@ export default function AdminPage() {
     runSearch();
     fetchExamLinks();
     fetchStudents();
+    fetchTests();
+    fetchAssets();
   }, [session, profile]);
 
   async function runSearch() {
@@ -196,7 +226,7 @@ export default function AdminPage() {
     let query = supabase
       .from("attempts")
       .select(
-        "id, display_name, student_code, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json"
+        "id, student_id, display_name, student_code, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json"
       )
       .order("created_at", { ascending: false })
       .limit(Number(limit || 200));
@@ -292,6 +322,40 @@ export default function AdminPage() {
     setStudentMsg(list.length ? "" : "No students.");
   }
 
+  async function fetchTests() {
+    setTestsMsg("Loading...");
+    const { data, error } = await supabase
+      .from("tests")
+      .select("id, version, title, type, pass_rate, is_public, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      console.error("tests fetch error:", error);
+      setTests([]);
+      setTestsMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    setTests(data ?? []);
+    setTestsMsg(data?.length ? "" : "No tests.");
+  }
+
+  async function fetchAssets() {
+    setAssetsMsg("Loading...");
+    const { data, error } = await supabase
+      .from("test_assets")
+      .select("id, test_version, test_type, asset_type, path, created_at, original_name")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      console.error("assets fetch error:", error);
+      setAssets([]);
+      setAssetsMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    setAssets(data ?? []);
+    setAssetsMsg(data?.length ? "" : "No assets.");
+  }
+
   async function inviteStudents(payload) {
     setCsvMsg("");
     setStudentMsg("");
@@ -350,6 +414,81 @@ export default function AdminPage() {
     return out.filter((r) => r.email);
   }
 
+  async function uploadTestAsset() {
+    setAssetUploadMsg("");
+    const file = assetFile;
+    const testVersion = assetForm.test_version.trim();
+    const title = assetForm.title.trim() || testVersion;
+    const type = assetForm.type;
+    const passRate = Number(assetForm.pass_rate);
+
+    if (!file) {
+      setAssetUploadMsg("CSV file is required.");
+      return;
+    }
+    if (!testVersion) {
+      setAssetUploadMsg("test_version is required.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setAssetUploadMsg("Only CSV is supported for now.");
+      return;
+    }
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setAssetUploadMsg("pass_rate must be between 0 and 1.");
+      return;
+    }
+
+    setAssetUploadMsg("Uploading...");
+
+    const { error: testError } = await supabase
+      .from("tests")
+      .upsert(
+        {
+          version: testVersion,
+          title,
+          type,
+          pass_rate: passRate,
+          is_public: true
+        },
+        { onConflict: "version" }
+      );
+    if (testError) {
+      console.error("tests upsert error:", testError);
+      setAssetUploadMsg(`Test upsert failed: ${testError.message}`);
+      return;
+    }
+
+    const filePath = `${type}/${testVersion}/${Date.now()}_${file.name}`;
+    const { error: uploadError } = await supabase.storage
+      .from("test-assets")
+      .upload(filePath, file, { upsert: true, contentType: file.type || "text/csv" });
+    if (uploadError) {
+      console.error("asset upload error:", uploadError);
+      setAssetUploadMsg(`Upload failed: ${uploadError.message}`);
+      return;
+    }
+
+    const { error: assetError } = await supabase.from("test_assets").insert({
+      test_version: testVersion,
+      test_type: type,
+      asset_type: "csv",
+      path: filePath,
+      mime_type: file.type || "text/csv",
+      original_name: file.name
+    });
+    if (assetError) {
+      console.error("asset insert error:", assetError);
+      setAssetUploadMsg(`DB insert failed: ${assetError.message}`);
+      return;
+    }
+
+    setAssetUploadMsg("Uploaded.");
+    setAssetFile(null);
+    fetchTests();
+    fetchAssets();
+  }
+
   async function handleCsvFile(file) {
     setCsvMsg("");
     if (!file) return;
@@ -370,14 +509,16 @@ export default function AdminPage() {
     setCsvMsg("");
   }
 
-  function exportSummaryCsv(list) {
+  async function exportSummaryCsv(list) {
+    const emailMap = await buildProfileEmailMap(supabase, list);
     const rows = [
-      ["attempt_id", "created_at", "display_name", "student_code", "test_version", "correct", "total", "score_rate"],
+      ["attempt_id", "created_at", "display_name", "student_code", "email", "test_version", "correct", "total", "score_rate"],
       ...list.map((a) => [
         a.id,
         a.created_at,
         a.display_name ?? "",
         a.student_code ?? "",
+        emailMap[a.student_id] ?? "",
         a.test_version ?? "",
         a.correct ?? 0,
         a.total ?? 0,
@@ -385,6 +526,48 @@ export default function AdminPage() {
       ])
     ];
     downloadText(`attempts_summary_${Date.now()}.csv`, toCsv(rows), "text/csv");
+  }
+
+  async function exportQuizSummaryCsv() {
+    setQuizMsg("");
+    const quizVersions = (tests ?? []).filter((t) => t.type === "quiz").map((t) => t.version);
+    let query = supabase
+      .from("attempts")
+      .select("id, student_id, display_name, student_code, test_version, correct, total, score_rate, created_at")
+      .order("created_at", { ascending: false })
+      .limit(2000);
+    if (quizVersions.length) {
+      query = query.in("test_version", quizVersions);
+    } else {
+      query = query.ilike("test_version", "quiz_%");
+    }
+    const { data, error } = await query;
+    if (error) {
+      console.error("quiz attempts fetch error:", error);
+      setQuizMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const list = data ?? [];
+    if (list.length === 0) {
+      setQuizMsg("No quiz attempts.");
+      return;
+    }
+    const emailMap = await buildProfileEmailMap(supabase, list);
+    const rows = [
+      ["attempt_id", "created_at", "display_name", "student_code", "email", "test_version", "correct", "total", "score_rate"],
+      ...list.map((a) => [
+        a.id,
+        a.created_at,
+        a.display_name ?? "",
+        a.student_code ?? "",
+        emailMap[a.student_id] ?? "",
+        a.test_version ?? "",
+        a.correct ?? 0,
+        a.total ?? 0,
+        a.score_rate ?? 0
+      ])
+    ];
+    downloadText(`quiz_attempts_summary_${Date.now()}.csv`, toCsv(rows), "text/csv");
   }
 
   function exportDetailCsv(list) {
@@ -524,8 +707,10 @@ export default function AdminPage() {
             <button className="btn" onClick={() => runSearch()}>Refresh</button>
             <button className="btn" onClick={() => exportSummaryCsv(attempts)}>Export CSV (Summary)</button>
             <button className="btn" onClick={() => exportDetailCsv(attempts)}>Export CSV (Detail)</button>
+            <button className="btn" onClick={() => exportQuizSummaryCsv()}>Export CSV (Quiz Summary)</button>
             <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
           </div>
+          {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
         </div>
       </div>
 
@@ -729,6 +914,136 @@ export default function AdminPage() {
             </table>
           </div>
           <div className="admin-msg">{linkMsg}</div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Tests</div>
+              <div className="admin-help">公開テスト（模試/小テスト）の一覧です。</div>
+            </div>
+            <button className="btn" onClick={() => fetchTests()}>Refresh Tests</button>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Type</th>
+                  <th>Version</th>
+                  <th>Title</th>
+                  <th>Pass Rate</th>
+                  <th>Public</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tests.map((t) => (
+                  <tr key={t.id}>
+                    <td>{formatDateTime(t.created_at)}</td>
+                    <td>{t.type ?? ""}</td>
+                    <td>{t.version ?? ""}</td>
+                    <td>{t.title ?? ""}</td>
+                    <td>{t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""}</td>
+                    <td>{t.is_public ? "Yes" : "No"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{testsMsg}</div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Content Import (CSV)</div>
+              <div className="admin-help">CSVをSupabase Storageへアップロードし、DBへ登録します。</div>
+            </div>
+            <button className="btn" onClick={() => fetchAssets()}>Refresh Assets</button>
+          </div>
+
+          <div className="admin-form" style={{ marginTop: 10 }}>
+            <div className="field small">
+              <label>Type</label>
+              <select
+                value={assetForm.type}
+                onChange={(e) => setAssetForm((s) => ({ ...s, type: e.target.value }))}
+              >
+                <option value="mock">mock</option>
+                <option value="quiz">quiz</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Test Version</label>
+              <input
+                value={assetForm.test_version}
+                onChange={(e) => setAssetForm((s) => ({ ...s, test_version: e.target.value }))}
+                placeholder="mock_v1"
+              />
+            </div>
+            <div className="field">
+              <label>Title</label>
+              <input
+                value={assetForm.title}
+                onChange={(e) => setAssetForm((s) => ({ ...s, title: e.target.value }))}
+                placeholder="Mock Test v1"
+              />
+            </div>
+            <div className="field small">
+              <label>Pass Rate</label>
+              <input
+                value={assetForm.pass_rate}
+                onChange={(e) => setAssetForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                placeholder="0.6"
+              />
+            </div>
+            <div className="field">
+              <label>CSV File</label>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(e) => setAssetFile(e.target.files?.[0] ?? null)}
+              />
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn btn-primary" type="button" onClick={uploadTestAsset}>
+                Upload CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="admin-help" style={{ marginTop: 6 }}>
+            Bucket: <b>test-assets</b> / CSV only (PNG/MP3は後追い対応)
+          </div>
+          <div className="admin-msg">{assetUploadMsg}</div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Type</th>
+                  <th>Version</th>
+                  <th>Asset</th>
+                  <th>Path</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assets.map((a) => (
+                  <tr key={a.id}>
+                    <td>{formatDateTime(a.created_at)}</td>
+                    <td>{a.test_type ?? ""}</td>
+                    <td>{a.test_version ?? ""}</td>
+                    <td>{a.asset_type ?? ""}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{a.path ?? a.original_name ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{assetsMsg}</div>
         </div>
 
         <form

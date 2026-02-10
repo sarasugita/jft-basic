@@ -6,6 +6,7 @@ const STORAGE_KEY = "jft_mock_state_v3";
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
 const TEST_VERSION = "mock_v1";
+const PASS_RATE_DEFAULT = 0.6;
 
 let authState = {
   checked: false,
@@ -13,6 +14,12 @@ let authState = {
   profile: null,
   recoveryMode: false,
   mustChangePassword: false,
+};
+
+let testsState = {
+  loaded: false,
+  list: [],
+  error: "",
 };
 
 const defaultState = {
@@ -33,6 +40,7 @@ const defaultState = {
   linkTestVersion: null,
   linkChecked: false,
   linkInvalid: false,
+  selectedTestVersion: "",
 };
 
 
@@ -116,6 +124,40 @@ async function refreshAuthState() {
   }
 
   authState.checked = true;
+}
+
+async function fetchPublicTests() {
+  testsState.error = "";
+  const { data, error } = await supabase
+    .from("tests")
+    .select("id, version, title, type, pass_rate, is_public, created_at")
+    .eq("is_public", true)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) {
+    testsState.list = [];
+    testsState.error = error.message;
+    testsState.loaded = true;
+    return;
+  }
+  const list = (data ?? []).filter((t) => t.type === "mock");
+  testsState.list = list;
+  testsState.loaded = true;
+  if (!state.linkId && !state.selectedTestVersion && list.length) {
+    state.selectedTestVersion = list[0].version;
+    saveState();
+  }
+}
+
+function getActiveTestVersion() {
+  return state.linkTestVersion || state.selectedTestVersion || TEST_VERSION;
+}
+
+function getActivePassRate() {
+  const version = getActiveTestVersion();
+  const test = testsState.list.find((t) => t.version === version);
+  const passRate = Number(test?.pass_rate ?? PASS_RATE_DEFAULT);
+  return Number.isFinite(passRate) ? passRate : PASS_RATE_DEFAULT;
 }
 
 function renderLogin(app) {
@@ -428,7 +470,7 @@ async function saveAttemptIfNeeded() {
     student_id: authState.session?.user?.id ?? null,
     display_name: state.user?.name?.trim() || null,
     student_code: state.user?.id?.trim() || null,
-    test_version: state.linkTestVersion || TEST_VERSION,
+    test_version: getActiveTestVersion(),
     correct,
     total,
     started_at: state.testStartAt ? new Date(state.testStartAt).toISOString() : null,
@@ -708,6 +750,7 @@ function sidebarHTML() {
 
 /** ===== Renders ===== */
 function renderIntro(app) {
+  const activeVersion = getActiveTestVersion();
   app.innerHTML = `
     <div class="app">
       ${topbarHTML({ rightButtonLabel: "Not started", rightButtonId: "disabledBtn" })}
@@ -723,6 +766,7 @@ function renderIntro(app) {
               ? `<p style="margin-top:6px;"><b>Guest link active</b> (expires: ${state.linkExpiresAt ? new Date(state.linkExpiresAt).toLocaleString() : "—"})</p>`
               : ""
           }
+          <p style="margin-top:6px;"><b>Test</b>: ${escapeHtml(activeVersion)}</p>
           ${
             authState.session
               ? `<p style="margin-top:6px;"><b>Logged in</b> (${escapeHtml(authState.session.user.email ?? "")})</p>`
@@ -731,6 +775,38 @@ function renderIntro(app) {
         </div>
 
         <div class="intro-form" style="margin-top:16px; max-width:520px;">
+          ${
+            state.linkId
+              ? ""
+              : `
+                <label class="form-label">Test</label>
+                <select class="form-input" id="testSelect">
+                  ${
+                    testsState.list.length
+                      ? testsState.list
+                          .map(
+                            (t) =>
+                              `<option value="${escapeHtml(t.version)}" ${
+                                t.version === activeVersion ? "selected" : ""
+                              }>${escapeHtml(t.title || t.version)}</option>`
+                          )
+                          .join("")
+                      : `<option value="${escapeHtml(TEST_VERSION)}">${escapeHtml(TEST_VERSION)}</option>`
+                  }
+                </select>
+                ${
+                  testsState.error
+                    ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testsState.error)}</div>`
+                    : ""
+                }
+                ${
+                  testsState.loaded && testsState.list.length === 0
+                    ? `<div style="margin-top:6px;color:#666;">公開テストがありません。デフォルトを使用します。</div>`
+                    : ""
+                }
+              `
+          }
+
           <label class="form-label">Name（任意）</label>
           <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
 
@@ -754,6 +830,15 @@ function renderIntro(app) {
   `;
 
   document.querySelector("#disabledBtn").disabled = true;
+
+  const testSelect = document.querySelector("#testSelect");
+  if (testSelect) {
+    testSelect.addEventListener("change", () => {
+      state.selectedTestVersion = testSelect.value;
+      saveState();
+      render();
+    });
+  }
 
   document.querySelector("#nextBtn").addEventListener("click", () => {
     // 入力を保存してから次へ
@@ -1061,6 +1146,9 @@ function buildResultRows() {
 function renderResult(app) {
   const { correct, total } = scoreAll();
   const rows = buildResultRows(); // ★ results rows (chosenImg/correctImg を含む想定)
+  const scoreRate = total === 0 ? 0 : correct / total;
+  const passRate = getActivePassRate();
+  const isPass = scoreRate >= passRate;
 
   // ★ Resultに入った瞬間にタイマーを止めたい場合（testEndAt方式を入れてるなら）
   // state.testEndAt = state.testEndAt ?? Date.now();
@@ -1077,6 +1165,11 @@ function renderResult(app) {
           <span class="score-slash">/</span>
           <span class="score-total">${total}</span>
         </div>
+        <div style="margin-top:8px;font-size:20px;font-weight:700; color:${isPass ? "#1a7f37" : "#b00"};">
+          ${isPass ? "合格" : "不合格"}
+          <span style="font-size:14px;font-weight:500;color:#444;"> (${(scoreRate * 100).toFixed(1)}%)</span>
+        </div>
+        <div style="margin-top:4px;color:#666;font-size:12px;">合格基準: ${(passRate * 100).toFixed(0)}%</div>
         <div class="save-status" id="saveStatus"></div>
 
         <div class="finish-actions">
@@ -1235,6 +1328,8 @@ async function checkLinkFromUrl() {
 
 supabase.auth.onAuthStateChange(() => {
   refreshAuthState().finally(render);
+  fetchPublicTests().finally(render);
 });
 
 Promise.all([checkLinkFromUrl(), refreshAuthState()]).finally(render);
+fetchPublicTests().finally(render);

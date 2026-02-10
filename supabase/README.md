@@ -28,3 +28,13 @@ Bulk:
 }
 ```
 
+## SQL (run once)
+
+See `supabase/sql/schema.sql` for required tables/columns:
+- `profiles` additions (`email`, `force_password_change`)
+- `tests` / `questions` / `choices`
+- `test_assets`
+
+## Storage
+
+Create a bucket named `test-assets` (private or public) and add policies for admin upload.

@@ -1,0 +1,70 @@
+-- Run in Supabase SQL Editor
+
+-- profiles additions (if not already applied)
+alter table public.profiles
+  add column if not exists email text,
+  add column if not exists force_password_change boolean not null default false;
+
+-- tests master
+create table if not exists public.tests (
+  id uuid primary key default gen_random_uuid(),
+  version text not null unique,
+  title text not null,
+  type text not null check (type in ('mock', 'quiz')),
+  pass_rate numeric not null default 0.6,
+  is_public boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists tests_type_idx on public.tests (type);
+create index if not exists tests_public_idx on public.tests (is_public);
+
+-- questions (optional, for future CSV ingestion)
+create table if not exists public.questions (
+  id uuid primary key default gen_random_uuid(),
+  test_version text not null references public.tests(version) on delete cascade,
+  question_id text not null,
+  section_key text,
+  type text not null,
+  prompt_en text,
+  prompt_bn text,
+  answer_index int,
+  order_index int,
+  data jsonb,
+  created_at timestamptz not null default now(),
+  unique (test_version, question_id)
+);
+
+create index if not exists questions_test_idx on public.questions (test_version);
+
+-- choices (optional)
+create table if not exists public.choices (
+  id uuid primary key default gen_random_uuid(),
+  question_id uuid not null references public.questions(id) on delete cascade,
+  choice_index int not null,
+  label text,
+  created_at timestamptz not null default now(),
+  unique (question_id, choice_index)
+);
+
+-- uploaded assets (CSV/PNG/MP3)
+create table if not exists public.test_assets (
+  id uuid primary key default gen_random_uuid(),
+  test_version text not null references public.tests(version) on delete cascade,
+  test_type text not null check (test_type in ('mock', 'quiz')),
+  asset_type text not null,
+  path text not null,
+  mime_type text,
+  original_name text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists test_assets_version_idx on public.test_assets (test_version);
+create index if not exists test_assets_type_idx on public.test_assets (test_type);
+
+-- attempts relation (optional)
+create index if not exists attempts_test_version_idx on public.attempts (test_version);
+-- If all existing attempts.test_version values are registered in tests, you can add an FK:
+-- alter table public.attempts
+--   add constraint attempts_test_version_fkey foreign key (test_version)
+--   references public.tests(version) on delete set null;
