@@ -674,13 +674,45 @@ export default function AdminPage() {
     setTestsMsg(data?.length ? "" : "No tests.");
   }
 
+  async function ensureTestRecord(testVersion, title, type, passRate) {
+    const { data, error } = await supabase
+      .from("tests")
+      .select("id, title")
+      .eq("version", testVersion)
+      .limit(1);
+    if (error) {
+      console.error("tests lookup error:", error);
+      return { ok: false, message: `Test lookup failed: ${error.message}` };
+    }
+    const existing = (data ?? [])[0] ?? null;
+    if (existing) {
+      if (title && existing.title && title !== existing.title) {
+        return { ok: false, message: "Test version already exists with a different title. Use a new version." };
+      }
+      return { ok: true, existing: true };
+    }
+
+    const effectiveTitle = title || testVersion;
+    const { error: insertError } = await supabase.from("tests").insert({
+      version: testVersion,
+      title: effectiveTitle,
+      type,
+      pass_rate: passRate,
+      is_public: true
+    });
+    if (insertError) {
+      console.error("tests insert error:", insertError);
+      return { ok: false, message: `Test create failed: ${insertError.message}` };
+    }
+    return { ok: true, existing: false };
+  }
+
   async function fetchAssets() {
     setAssetsMsg("Loading...");
     const { data, error } = await supabase
       .from("test_assets")
-      .select("id, test_version, test_type, asset_type, path, created_at, original_name")
-      .order("created_at", { ascending: false })
-      .limit(200);
+      .select("id")
+      .limit(1);
     if (error) {
       console.error("assets fetch error:", error);
       setAssets([]);
@@ -688,7 +720,7 @@ export default function AdminPage() {
       return;
     }
     setAssets(data ?? []);
-    setAssetsMsg(data?.length ? "" : "No assets.");
+    setAssetsMsg("");
   }
 
   async function inviteStudents(payload) {
@@ -802,21 +834,9 @@ export default function AdminPage() {
 
     setAssetUploadMsg("Uploading...");
 
-    const { error: testError } = await supabase
-      .from("tests")
-      .upsert(
-        {
-          version: testVersion,
-          title,
-          type,
-          pass_rate: passRate,
-          is_public: true
-        },
-        { onConflict: "version" }
-      );
-    if (testError) {
-      console.error("tests upsert error:", testError);
-      setAssetUploadMsg(`Test upsert failed: ${testError.message}`);
+    const ensure = await ensureTestRecord(testVersion, title, type, passRate);
+    if (!ensure.ok) {
+      setAssetUploadMsg(ensure.message);
       return;
     }
 
@@ -922,21 +942,9 @@ export default function AdminPage() {
     applyAssetMap(questions, choices, assetMap);
 
     setAssetImportMsg("Upserting tests...");
-    const { error: testError } = await supabase
-      .from("tests")
-      .upsert(
-        {
-          version: resolvedVersion,
-          title: resolvedTitle,
-          type,
-          pass_rate: passRate,
-          is_public: true
-        },
-        { onConflict: "version" }
-      );
-    if (testError) {
-      console.error("tests upsert error:", testError);
-      setAssetImportMsg(`Test upsert failed: ${testError.message}`);
+    const ensure = await ensureTestRecord(resolvedVersion, resolvedTitle, type, passRate);
+    if (!ensure.ok) {
+      setAssetImportMsg(ensure.message);
       return;
     }
 
@@ -1471,7 +1479,7 @@ export default function AdminPage() {
               <div className="admin-title">Content Import (CSV)</div>
               <div className="admin-help">CSVをSupabase Storageへアップロードし、DBへ登録します。</div>
             </div>
-            <button className="btn" onClick={() => fetchAssets()}>Refresh Assets</button>
+            <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
           </div>
 
           <div className="admin-form" style={{ marginTop: 10 }}>
@@ -1581,30 +1589,6 @@ export default function AdminPage() {
             </pre>
           ) : null}
 
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Type</th>
-                  <th>Version</th>
-                  <th>Asset</th>
-                  <th>Path</th>
-                </tr>
-              </thead>
-              <tbody>
-                {assets.map((a) => (
-                  <tr key={a.id}>
-                    <td>{formatDateTime(a.created_at)}</td>
-                    <td>{a.test_type ?? ""}</td>
-                    <td>{a.test_version ?? ""}</td>
-                    <td>{a.asset_type ?? ""}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{a.path ?? a.original_name ?? ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
           <div className="admin-msg">{assetsMsg}</div>
         </div>
 
