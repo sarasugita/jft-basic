@@ -11,7 +11,7 @@ create table if not exists public.tests (
   version text not null unique,
   title text not null,
   type text not null check (type in ('mock', 'quiz')),
-  pass_rate numeric not null default 0.6,
+  pass_rate numeric not null default 0.8,
   is_public boolean not null default true,
   created_at timestamptz not null default now()
 );

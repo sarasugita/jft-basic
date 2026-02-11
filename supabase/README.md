@@ -18,6 +18,9 @@ Single:
 { "email": "s1@example.com", "display_name": "Taro", "student_code": "ID001", "temp_password": "TempPass1!" }
 ```
 
+### `delete-student`
+
+Deletes an auth user and profile (admin-only).
 Bulk:
 ```json
 {

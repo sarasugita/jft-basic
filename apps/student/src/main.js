@@ -6,7 +6,7 @@ const STORAGE_KEY = "jft_mock_state_v3";
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
 const TEST_VERSION = "test_exam";
-const PASS_RATE_DEFAULT = 0.6;
+const PASS_RATE_DEFAULT = 0.8;
 
 let authState = {
   checked: false,

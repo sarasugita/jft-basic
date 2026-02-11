@@ -56,6 +56,20 @@ function getPromptText(q) {
   return q.promptEn ?? "";
 }
 
+function mapDbQuestion(row) {
+  const data = row.data ?? {};
+  return {
+    id: row.question_id,
+    sectionKey: row.section_key,
+    type: row.type,
+    promptEn: row.prompt_en,
+    promptBn: row.prompt_bn,
+    answerIndex: row.answer_index,
+    orderIndex: row.order_index ?? 0,
+    ...data,
+  };
+}
+
 function buildAttemptDetailRows(answersJson) {
   const answers = answersJson ?? {};
   const rows = [];
@@ -364,6 +378,19 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
   return { questions, choices, errors };
 }
 
+function detectTestVersionFromCsvText(text) {
+  const rows = parseCsvRows(text);
+  if (rows.length < 2) return "";
+  const header = rows[0].map((h) => String(h ?? "").trim());
+  const idx = header.indexOf("test_version");
+  if (idx === -1) return "";
+  for (let i = 1; i < rows.length; i += 1) {
+    const value = String(rows[i]?.[idx] ?? "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
 function resolveAssetValue(value, assetMap) {
   const raw = String(value ?? "").trim();
   if (!raw) return raw;
@@ -447,6 +474,24 @@ async function buildProfileEmailMap(supabase, attemptsList) {
   return map;
 }
 
+async function fetchQuestionCounts(supabase, versions) {
+  if (!Array.isArray(versions) || versions.length === 0) return {};
+  const { data, error } = await supabase
+    .from("questions")
+    .select("test_version")
+    .in("test_version", versions);
+  if (error) {
+    console.error("question count fetch error:", error);
+    return {};
+  }
+  const counts = {};
+  for (const row of data ?? []) {
+    if (!row?.test_version) continue;
+    counts[row.test_version] = (counts[row.test_version] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export default function AdminPage() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -484,11 +529,16 @@ export default function AdminPage() {
   const [assets, setAssets] = useState([]);
   const [assetsMsg, setAssetsMsg] = useState("");
   const [quizMsg, setQuizMsg] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewTest, setPreviewTest] = useState("");
+  const [previewQuestions, setPreviewQuestions] = useState([]);
+  const [previewAnswers, setPreviewAnswers] = useState({});
+  const [previewMsg, setPreviewMsg] = useState("");
   const [assetForm, setAssetForm] = useState({
     test_version: "test_exam",
     title: "",
     type: "mock",
-    pass_rate: "0.6"
+    pass_rate: "0.8"
   });
   const [assetFile, setAssetFile] = useState(null);
   const [assetFiles, setAssetFiles] = useState([]);
@@ -661,17 +711,56 @@ export default function AdminPage() {
     setTestsMsg("Loading...");
     const { data, error } = await supabase
       .from("tests")
-      .select("id, version, title, type, pass_rate, is_public, created_at")
+      .select("id, version, title, type, pass_rate, is_public, created_at, questions(count)")
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
+      const msg = String(error.message ?? "");
+      if (msg.includes("relationship") || msg.includes("questions")) {
+        const fallback = await supabase
+          .from("tests")
+          .select("id, version, title, type, pass_rate, is_public, created_at")
+          .order("created_at", { ascending: false })
+          .limit(200);
+        if (fallback.error) {
+          console.error("tests fetch error:", fallback.error);
+          setTests([]);
+          setTestsMsg(`Load failed: ${fallback.error.message}`);
+          return;
+        }
+        const list = fallback.data ?? [];
+        const counts = await fetchQuestionCounts(supabase, list.map((t) => t.version));
+        const withCounts = list.map((t) => ({
+          ...t,
+          question_count: counts[t.version] ?? 0
+        }));
+        setTests(withCounts);
+        setTestsMsg(list.length ? "" : "No tests.");
+        return;
+      }
       console.error("tests fetch error:", error);
       setTests([]);
       setTestsMsg(`Load failed: ${error.message}`);
       return;
     }
-    setTests(data ?? []);
-    setTestsMsg(data?.length ? "" : "No tests.");
+    const list = data ?? [];
+    const hasRelation = list.some((t) => Array.isArray(t.questions));
+    if (!hasRelation) {
+      const counts = await fetchQuestionCounts(supabase, list.map((t) => t.version));
+      const withCounts = list.map((t) => ({
+        ...t,
+        question_count: counts[t.version] ?? 0
+      }));
+      setTests(withCounts);
+      setTestsMsg(list.length ? "" : "No tests.");
+      return;
+    }
+    const withCounts = list.map((t) => ({
+      ...t,
+      question_count: t.questions?.[0]?.count ?? 0
+    }));
+    setTests(withCounts);
+    setTestsMsg(list.length ? "" : "No tests.");
   }
 
   async function ensureTestRecord(testVersion, title, type, passRate) {
@@ -723,10 +812,7 @@ export default function AdminPage() {
     setAssetsMsg("");
   }
 
-  async function inviteStudents(payload) {
-    setCsvMsg("");
-    setStudentMsg("");
-    setInviteResults([]);
+  async function getAccessToken() {
     const { data: sessionData } = await supabase.auth.getSession();
     let accessToken = sessionData?.session?.access_token ?? null;
     const expiresAt = sessionData?.session?.expires_at ?? 0;
@@ -736,6 +822,86 @@ export default function AdminPage() {
         accessToken = refreshed?.session?.access_token ?? null;
       }
     }
+    return accessToken;
+  }
+
+  async function openPreview(testVersion) {
+    setPreviewOpen(true);
+    setPreviewTest(testVersion);
+    setPreviewAnswers({});
+    setPreviewMsg("Loading...");
+    const { data, error } = await supabase
+      .from("questions")
+      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .eq("test_version", testVersion)
+      .order("order_index", { ascending: true });
+    if (error) {
+      console.error("preview questions error:", error);
+      setPreviewQuestions([]);
+      setPreviewMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const list = (data ?? []).map(mapDbQuestion);
+    setPreviewQuestions(list);
+    setPreviewMsg(list.length ? "" : "No questions.");
+  }
+
+  function closePreview() {
+    setPreviewOpen(false);
+    setPreviewTest("");
+    setPreviewQuestions([]);
+    setPreviewAnswers({});
+    setPreviewMsg("");
+  }
+
+  async function deleteTest(testVersion) {
+    if (!testVersion) return;
+    const ok = window.confirm(`Delete test "${testVersion}"? This will remove questions/choices/assets.`);
+    if (!ok) return;
+    const { error } = await supabase.from("tests").delete().eq("version", testVersion);
+    if (error) {
+      console.error("delete test error:", error);
+      setTestsMsg(`Delete failed: ${error.message}`);
+      return;
+    }
+    setTestsMsg(`Deleted: ${testVersion}`);
+    closePreview();
+    fetchTests();
+  }
+
+  async function deleteAttempt(attemptId) {
+    if (!attemptId) return;
+    const ok = window.confirm(`Delete attempt ${attemptId}?`);
+    if (!ok) return;
+    const { error } = await supabase.from("attempts").delete().eq("id", attemptId);
+    if (error) {
+      console.error("delete attempt error:", error);
+      setMsg(`Delete failed: ${error.message}`);
+      return;
+    }
+    if (selectedId === attemptId) setSelectedId(null);
+    setMsg(`Deleted: ${attemptId}`);
+    runSearch();
+  }
+
+  function setPreviewAnswer(questionId, choiceIndex) {
+    setPreviewAnswers((prev) => ({ ...prev, [questionId]: choiceIndex }));
+  }
+
+  function setPreviewPartAnswer(questionId, partIndex, choiceIndex) {
+    setPreviewAnswers((prev) => {
+      const cur = prev[questionId] ?? {};
+      const next = Array.isArray(cur.partAnswers) ? [...cur.partAnswers] : [];
+      next[partIndex] = choiceIndex;
+      return { ...prev, [questionId]: { partAnswers: next } };
+    });
+  }
+
+  async function inviteStudents(payload) {
+    setCsvMsg("");
+    setStudentMsg("");
+    setInviteResults([]);
+    const accessToken = await getAccessToken();
     if (!accessToken) {
       setStudentMsg("Session expired. Please log in again.");
       return;
@@ -754,6 +920,32 @@ export default function AdminPage() {
     const okCount = results.filter((r) => r.ok).length;
     const ngCount = results.length - okCount;
     setStudentMsg(`Created: ${okCount} ok / ${ngCount} failed`);
+    fetchStudents();
+  }
+
+  async function deleteStudent(userId, email) {
+    if (!userId) return;
+    const ok = window.confirm(`Delete student ${email || userId}?`);
+    if (!ok) return;
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      setStudentMsg("Session expired. Please log in again.");
+      return;
+    }
+    const { data, error } = await supabase.functions.invoke("delete-student", {
+      body: { user_id: userId },
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (error) {
+      console.error("delete-student error:", error);
+      setStudentMsg(`Delete failed: ${error.message}`);
+      return;
+    }
+    if (data?.error) {
+      setStudentMsg(`Delete failed: ${data.error}`);
+      return;
+    }
+    setStudentMsg(`Deleted: ${email || userId}`);
     fetchStudents();
   }
 
@@ -814,10 +1006,19 @@ export default function AdminPage() {
     setAssetUploadMsg("");
     const singleFile = assetFile;
     const folderFiles = assetFiles || [];
-    const testVersion = assetForm.test_version.trim();
+    let testVersion = assetForm.test_version.trim();
     const title = assetForm.title.trim() || testVersion;
     const type = assetForm.type;
     const passRate = Number(assetForm.pass_rate);
+
+    if (assetCsvFile) {
+      const csvText = await assetCsvFile.text();
+      const detectedVersion = detectTestVersionFromCsvText(csvText);
+      if (detectedVersion && detectedVersion !== testVersion) {
+        testVersion = detectedVersion;
+        setAssetForm((s) => ({ ...s, test_version: detectedVersion }));
+      }
+    }
 
     if (!singleFile && folderFiles.length === 0) {
       setAssetUploadMsg("File or folder is required.");
@@ -832,6 +1033,22 @@ export default function AdminPage() {
       return;
     }
 
+    const files = [];
+    if (singleFile) files.push(singleFile);
+    files.push(...folderFiles);
+    if (assetCsvFile && !files.includes(assetCsvFile)) files.unshift(assetCsvFile);
+    if (singleFile && singleFile.name.toLowerCase().endsWith(".csv")) {
+      setAssetCsvFile(singleFile);
+    }
+    const hasCsv =
+      (assetCsvFile && assetCsvFile.name.toLowerCase().endsWith(".csv")) ||
+      (singleFile && singleFile.name.toLowerCase().endsWith(".csv")) ||
+      files.some((f) => f.name.toLowerCase().endsWith(".csv"));
+    if (!hasCsv) {
+      setAssetUploadMsg("CSV file is required for Upload & Create Exam.");
+      return;
+    }
+
     setAssetUploadMsg("Uploading...");
 
     const ensure = await ensureTestRecord(testVersion, title, type, passRate);
@@ -840,12 +1057,6 @@ export default function AdminPage() {
       return;
     }
 
-    const files = [];
-    if (singleFile) files.push(singleFile);
-    files.push(...folderFiles);
-    if (singleFile && singleFile.name.toLowerCase().endsWith(".csv")) {
-      setAssetCsvFile(singleFile);
-    }
     let ok = 0;
     let ng = 0;
     for (const file of files) {
@@ -860,10 +1071,13 @@ export default function AdminPage() {
     }
 
     setAssetUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
-    setAssetFile(null);
-    setAssetFiles([]);
     fetchTests();
     fetchAssets();
+
+    await importQuestionsFromCsv();
+
+    setAssetFile(null);
+    setAssetFiles([]);
   }
 
   async function importQuestionsFromCsv() {
@@ -908,6 +1122,9 @@ export default function AdminPage() {
       return;
     }
     const resolvedVersion = Array.from(versionSet)[0] || testVersion;
+    if (resolvedVersion && resolvedVersion !== testVersion) {
+      setAssetForm((s) => ({ ...s, test_version: resolvedVersion }));
+    }
     if (!resolvedVersion) {
       setAssetImportMsg("test_version is required (either in form or CSV).");
       return;
@@ -1147,6 +1364,26 @@ export default function AdminPage() {
     };
   }, [attempts]);
 
+  const previewScore = useMemo(() => {
+    let correct = 0;
+    let total = 0;
+    for (const q of previewQuestions) {
+      if (Array.isArray(q.parts) && q.parts.length) {
+        q.parts.forEach((p, idx) => {
+          if (p.answerIndex == null) return;
+          total += 1;
+          const selected = previewAnswers[q.id]?.partAnswers?.[idx];
+          if (selected === p.answerIndex) correct += 1;
+        });
+        continue;
+      }
+      if (q.answerIndex == null) continue;
+      total += 1;
+      if (previewAnswers[q.id] === q.answerIndex) correct += 1;
+    }
+    return { correct, total };
+  }, [previewQuestions, previewAnswers]);
+
   async function handleLogin() {
     setLoginMsg("");
     const { email, password } = loginForm;
@@ -1217,7 +1454,7 @@ export default function AdminPage() {
       <div className="admin-top">
         <div>
           <div className="admin-title">Admin Panel</div>
-          <div className="admin-help">受験結果（attempts）を検索・詳細表示・CSV出力できます。</div>
+          <div className="admin-subtitle">受験結果（attempts）を検索・詳細表示・CSV出力できます。</div>
         </div>
         <div className="admin-meta">
           <span className="admin-chip">user: {session.user.email}</span>
@@ -1234,11 +1471,12 @@ export default function AdminPage() {
       </div>
 
       <div className="admin-panel">
+
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div className="admin-title">Students</div>
-              <div className="admin-help">一時パスワードで生徒アカウントを作成できます。</div>
+              <div className="admin-subtitle">一時パスワードで生徒アカウントを作成できます。</div>
             </div>
             <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
           </div>
@@ -1320,6 +1558,7 @@ export default function AdminPage() {
                   <th>Code</th>
                   <th>User ID</th>
                   <th>Temp Password</th>
+                  <th>Delete</th>
                 </tr>
               </thead>
               <tbody>
@@ -1331,6 +1570,14 @@ export default function AdminPage() {
                     <td>{s.student_code ?? ""}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{s.id}</td>
                     <td></td>
+                    <td>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => deleteStudent(s.id, s.email)}
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1371,7 +1618,7 @@ export default function AdminPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div className="admin-title">Exam Links</div>
-              <div className="admin-help">期限付きの模試リンクを発行します（A: 期限のみ）。</div>
+              <div className="admin-subtitle">期限付きの模試リンクを発行します（A: 期限のみ）。</div>
             </div>
             <button className="btn" onClick={() => fetchExamLinks()}>Refresh Links</button>
           </div>
@@ -1439,7 +1686,7 @@ export default function AdminPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div className="admin-title">Tests</div>
-              <div className="admin-help">公開テスト（模試/小テスト）の一覧です。</div>
+              <div className="admin-subtitle">公開テスト（模試/小テスト）の一覧です。</div>
             </div>
             <button className="btn" onClick={() => fetchTests()}>Refresh Tests</button>
           </div>
@@ -1454,17 +1701,43 @@ export default function AdminPage() {
                   <th>Title</th>
                   <th>Pass Rate</th>
                   <th>Public</th>
+                  <th>Questions</th>
+                  <th>Preview</th>
+                  <th>Delete</th>
                 </tr>
               </thead>
               <tbody>
                 {tests.map((t) => (
-                  <tr key={t.id}>
+                  <tr key={t.id} onClick={() => openPreview(t.version)}>
                     <td>{formatDateTime(t.created_at)}</td>
                     <td>{t.type ?? ""}</td>
                     <td>{t.version ?? ""}</td>
                     <td>{t.title ?? ""}</td>
                     <td>{t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""}</td>
                     <td>{t.is_public ? "Yes" : "No"}</td>
+                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPreview(t.version);
+                        }}
+                      >
+                        Preview
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-danger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteTest(t.version);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1477,7 +1750,7 @@ export default function AdminPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div className="admin-title">Content Import (CSV)</div>
-              <div className="admin-help">CSVをSupabase Storageへアップロードし、DBへ登録します。</div>
+              <div className="admin-subtitle">CSVをSupabase Storageへアップロードし、DBへ登録します。</div>
             </div>
             <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
           </div>
@@ -1514,7 +1787,7 @@ export default function AdminPage() {
               <input
                 value={assetForm.pass_rate}
                 onChange={(e) => setAssetForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                placeholder="0.6"
+                placeholder="0.8"
               />
             </div>
             <div className="field">
@@ -1525,7 +1798,15 @@ export default function AdminPage() {
                 onChange={(e) => {
                   const file = e.target.files?.[0] ?? null;
                   setAssetFile(file);
-                  if (file && file.name.toLowerCase().endsWith(".csv")) setAssetCsvFile(file);
+                  if (file && file.name.toLowerCase().endsWith(".csv")) {
+                    setAssetCsvFile(file);
+                    file.text().then((text) => {
+                      const detected = detectTestVersionFromCsvText(text);
+                      if (detected) {
+                        setAssetForm((s) => ({ ...s, test_version: detected }));
+                      }
+                    });
+                  }
                 }}
               />
               {assetCsvFile ? (
@@ -1541,8 +1822,21 @@ export default function AdminPage() {
                 multiple
                 webkitdirectory="true"
                 directory="true"
-                accept=".png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
-                onChange={(e) => setAssetFiles(Array.from(e.target.files ?? []))}
+                accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  setAssetFiles(files);
+                  const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv"));
+                  if (csvFile) {
+                    setAssetCsvFile(csvFile);
+                    csvFile.text().then((text) => {
+                      const detected = detectTestVersionFromCsvText(text);
+                      if (detected) {
+                        setAssetForm((s) => ({ ...s, test_version: detected }));
+                      }
+                    });
+                  }
+                }}
               />
               {assetFiles.length ? (
                 <div className="admin-help" style={{ marginTop: 4 }}>
@@ -1553,13 +1847,7 @@ export default function AdminPage() {
             <div className="field small">
               <label>&nbsp;</label>
               <button className="btn btn-primary" type="button" onClick={uploadAssets}>
-                Upload Assets
-              </button>
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button className="btn" type="button" onClick={importQuestionsFromCsv}>
-                Create Exam
+                Upload & Create Exam
               </button>
             </div>
           </div>
@@ -1568,7 +1856,7 @@ export default function AdminPage() {
             Bucket: <b>test-assets</b> / CSV, PNG, MP3 (他拡張子もOK)
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
-            Upload AssetsでCSV/PNG/MP3をアップロード → Create ExamでCSVを取り込みます。
+            Upload &amp; Create ExamでCSV/PNG/MP3をアップロードし、試験を作成します。
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
             CSVにはファイル名のみ記載してください。
@@ -1590,6 +1878,153 @@ export default function AdminPage() {
           ) : null}
 
           <div className="admin-msg">{assetsMsg}</div>
+        </div>
+
+        {previewOpen ? (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.35)",
+              zIndex: 1000,
+              padding: 16,
+              overflow: "auto",
+            }}
+          >
+            <div className="admin-panel" style={{ padding: 12, maxWidth: 1100, margin: "0 auto" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div className="admin-title">Preview: {previewTest}</div>
+                  <div className="admin-help">正解の選択肢を色で表示します。</div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn" onClick={closePreview}>Exit Preview</button>
+                  <button className="btn" onClick={() => deleteTest(previewTest)}>Delete Test</button>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <div className="admin-help">
+                  Total: <b>{previewQuestions.length}</b>
+                </div>
+                {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
+                {!previewMsg && previewQuestions.length === 0 ? (
+                  <div className="admin-help" style={{ marginTop: 6 }}>
+                    No questions. Create ExamでCSVを取り込むか、CSVの`test_version`がこのテストと一致しているか確認してください。
+                  </div>
+                ) : null}
+              </div>
+
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
+                {previewQuestions.map((q, idx) => {
+                  const prompt = q.promptEn || q.promptBn || "";
+                  const choices = q.choicesJa ?? [];
+                  const choiceImages = q.choiceImages ?? [];
+
+                  const renderChoiceButtons = (labels, images, correctIdx) => (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
+                      {labels.map((label, i) => (
+                        <button
+                          key={`c-${i}`}
+                          className="btn"
+                          style={{
+                            border: correctIdx === i ? "2px solid #1a7f37" : "1px solid #ddd",
+                            background: correctIdx === i ? "#e7f7ee" : "#fff",
+                            padding: 8,
+                            cursor: "default",
+                          }}
+                          disabled
+                        >
+                          {label}
+                        </button>
+                      ))}
+                      {images.map((src, i) => (
+                        <button
+                          key={`ci-${i}`}
+                          className="btn"
+                          style={{
+                            border: correctIdx === i ? "2px solid #1a7f37" : "1px solid #ddd",
+                            background: correctIdx === i ? "#e7f7ee" : "#fff",
+                            padding: 8,
+                            cursor: "default",
+                          }}
+                          disabled
+                        >
+                          <img src={src} alt="choice" style={{ maxWidth: "100%" }} />
+                        </button>
+                      ))}
+                    </div>
+                  );
+
+                  const renderParts = (parts) => (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {parts.map((p, pIdx) => {
+                        const partChoices = p.choicesJa ?? [];
+                        const partImages = p.choiceImages ?? [];
+                        const partCorrect = p.answerIndex != null ? p.answerIndex : null;
+                        return (
+                          <div key={`p-${pIdx}`} style={{ border: "1px solid #eee", borderRadius: 8, padding: 8 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                              {p.partLabel ?? `(${pIdx + 1})`} {p.questionJa ?? ""}
+                            </div>
+                            {partChoices.length
+                              ? renderChoiceButtons(partChoices, [], partCorrect)
+                              : renderChoiceButtons([], partImages, partCorrect)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+
+                  return (
+                    <div key={`${q.id}-${idx}`} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
+                      <div style={{ fontWeight: 700 }}>
+                        {q.id} {q.sectionKey ? `(${q.sectionKey})` : ""}
+                      </div>
+                      {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
+                      {q.sentenceJa ? <div style={{ marginTop: 6 }}>{q.sentenceJa}</div> : null}
+                      {Array.isArray(q.sentencePartsJa) ? (
+                        <div style={{ marginTop: 6 }}>
+                          {q.sentencePartsJa.map((p, i2) => (
+                            <span key={`sp-${i2}`} style={{ textDecoration: p.underline ? "underline" : "none" }}>
+                              {p.text}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {Array.isArray(q.dialogJa) ? (
+                        <div style={{ marginTop: 6 }}>
+                          {q.dialogJa.map((line, i2) => (
+                            <div key={`dlg-${i2}`}>{line}</div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {q.image ? <img src={q.image} alt="question" style={{ marginTop: 8, maxWidth: "100%" }} /> : null}
+                      {q.stemImage ? <img src={q.stemImage} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} /> : null}
+                      {q.passageImage ? <img src={q.passageImage} alt="passage" style={{ marginTop: 8, maxWidth: "100%" }} /> : null}
+                      {q.tableImage ? <img src={q.tableImage} alt="table" style={{ marginTop: 8, maxWidth: "100%" }} /> : null}
+                      {q.audio ? (
+                        <audio controls src={q.audio} style={{ marginTop: 8, width: "100%" }} />
+                      ) : null}
+
+                      <div style={{ marginTop: 10 }}>
+                        {Array.isArray(q.parts) && q.parts.length
+                          ? renderParts(q.parts)
+                          : choices.length
+                            ? renderChoiceButtons(choices, [], q.answerIndex)
+                            : renderChoiceButtons([], choiceImages, q.answerIndex)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{ marginBottom: 12 }}>
+          <div className="admin-title">Attempts</div>
+          <div className="admin-subtitle">受験結果を検索・詳細表示・CSV出力できます。</div>
         </div>
 
         <form
@@ -1673,31 +2108,43 @@ export default function AdminPage() {
                     <th>Created</th>
                     <th>Name</th>
                     <th>Code</th>
-                    <th>Score</th>
-                    <th>Rate</th>
-                    <th>Test</th>
-                    <th>Attempt ID</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attempts.map((a) => {
-                    const score = `${a.correct}/${a.total}`;
-                    const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
-                    return (
-                      <tr key={a.id} onClick={() => setSelectedId(a.id)}>
-                        <td>{formatDateTime(a.created_at)}</td>
-                        <td>{a.display_name ?? ""}</td>
-                        <td>{a.student_code ?? ""}</td>
-                        <td>{score}</td>
-                        <td>{rate}</td>
-                        <td>{a.test_version ?? ""}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  <th>Score</th>
+                  <th>Rate</th>
+                  <th>Test</th>
+                  <th>Attempt ID</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attempts.map((a) => {
+                  const score = `${a.correct}/${a.total}`;
+                  const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                  return (
+                    <tr key={a.id} onClick={() => setSelectedId(a.id)}>
+                      <td>{formatDateTime(a.created_at)}</td>
+                      <td>{a.display_name ?? ""}</td>
+                      <td>{a.student_code ?? ""}</td>
+                      <td>{score}</td>
+                      <td>{rate}</td>
+                      <td>{a.test_version ?? ""}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
+                      <td>
+                        <button
+                          className="btn btn-danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteAttempt(a.id);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
             <div className="admin-msg">{loading ? "Loading..." : msg}</div>
           </div>
 

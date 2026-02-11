@@ -25,6 +25,7 @@ body { padding: 0; }
   min-width: 120px;
 }
 .btn-primary { background: #3f6b0f; border-color: #2f520b; color: #fff; }
+.btn-danger { background: #b00020; border-color: #7a0016; color: #fff; }
 .btn:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
 
 .admin-wrap {
@@ -43,6 +44,14 @@ body { padding: 0; }
 
 .admin-title { font-size: 20px; font-weight: 900; }
 .admin-help { color: #374151; font-size: 13px; line-height: 1.6; }
+.admin-subtitle {
+  font-weight: 800;
+  font-size: 14px;
+  color: #111827;
+  padding-bottom: 6px;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.12);
+  margin-top: 6px;
+}
 
 .admin-meta {
   display: flex;
@@ -149,5 +158,4 @@ body { padding: 0; }
   box-shadow: var(--shadow);
 }
 .admin-login h2 { margin: 0 0 6px; }
-
 
