@@ -492,6 +492,7 @@ export default function AdminPage() {
   });
   const [assetFile, setAssetFile] = useState(null);
   const [assetFiles, setAssetFiles] = useState([]);
+  const [assetCsvFile, setAssetCsvFile] = useState(null);
   const [assetUploadMsg, setAssetUploadMsg] = useState("");
   const [assetImportMsg, setAssetImportMsg] = useState("");
   function generateTempPassword(length = 10) {
@@ -822,6 +823,9 @@ export default function AdminPage() {
     const files = [];
     if (singleFile) files.push(singleFile);
     files.push(...folderFiles);
+    if (singleFile && singleFile.name.toLowerCase().endsWith(".csv")) {
+      setAssetCsvFile(singleFile);
+    }
     let ok = 0;
     let ng = 0;
     for (const file of files) {
@@ -844,7 +848,7 @@ export default function AdminPage() {
 
   async function importQuestionsFromCsv() {
     setAssetImportMsg("");
-    const file = assetFile;
+    const file = assetCsvFile || assetFile;
     const testVersion = assetForm.test_version.trim();
     const title = assetForm.title.trim();
     const type = assetForm.type;
@@ -1510,8 +1514,17 @@ export default function AdminPage() {
               <input
                 type="file"
                 accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
-                onChange={(e) => setAssetFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  setAssetFile(file);
+                  if (file && file.name.toLowerCase().endsWith(".csv")) setAssetCsvFile(file);
+                }}
               />
+              {assetCsvFile ? (
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  CSV ready: {assetCsvFile.name}
+                </div>
+              ) : null}
             </div>
             <div className="field">
               <label>Folder (PNG/MP3)</label>
