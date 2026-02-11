@@ -83,3 +83,4 @@ test_exam,SV-1,SV,mcq_image,"Look at the illustration and choose the correct wor
 - CSVには `q1.png` のような**ファイル名のみ**でもOK
 - 先に `test-assets` にアップロードしておくと、取り込み時に自動でURLへ解決されます
 - サンプルファイル: `docs/sample_test_assets/`（プレースホルダー）
+- `/images/...` や `/audio/...` のようなパスは取り込み時にエラーになります

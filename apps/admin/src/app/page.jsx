@@ -397,6 +397,41 @@ function applyAssetMap(questions, choices, assetMap) {
   }
 }
 
+function validateAssetRefs(questions, choices, assetMap) {
+  const missing = new Set();
+  const invalid = new Set();
+
+  const checkValue = (value) => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return;
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return;
+    if (raw.startsWith("/")) {
+      invalid.add(raw);
+      return;
+    }
+    if (raw.includes("/")) return;
+    if (!assetMap[raw]) missing.add(raw);
+  };
+
+  for (const q of questions) {
+    const data = q.data ?? {};
+    checkValue(data.image);
+    checkValue(data.audio);
+    checkValue(data.stemImage);
+    checkValue(data.passageImage);
+    checkValue(data.tableImage);
+    if (Array.isArray(data.choiceImages)) data.choiceImages.forEach(checkValue);
+    if (Array.isArray(data.parts)) {
+      data.parts.forEach((p) => {
+        if (Array.isArray(p.choiceImages)) p.choiceImages.forEach(checkValue);
+      });
+    }
+  }
+  for (const c of choices) checkValue(c.choice_image);
+
+  return { missing: Array.from(missing), invalid: Array.from(invalid) };
+}
+
 async function buildProfileEmailMap(supabase, attemptsList) {
   const ids = Array.from(new Set((attemptsList ?? []).map((a) => a.student_id).filter(Boolean)));
   if (ids.length === 0) return {};
@@ -742,16 +777,17 @@ export default function AdminPage() {
     return { error: null };
   }
 
-  async function uploadTestAsset() {
+  async function uploadAssets() {
     setAssetUploadMsg("");
-    const file = assetFile;
+    const singleFile = assetFile;
+    const folderFiles = assetFiles || [];
     const testVersion = assetForm.test_version.trim();
     const title = assetForm.title.trim() || testVersion;
     const type = assetForm.type;
     const passRate = Number(assetForm.pass_rate);
 
-    if (!file) {
-      setAssetUploadMsg("File is required.");
+    if (!singleFile && folderFiles.length === 0) {
+      setAssetUploadMsg("File or folder is required.");
       return;
     }
     if (!testVersion) {
@@ -783,59 +819,9 @@ export default function AdminPage() {
       return;
     }
 
-    const { error: uploadError } = await uploadSingleAsset(file, testVersion, type);
-    if (uploadError) {
-      console.error("asset upload error:", uploadError);
-      setAssetUploadMsg(`Upload failed: ${uploadError.message}`);
-      return;
-    }
-
-    setAssetUploadMsg("Uploaded.");
-    setAssetFile(null);
-    fetchTests();
-    fetchAssets();
-  }
-
-  async function uploadAssetFolder() {
-    setAssetUploadMsg("");
-    const files = assetFiles || [];
-    const testVersion = assetForm.test_version.trim();
-    const title = assetForm.title.trim() || testVersion;
-    const type = assetForm.type;
-    const passRate = Number(assetForm.pass_rate);
-
-    if (!files.length) {
-      setAssetUploadMsg("Folder files are required.");
-      return;
-    }
-    if (!testVersion) {
-      setAssetUploadMsg("test_version is required.");
-      return;
-    }
-    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
-      setAssetUploadMsg("pass_rate must be between 0 and 1.");
-      return;
-    }
-
-    setAssetUploadMsg("Uploading folder...");
-    const { error: testError } = await supabase
-      .from("tests")
-      .upsert(
-        {
-          version: testVersion,
-          title,
-          type,
-          pass_rate: passRate,
-          is_public: true
-        },
-        { onConflict: "version" }
-      );
-    if (testError) {
-      console.error("tests upsert error:", testError);
-      setAssetUploadMsg(`Test upsert failed: ${testError.message}`);
-      return;
-    }
-
+    const files = [];
+    if (singleFile) files.push(singleFile);
+    files.push(...folderFiles);
     let ok = 0;
     let ng = 0;
     for (const file of files) {
@@ -850,6 +836,7 @@ export default function AdminPage() {
     }
 
     setAssetUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
+    setAssetFile(null);
     setAssetFiles([]);
     fetchTests();
     fetchAssets();
@@ -864,11 +851,11 @@ export default function AdminPage() {
     const passRate = Number(assetForm.pass_rate);
 
     if (!file) {
-      setAssetImportMsg("CSV file is required.");
+      setAssetImportMsg("CSV file is required for Create Exam.");
       return;
     }
     if (!file.name.toLowerCase().endsWith(".csv")) {
-      setAssetImportMsg("CSV file is required.");
+      setAssetImportMsg("CSV file is required for Create Exam.");
       return;
     }
     if (!file.name.toLowerCase().endsWith(".csv")) {
@@ -918,6 +905,15 @@ export default function AdminPage() {
     for (const row of assetRows ?? []) {
       const name = row.original_name || row.path?.split("/").pop();
       if (name) assetMap[name] = `${baseUrl}${row.path}`;
+    }
+    const { missing, invalid } = validateAssetRefs(questions, choices, assetMap);
+    if (invalid.length) {
+      setAssetImportMsg(`Invalid asset paths (use filename only):\n${invalid.slice(0, 5).join("\n")}`);
+      return;
+    }
+    if (missing.length) {
+      setAssetImportMsg(`Missing assets (upload first):\n${missing.slice(0, 5).join("\n")}`);
+      return;
     }
     applyAssetMap(questions, choices, assetMap);
 
@@ -1510,7 +1506,7 @@ export default function AdminPage() {
               />
             </div>
             <div className="field">
-              <label>File (CSV/PNG/MP3)</label>
+              <label>CSV File (required for Create Exam)</label>
               <input
                 type="file"
                 accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
@@ -1535,20 +1531,14 @@ export default function AdminPage() {
             </div>
             <div className="field small">
               <label>&nbsp;</label>
-              <button className="btn btn-primary" type="button" onClick={uploadTestAsset}>
-                Upload File
-              </button>
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button className="btn" type="button" onClick={uploadAssetFolder}>
-                Upload Folder
+              <button className="btn btn-primary" type="button" onClick={uploadAssets}>
+                Upload Assets
               </button>
             </div>
             <div className="field small">
               <label>&nbsp;</label>
               <button className="btn" type="button" onClick={importQuestionsFromCsv}>
-                Import Questions
+                Create Exam
               </button>
             </div>
           </div>
@@ -1557,7 +1547,13 @@ export default function AdminPage() {
             Bucket: <b>test-assets</b> / CSV, PNG, MP3 (他拡張子もOK)
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
-            PNG/MP3を先にアップロードして、CSVにはファイル名のみ記載してください。
+            Upload AssetsでCSV/PNG/MP3をアップロード → Create ExamでCSVを取り込みます。
+          </div>
+          <div className="admin-help" style={{ marginTop: 4 }}>
+            CSVにはファイル名のみ記載してください。
+          </div>
+          <div className="admin-help" style={{ marginTop: 4 }}>
+            ※ `/images/...` や `/audio/...` などのパスは無効です。
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
             CSV format: <code>docs/question_csv.md</code>
