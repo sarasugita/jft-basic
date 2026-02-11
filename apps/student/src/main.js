@@ -1,6 +1,6 @@
 import "./style.css";
 import { questions, sections } from "../../../packages/shared/questions.js";
-import { supabase } from "./supabaseClient";
+import { supabase, publicSupabase } from "./supabaseClient";
 
 const STORAGE_KEY = "jft_mock_state_v3";
 
@@ -136,7 +136,7 @@ async function refreshAuthState() {
 
 async function fetchPublicTests() {
   testsState.error = "";
-  const { data, error } = await supabase
+  const { data, error } = await publicSupabase
     .from("tests")
     .select("id, version, title, type, pass_rate, is_public, created_at")
     .eq("is_public", true)
@@ -176,9 +176,8 @@ function getActivePassRate() {
 function renderLogin(app) {
   app.innerHTML = `
     <div class="app">
-      ${topbarHTML({ rightButtonLabel: "Login", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
-        <div style="max-width:420px;margin:20px auto;padding:20px;border:1px solid #ddd;border-radius:12px;background:#fff;">
+        <div style="max-width:420px;margin:40px auto;padding:20px;border:1px solid #ddd;border-radius:12px;background:#fff;">
           <h2 style="margin:0 0 6px;">Student Login</h2>
           <p style="margin-top:0;line-height:1.6;">
             メールとパスワードでログインします。
@@ -203,8 +202,6 @@ function renderLogin(app) {
       </main>
     </div>
   `;
-
-  document.querySelector("#disabledBtn").disabled = true;
 
   const emailEl = app.querySelector("#email");
   const passEl = app.querySelector("#password");
@@ -770,8 +767,6 @@ function renderIntro(app) {
   const activeVersion = getActiveTestVersion();
   app.innerHTML = `
     <div class="app">
-      ${topbarHTML({ rightButtonLabel: "Not started", rightButtonId: "disabledBtn" })}
-
       <main class="content" style="margin:12px;">
         <h1 class="prompt">Mock Test</h1>
         <div style="line-height:1.7; margin-top:10px;">
@@ -886,8 +881,6 @@ function renderTestSelect(app) {
   const activeVersion = getActiveTestVersion();
   app.innerHTML = `
     <div class="app">
-      ${topbarHTML({ rightButtonLabel: "Not started", rightButtonId: "disabledBtn" })}
-
       <main class="content" style="margin:12px;">
         <h1 class="prompt">Select Test</h1>
         <div style="line-height:1.7; margin-top:10px;">
@@ -943,8 +936,6 @@ function renderTestSelect(app) {
       </main>
     </div>
   `;
-
-  document.querySelector("#disabledBtn").disabled = true;
 
   document.querySelector("#startBtn").addEventListener("click", () => {
     const name = document.querySelector("#nameInput").value.trim();
@@ -1387,13 +1378,17 @@ async function checkLinkFromUrl() {
   const url = new URL(window.location.href);
   const linkId = url.searchParams.get("link");
   if (!linkId) {
+    state.linkId = null;
+    state.linkExpiresAt = null;
+    state.linkTestVersion = null;
+    state.linkInvalid = false;
     state.linkChecked = true;
     saveState();
     return;
   }
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await publicSupabase
       .from("exam_links")
       .select("id, test_version, expires_at")
       .eq("id", linkId)

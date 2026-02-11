@@ -40,6 +40,8 @@ Question CSV format: `docs/question_csv.md`
 Sample CSV (from current Questions.js):
 - `docs/test_exam_questions.csv`
 - `docs/question_csv_template.csv` (separate columns, filename-based)
+Sample assets:
+- `docs/sample_test_assets/` (placeholders)
 
 Seed:
 - `supabase/sql/seed.sql` (creates Test Exam)

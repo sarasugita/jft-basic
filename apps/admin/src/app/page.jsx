@@ -447,6 +447,7 @@ export default function AdminPage() {
     pass_rate: "0.6"
   });
   const [assetFile, setAssetFile] = useState(null);
+  const [assetFiles, setAssetFiles] = useState([]);
   const [assetUploadMsg, setAssetUploadMsg] = useState("");
   const [assetImportMsg, setAssetImportMsg] = useState("");
   function generateTempPassword(length = 10) {
@@ -703,6 +704,35 @@ export default function AdminPage() {
     return out.filter((r) => r.email);
   }
 
+  function getAssetTypeByExt(filename) {
+    const ext = String(filename ?? "").toLowerCase().split(".").pop() ?? "";
+    if (ext === "csv") return "csv";
+    if (["png", "jpg", "jpeg", "webp"].includes(ext)) return "image";
+    if (["mp3", "wav", "m4a", "ogg"].includes(ext)) return "audio";
+    return "file";
+  }
+
+  async function uploadSingleAsset(file, testVersion, type) {
+    const assetType = getAssetTypeByExt(file.name);
+    const relPath = file.webkitRelativePath || file.name;
+    const filePath = `${type}/${testVersion}/${assetType}/${relPath}`;
+    const { error: uploadError } = await supabase.storage
+      .from("test-assets")
+      .upload(filePath, file, { upsert: true, contentType: file.type || undefined });
+    if (uploadError) return { error: uploadError };
+
+    const { error: assetError } = await supabase.from("test_assets").insert({
+      test_version: testVersion,
+      test_type: type,
+      asset_type: assetType,
+      path: filePath,
+      mime_type: file.type || null,
+      original_name: file.name
+    });
+    if (assetError) return { error: assetError };
+    return { error: null };
+  }
+
   async function uploadTestAsset() {
     setAssetUploadMsg("");
     const file = assetFile;
@@ -744,37 +774,74 @@ export default function AdminPage() {
       return;
     }
 
-    const ext = file.name.toLowerCase().split(".").pop() ?? "";
-    let assetType = "file";
-    if (ext === "csv") assetType = "csv";
-    else if (["png", "jpg", "jpeg", "webp"].includes(ext)) assetType = "image";
-    else if (["mp3", "wav", "m4a", "ogg"].includes(ext)) assetType = "audio";
-    const filePath = `${type}/${testVersion}/${assetType}/${file.name}`;
-    const { error: uploadError } = await supabase.storage
-      .from("test-assets")
-      .upload(filePath, file, { upsert: true, contentType: file.type || undefined });
+    const { error: uploadError } = await uploadSingleAsset(file, testVersion, type);
     if (uploadError) {
       console.error("asset upload error:", uploadError);
       setAssetUploadMsg(`Upload failed: ${uploadError.message}`);
       return;
     }
 
-    const { error: assetError } = await supabase.from("test_assets").insert({
-      test_version: testVersion,
-      test_type: type,
-      asset_type: assetType,
-      path: filePath,
-      mime_type: file.type || null,
-      original_name: file.name
-    });
-    if (assetError) {
-      console.error("asset insert error:", assetError);
-      setAssetUploadMsg(`DB insert failed: ${assetError.message}`);
+    setAssetUploadMsg("Uploaded.");
+    setAssetFile(null);
+    fetchTests();
+    fetchAssets();
+  }
+
+  async function uploadAssetFolder() {
+    setAssetUploadMsg("");
+    const files = assetFiles || [];
+    const testVersion = assetForm.test_version.trim();
+    const title = assetForm.title.trim() || testVersion;
+    const type = assetForm.type;
+    const passRate = Number(assetForm.pass_rate);
+
+    if (!files.length) {
+      setAssetUploadMsg("Folder files are required.");
+      return;
+    }
+    if (!testVersion) {
+      setAssetUploadMsg("test_version is required.");
+      return;
+    }
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setAssetUploadMsg("pass_rate must be between 0 and 1.");
       return;
     }
 
-    setAssetUploadMsg("Uploaded.");
-    setAssetFile(null);
+    setAssetUploadMsg("Uploading folder...");
+    const { error: testError } = await supabase
+      .from("tests")
+      .upsert(
+        {
+          version: testVersion,
+          title,
+          type,
+          pass_rate: passRate,
+          is_public: true
+        },
+        { onConflict: "version" }
+      );
+    if (testError) {
+      console.error("tests upsert error:", testError);
+      setAssetUploadMsg(`Test upsert failed: ${testError.message}`);
+      return;
+    }
+
+    let ok = 0;
+    let ng = 0;
+    for (const file of files) {
+      const { error } = await uploadSingleAsset(file, testVersion, type);
+      if (error) {
+        ng += 1;
+        console.error("asset upload error:", error);
+      } else {
+        ok += 1;
+      }
+      setAssetUploadMsg(`Uploading... ${ok + ng}/${files.length}`);
+    }
+
+    setAssetUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
+    setAssetFiles([]);
     fetchTests();
     fetchAssets();
   }
@@ -788,6 +855,10 @@ export default function AdminPage() {
     const passRate = Number(assetForm.pass_rate);
 
     if (!file) {
+      setAssetImportMsg("CSV file is required.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".csv")) {
       setAssetImportMsg("CSV file is required.");
       return;
     }
@@ -1437,10 +1508,32 @@ export default function AdminPage() {
                 onChange={(e) => setAssetFile(e.target.files?.[0] ?? null)}
               />
             </div>
+            <div className="field">
+              <label>Folder (PNG/MP3)</label>
+              <input
+                type="file"
+                multiple
+                webkitdirectory="true"
+                directory="true"
+                accept=".png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
+                onChange={(e) => setAssetFiles(Array.from(e.target.files ?? []))}
+              />
+              {assetFiles.length ? (
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  Selected: {assetFiles.length} files
+                </div>
+              ) : null}
+            </div>
             <div className="field small">
               <label>&nbsp;</label>
               <button className="btn btn-primary" type="button" onClick={uploadTestAsset}>
-                Upload CSV
+                Upload File
+              </button>
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn" type="button" onClick={uploadAssetFolder}>
+                Upload Folder
               </button>
             </div>
             <div className="field small">
@@ -1459,6 +1552,9 @@ export default function AdminPage() {
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
             CSV format: <code>docs/question_csv.md</code>
+          </div>
+          <div className="admin-help" style={{ marginTop: 4 }}>
+            Template: <a href="/question_csv_template.csv" download>question_csv_template.csv</a>
           </div>
           <div className="admin-msg">{assetUploadMsg}</div>
           {assetImportMsg ? (
