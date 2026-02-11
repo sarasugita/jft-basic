@@ -126,9 +126,15 @@ async function refreshAuthState() {
   } else {
     authState.profile = prof;
     authState.mustChangePassword = Boolean(authState.mustChangePassword || prof?.force_password_change);
-    const nextName = (state.user?.name ?? "").trim() || (prof?.display_name ?? "");
-    const nextId = (state.user?.id ?? "").trim() || (prof?.student_code ?? "");
+    const nextName = (prof?.display_name ?? "").trim() || (state.user?.name ?? "").trim();
+    const nextId = (prof?.student_code ?? "").trim() || (state.user?.id ?? "").trim();
     state.user = { name: nextName, id: nextId };
+    saveState();
+  }
+
+  if (authState.session && state.linkId) {
+    state.linkLoginRequired = false;
+    if (state.phase === "login") state.phase = "intro";
     saveState();
   }
 
@@ -844,7 +850,8 @@ function renderIntro(app) {
     </div>
   `;
 
-  document.querySelector("#disabledBtn").disabled = true;
+  const disabledBtn = document.querySelector("#disabledBtn");
+  if (disabledBtn) disabledBtn.disabled = true;
 
   const testSelect = document.querySelector("#testSelect");
   if (testSelect) {
@@ -975,7 +982,8 @@ function renderLinkInvalid(app) {
       </main>
     </div>
   `;
-  document.querySelector("#disabledBtn").disabled = true;
+  const disabledBtn = document.querySelector("#disabledBtn");
+  if (disabledBtn) disabledBtn.disabled = true;
   document.querySelector("#backBtn").addEventListener("click", goIntro);
 }
 

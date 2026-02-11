@@ -654,12 +654,16 @@ export default function AdminPage() {
 
   async function createExamLink() {
     setLinkMsg("");
+    if (!linkForm.testVersion) {
+      setLinkMsg("テストを選択してください。");
+      return;
+    }
     if (!linkForm.expiresAt) {
       setLinkMsg("期限（expires_at）を入力してください。");
       return;
     }
     const payload = {
-      test_version: linkForm.testVersion || "mock_v1",
+      test_version: linkForm.testVersion,
       expires_at: new Date(linkForm.expiresAt).toISOString()
     };
     const { error } = await supabase.from("exam_links").insert(payload);
@@ -735,6 +739,9 @@ export default function AdminPage() {
           question_count: counts[t.version] ?? 0
         }));
         setTests(withCounts);
+        if (withCounts.length && !withCounts.find((t) => t.version === linkForm.testVersion)) {
+          setLinkForm((s) => ({ ...s, testVersion: withCounts[0].version }));
+        }
         setTestsMsg(list.length ? "" : "No tests.");
         return;
       }
@@ -752,6 +759,9 @@ export default function AdminPage() {
         question_count: counts[t.version] ?? 0
       }));
       setTests(withCounts);
+      if (withCounts.length && !withCounts.find((t) => t.version === linkForm.testVersion)) {
+        setLinkForm((s) => ({ ...s, testVersion: withCounts[0].version }));
+      }
       setTestsMsg(list.length ? "" : "No tests.");
       return;
     }
@@ -760,6 +770,9 @@ export default function AdminPage() {
       question_count: t.questions?.[0]?.count ?? 0
     }));
     setTests(withCounts);
+    if (withCounts.length && !withCounts.find((t) => t.version === linkForm.testVersion)) {
+      setLinkForm((s) => ({ ...s, testVersion: withCounts[0].version }));
+    }
     setTestsMsg(list.length ? "" : "No tests.");
   }
 
@@ -1626,11 +1639,20 @@ export default function AdminPage() {
           <div className="admin-form" style={{ marginTop: 10 }}>
             <div className="field">
               <label>Test Version</label>
-              <input
+              <select
                 value={linkForm.testVersion}
                 onChange={(e) => setLinkForm((s) => ({ ...s, testVersion: e.target.value }))}
-                placeholder="mock_v1"
-              />
+              >
+                {tests.length ? (
+                  tests.map((t) => (
+                    <option key={`link-${t.version}`} value={t.version}>
+                      {t.title ? `${t.title} (${t.version})` : t.version}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No tests</option>
+                )}
+              </select>
             </div>
             <div className="field">
               <label>Expires At</label>
