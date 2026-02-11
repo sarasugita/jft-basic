@@ -41,11 +41,24 @@ create index if not exists questions_test_idx on public.questions (test_version)
 create table if not exists public.choices (
   id uuid primary key default gen_random_uuid(),
   question_id uuid not null references public.questions(id) on delete cascade,
+  part_index int,
   choice_index int not null,
   label text,
+  choice_image text,
   created_at timestamptz not null default now(),
-  unique (question_id, choice_index)
+  unique (question_id, part_index, choice_index)
 );
+
+-- If choices already existed with a different unique constraint, migrate safely:
+alter table public.choices
+  add column if not exists part_index int,
+  add column if not exists choice_image text;
+
+alter table public.choices
+  drop constraint if exists choices_question_id_choice_index_key;
+
+create unique index if not exists choices_unique_idx
+  on public.choices (question_id, part_index, choice_index);
 
 -- uploaded assets (CSV/PNG/MP3)
 create table if not exists public.test_assets (

@@ -35,6 +35,15 @@ See `supabase/sql/schema.sql` for required tables/columns:
 - `tests` / `questions` / `choices`
 - `test_assets`
 
+Question CSV format: `docs/question_csv.md`
+
+Sample CSV (from current Questions.js):
+- `docs/test_exam_questions.csv`
+- `docs/question_csv_template.csv` (separate columns, filename-based)
+
+Seed:
+- `supabase/sql/seed.sql` (creates Test Exam)
+
 ## Storage
 
 Create a bucket named `test-assets` (private or public) and add policies for admin upload.

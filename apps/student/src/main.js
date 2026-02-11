@@ -5,7 +5,7 @@ import { supabase } from "./supabaseClient";
 const STORAGE_KEY = "jft_mock_state_v3";
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
-const TEST_VERSION = "mock_v1";
+const TEST_VERSION = "test_exam";
 const PASS_RATE_DEFAULT = 0.6;
 
 let authState = {
@@ -63,8 +63,16 @@ function saveState() {
 function resetAll() {
   state = { ...defaultState };
   state.testEndAt = null;
+  const url = new URL(window.location.href);
+  const linkId = url.searchParams.get("link");
+  if (!linkId) {
+    state.linkChecked = true;
+    saveState();
+    render();
+    return;
+  }
   saveState();
-  render();
+  checkLinkFromUrl().finally(render);
 }
 
 function goIntro() {
@@ -136,7 +144,12 @@ async function fetchPublicTests() {
     .limit(100);
   if (error) {
     testsState.list = [];
-    testsState.error = error.message;
+    const msg = error.message || "Failed to load tests.";
+    if (String(msg).includes("does not exist") || error.status === 404) {
+      testsState.error = "testsテーブルがありません。Supabaseでスキーマを適用してください。";
+    } else {
+      testsState.error = msg;
+    }
     testsState.loaded = true;
     return;
   }
@@ -210,6 +223,8 @@ function renderLogin(app) {
       msgEl.textContent = error.message;
       return;
     }
+    state.phase = "intro";
+    saveState();
   });
 
   app.querySelector("#resetBtn").addEventListener("click", async () => {
@@ -466,6 +481,7 @@ async function saveAttemptIfNeeded() {
   if (statusEl) statusEl.textContent = "Saving...";
 
   const { correct, total } = scoreAll();
+  const scoreRate = total === 0 ? 0 : correct / total;
   const payload = {
     student_id: authState.session?.user?.id ?? null,
     display_name: state.user?.name?.trim() || null,
@@ -473,6 +489,7 @@ async function saveAttemptIfNeeded() {
     test_version: getActiveTestVersion(),
     correct,
     total,
+    score_rate: scoreRate,
     started_at: state.testStartAt ? new Date(state.testStartAt).toISOString() : null,
     ended_at: state.testEndAt ? new Date(state.testEndAt).toISOString() : new Date().toISOString(),
     answers_json: state.answers ?? {},
@@ -865,6 +882,90 @@ function renderIntro(app) {
   document.querySelector("#resetBtn").addEventListener("click", resetAll);
 }
 
+function renderTestSelect(app) {
+  const activeVersion = getActiveTestVersion();
+  app.innerHTML = `
+    <div class="app">
+      ${topbarHTML({ rightButtonLabel: "Not started", rightButtonId: "disabledBtn" })}
+
+      <main class="content" style="margin:12px;">
+        <h1 class="prompt">Select Test</h1>
+        <div style="line-height:1.7; margin-top:10px;">
+          <p>• Choose a mock test and start.</p>
+          <p>• Answers are saved automatically.</p>
+          ${
+            authState.session
+              ? `<p style="margin-top:6px;"><b>Logged in</b> (${escapeHtml(authState.session.user.email ?? "")})</p>`
+              : ""
+          }
+        </div>
+
+        <div class="intro-form" style="margin-top:16px; max-width:640px;">
+          <label class="form-label">Test</label>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
+            ${
+              testsState.list.length
+                ? testsState.list
+                    .map(
+                      (t) => `
+                        <label style="display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;">
+                          <input type="radio" name="testSelect" value="${escapeHtml(t.version)}" ${
+                            t.version === activeVersion ? "checked" : ""
+                          } />
+                          <div>
+                            <div style="font-weight:600;">${escapeHtml(t.title || t.version)}</div>
+                            <div style="font-size:12px;color:#666;">${escapeHtml(t.version)} • pass ${(Number(t.pass_rate ?? 0.6) * 100).toFixed(0)}%</div>
+                          </div>
+                        </label>
+                      `
+                    )
+                    .join("")
+                : `<div style="color:#666;">公開テストがありません。デフォルトを使用します。</div>`
+            }
+          </div>
+          ${
+            testsState.error
+              ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testsState.error)}</div>`
+              : ""
+          }
+
+          <label class="form-label" style="margin-top:14px;">Name（任意）</label>
+          <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
+
+          <label class="form-label" style="margin-top:10px;">ID（任意）</label>
+          <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
+        </div>
+
+        <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="nav-btn" id="startBtn">Start</button>
+          <button class="nav-btn ghost" id="signOutBtn">Sign out</button>
+        </div>
+      </main>
+    </div>
+  `;
+
+  document.querySelector("#disabledBtn").disabled = true;
+
+  document.querySelector("#startBtn").addEventListener("click", () => {
+    const name = document.querySelector("#nameInput").value.trim();
+    const id = document.querySelector("#idInput").value.trim();
+    const selected = document.querySelector('input[name="testSelect"]:checked');
+    if (selected) state.selectedTestVersion = selected.value;
+
+    state.user = { name, id };
+    state.phase = "sectionIntro";
+    state.sectionIndex = 0;
+    state.questionIndexInSection = 0;
+    state.sectionStartAt = null;
+    state.showBangla = false;
+
+    saveState();
+    render();
+  });
+
+  document.querySelector("#signOutBtn")?.addEventListener("click", () => supabase.auth.signOut());
+}
+
 function renderLinkInvalid(app) {
   app.innerHTML = `
     <div class="app">
@@ -1166,10 +1267,10 @@ function renderResult(app) {
           <span class="score-total">${total}</span>
         </div>
         <div style="margin-top:8px;font-size:20px;font-weight:700; color:${isPass ? "#1a7f37" : "#b00"};">
-          ${isPass ? "合格" : "不合格"}
+          ${isPass ? "Pass" : "Fail"}
           <span style="font-size:14px;font-weight:500;color:#444;"> (${(scoreRate * 100).toFixed(1)}%)</span>
         </div>
-        <div style="margin-top:4px;color:#666;font-size:12px;">合格基準: ${(passRate * 100).toFixed(0)}%</div>
+        <div style="margin-top:4px;color:#666;font-size:12px;">Pass threshold: ${(passRate * 100).toFixed(0)}%</div>
         <div class="save-status" id="saveStatus"></div>
 
         <div class="finish-actions">
@@ -1256,6 +1357,7 @@ function render() {
   if (state.linkInvalid) return renderLinkInvalid(app);
   if (authState.session && authState.mustChangePassword) return renderSetPassword(app);
   if (!authState.session && !state.linkId) return renderLogin(app);
+  if (authState.session && !state.linkId && state.phase === "intro") return renderTestSelect(app);
   if (state.phase === "login") return renderLogin(app);
   if (state.phase === "intro") return renderIntro(app);
   if (state.phase === "sectionIntro") return renderSectionIntro(app); // ←追加

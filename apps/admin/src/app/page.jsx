@@ -100,6 +100,294 @@ function formatDateTime(iso) {
   return d.toLocaleString();
 }
 
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        cur += '"';
+        i += 1;
+        continue;
+      }
+      if (ch === '"') {
+        inQuotes = false;
+        continue;
+      }
+      cur += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === ",") {
+      row.push(cur);
+      cur = "";
+      continue;
+    }
+    if (ch === "\n") {
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = "";
+      continue;
+    }
+    if (ch === "\r") continue;
+    cur += ch;
+  }
+  row.push(cur);
+  rows.push(row);
+  return rows.filter((r) => r.some((c) => String(c ?? "").trim().length));
+}
+
+function parseListCell(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map((v) => String(v ?? "").trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+  return raw.split("|").map((v) => v.trim()).filter(Boolean);
+}
+
+function parseJsonCell(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function parseQuestionCsv(text, defaultTestVersion = "") {
+  const rows = parseCsvRows(text);
+  if (rows.length === 0) return { questions: [], choices: [], errors: ["CSV is empty."] };
+  const header = rows[0].map((h) => String(h ?? "").trim());
+  const idx = (name) => header.indexOf(name);
+  const getCell = (row, name) => {
+    const i = idx(name);
+    return i === -1 ? "" : String(row[i] ?? "").trim();
+  };
+  const getInt = (row, name) => {
+    const v = getCell(row, name);
+    if (!v) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const getChoiceList = (row, prefix) => {
+    const bulk = getCell(row, `${prefix}choices_ja`);
+    const out = [];
+    for (let i = 1; i <= 6; i += 1) {
+      const v = getCell(row, `${prefix}choice${i}_ja`);
+      if (v) out.push(v);
+    }
+    if (out.length) return out;
+    if (bulk) return parseListCell(bulk);
+    return out;
+  };
+  const getChoiceImages = (row, prefix) => {
+    const bulk = getCell(row, `${prefix}choice_images`);
+    const out = [];
+    for (let i = 1; i <= 6; i += 1) {
+      const v = getCell(row, `${prefix}choice${i}_image`);
+      if (v) out.push(v);
+    }
+    if (out.length) return out;
+    if (bulk) return parseListCell(bulk);
+    return out;
+  };
+
+  if (idx("question_id") === -1 || idx("section_key") === -1 || idx("type") === -1) {
+    return { questions: [], choices: [], errors: ["CSV must include question_id, section_key, type."] };
+  }
+
+  const questions = [];
+  const choices = [];
+  const errors = [];
+
+  for (let r = 1; r < rows.length; r += 1) {
+    const row = rows[r];
+    const questionId = getCell(row, "question_id");
+    if (!questionId) continue;
+    const testVersion = getCell(row, "test_version") || defaultTestVersion;
+    if (!testVersion) {
+      errors.push(`Row ${r + 1}: test_version is required.`);
+      continue;
+    }
+    const sectionKey = getCell(row, "section_key");
+    const type = getCell(row, "type");
+    const promptEn = getCell(row, "prompt_en") || null;
+    const promptBn = getCell(row, "prompt_bn") || null;
+    const orderIndex = getInt(row, "order_index");
+    const answerIndex = getInt(row, "answer_index");
+    const data = {};
+
+    const sentenceJa = getCell(row, "sentence_ja");
+    const sentenceParts = parseJsonCell(getCell(row, "sentence_parts_json") || getCell(row, "sentence_parts_ja"));
+    const dialogJa = parseListCell(getCell(row, "dialog_ja"));
+    const blankStyle = getCell(row, "blank_style");
+    const image = getCell(row, "image");
+    const audio = getCell(row, "audio");
+    const stemImage = getCell(row, "stem_image");
+    const passageImage = getCell(row, "passage_image");
+    const tableImage = getCell(row, "table_image");
+
+    if (sentenceJa) data.sentenceJa = sentenceJa;
+    if (Array.isArray(sentenceParts)) data.sentencePartsJa = sentenceParts;
+    if (dialogJa.length) data.dialogJa = dialogJa;
+    if (blankStyle) data.blankStyle = blankStyle;
+    if (image) data.image = image;
+    if (audio) data.audio = audio;
+    if (stemImage) data.stemImage = stemImage;
+    if (passageImage) data.passageImage = passageImage;
+    if (tableImage) data.tableImage = tableImage;
+
+    const topChoices = getChoiceList(row, "");
+    const topChoiceImages = getChoiceImages(row, "");
+    if (topChoices.length) data.choicesJa = topChoices;
+    if (topChoiceImages.length) data.choiceImages = topChoiceImages;
+
+    const parts = [];
+    for (let i = 1; i <= 2; i += 1) {
+      const partLabel = getCell(row, `part${i}_label`);
+      const partQuestionJa = getCell(row, `part${i}_question_ja`);
+      const partAnswerIndex = getInt(row, `part${i}_answer_index`);
+      const partChoices = getChoiceList(row, `part${i}_`);
+      const partChoiceImages = getChoiceImages(row, `part${i}_`);
+      if (partLabel || partQuestionJa || partChoices.length || partChoiceImages.length || partAnswerIndex != null) {
+        const partData = {
+          partLabel: partLabel || null,
+          questionJa: partQuestionJa || null,
+          answerIndex: partAnswerIndex != null ? partAnswerIndex : null,
+        };
+        if (partChoices.length) partData.choicesJa = partChoices;
+        if (partChoiceImages.length) partData.choiceImages = partChoiceImages;
+        parts.push(partData);
+      }
+    }
+    if (parts.length) data.parts = parts;
+
+    const typeErrors = [];
+    const needChoices = [
+      "mcq_image",
+      "mcq_sentence_blank",
+      "mcq_kanji_reading",
+      "mcq_dialog_with_image",
+      "mcq_illustrated_dialog",
+    ];
+    const needChoiceImages = ["mcq_listening_image_choices"];
+    const needParts = ["mcq_listening_two_part_image", "mcq_reading_passage_two_questions", "mcq_reading_table_two_questions"];
+
+    if (needChoices.includes(type) && (!topChoices.length || answerIndex == null)) {
+      typeErrors.push("choices_ja and answer_index are required.");
+    }
+    if (needChoiceImages.includes(type) && (!topChoiceImages.length || answerIndex == null)) {
+      typeErrors.push("choice_images and answer_index are required.");
+    }
+    if (type === "mcq_sentence_blank" && !sentenceJa) typeErrors.push("sentence_ja is required.");
+    if (type === "mcq_kanji_reading" && !Array.isArray(sentenceParts)) {
+      typeErrors.push("sentence_parts_json is required.");
+    }
+    if (type === "mcq_dialog_with_image" && !dialogJa.length) typeErrors.push("dialog_ja is required.");
+    if (type === "mcq_dialog_with_image" && !image) typeErrors.push("image is required.");
+    if (type === "mcq_illustrated_dialog" && !image) typeErrors.push("image is required.");
+    if (type === "mcq_listening_image_choices" && !audio) typeErrors.push("audio is required.");
+    if (type === "mcq_listening_image_choices" && !stemImage) typeErrors.push("stem_image is required.");
+    if (type === "mcq_listening_two_part_image" && (!audio || !stemImage)) {
+      typeErrors.push("audio and stem_image are required.");
+    }
+    if (needParts.includes(type) && parts.length === 0) typeErrors.push("parts are required.");
+    if (type === "mcq_reading_passage_two_questions" && !passageImage) typeErrors.push("passage_image is required.");
+    if (type === "mcq_reading_table_two_questions" && !tableImage) typeErrors.push("table_image is required.");
+
+    if (typeErrors.length) {
+      errors.push(`Row ${r + 1} (${questionId}): ${typeErrors.join(" ")}`);
+      continue;
+    }
+
+    questions.push({
+      test_version: testVersion,
+      question_id: questionId,
+      section_key: sectionKey || null,
+      type,
+      prompt_en: promptEn,
+      prompt_bn: promptBn,
+      answer_index: answerIndex != null ? answerIndex : null,
+      order_index: orderIndex != null ? orderIndex : r,
+      data,
+    });
+
+    const pushChoices = (items, images, partIndex) => {
+      const max = Math.max(items.length, images.length);
+      for (let i = 0; i < max; i += 1) {
+        const label = items[i] ?? null;
+        const choiceImage = images[i] ?? null;
+        if (label == null && choiceImage == null) continue;
+        choices.push({
+          test_version: testVersion,
+          question_key: questionId,
+          part_index: partIndex,
+          choice_index: i,
+          label,
+          choice_image: choiceImage,
+        });
+      }
+    };
+
+    if (topChoices.length || topChoiceImages.length) pushChoices(topChoices, topChoiceImages, null);
+    parts.forEach((p, idx) => {
+      const partChoices = p.choicesJa ?? [];
+      const partChoiceImages = p.choiceImages ?? [];
+      if (partChoices.length || partChoiceImages.length) pushChoices(partChoices, partChoiceImages, idx);
+    });
+  }
+
+  return { questions, choices, errors };
+}
+
+function resolveAssetValue(value, assetMap) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.includes("/")) return raw;
+  return assetMap[raw] ?? raw;
+}
+
+function applyAssetMap(questions, choices, assetMap) {
+  for (const q of questions) {
+    const data = q.data ?? {};
+    data.image = resolveAssetValue(data.image, assetMap);
+    data.audio = resolveAssetValue(data.audio, assetMap);
+    data.stemImage = resolveAssetValue(data.stemImage, assetMap);
+    data.passageImage = resolveAssetValue(data.passageImage, assetMap);
+    data.tableImage = resolveAssetValue(data.tableImage, assetMap);
+    if (Array.isArray(data.choiceImages)) {
+      data.choiceImages = data.choiceImages.map((v) => resolveAssetValue(v, assetMap));
+    }
+    if (Array.isArray(data.parts)) {
+      data.parts = data.parts.map((p) => {
+        if (Array.isArray(p.choiceImages)) {
+          return { ...p, choiceImages: p.choiceImages.map((v) => resolveAssetValue(v, assetMap)) };
+        }
+        return p;
+      });
+    }
+    q.data = data;
+  }
+  for (const c of choices) {
+    c.choice_image = resolveAssetValue(c.choice_image, assetMap);
+  }
+}
+
 async function buildProfileEmailMap(supabase, attemptsList) {
   const ids = Array.from(new Set((attemptsList ?? []).map((a) => a.student_id).filter(Boolean)));
   if (ids.length === 0) return {};
@@ -134,7 +422,7 @@ export default function AdminPage() {
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
   const [linkForm, setLinkForm] = useState({
-    testVersion: "mock_v1",
+    testVersion: "test_exam",
     expiresAt: ""
   });
   const [students, setStudents] = useState([]);
@@ -153,13 +441,14 @@ export default function AdminPage() {
   const [assetsMsg, setAssetsMsg] = useState("");
   const [quizMsg, setQuizMsg] = useState("");
   const [assetForm, setAssetForm] = useState({
-    test_version: "",
+    test_version: "test_exam",
     title: "",
     type: "mock",
     pass_rate: "0.6"
   });
   const [assetFile, setAssetFile] = useState(null);
   const [assetUploadMsg, setAssetUploadMsg] = useState("");
+  const [assetImportMsg, setAssetImportMsg] = useState("");
   function generateTempPassword(length = 10) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
     const bytes = new Uint8Array(length);
@@ -423,15 +712,11 @@ export default function AdminPage() {
     const passRate = Number(assetForm.pass_rate);
 
     if (!file) {
-      setAssetUploadMsg("CSV file is required.");
+      setAssetUploadMsg("File is required.");
       return;
     }
     if (!testVersion) {
       setAssetUploadMsg("test_version is required.");
-      return;
-    }
-    if (!file.name.toLowerCase().endsWith(".csv")) {
-      setAssetUploadMsg("Only CSV is supported for now.");
       return;
     }
     if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
@@ -459,10 +744,15 @@ export default function AdminPage() {
       return;
     }
 
-    const filePath = `${type}/${testVersion}/${Date.now()}_${file.name}`;
+    const ext = file.name.toLowerCase().split(".").pop() ?? "";
+    let assetType = "file";
+    if (ext === "csv") assetType = "csv";
+    else if (["png", "jpg", "jpeg", "webp"].includes(ext)) assetType = "image";
+    else if (["mp3", "wav", "m4a", "ogg"].includes(ext)) assetType = "audio";
+    const filePath = `${type}/${testVersion}/${assetType}/${file.name}`;
     const { error: uploadError } = await supabase.storage
       .from("test-assets")
-      .upload(filePath, file, { upsert: true, contentType: file.type || "text/csv" });
+      .upload(filePath, file, { upsert: true, contentType: file.type || undefined });
     if (uploadError) {
       console.error("asset upload error:", uploadError);
       setAssetUploadMsg(`Upload failed: ${uploadError.message}`);
@@ -472,9 +762,9 @@ export default function AdminPage() {
     const { error: assetError } = await supabase.from("test_assets").insert({
       test_version: testVersion,
       test_type: type,
-      asset_type: "csv",
+      asset_type: assetType,
       path: filePath,
-      mime_type: file.type || "text/csv",
+      mime_type: file.type || null,
       original_name: file.name
     });
     if (assetError) {
@@ -487,6 +777,147 @@ export default function AdminPage() {
     setAssetFile(null);
     fetchTests();
     fetchAssets();
+  }
+
+  async function importQuestionsFromCsv() {
+    setAssetImportMsg("");
+    const file = assetFile;
+    const testVersion = assetForm.test_version.trim();
+    const title = assetForm.title.trim();
+    const type = assetForm.type;
+    const passRate = Number(assetForm.pass_rate);
+
+    if (!file) {
+      setAssetImportMsg("CSV file is required.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setAssetImportMsg("Only CSV is supported.");
+      return;
+    }
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setAssetImportMsg("pass_rate must be between 0 and 1.");
+      return;
+    }
+
+    setAssetImportMsg("Parsing...");
+    const text = await file.text();
+    const { questions, choices, errors } = parseQuestionCsv(text, testVersion);
+    if (errors.length) {
+      setAssetImportMsg(`CSV errors:\n${errors.slice(0, 5).join("\n")}`);
+      return;
+    }
+    if (questions.length === 0) {
+      setAssetImportMsg("No questions found.");
+      return;
+    }
+    const versionSet = new Set(questions.map((q) => q.test_version));
+    if (versionSet.size > 1) {
+      setAssetImportMsg("Multiple test_version values detected. Split CSV per test_version.");
+      return;
+    }
+    const resolvedVersion = Array.from(versionSet)[0] || testVersion;
+    if (!resolvedVersion) {
+      setAssetImportMsg("test_version is required (either in form or CSV).");
+      return;
+    }
+    const resolvedTitle = title || resolvedVersion;
+
+    setAssetImportMsg("Resolving assets...");
+    const { data: assetRows, error: assetErr } = await supabase
+      .from("test_assets")
+      .select("path, original_name")
+      .eq("test_version", resolvedVersion);
+    if (assetErr) {
+      console.error("assets fetch error:", assetErr);
+      setAssetImportMsg(`Asset lookup failed: ${assetErr.message}`);
+      return;
+    }
+    const assetMap = {};
+    const baseUrl = `${supabaseUrl}/storage/v1/object/public/test-assets/`;
+    for (const row of assetRows ?? []) {
+      const name = row.original_name || row.path?.split("/").pop();
+      if (name) assetMap[name] = `${baseUrl}${row.path}`;
+    }
+    applyAssetMap(questions, choices, assetMap);
+
+    setAssetImportMsg("Upserting tests...");
+    const { error: testError } = await supabase
+      .from("tests")
+      .upsert(
+        {
+          version: resolvedVersion,
+          title: resolvedTitle,
+          type,
+          pass_rate: passRate,
+          is_public: true
+        },
+        { onConflict: "version" }
+      );
+    if (testError) {
+      console.error("tests upsert error:", testError);
+      setAssetImportMsg(`Test upsert failed: ${testError.message}`);
+      return;
+    }
+
+    setAssetImportMsg("Upserting questions...");
+    const { error: qError } = await supabase.from("questions").upsert(questions, {
+      onConflict: "test_version,question_id"
+    });
+    if (qError) {
+      console.error("questions upsert error:", qError);
+      setAssetImportMsg(`Question upsert failed: ${qError.message}`);
+      return;
+    }
+
+    const questionIds = questions.map((q) => q.question_id);
+    const { data: qRows, error: qFetchErr } = await supabase
+      .from("questions")
+      .select("id, question_id")
+      .eq("test_version", resolvedVersion)
+      .in("question_id", questionIds);
+    if (qFetchErr) {
+      console.error("questions fetch error:", qFetchErr);
+      setAssetImportMsg(`Question fetch failed: ${qFetchErr.message}`);
+      return;
+    }
+
+    const idMap = {};
+    for (const row of qRows ?? []) {
+      idMap[row.question_id] = row.id;
+    }
+
+    const choiceRows = choices
+      .map((c) => ({
+        question_id: idMap[c.question_key],
+        part_index: c.part_index,
+        choice_index: c.choice_index,
+        label: c.label,
+        choice_image: c.choice_image
+      }))
+      .filter((c) => c.question_id);
+
+    const qUuidList = Object.values(idMap);
+    if (qUuidList.length) {
+      const { error: delErr } = await supabase.from("choices").delete().in("question_id", qUuidList);
+      if (delErr) {
+        console.error("choices delete error:", delErr);
+        setAssetImportMsg(`Choice cleanup failed: ${delErr.message}`);
+        return;
+      }
+    }
+
+    if (choiceRows.length) {
+      const { error: cErr } = await supabase.from("choices").insert(choiceRows);
+      if (cErr) {
+        console.error("choices insert error:", cErr);
+        setAssetImportMsg(`Choice insert failed: ${cErr.message}`);
+        return;
+      }
+    }
+
+    setAssetImportMsg(`Imported ${questions.length} questions / ${choiceRows.length} choices.`);
+    fetchTests();
   }
 
   async function handleCsvFile(file) {
@@ -999,10 +1430,10 @@ export default function AdminPage() {
               />
             </div>
             <div className="field">
-              <label>CSV File</label>
+              <label>File (CSV/PNG/MP3)</label>
               <input
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
                 onChange={(e) => setAssetFile(e.target.files?.[0] ?? null)}
               />
             </div>
@@ -1012,12 +1443,29 @@ export default function AdminPage() {
                 Upload CSV
               </button>
             </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn" type="button" onClick={importQuestionsFromCsv}>
+                Import Questions
+              </button>
+            </div>
           </div>
 
           <div className="admin-help" style={{ marginTop: 6 }}>
-            Bucket: <b>test-assets</b> / CSV only (PNG/MP3は後追い対応)
+            Bucket: <b>test-assets</b> / CSV, PNG, MP3 (他拡張子もOK)
+          </div>
+          <div className="admin-help" style={{ marginTop: 4 }}>
+            PNG/MP3を先にアップロードして、CSVにはファイル名のみ記載してください。
+          </div>
+          <div className="admin-help" style={{ marginTop: 4 }}>
+            CSV format: <code>docs/question_csv.md</code>
           </div>
           <div className="admin-msg">{assetUploadMsg}</div>
+          {assetImportMsg ? (
+            <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
+              {assetImportMsg}
+            </pre>
+          ) : null}
 
           <div className="admin-table-wrap" style={{ marginTop: 10 }}>
             <table className="admin-table" style={{ minWidth: 860 }}>
