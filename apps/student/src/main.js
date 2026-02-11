@@ -40,6 +40,7 @@ const defaultState = {
   linkTestVersion: null,
   linkChecked: false,
   linkInvalid: false,
+  linkLoginRequired: false,
   selectedTestVersion: "",
 };
 
@@ -220,6 +221,7 @@ function renderLogin(app) {
       msgEl.textContent = error.message;
       return;
     }
+    state.linkLoginRequired = false;
     state.phase = "intro";
     saveState();
   });
@@ -243,6 +245,8 @@ function renderLogin(app) {
 
   if (state.linkId) {
     app.querySelector("#guestBtn")?.addEventListener("click", () => {
+      supabase.auth.signOut();
+      state.linkLoginRequired = false;
       goIntro();
     });
   }
@@ -486,7 +490,6 @@ async function saveAttemptIfNeeded() {
     test_version: getActiveTestVersion(),
     correct,
     total,
-    score_rate: scoreRate,
     started_at: state.testStartAt ? new Date(state.testStartAt).toISOString() : null,
     ended_at: state.testEndAt ? new Date(state.testEndAt).toISOString() : new Date().toISOString(),
     answers_json: state.answers ?? {},
@@ -1346,6 +1349,7 @@ function render() {
   const app = document.querySelector("#app");
   if (!state.linkChecked || !authState.checked) return renderLoading(app);
   if (state.linkInvalid) return renderLinkInvalid(app);
+  if (state.linkLoginRequired) return renderLogin(app);
   if (authState.session && authState.mustChangePassword) return renderSetPassword(app);
   if (!authState.session && !state.linkId) return renderLogin(app);
   if (authState.session && !state.linkId && state.phase === "intro") return renderTestSelect(app);
@@ -1382,6 +1386,7 @@ async function checkLinkFromUrl() {
     state.linkExpiresAt = null;
     state.linkTestVersion = null;
     state.linkInvalid = false;
+    state.linkLoginRequired = false;
     state.linkChecked = true;
     saveState();
     return;
@@ -1414,7 +1419,8 @@ async function checkLinkFromUrl() {
     state.linkTestVersion = data.test_version;
     state.linkInvalid = false;
     state.linkChecked = true;
-    state.phase = "intro";
+    state.linkLoginRequired = true;
+    state.phase = "login";
     saveState();
   } catch {
     state.linkInvalid = true;

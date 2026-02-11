@@ -100,6 +100,15 @@ function formatDateTime(iso) {
   return d.toLocaleString();
 }
 
+function getScoreRate(attempt) {
+  const rate = Number(attempt?.score_rate);
+  if (Number.isFinite(rate)) return rate;
+  const correct = Number(attempt?.correct ?? 0);
+  const total = Number(attempt?.total ?? 0);
+  if (!total) return 0;
+  return correct / total;
+}
+
 function parseCsvRows(text) {
   const rows = [];
   let row = [];
@@ -1024,7 +1033,7 @@ export default function AdminPage() {
         a.test_version ?? "",
         a.correct ?? 0,
         a.total ?? 0,
-        a.score_rate ?? 0
+        getScoreRate(a)
       ])
     ];
     downloadText(`attempts_summary_${Date.now()}.csv`, toCsv(rows), "text/csv");
@@ -1066,7 +1075,7 @@ export default function AdminPage() {
         a.test_version ?? "",
         a.correct ?? 0,
         a.total ?? 0,
-        a.score_rate ?? 0
+        getScoreRate(a)
       ])
     ];
     downloadText(`quiz_attempts_summary_${Date.now()}.csv`, toCsv(rows), "text/csv");
@@ -1121,8 +1130,8 @@ export default function AdminPage() {
   const kpi = useMemo(() => {
     const count = attempts.length;
     const avgRate =
-      count === 0 ? 0 : attempts.reduce((acc, a) => acc + Number(a.score_rate ?? 0), 0) / Math.max(1, count);
-    const maxRate = count === 0 ? 0 : Math.max(...attempts.map((a) => Number(a.score_rate ?? 0)));
+      count === 0 ? 0 : attempts.reduce((acc, a) => acc + getScoreRate(a), 0) / Math.max(1, count);
+    const maxRate = count === 0 ? 0 : Math.max(...attempts.map((a) => getScoreRate(a)));
     return {
       count,
       avgRate,
@@ -1680,7 +1689,7 @@ export default function AdminPage() {
                 <tbody>
                   {attempts.map((a) => {
                     const score = `${a.correct}/${a.total}`;
-                    const rate = `${(Number(a.score_rate ?? 0) * 100).toFixed(1)}%`;
+                    const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
                     return (
                       <tr key={a.id} onClick={() => setSelectedId(a.id)}>
                         <td>{formatDateTime(a.created_at)}</td>
@@ -1724,7 +1733,7 @@ export default function AdminPage() {
                     created: {formatDateTime(selectedAttempt.created_at)}
                     <br />
                     score: <b>{selectedAttempt.correct}/{selectedAttempt.total}</b> (
-                    {(Number(selectedAttempt.score_rate ?? 0) * 100).toFixed(1)}%)
+                    {(getScoreRate(selectedAttempt) * 100).toFixed(1)}%)
                   </div>
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                     <table className="admin-table" style={{ minWidth: 860 }}>

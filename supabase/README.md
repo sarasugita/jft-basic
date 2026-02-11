@@ -49,3 +49,5 @@ Seed:
 ## Storage
 
 Create a bucket named `test-assets` (private or public) and add policies for admin upload.
+SQL helper:
+- `supabase/sql/storage.sql`
