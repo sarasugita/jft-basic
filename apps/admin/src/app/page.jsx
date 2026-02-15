@@ -38,6 +38,7 @@ function getSectionTitle(sectionKey) {
 
 function getChoiceText(q, idx) {
   if (idx == null) return "";
+  if (Array.isArray(q.choices) && q.choices[idx] != null) return q.choices[idx];
   if (Array.isArray(q.choicesJa) && q.choicesJa[idx] != null) return q.choicesJa[idx];
   if (Array.isArray(q.choicesEn) && q.choicesEn[idx] != null) return q.choicesEn[idx];
   return `#${Number(idx) + 1}`;
@@ -50,10 +51,42 @@ function getPartChoiceText(part, idx) {
 }
 
 function getPromptText(q) {
+  if (q.boxText) return q.boxText;
+  if (q.stemText) return q.stemText;
+  if (q.stemExtra) return q.stemExtra;
   if (q.type === "mcq_sentence_blank") return q.sentenceJa ?? q.promptEn ?? "";
   if (q.type === "mcq_kanji_reading") return q.sentencePartsJa?.map((p) => p.text).join("") ?? q.promptEn ?? "";
   if (q.type === "mcq_dialog_with_image") return q.dialogJa?.join(" / ") ?? q.promptEn ?? "";
   return q.promptEn ?? "";
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function renderUnderlinesHtml(text) {
+  const escaped = escapeHtml(text ?? "");
+  return escaped.replace(/【(.*?)】/g, '<span class="u">$1</span>');
+}
+
+function splitStemLines(text) {
+  return String(text ?? "")
+    .split(/\r?\n|\|/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isImageAsset(value) {
+  return /\.(png|jpe?g|webp)$/i.test(String(value ?? "").trim());
+}
+
+function isAudioAsset(value) {
+  return /\.(mp3|wav|m4a|ogg)$/i.test(String(value ?? "").trim());
 }
 
 function mapDbQuestion(row) {
@@ -192,14 +225,27 @@ function parseJsonCell(value) {
   }
 }
 
+function normalizeCsvValue(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.toUpperCase() === "N/A") return "";
+  return raw;
+}
+
+function parseAnswerIndex(value) {
+  const raw = normalizeCsvValue(value).toUpperCase();
+  const map = { A: 0, B: 1, C: 2, D: 3 };
+  return raw in map ? map[raw] : null;
+}
+
 function parseQuestionCsv(text, defaultTestVersion = "") {
   const rows = parseCsvRows(text);
   if (rows.length === 0) return { questions: [], choices: [], errors: ["CSV is empty."] };
-  const header = rows[0].map((h) => String(h ?? "").trim());
+  const header = rows[0].map((h) => String(h ?? "").trim().replace(/^\uFEFF/, ""));
   const idx = (name) => header.indexOf(name);
   const getCell = (row, name) => {
     const i = idx(name);
-    return i === -1 ? "" : String(row[i] ?? "").trim();
+    return i === -1 ? "" : normalizeCsvValue(row[i]);
   };
   const getInt = (row, name) => {
     const v = getCell(row, name);
@@ -207,31 +253,9 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
-  const getChoiceList = (row, prefix) => {
-    const bulk = getCell(row, `${prefix}choices_ja`);
-    const out = [];
-    for (let i = 1; i <= 6; i += 1) {
-      const v = getCell(row, `${prefix}choice${i}_ja`);
-      if (v) out.push(v);
-    }
-    if (out.length) return out;
-    if (bulk) return parseListCell(bulk);
-    return out;
-  };
-  const getChoiceImages = (row, prefix) => {
-    const bulk = getCell(row, `${prefix}choice_images`);
-    const out = [];
-    for (let i = 1; i <= 6; i += 1) {
-      const v = getCell(row, `${prefix}choice${i}_image`);
-      if (v) out.push(v);
-    }
-    if (out.length) return out;
-    if (bulk) return parseListCell(bulk);
-    return out;
-  };
 
-  if (idx("question_id") === -1 || idx("section_key") === -1 || idx("type") === -1) {
-    return { questions: [], choices: [], errors: ["CSV must include question_id, section_key, type."] };
+  if (idx("item_id") === -1 || idx("section_key") === -1 || idx("type") === -1) {
+    return { questions: [], choices: [], errors: ["CSV must include item_id, section_key, type."] };
   }
 
   const questions = [];
@@ -240,7 +264,7 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
 
   for (let r = 1; r < rows.length; r += 1) {
     const row = rows[r];
-    const questionId = getCell(row, "question_id");
+    const questionId = getCell(row, "item_id");
     if (!questionId) continue;
     const testVersion = getCell(row, "test_version") || defaultTestVersion;
     if (!testVersion) {
@@ -252,91 +276,40 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
     const promptEn = getCell(row, "prompt_en") || null;
     const promptBn = getCell(row, "prompt_bn") || null;
     const orderIndex = getInt(row, "order_index");
-    const answerIndex = getInt(row, "answer_index");
-    const data = {};
-
-    const sentenceJa = getCell(row, "sentence_ja");
-    const sentenceParts = parseJsonCell(getCell(row, "sentence_parts_json") || getCell(row, "sentence_parts_ja"));
-    const dialogJa = parseListCell(getCell(row, "dialog_ja"));
-    const blankStyle = getCell(row, "blank_style");
-    const image = getCell(row, "image");
-    const audio = getCell(row, "audio");
-    const stemImage = getCell(row, "stem_image");
-    const passageImage = getCell(row, "passage_image");
-    const tableImage = getCell(row, "table_image");
-
-    if (sentenceJa) data.sentenceJa = sentenceJa;
-    if (Array.isArray(sentenceParts)) data.sentencePartsJa = sentenceParts;
-    if (dialogJa.length) data.dialogJa = dialogJa;
-    if (blankStyle) data.blankStyle = blankStyle;
-    if (image) data.image = image;
-    if (audio) data.audio = audio;
-    if (stemImage) data.stemImage = stemImage;
-    if (passageImage) data.passageImage = passageImage;
-    if (tableImage) data.tableImage = tableImage;
-
-    const topChoices = getChoiceList(row, "");
-    const topChoiceImages = getChoiceImages(row, "");
-    if (topChoices.length) data.choicesJa = topChoices;
-    if (topChoiceImages.length) data.choiceImages = topChoiceImages;
-
-    const parts = [];
-    for (let i = 1; i <= 2; i += 1) {
-      const partLabel = getCell(row, `part${i}_label`);
-      const partQuestionJa = getCell(row, `part${i}_question_ja`);
-      const partAnswerIndex = getInt(row, `part${i}_answer_index`);
-      const partChoices = getChoiceList(row, `part${i}_`);
-      const partChoiceImages = getChoiceImages(row, `part${i}_`);
-      if (partLabel || partQuestionJa || partChoices.length || partChoiceImages.length || partAnswerIndex != null) {
-        const partData = {
-          partLabel: partLabel || null,
-          questionJa: partQuestionJa || null,
-          answerIndex: partAnswerIndex != null ? partAnswerIndex : null,
-        };
-        if (partChoices.length) partData.choicesJa = partChoices;
-        if (partChoiceImages.length) partData.choiceImages = partChoiceImages;
-        parts.push(partData);
-      }
-    }
-    if (parts.length) data.parts = parts;
-
-    const typeErrors = [];
-    const needChoices = [
-      "mcq_image",
-      "mcq_sentence_blank",
-      "mcq_kanji_reading",
-      "mcq_dialog_with_image",
-      "mcq_illustrated_dialog",
-    ];
-    const needChoiceImages = ["mcq_listening_image_choices"];
-    const needParts = ["mcq_listening_two_part_image", "mcq_reading_passage_two_questions", "mcq_reading_table_two_questions"];
-
-    if (needChoices.includes(type) && (!topChoices.length || answerIndex == null)) {
-      typeErrors.push("choices_ja and answer_index are required.");
-    }
-    if (needChoiceImages.includes(type) && (!topChoiceImages.length || answerIndex == null)) {
-      typeErrors.push("choice_images and answer_index are required.");
-    }
-    if (type === "mcq_sentence_blank" && !sentenceJa) typeErrors.push("sentence_ja is required.");
-    if (type === "mcq_kanji_reading" && !Array.isArray(sentenceParts)) {
-      typeErrors.push("sentence_parts_json is required.");
-    }
-    if (type === "mcq_dialog_with_image" && !dialogJa.length) typeErrors.push("dialog_ja is required.");
-    if (type === "mcq_dialog_with_image" && !image) typeErrors.push("image is required.");
-    if (type === "mcq_illustrated_dialog" && !image) typeErrors.push("image is required.");
-    if (type === "mcq_listening_image_choices" && !audio) typeErrors.push("audio is required.");
-    if (type === "mcq_listening_image_choices" && !stemImage) typeErrors.push("stem_image is required.");
-    if (type === "mcq_listening_two_part_image" && (!audio || !stemImage)) {
-      typeErrors.push("audio and stem_image are required.");
-    }
-    if (needParts.includes(type) && parts.length === 0) typeErrors.push("parts are required.");
-    if (type === "mcq_reading_passage_two_questions" && !passageImage) typeErrors.push("passage_image is required.");
-    if (type === "mcq_reading_table_two_questions" && !tableImage) typeErrors.push("table_image is required.");
-
-    if (typeErrors.length) {
-      errors.push(`Row ${r + 1} (${questionId}): ${typeErrors.join(" ")}`);
+    const answerIndex = parseAnswerIndex(getCell(row, "answer"));
+    const choicesList = ["choiceA", "choiceB", "choiceC", "choiceD"]
+      .map((key) => getCell(row, key))
+      .filter(Boolean);
+    if (!sectionKey || !type) {
+      errors.push(`Row ${r + 1} (${questionId}): section_key and type are required.`);
       continue;
     }
+    if (answerIndex == null) {
+      errors.push(`Row ${r + 1} (${questionId}): answer must be A/B/C/D.`);
+      continue;
+    }
+    if (choicesList.length === 0) {
+      errors.push(`Row ${r + 1} (${questionId}): choices are required.`);
+      continue;
+    }
+    if (answerIndex >= choicesList.length) {
+      errors.push(`Row ${r + 1} (${questionId}): answer is out of range for choices.`);
+      continue;
+    }
+
+    const data = {
+      qid: getCell(row, "qid") || null,
+      subId: getCell(row, "sub_id") || null,
+      itemId: questionId,
+      stemKind: getCell(row, "stem_kind") || null,
+      stemText: getCell(row, "stem_text") || null,
+      stemAsset: getCell(row, "stem_asset") || null,
+      stemExtra: getCell(row, "stem_extra") || null,
+      boxText: getCell(row, "box_text") || null,
+      choices: choicesList,
+      target: getCell(row, "target") || null,
+      blankStyle: getCell(row, "meta_blank_style") || null,
+    };
 
     questions.push({
       test_version: testVersion,
@@ -349,29 +322,16 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
       order_index: orderIndex != null ? orderIndex : r,
       data,
     });
-
-    const pushChoices = (items, images, partIndex) => {
-      const max = Math.max(items.length, images.length);
-      for (let i = 0; i < max; i += 1) {
-        const label = items[i] ?? null;
-        const choiceImage = images[i] ?? null;
-        if (label == null && choiceImage == null) continue;
-        choices.push({
-          test_version: testVersion,
-          question_key: questionId,
-          part_index: partIndex,
-          choice_index: i,
-          label,
-          choice_image: choiceImage,
-        });
-      }
-    };
-
-    if (topChoices.length || topChoiceImages.length) pushChoices(topChoices, topChoiceImages, null);
-    parts.forEach((p, idx) => {
-      const partChoices = p.choicesJa ?? [];
-      const partChoiceImages = p.choiceImages ?? [];
-      if (partChoices.length || partChoiceImages.length) pushChoices(partChoices, partChoiceImages, idx);
+    choicesList.forEach((value, i) => {
+      const isImage = /\.(png|jpe?g|webp)$/i.test(value);
+      choices.push({
+        test_version: testVersion,
+        question_key: questionId,
+        part_index: null,
+        choice_index: i,
+        label: isImage ? null : value,
+        choice_image: isImage ? value : null,
+      });
     });
   }
 
@@ -381,7 +341,7 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
 function detectTestVersionFromCsvText(text) {
   const rows = parseCsvRows(text);
   if (rows.length < 2) return "";
-  const header = rows[0].map((h) => String(h ?? "").trim());
+  const header = rows[0].map((h) => String(h ?? "").trim().replace(/^\uFEFF/, ""));
   const idx = header.indexOf("test_version");
   if (idx === -1) return "";
   for (let i = 1; i < rows.length; i += 1) {
@@ -401,20 +361,13 @@ function resolveAssetValue(value, assetMap) {
 function applyAssetMap(questions, choices, assetMap) {
   for (const q of questions) {
     const data = q.data ?? {};
-    data.image = resolveAssetValue(data.image, assetMap);
-    data.audio = resolveAssetValue(data.audio, assetMap);
-    data.stemImage = resolveAssetValue(data.stemImage, assetMap);
-    data.passageImage = resolveAssetValue(data.passageImage, assetMap);
-    data.tableImage = resolveAssetValue(data.tableImage, assetMap);
-    if (Array.isArray(data.choiceImages)) {
-      data.choiceImages = data.choiceImages.map((v) => resolveAssetValue(v, assetMap));
-    }
-    if (Array.isArray(data.parts)) {
-      data.parts = data.parts.map((p) => {
-        if (Array.isArray(p.choiceImages)) {
-          return { ...p, choiceImages: p.choiceImages.map((v) => resolveAssetValue(v, assetMap)) };
-        }
-        return p;
+    if (data.stemAsset) data.stemAsset = resolveAssetValue(data.stemAsset, assetMap);
+    if (Array.isArray(data.choices)) {
+      data.choices = data.choices.map((v) => {
+        const raw = String(v ?? "").trim();
+        if (!raw) return v;
+        if (!/\.(png|jpe?g|webp|mp3|wav|m4a|ogg)$/i.test(raw)) return v;
+        return resolveAssetValue(raw, assetMap);
       });
     }
     q.data = data;
@@ -431,6 +384,7 @@ function validateAssetRefs(questions, choices, assetMap) {
   const checkValue = (value) => {
     const raw = String(value ?? "").trim();
     if (!raw) return;
+    if (!/\.(png|jpe?g|webp|mp3|wav|m4a|ogg)$/i.test(raw)) return;
     if (raw.startsWith("http://") || raw.startsWith("https://")) return;
     if (raw.startsWith("/")) {
       invalid.add(raw);
@@ -442,17 +396,8 @@ function validateAssetRefs(questions, choices, assetMap) {
 
   for (const q of questions) {
     const data = q.data ?? {};
-    checkValue(data.image);
-    checkValue(data.audio);
-    checkValue(data.stemImage);
-    checkValue(data.passageImage);
-    checkValue(data.tableImage);
-    if (Array.isArray(data.choiceImages)) data.choiceImages.forEach(checkValue);
-    if (Array.isArray(data.parts)) {
-      data.parts.forEach((p) => {
-        if (Array.isArray(p.choiceImages)) p.choiceImages.forEach(checkValue);
-      });
-    }
+    checkValue(data.stemAsset);
+    if (Array.isArray(data.choices)) data.choices.forEach(checkValue);
   }
   for (const c of choices) checkValue(c.choice_image);
 
@@ -1932,7 +1877,7 @@ export default function AdminPage() {
                 {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
                 {!previewMsg && previewQuestions.length === 0 ? (
                   <div className="admin-help" style={{ marginTop: 6 }}>
-                    No questions. Create ExamでCSVを取り込むか、CSVの`test_version`がこのテストと一致しているか確認してください。
+                    No questions. Upload & Create ExamでCSVを取り込むか、CSVの`test_version`がこのテストと一致しているか確認してください。
                   </div>
                 ) : null}
               </div>
@@ -1940,58 +1885,38 @@ export default function AdminPage() {
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
                 {previewQuestions.map((q, idx) => {
                   const prompt = q.promptEn || q.promptBn || "";
-                  const choices = q.choicesJa ?? [];
-                  const choiceImages = q.choiceImages ?? [];
+                  const choices = q.choices ?? q.choicesJa ?? [];
+                  const stemKind = q.stemKind || "";
+                  const stemText = q.stemText;
+                  const stemExtra = q.stemExtra;
+                  const stemAsset = q.stemAsset;
+                  const boxText = q.boxText;
+                  const isImageStem = ["image", "passage_image", "table_image"].includes(stemKind);
+                  const isAudioStem = stemKind === "audio";
+                  const shouldShowImage = isImageStem || (!stemKind && isImageAsset(stemAsset));
+                  const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
+                  const stemLines = splitStemLines(stemExtra);
 
-                  const renderChoiceButtons = (labels, images, correctIdx) => (
+                  const renderChoices = () => (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-                      {labels.map((label, i) => (
-                        <button
-                          key={`c-${i}`}
-                          className="btn"
-                          style={{
-                            border: correctIdx === i ? "2px solid #1a7f37" : "1px solid #ddd",
-                            background: correctIdx === i ? "#e7f7ee" : "#fff",
-                            padding: 8,
-                            cursor: "default",
-                          }}
-                          disabled
-                        >
-                          {label}
-                        </button>
-                      ))}
-                      {images.map((src, i) => (
-                        <button
-                          key={`ci-${i}`}
-                          className="btn"
-                          style={{
-                            border: correctIdx === i ? "2px solid #1a7f37" : "1px solid #ddd",
-                            background: correctIdx === i ? "#e7f7ee" : "#fff",
-                            padding: 8,
-                            cursor: "default",
-                          }}
-                          disabled
-                        >
-                          <img src={src} alt="choice" style={{ maxWidth: "100%" }} />
-                        </button>
-                      ))}
-                    </div>
-                  );
-
-                  const renderParts = (parts) => (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      {parts.map((p, pIdx) => {
-                        const partChoices = p.choicesJa ?? [];
-                        const partImages = p.choiceImages ?? [];
-                        const partCorrect = p.answerIndex != null ? p.answerIndex : null;
+                      {choices.map((choice, i) => {
+                        const isCorrect = q.answerIndex === i;
+                        const isImage = isImageAsset(choice);
                         return (
-                          <div key={`p-${pIdx}`} style={{ border: "1px solid #eee", borderRadius: 8, padding: 8 }}>
-                            <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                              {p.partLabel ?? `(${pIdx + 1})`} {p.questionJa ?? ""}
-                            </div>
-                            {partChoices.length
-                              ? renderChoiceButtons(partChoices, [], partCorrect)
-                              : renderChoiceButtons([], partImages, partCorrect)}
+                          <div
+                            key={`c-${i}`}
+                            className="btn"
+                            style={{
+                              border: isCorrect ? "2px solid #1a7f37" : "1px solid #ddd",
+                              background: isCorrect ? "#e7f7ee" : "#fff",
+                              padding: 8,
+                            }}
+                          >
+                            {isImage ? (
+                              <img src={choice} alt="choice" style={{ maxWidth: "100%" }} />
+                            ) : (
+                              choice
+                            )}
                           </div>
                         );
                       })}
@@ -2004,37 +1929,38 @@ export default function AdminPage() {
                         {q.id} {q.sectionKey ? `(${q.sectionKey})` : ""}
                       </div>
                       {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
-                      {q.sentenceJa ? <div style={{ marginTop: 6 }}>{q.sentenceJa}</div> : null}
-                      {Array.isArray(q.sentencePartsJa) ? (
+                      {stemText ? (
+                        <div
+                          style={{ marginTop: 6 }}
+                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
+                        />
+                      ) : null}
+                      {stemLines.length ? (
                         <div style={{ marginTop: 6 }}>
-                          {q.sentencePartsJa.map((p, i2) => (
-                            <span key={`sp-${i2}`} style={{ textDecoration: p.underline ? "underline" : "none" }}>
-                              {p.text}
-                            </span>
+                          {stemLines.map((line, i2) => (
+                            <div
+                              key={`line-${i2}`}
+                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(line) }}
+                            />
                           ))}
                         </div>
                       ) : null}
-                      {Array.isArray(q.dialogJa) ? (
-                        <div style={{ marginTop: 6 }}>
-                          {q.dialogJa.map((line, i2) => (
-                            <div key={`dlg-${i2}`}>{line}</div>
-                          ))}
-                        </div>
+                      {boxText ? (
+                        <div
+                          className="boxed"
+                          style={{ marginTop: 8 }}
+                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(boxText) }}
+                        />
                       ) : null}
-                      {q.image ? <img src={q.image} alt="question" style={{ marginTop: 8, maxWidth: "100%" }} /> : null}
-                      {q.stemImage ? <img src={q.stemImage} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} /> : null}
-                      {q.passageImage ? <img src={q.passageImage} alt="passage" style={{ marginTop: 8, maxWidth: "100%" }} /> : null}
-                      {q.tableImage ? <img src={q.tableImage} alt="table" style={{ marginTop: 8, maxWidth: "100%" }} /> : null}
-                      {q.audio ? (
-                        <audio controls src={q.audio} style={{ marginTop: 8, width: "100%" }} />
+                      {shouldShowImage && stemAsset ? (
+                        <img src={stemAsset} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} />
+                      ) : null}
+                      {shouldShowAudio && stemAsset ? (
+                        <audio controls src={stemAsset} style={{ marginTop: 8, width: "100%" }} />
                       ) : null}
 
                       <div style={{ marginTop: 10 }}>
-                        {Array.isArray(q.parts) && q.parts.length
-                          ? renderParts(q.parts)
-                          : choices.length
-                            ? renderChoiceButtons(choices, [], q.answerIndex)
-                            : renderChoiceButtons([], choiceImages, q.answerIndex)}
+                        {choices.length ? renderChoices() : null}
                       </div>
                     </div>
                   );

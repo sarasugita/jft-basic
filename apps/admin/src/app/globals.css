@@ -141,6 +141,20 @@ body { padding: 0; }
 .admin-detail h3 { margin: 0 0 8px; }
 .admin-msg { margin-top: 10px; color: #b00020; font-weight: 700; min-height: 20px; }
 
+.boxed {
+  border: 2px solid #111;
+  padding: 12px;
+  border-radius: 6px;
+  margin: 10px 0;
+  background: #fff;
+}
+
+.u {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
 .admin-login {
   max-width: 420px;
   margin: 50px auto;

@@ -22,6 +22,14 @@ let testsState = {
   error: "",
 };
 
+let questionsState = {
+  loaded: false,
+  loading: false,
+  list: [],
+  error: "",
+  version: "",
+};
+
 const defaultState = {
   phase: "intro",
   sectionIndex: 0,
@@ -59,6 +67,69 @@ function loadState() {
 }
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function mapDbQuestion(row) {
+  const data = row.data ?? {};
+  return {
+    id: data.itemId || row.question_id,
+    qid: data.qid || null,
+    subId: data.subId || null,
+    sectionKey: row.section_key,
+    type: row.type,
+    promptEn: row.prompt_en,
+    promptBn: row.prompt_bn,
+    answerIndex: row.answer_index,
+    orderIndex: row.order_index ?? 0,
+    stemKind: data.stemKind || null,
+    stemText: data.stemText || null,
+    stemAsset: data.stemAsset || null,
+    stemExtra: data.stemExtra || null,
+    boxText: data.boxText || null,
+    choices: data.choices || data.choicesJa || [],
+    blankStyle: data.blankStyle || null,
+    target: data.target || null,
+  };
+}
+
+async function fetchQuestionsForVersion(version) {
+  if (!version) return;
+  if (questionsState.loading && questionsState.version === version) return;
+  questionsState.loading = true;
+  questionsState.error = "";
+  questionsState.version = version;
+  const { data, error } = await publicSupabase
+    .from("questions")
+    .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+    .eq("test_version", version)
+    .order("order_index", { ascending: true });
+  if (error) {
+    questionsState.list = [];
+    questionsState.error = error.message || "Failed to load questions.";
+  } else {
+    questionsState.list = (data ?? []).map(mapDbQuestion);
+  }
+  questionsState.loaded = true;
+  questionsState.loading = false;
+}
+
+function ensureQuestionsLoaded() {
+  const version = getActiveTestVersion();
+  if (!version) return;
+  if (questionsState.version !== version && !questionsState.loading) {
+    questionsState.loaded = false;
+    questionsState.list = [];
+    questionsState.error = "";
+    fetchQuestionsForVersion(version).finally(render);
+  }
+}
+
+function getQuestions() {
+  if (questionsState.loaded && questionsState.version === getActiveTestVersion()) {
+    return questionsState.list;
+  }
+  if (testsState.loaded && testsState.list.length > 0) return [];
+  return questions;
 }
 
 function resetAll() {
@@ -167,6 +238,7 @@ async function fetchPublicTests() {
     state.selectedTestVersion = list[0].version;
     saveState();
   }
+  ensureQuestionsLoaded();
 }
 
 function getActiveTestVersion() {
@@ -326,12 +398,34 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+function renderUnderlines(text) {
+  const escaped = escapeHtml(text ?? "");
+  return escaped.replace(/【(.*?)】/g, '<span class="u">$1</span>');
+}
+
+function splitStemLines(text) {
+  return String(text ?? "")
+    .split(/\r?\n|\|/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isImageChoiceValue(value) {
+  return /\.(png|jpe?g|webp)$/i.test(String(value ?? "").trim());
+}
+
+function isAudioAssetValue(value) {
+  return /\.(mp3|wav|m4a|ogg)$/i.test(String(value ?? "").trim());
+}
+
 
 function getCurrentSection() {
   return sections[state.sectionIndex];
 }
 function getSectionQuestions(sectionKey) {
-  return questions.filter((q) => q.sectionKey === sectionKey);
+  return getQuestions()
+    .filter((q) => q.sectionKey === sectionKey)
+    .sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
 }
 function getCurrentQuestion() {
   const sec = getCurrentSection();
@@ -369,21 +463,12 @@ function countAnsweredAll() {
 
 function scoreAll() {
   let correct = 0;
-  for (const q of questions) {
+  const list = getQuestions();
+  for (const q of list) {
     const ans = state.answers[q.id];
-    if (q.parts?.length) {
-      // 2問セット：全部正解で1点×parts（パートごと採点）
-      if (ans && Array.isArray(ans.partAnswers)) {
-        q.parts.forEach((p, i) => {
-          if (ans.partAnswers[i] === p.answerIndex) correct++;
-        });
-      }
-    } else {
-      if (ans === q.answerIndex) correct++;
-    }
+    if (ans === q.answerIndex) correct++;
   }
-  // total = 単問 + parts数
-  const total = questions.reduce((acc, q) => acc + (q.parts?.length ? q.parts.length : 1), 0);
+  const total = list.length;
   return { correct, total };
 }
 
@@ -576,23 +661,29 @@ function promptHTML(q) {
 }
 
 /** ===== Render question blocks by type ===== */
-function renderChoicesText(q) {
+function getChoices(q) {
+  if (Array.isArray(q.choices)) return q.choices;
+  if (Array.isArray(q.choicesJa)) return q.choicesJa;
+  return [];
+}
+
+function renderChoicesText(q, choices) {
   const chosen = state.answers[q.id];
   return `
     <div class="choices">
-      ${q.choicesJa.map((c, i) => {
+      ${choices.map((c, i) => {
         const sel = chosen === i ? "selected" : "";
-        return `<button class="choice ${sel}" data-choice="${i}">${c}</button>`;
+        return `<button class="choice ${sel}" data-choice="${i}">${escapeHtml(c)}</button>`;
       }).join("")}
     </div>
   `;
 }
 
-function renderChoicesImages(q) {
+function renderChoicesImages(q, choices) {
   const chosen = state.answers[q.id];
   return `
     <div class="img-choice-grid">
-      ${q.choiceImages.map((src, i) => {
+      ${choices.map((src, i) => {
         const sel = chosen === i ? "selected" : "";
         return `
           <button class="img-choice ${sel}" data-choice="${i}">
@@ -604,146 +695,60 @@ function renderChoicesImages(q) {
   `;
 }
 
-function renderTwoPartImageChoices(q) {
-  const ans = state.answers[q.id];
-  const partAnswers = ans?.partAnswers ?? [];
-
-  return `
-    ${q.parts.map((p, idx) => {
-      const chosen = partAnswers[idx];
-      return `
-        <div class="part-block">
-          <div class="part-title">${p.partLabel}</div>
-          <div class="part-question">${p.questionJa}</div>
-          <div class="img-choice-grid">
-            ${p.choiceImages.map((src, i) => {
-              const sel = chosen === i ? "selected" : "";
-              return `
-                <button class="img-choice ${sel}" data-part="${idx}" data-choice="${i}">
-                  <img src="${src}" alt="choice ${i + 1}" />
-                </button>
-              `;
-            }).join("")}
-          </div>
-        </div>
-      `;
-    }).join("")}
-  `;
-}
-
-function renderTwoPartTextChoices(q, imageKey) {
-  const ans = state.answers[q.id];
-  const partAnswers = ans?.partAnswers ?? [];
-
-  return `
-    ${q[imageKey] ? `<div class="question-area"><img class="passage-img" src="${q[imageKey]}" alt="passage" /></div>` : ""}
-    ${q.parts.map((p, idx) => {
-      const chosen = partAnswers[idx];
-      return `
-        <div class="part-block">
-          <div class="part-title">${p.partLabel} ${p.questionJa}</div>
-          <div class="choices">
-            ${p.choicesJa.map((c, i) => {
-              const sel = chosen === i ? "selected" : "";
-              return `<button class="choice ${sel}" data-part="${idx}" data-choice="${i}">${c}</button>`;
-            }).join("")}
-          </div>
-        </div>
-      `;
-    }).join("")}
-  `;
+function renderStemHTML(q) {
+  const parts = [];
+  if (q.stemText) {
+    parts.push(`<div class="stem-text">${renderUnderlines(q.stemText)}</div>`);
+  }
+  if (q.stemExtra) {
+    const lines = splitStemLines(q.stemExtra);
+    if (lines.length) {
+      parts.push(
+        `<div class="stem-extra">${lines.map((l) => `<div>${renderUnderlines(l)}</div>`).join("")}</div>`
+      );
+    }
+  }
+  if (q.stemKind === "audio" && q.stemAsset) {
+    parts.push(`
+      <div style="margin:10px 0 12px;">
+        <audio controls preload="auto" src="${q.stemAsset}"></audio>
+      </div>
+    `);
+  }
+  if (["image", "passage_image", "table_image"].includes(q.stemKind) && q.stemAsset) {
+    parts.push(`
+      <div class="question-area">
+        <img class="illustration" src="${q.stemAsset}" alt="stem" />
+      </div>
+    `);
+  }
+  if (!q.stemKind && q.stemAsset && isAudioAssetValue(q.stemAsset)) {
+    parts.push(`
+      <div style="margin:10px 0 12px;">
+        <audio controls preload="auto" src="${q.stemAsset}"></audio>
+      </div>
+    `);
+  }
+  if (!q.stemKind && q.stemAsset && isImageChoiceValue(q.stemAsset)) {
+    parts.push(`
+      <div class="question-area">
+        <img class="illustration" src="${q.stemAsset}" alt="stem" />
+      </div>
+    `);
+  }
+  if (q.boxText) {
+    parts.push(`<div class="boxed">${renderUnderlines(q.boxText)}</div>`);
+  }
+  return parts.join("");
 }
 
 function questionBodyHTML(q) {
-  switch (q.type) {
-    case "mcq_image":
-      return `
-        <div class="question-area">
-          <img class="illustration" src="${q.image}" alt="illustration" />
-        </div>
-        ${renderChoicesText(q)}
-      `;
-
-    case "mcq_sentence_blank":
-      return `
-        <div class="blue-box">
-          <div class="jp-sentence">${q.sentenceJa}</div>
-        </div>
-        ${renderChoicesText(q)}
-      `;
-
-    case "mcq_kanji_reading":
-      return `
-        <div class="blue-box">
-          <div class="jp-sentence">
-            ${q.sentencePartsJa
-              .map((p) => (p.underline ? `<span class="underline">${p.text}</span>` : p.text))
-              .join("")}
-          </div>
-        </div>
-        ${renderChoicesText(q)}
-      `;
-
-    case "mcq_dialog_with_image":
-      return `
-        <div class="dialog-row">
-          <div class="dialog-text">
-            ${q.dialogJa
-              .map((line) => `<div class="dialog-line">${line.replace("［　　］", `<span class="blank-red"></span>`)}</div>`)
-              .join("")}
-          </div>
-          <div class="dialog-img">
-            <img src="${q.image}" alt="dialog image" />
-          </div>
-        </div>
-        ${renderChoicesText(q)}
-      `;
-
-    case "mcq_illustrated_dialog":
-      return `
-        <div class="question-area">
-          <img class="passage-img" src="${q.image}" alt="illustrated dialog" />
-        </div>
-        ${renderChoicesText(q)}
-      `;
-
-    case "mcq_listening_image_choices":
-      return `
-        <div style="margin:10px 0 12px;">
-          <audio controls preload="auto">
-            <source src="/audio/lc1.mp3" type="audio/mpeg" />
-            Your browser does not support the audio element.
-          </audio>  
-        </div>
-        ${q.stemImage ? `<div class="question-area"><img class="illustration" src="${q.stemImage}" alt="stem" /></div>` : ""}
-        ${renderChoicesImages(q)}
-      `;
-
-    case "mcq_listening_two_part_image":
-      return `
-        <div style="margin:10px 0 12px;">
-          <audio controls preload="auto">
-            <source src="/audio/lc1.mp3" type="audio/mpeg" />
-            Your browser does not support the audio element.
-          </audio>  
-        </div>
-        ${q.stemImage ? `<div class="question-area"><img class="illustration" src="${q.stemImage}" alt="stem" /></div>` : ""}
-        ${renderTwoPartImageChoices(q)}
-      `;
-
-    case "mcq_reading_passage_two_questions":
-      return `
-        ${renderTwoPartTextChoices(q, "passageImage")}
-      `;
-
-    case "mcq_reading_table_two_questions":
-      return `
-        ${renderTwoPartTextChoices(q, "tableImage")}
-      `;
-
-    default:
-      return `<div>Unknown question type: ${q.type}</div>`;
-  }
+  const choices = getChoices(q);
+  const hasImageChoices = choices.length > 0 && choices.every((c) => isImageChoiceValue(c));
+  return `
+    ${renderStemHTML(q)}
+    ${choices.length ? (hasImageChoices ? renderChoicesImages(q, choices) : renderChoicesText(q, choices)) : ""}
+  `;
 }
 
 /** ===== Sidebar ===== */
@@ -818,6 +823,11 @@ function renderIntro(app) {
                 ${
                   testsState.error
                     ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testsState.error)}</div>`
+                    : ""
+                }
+                ${
+                  questionsState.error
+                    ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(questionsState.error)}</div>`
                     : ""
                 }
                 ${
@@ -929,6 +939,11 @@ function renderTestSelect(app) {
           ${
             testsState.error
               ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testsState.error)}</div>`
+              : ""
+          }
+          ${
+            questionsState.error
+              ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(questionsState.error)}</div>`
               : ""
           }
 
@@ -1151,19 +1166,20 @@ function renderSectionEnd(app) {
 
 function getChoiceLabel(q, idx) {
   if (idx == null || idx === "") return "";
+  if (q.choices?.[idx] != null) return q.choices[idx];
   if (q.choicesJa?.[idx] != null) return q.choicesJa[idx];
-  // 画像選択肢などchoicesJaが無い場合
   return `選択肢${Number(idx) + 1}`;
 }
 
 function getQuestionThumb(q) {
   // 表に出したい代表画像（あれば）
-  return q.image || q.stemImage || q.passageImage || q.tableImage || "";
+  return q.stemKind && q.stemKind !== "audio" ? (q.stemAsset || "") : "";
 }
 
 function pickChoiceImage(q, idx) {
   if (idx == null) return "";
-  if (Array.isArray(q.choiceImages) && q.choiceImages[idx]) return q.choiceImages[idx];
+  const value = q.choices?.[idx] ?? q.choicesJa?.[idx];
+  if (value && isImageChoiceValue(value)) return value;
   return "";
 }
 function pickPartChoiceImage(part, idx) {
@@ -1174,6 +1190,7 @@ function pickPartChoiceImage(part, idx) {
 
 function getChoiceText(q, idx) {
   if (idx == null) return "";
+  if (Array.isArray(q.choices) && q.choices[idx] != null) return q.choices[idx];
   if (Array.isArray(q.choicesJa) && q.choicesJa[idx] != null) return q.choicesJa[idx];
   return "";
 }
@@ -1187,47 +1204,17 @@ function getPartChoiceText(part, idx) {
 function buildResultRows() {
   const rows = [];
 
-  for (const q of questions) {
-    // ===== parts（2問セット：LC-3など）=====
-    if (q.parts?.length) {
-      const ans = state.answers[q.id];
-      q.parts.forEach((part, i) => {
-        const chosenIdx = ans?.partAnswers?.[i];
-        const correctIdx = part.answerIndex;
-
-        rows.push({
-          id: `${q.id}-${i + 1}`,
-          thumb: q.image || q.stemImage || q.passageImage || q.tableImage || "",
-          prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
-          isCorrect: chosenIdx === correctIdx,
-
-          chosen: getPartChoiceText(part, chosenIdx),
-          correct: getPartChoiceText(part, correctIdx),
-
-          chosenImg: pickPartChoiceImage(part, chosenIdx),
-          correctImg: pickPartChoiceImage(part, correctIdx),
-        });
-      });
-      continue;
-    }
-
-    // ===== 単問（Script/Vocabなど）=====
+  for (const q of getQuestions()) {
     const chosenIdx = state.answers[q.id];
     const correctIdx = q.answerIndex;
 
     // 問題文の表示テキスト（最低限）
     const promptText =
-      q.type === "mcq_sentence_blank"
-        ? (q.sentenceJa ?? q.promptEn ?? "")
-        : q.type === "mcq_kanji_reading"
-          ? (q.sentencePartsJa?.map((p) => p.text).join("") ?? q.promptEn ?? "")
-          : q.type === "mcq_dialog_with_image"
-            ? (q.dialogJa?.join(" / ") ?? q.promptEn ?? "")
-            : (q.promptEn ?? "");
+      q.boxText || q.stemText || q.stemExtra || q.promptEn || "";
 
     rows.push({
       id: String(q.id),
-      thumb: q.image || q.stemImage || q.passageImage || q.tableImage || "",
+      thumb: q.stemKind && q.stemKind !== "audio" ? (q.stemAsset || "") : "",
       prompt: promptText,
       isCorrect: chosenIdx === correctIdx,
 
@@ -1360,6 +1347,15 @@ function render() {
   if (state.linkLoginRequired) return renderLogin(app);
   if (authState.session && authState.mustChangePassword) return renderSetPassword(app);
   if (!authState.session && !state.linkId) return renderLogin(app);
+
+  const needsQuestions = ["intro", "sectionIntro", "quiz", "result"].includes(state.phase);
+  if (needsQuestions && testsState.loaded && testsState.list.length > 0) {
+    ensureQuestionsLoaded();
+    if (!questionsState.loaded || questionsState.version !== getActiveTestVersion()) {
+      return renderLoading(app);
+    }
+  }
+
   if (authState.session && !state.linkId && state.phase === "intro") return renderTestSelect(app);
   if (state.phase === "login") return renderLogin(app);
   if (state.phase === "intro") return renderIntro(app);
