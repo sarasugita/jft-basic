@@ -22,12 +22,19 @@ let testsState = {
   error: "",
 };
 
+let testSessionsState = {
+  loaded: false,
+  list: [],
+  error: "",
+};
+
 let questionsState = {
   loaded: false,
   loading: false,
   list: [],
   error: "",
   version: "",
+  updatedAt: "",
 };
 
 const defaultState = {
@@ -46,10 +53,12 @@ const defaultState = {
   linkId: null,
   linkExpiresAt: null,
   linkTestVersion: null,
+  linkTestSessionId: null,
   linkChecked: false,
   linkInvalid: false,
   linkLoginRequired: false,
   selectedTestVersion: "",
+  selectedTestSessionId: "",
 };
 
 
@@ -92,7 +101,7 @@ function mapDbQuestion(row) {
   };
 }
 
-async function fetchQuestionsForVersion(version) {
+async function fetchQuestionsForVersion(version, updatedAt = "") {
   if (!version) return;
   if (questionsState.loading && questionsState.version === version) return;
   questionsState.loading = true;
@@ -111,16 +120,19 @@ async function fetchQuestionsForVersion(version) {
   }
   questionsState.loaded = true;
   questionsState.loading = false;
+  questionsState.updatedAt = updatedAt || "";
 }
 
 function ensureQuestionsLoaded() {
   const version = getActiveTestVersion();
   if (!version) return;
-  if (questionsState.version !== version && !questionsState.loading) {
+  const problemSet = testsState.list.find((t) => t.version === version);
+  const updatedAt = problemSet?.updated_at ?? "";
+  if ((questionsState.version !== version || questionsState.updatedAt !== updatedAt) && !questionsState.loading) {
     questionsState.loaded = false;
     questionsState.list = [];
     questionsState.error = "";
-    fetchQuestionsForVersion(version).finally(render);
+    fetchQuestionsForVersion(version, updatedAt).finally(render);
   }
 }
 
@@ -216,7 +228,7 @@ async function fetchPublicTests() {
   testsState.error = "";
   const { data, error } = await publicSupabase
     .from("tests")
-    .select("id, version, title, type, pass_rate, is_public, created_at")
+    .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
     .eq("is_public", true)
     .order("created_at", { ascending: false })
     .limit(100);
@@ -241,7 +253,41 @@ async function fetchPublicTests() {
   ensureQuestionsLoaded();
 }
 
+async function fetchTestSessions() {
+  testSessionsState.error = "";
+  const { data, error } = await publicSupabase
+    .from("test_sessions")
+    .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, created_at")
+    .eq("is_published", true)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) {
+    testSessionsState.list = [];
+    const msg = error.message || "Failed to load test sessions.";
+    if (String(msg).includes("does not exist") || error.status === 404) {
+      testSessionsState.error = "test_sessionsテーブルがありません。Supabaseでスキーマを適用してください。";
+    } else {
+      testSessionsState.error = msg;
+    }
+    testSessionsState.loaded = true;
+    return;
+  }
+  const list = data ?? [];
+  testSessionsState.list = list;
+  testSessionsState.loaded = true;
+  if (!state.linkId && !state.selectedTestSessionId && list.length) {
+    state.selectedTestSessionId = list[0].id;
+    saveState();
+  }
+  ensureQuestionsLoaded();
+}
+
 function getActiveTestVersion() {
+  const sessionId = state.linkTestSessionId || state.selectedTestSessionId;
+  if (sessionId) {
+    const session = testSessionsState.list.find((s) => s.id === sessionId);
+    if (session?.problem_set_id) return session.problem_set_id;
+  }
   return state.linkTestVersion || state.selectedTestVersion || TEST_VERSION;
 }
 
@@ -574,11 +620,13 @@ async function saveAttemptIfNeeded() {
 
   const { correct, total } = scoreAll();
   const scoreRate = total === 0 ? 0 : correct / total;
+  const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId || null;
   const payload = {
     student_id: authState.session?.user?.id ?? null,
     display_name: state.user?.name?.trim() || null,
     student_code: state.user?.id?.trim() || null,
     test_version: getActiveTestVersion(),
+    test_session_id: activeSessionId,
     correct,
     total,
     started_at: state.testStartAt ? new Date(state.testStartAt).toISOString() : null,
@@ -779,6 +827,9 @@ function sidebarHTML() {
 /** ===== Renders ===== */
 function renderIntro(app) {
   const activeVersion = getActiveTestVersion();
+  const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
+  const activeSession = testSessionsState.list.find((s) => s.id === activeSessionId);
+  const activeTitle = activeSession?.title || activeVersion;
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
@@ -792,7 +843,7 @@ function renderIntro(app) {
               ? `<p style="margin-top:6px;"><b>Guest link active</b> (expires: ${state.linkExpiresAt ? new Date(state.linkExpiresAt).toLocaleString() : "—"})</p>`
               : ""
           }
-          <p style="margin-top:6px;"><b>Test</b>: ${escapeHtml(activeVersion)}</p>
+          <p style="margin-top:6px;"><b>Test</b>: ${escapeHtml(activeTitle)}</p>
           ${
             authState.session
               ? `<p style="margin-top:6px;"><b>Logged in</b> (${escapeHtml(authState.session.user.email ?? "")})</p>`
@@ -805,19 +856,19 @@ function renderIntro(app) {
             state.linkId
               ? ""
               : `
-                <label class="form-label">Test</label>
+                <label class="form-label">Test Session</label>
                 <select class="form-input" id="testSelect">
                   ${
-                    testsState.list.length
-                      ? testsState.list
-                          .map(
-                            (t) =>
-                              `<option value="${escapeHtml(t.version)}" ${
-                                t.version === activeVersion ? "selected" : ""
-                              }>${escapeHtml(t.title || t.version)}</option>`
-                          )
+                    testSessionsState.list.length
+                      ? testSessionsState.list
+                          .map((t) => {
+                            const label = `${t.title} (${t.problem_set_id})`;
+                            return `<option value="${escapeHtml(t.id)}" ${
+                              t.id === activeSessionId ? "selected" : ""
+                            }>${escapeHtml(label)}</option>`;
+                          })
                           .join("")
-                      : `<option value="${escapeHtml(TEST_VERSION)}">${escapeHtml(TEST_VERSION)}</option>`
+                      : `<option value="">No sessions</option>`
                   }
                 </select>
                 ${
@@ -831,8 +882,13 @@ function renderIntro(app) {
                     : ""
                 }
                 ${
-                  testsState.loaded && testsState.list.length === 0
-                    ? `<div style="margin-top:6px;color:#666;">公開テストがありません。デフォルトを使用します。</div>`
+                  testSessionsState.error
+                    ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testSessionsState.error)}</div>`
+                    : ""
+                }
+                ${
+                  testSessionsState.loaded && testSessionsState.list.length === 0
+                    ? `<div style="margin-top:6px;color:#666;">公開テストがありません。</div>`
                     : ""
                 }
               `
@@ -866,7 +922,9 @@ function renderIntro(app) {
   const testSelect = document.querySelector("#testSelect");
   if (testSelect) {
     testSelect.addEventListener("change", () => {
-      state.selectedTestVersion = testSelect.value;
+      state.selectedTestSessionId = testSelect.value;
+      const session = testSessionsState.list.find((s) => s.id === testSelect.value);
+      if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
       saveState();
       render();
     });
@@ -899,6 +957,7 @@ function renderIntro(app) {
 
 function renderTestSelect(app) {
   const activeVersion = getActiveTestVersion();
+  const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
@@ -914,26 +973,28 @@ function renderTestSelect(app) {
         </div>
 
         <div class="intro-form" style="margin-top:16px; max-width:640px;">
-          <label class="form-label">Test</label>
+          <label class="form-label">Test Session</label>
           <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
             ${
-              testsState.list.length
-                ? testsState.list
-                    .map(
-                      (t) => `
+              testSessionsState.list.length
+                ? testSessionsState.list
+                    .map((t) => {
+                      const problemSet = testsState.list.find((ps) => ps.version === t.problem_set_id);
+                      const passRate = Number(problemSet?.pass_rate ?? PASS_RATE_DEFAULT);
+                      return `
                         <label style="display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;">
-                          <input type="radio" name="testSelect" value="${escapeHtml(t.version)}" ${
-                            t.version === activeVersion ? "checked" : ""
+                          <input type="radio" name="testSelect" value="${escapeHtml(t.id)}" ${
+                            t.id === activeSessionId ? "checked" : ""
                           } />
                           <div>
-                            <div style="font-weight:600;">${escapeHtml(t.title || t.version)}</div>
-                            <div style="font-size:12px;color:#666;">${escapeHtml(t.version)} • pass ${(Number(t.pass_rate ?? 0.6) * 100).toFixed(0)}%</div>
+                            <div style="font-weight:600;">${escapeHtml(t.title)}</div>
+                            <div style="font-size:12px;color:#666;">${escapeHtml(t.problem_set_id)} • pass ${(passRate * 100).toFixed(0)}%</div>
                           </div>
                         </label>
-                      `
-                    )
+                      `;
+                    })
                     .join("")
-                : `<div style="color:#666;">公開テストがありません。デフォルトを使用します。</div>`
+                : `<div style="color:#666;">公開テストがありません。</div>`
             }
           </div>
           ${
@@ -944,6 +1005,11 @@ function renderTestSelect(app) {
           ${
             questionsState.error
               ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(questionsState.error)}</div>`
+              : ""
+          }
+          ${
+            testSessionsState.error
+              ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testSessionsState.error)}</div>`
               : ""
           }
 
@@ -966,7 +1032,11 @@ function renderTestSelect(app) {
     const name = document.querySelector("#nameInput").value.trim();
     const id = document.querySelector("#idInput").value.trim();
     const selected = document.querySelector('input[name="testSelect"]:checked');
-    if (selected) state.selectedTestVersion = selected.value;
+    if (selected) {
+      state.selectedTestSessionId = selected.value;
+      const session = testSessionsState.list.find((s) => s.id === selected.value);
+      if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
+    }
 
     state.user = { name, id };
     state.phase = "sectionIntro";
@@ -1349,7 +1419,8 @@ function render() {
   if (!authState.session && !state.linkId) return renderLogin(app);
 
   const needsQuestions = ["intro", "sectionIntro", "quiz", "result"].includes(state.phase);
-  if (needsQuestions && testsState.loaded && testsState.list.length > 0) {
+  const sessionsReady = testSessionsState.loaded || Boolean(state.linkId);
+  if (needsQuestions && testsState.loaded && sessionsReady) {
     ensureQuestionsLoaded();
     if (!questionsState.loaded || questionsState.version !== getActiveTestVersion()) {
       return renderLoading(app);
@@ -1389,6 +1460,7 @@ async function checkLinkFromUrl() {
     state.linkId = null;
     state.linkExpiresAt = null;
     state.linkTestVersion = null;
+    state.linkTestSessionId = null;
     state.linkInvalid = false;
     state.linkLoginRequired = false;
     state.linkChecked = true;
@@ -1399,7 +1471,7 @@ async function checkLinkFromUrl() {
   try {
     const { data, error } = await publicSupabase
       .from("exam_links")
-      .select("id, test_version, expires_at")
+      .select("id, test_version, test_session_id, expires_at")
       .eq("id", linkId)
       .single();
 
@@ -1420,7 +1492,23 @@ async function checkLinkFromUrl() {
 
     state.linkId = data.id;
     state.linkExpiresAt = data.expires_at;
-    state.linkTestVersion = data.test_version;
+    state.linkTestSessionId = data.test_session_id ?? null;
+    if (data.test_session_id) {
+      const { data: sessionRow, error: sessionErr } = await publicSupabase
+        .from("test_sessions")
+        .select("id, problem_set_id")
+        .eq("id", data.test_session_id)
+        .single();
+      if (sessionErr || !sessionRow) {
+        state.linkInvalid = true;
+        state.linkChecked = true;
+        saveState();
+        return;
+      }
+      state.linkTestVersion = sessionRow.problem_set_id;
+    } else {
+      state.linkTestVersion = data.test_version;
+    }
     state.linkInvalid = false;
     state.linkChecked = true;
     state.linkLoginRequired = true;
@@ -1436,7 +1524,9 @@ async function checkLinkFromUrl() {
 supabase.auth.onAuthStateChange(() => {
   refreshAuthState().finally(render);
   fetchPublicTests().finally(render);
+  fetchTestSessions().finally(render);
 });
 
 Promise.all([checkLinkFromUrl(), refreshAuthState()]).finally(render);
 fetchPublicTests().finally(render);
+fetchTestSessions().finally(render);

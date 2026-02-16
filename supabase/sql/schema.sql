@@ -8,13 +8,17 @@ alter table public.profiles
 -- tests master
 create table if not exists public.tests (
   id uuid primary key default gen_random_uuid(),
-  version text not null unique,
-  title text not null,
+  version text not null unique, -- Problem Set ID
+  title text not null, -- Default title
   type text not null check (type in ('mock', 'quiz')),
   pass_rate numeric not null default 0.8,
   is_public boolean not null default true,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
+
+alter table public.tests
+  add column if not exists updated_at timestamptz not null default now();
 
 create index if not exists tests_type_idx on public.tests (type);
 create index if not exists tests_public_idx on public.tests (is_public);
@@ -75,8 +79,29 @@ create table if not exists public.test_assets (
 create index if not exists test_assets_version_idx on public.test_assets (test_version);
 create index if not exists test_assets_type_idx on public.test_assets (test_type);
 
+-- test sessions (runtime / schedules)
+create table if not exists public.test_sessions (
+  id uuid primary key default gen_random_uuid(),
+  problem_set_id text not null references public.tests(version) on delete restrict,
+  title text not null,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  time_limit_min int,
+  is_published boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists test_sessions_problem_set_idx on public.test_sessions (problem_set_id);
+create index if not exists test_sessions_published_idx on public.test_sessions (is_published);
+
 -- attempts relation (optional)
 create index if not exists attempts_test_version_idx on public.attempts (test_version);
+alter table public.attempts
+  add column if not exists test_session_id uuid;
+
+-- exam links may reference test_session_id
+alter table public.exam_links
+  add column if not exists test_session_id uuid references public.test_sessions(id) on delete set null;
 -- If all existing attempts.test_version values are registered in tests, you can add an FK:
 -- alter table public.attempts
 --   add constraint attempts_test_version_fkey foreign key (test_version)

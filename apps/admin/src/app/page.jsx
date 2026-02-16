@@ -36,6 +36,11 @@ function getSectionTitle(sectionKey) {
   return sections.find((s) => s.key === sectionKey)?.title ?? sectionKey ?? "";
 }
 
+function getProblemSetTitle(problemSetId, testsList) {
+  const item = (testsList ?? []).find((t) => t.version === problemSetId);
+  return item?.title || problemSetId || "";
+}
+
 function getChoiceText(q, idx) {
   if (idx == null) return "";
   if (Array.isArray(q.choices) && q.choices[idx] != null) return q.choices[idx];
@@ -266,7 +271,7 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
     const row = rows[r];
     const questionId = getCell(row, "item_id");
     if (!questionId) continue;
-    const testVersion = getCell(row, "test_version") || defaultTestVersion;
+    const testVersion = defaultTestVersion || getCell(row, "test_version");
     if (!testVersion) {
       errors.push(`Row ${r + 1}: test_version is required.`);
       continue;
@@ -456,7 +461,7 @@ export default function AdminPage() {
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
   const [linkForm, setLinkForm] = useState({
-    testVersion: "test_exam",
+    testSessionId: "",
     expiresAt: ""
   });
   const [students, setStudents] = useState([]);
@@ -471,6 +476,16 @@ export default function AdminPage() {
   const [inviteResults, setInviteResults] = useState([]);
   const [tests, setTests] = useState([]);
   const [testsMsg, setTestsMsg] = useState("");
+  const [testSessions, setTestSessions] = useState([]);
+  const [testSessionsMsg, setTestSessionsMsg] = useState("");
+  const [testSessionForm, setTestSessionForm] = useState({
+    problem_set_id: "",
+    title: "",
+    starts_at: "",
+    ends_at: "",
+    time_limit_min: "",
+    is_published: true
+  });
   const [assets, setAssets] = useState([]);
   const [assetsMsg, setAssetsMsg] = useState("");
   const [quizMsg, setQuizMsg] = useState("");
@@ -545,6 +560,7 @@ export default function AdminPage() {
     fetchExamLinks();
     fetchStudents();
     fetchTests();
+    fetchTestSessions();
     fetchAssets();
   }, [session, profile]);
 
@@ -584,7 +600,7 @@ export default function AdminPage() {
     setLinkMsg("Loading...");
     const { data, error } = await supabase
       .from("exam_links")
-      .select("id, test_version, expires_at, created_at")
+      .select("id, test_version, test_session_id, expires_at, created_at")
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
@@ -599,7 +615,7 @@ export default function AdminPage() {
 
   async function createExamLink() {
     setLinkMsg("");
-    if (!linkForm.testVersion) {
+    if (!linkForm.testSessionId) {
       setLinkMsg("テストを選択してください。");
       return;
     }
@@ -607,8 +623,11 @@ export default function AdminPage() {
       setLinkMsg("期限（expires_at）を入力してください。");
       return;
     }
+    const session = testSessions.find((t) => t.id === linkForm.testSessionId);
+    const problemSetId = session?.problem_set_id || "";
     const payload = {
-      test_version: linkForm.testVersion,
+      test_session_id: linkForm.testSessionId,
+      test_version: problemSetId || undefined,
       expires_at: new Date(linkForm.expiresAt).toISOString()
     };
     const { error } = await supabase.from("exam_links").insert(payload);
@@ -684,8 +703,8 @@ export default function AdminPage() {
           question_count: counts[t.version] ?? 0
         }));
         setTests(withCounts);
-        if (withCounts.length && !withCounts.find((t) => t.version === linkForm.testVersion)) {
-          setLinkForm((s) => ({ ...s, testVersion: withCounts[0].version }));
+        if (withCounts.length && !testSessionForm.problem_set_id) {
+          setTestSessionForm((s) => ({ ...s, problem_set_id: withCounts[0].version }));
         }
         setTestsMsg(list.length ? "" : "No tests.");
         return;
@@ -704,8 +723,8 @@ export default function AdminPage() {
         question_count: counts[t.version] ?? 0
       }));
       setTests(withCounts);
-      if (withCounts.length && !withCounts.find((t) => t.version === linkForm.testVersion)) {
-        setLinkForm((s) => ({ ...s, testVersion: withCounts[0].version }));
+      if (withCounts.length && !testSessionForm.problem_set_id) {
+        setTestSessionForm((s) => ({ ...s, problem_set_id: withCounts[0].version }));
       }
       setTestsMsg(list.length ? "" : "No tests.");
       return;
@@ -715,10 +734,79 @@ export default function AdminPage() {
       question_count: t.questions?.[0]?.count ?? 0
     }));
     setTests(withCounts);
-    if (withCounts.length && !withCounts.find((t) => t.version === linkForm.testVersion)) {
-      setLinkForm((s) => ({ ...s, testVersion: withCounts[0].version }));
+    if (withCounts.length && !testSessionForm.problem_set_id) {
+      setTestSessionForm((s) => ({ ...s, problem_set_id: withCounts[0].version }));
     }
     setTestsMsg(list.length ? "" : "No tests.");
+  }
+
+  async function fetchTestSessions() {
+    setTestSessionsMsg("Loading...");
+    const { data, error } = await supabase
+      .from("test_sessions")
+      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      console.error("test_sessions fetch error:", error);
+      setTestSessions([]);
+      setTestSessionsMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const list = data ?? [];
+    setTestSessions(list);
+    setTestSessionsMsg(list.length ? "" : "No test sessions.");
+    if (list.length && !list.find((t) => t.id === linkForm.testSessionId)) {
+      setLinkForm((s) => ({ ...s, testSessionId: list[0].id }));
+    }
+    if (list.length && !testSessionForm.problem_set_id) {
+      setTestSessionForm((s) => ({ ...s, problem_set_id: list[0].problem_set_id || "" }));
+    }
+  }
+
+  async function createTestSession() {
+    setTestSessionsMsg("");
+    const problemSetId = testSessionForm.problem_set_id.trim();
+    const title = testSessionForm.title.trim();
+    if (!problemSetId) {
+      setTestSessionsMsg("Problem Set ID is required.");
+      return;
+    }
+    if (!title) {
+      setTestSessionsMsg("Title is required.");
+      return;
+    }
+    const payload = {
+      problem_set_id: problemSetId,
+      title,
+      starts_at: testSessionForm.starts_at ? new Date(testSessionForm.starts_at).toISOString() : null,
+      ends_at: testSessionForm.ends_at ? new Date(testSessionForm.ends_at).toISOString() : null,
+      time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
+      is_published: Boolean(testSessionForm.is_published)
+    };
+    const { error } = await supabase.from("test_sessions").insert(payload);
+    if (error) {
+      console.error("test_sessions insert error:", error);
+      setTestSessionsMsg(`Create failed: ${error.message}`);
+      return;
+    }
+    setTestSessionsMsg("Created.");
+    setTestSessionForm((s) => ({ ...s, title: "" }));
+    fetchTestSessions();
+  }
+
+  async function deleteTestSession(id) {
+    if (!id) return;
+    const ok = window.confirm(`Delete test session ${id}?`);
+    if (!ok) return;
+    const { error } = await supabase.from("test_sessions").delete().eq("id", id);
+    if (error) {
+      console.error("test_sessions delete error:", error);
+      setTestSessionsMsg(`Delete failed: ${error.message}`);
+      return;
+    }
+    setTestSessionsMsg(`Deleted: ${id}`);
+    fetchTestSessions();
   }
 
   async function ensureTestRecord(testVersion, title, type, passRate) {
@@ -736,6 +824,14 @@ export default function AdminPage() {
       if (title && existing.title && title !== existing.title) {
         return { ok: false, message: "Test version already exists with a different title. Use a new version." };
       }
+      const { error: updateError } = await supabase
+        .from("tests")
+        .update({ pass_rate: passRate, type, updated_at: new Date().toISOString() })
+        .eq("version", testVersion);
+      if (updateError) {
+        console.error("tests update error:", updateError);
+        return { ok: false, message: `Test update failed: ${updateError.message}` };
+      }
       return { ok: true, existing: true };
     }
 
@@ -745,7 +841,8 @@ export default function AdminPage() {
       title: effectiveTitle,
       type,
       pass_rate: passRate,
-      is_public: true
+      is_public: true,
+      updated_at: new Date().toISOString()
     });
     if (insertError) {
       console.error("tests insert error:", insertError);
@@ -969,7 +1066,7 @@ export default function AdminPage() {
     const type = assetForm.type;
     const passRate = Number(assetForm.pass_rate);
 
-    if (assetCsvFile) {
+    if (!testVersion && assetCsvFile) {
       const csvText = await assetCsvFile.text();
       const detectedVersion = detectTestVersionFromCsvText(csvText);
       if (detectedVersion && detectedVersion !== testVersion) {
@@ -1003,7 +1100,7 @@ export default function AdminPage() {
       (singleFile && singleFile.name.toLowerCase().endsWith(".csv")) ||
       files.some((f) => f.name.toLowerCase().endsWith(".csv"));
     if (!hasCsv) {
-      setAssetUploadMsg("CSV file is required for Upload & Create Exam.");
+      setAssetUploadMsg("CSV file is required for Upload & Register Problem Set.");
       return;
     }
 
@@ -1047,11 +1144,11 @@ export default function AdminPage() {
     const passRate = Number(assetForm.pass_rate);
 
     if (!file) {
-      setAssetImportMsg("CSV file is required for Create Exam.");
+      setAssetImportMsg("CSV file is required.");
       return;
     }
     if (!file.name.toLowerCase().endsWith(".csv")) {
-      setAssetImportMsg("CSV file is required for Create Exam.");
+      setAssetImportMsg("CSV file is required.");
       return;
     }
     if (!file.name.toLowerCase().endsWith(".csv")) {
@@ -1123,6 +1220,31 @@ export default function AdminPage() {
       return;
     }
 
+    const questionIds = questions.map((q) => q.question_id);
+    if (questionIds.length) {
+      const notIn = `(${questionIds.map((id) => `"${id}"`).join(",")})`;
+      const { error: cleanupErr } = await supabase
+        .from("questions")
+        .delete()
+        .eq("test_version", resolvedVersion)
+        .not("question_id", "in", notIn);
+      if (cleanupErr) {
+        console.error("questions cleanup error:", cleanupErr);
+        setAssetImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+        return;
+      }
+    } else {
+      const { error: cleanupErr } = await supabase
+        .from("questions")
+        .delete()
+        .eq("test_version", resolvedVersion);
+      if (cleanupErr) {
+        console.error("questions cleanup error:", cleanupErr);
+        setAssetImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+        return;
+      }
+    }
+
     setAssetImportMsg("Upserting questions...");
     const { error: qError } = await supabase.from("questions").upsert(questions, {
       onConflict: "test_version,question_id"
@@ -1132,8 +1254,6 @@ export default function AdminPage() {
       setAssetImportMsg(`Question upsert failed: ${qError.message}`);
       return;
     }
-
-    const questionIds = questions.map((q) => q.question_id);
     const { data: qRows, error: qFetchErr } = await supabase
       .from("questions")
       .select("id, question_id")
@@ -1181,6 +1301,7 @@ export default function AdminPage() {
 
     setAssetImportMsg(`Imported ${questions.length} questions / ${choiceRows.length} choices.`);
     fetchTests();
+    setAssetCsvFile(null);
   }
 
   async function handleCsvFile(file) {
@@ -1575,6 +1696,120 @@ export default function AdminPage() {
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
+              <div className="admin-title">Test Sessions</div>
+              <div className="admin-subtitle">Problem Setから実施テストを作成します。</div>
+            </div>
+            <button className="btn" onClick={() => fetchTestSessions()}>Refresh Sessions</button>
+          </div>
+
+          <div className="admin-form" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label>Problem Set</label>
+              <select
+                value={testSessionForm.problem_set_id}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
+              >
+                {tests.length ? (
+                  tests.map((t) => (
+                    <option key={`ps-${t.version}`} value={t.version}>
+                      {t.title ? `${t.title} (${t.version})` : t.version}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No problem sets</option>
+                )}
+              </select>
+            </div>
+            <div className="field">
+              <label>Title</label>
+              <input
+                value={testSessionForm.title}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
+                placeholder="Mock Test (Retake)"
+              />
+            </div>
+            <div className="field small">
+              <label>Starts At</label>
+              <input
+                type="datetime-local"
+                value={testSessionForm.starts_at}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Ends At</label>
+              <input
+                type="datetime-local"
+                value={testSessionForm.ends_at}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Time Limit (min)</label>
+              <input
+                value={testSessionForm.time_limit_min}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                placeholder="60"
+              />
+            </div>
+            <div className="field small">
+              <label>Published</label>
+              <select
+                value={testSessionForm.is_published ? "yes" : "no"}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, is_published: e.target.value === "yes" }))}
+              >
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn btn-primary" type="button" onClick={createTestSession}>
+                Create Session
+              </button>
+            </div>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Title</th>
+                  <th>Problem Set</th>
+                  <th>Published</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th>Time (min)</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {testSessions.map((t) => (
+                  <tr key={t.id}>
+                    <td>{formatDateTime(t.created_at)}</td>
+                    <td>{t.title ?? ""}</td>
+                    <td>{t.problem_set_id ?? ""}</td>
+                    <td>{t.is_published ? "Yes" : "No"}</td>
+                    <td>{formatDateTime(t.starts_at)}</td>
+                    <td>{formatDateTime(t.ends_at)}</td>
+                    <td>{t.time_limit_min ?? ""}</td>
+                    <td>
+                      <button className="btn btn-danger" onClick={() => deleteTestSession(t.id)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{testSessionsMsg}</div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
               <div className="admin-title">Exam Links</div>
               <div className="admin-subtitle">期限付きの模試リンクを発行します（A: 期限のみ）。</div>
             </div>
@@ -1583,19 +1818,19 @@ export default function AdminPage() {
 
           <div className="admin-form" style={{ marginTop: 10 }}>
             <div className="field">
-              <label>Test Version</label>
+              <label>Test Session</label>
               <select
-                value={linkForm.testVersion}
-                onChange={(e) => setLinkForm((s) => ({ ...s, testVersion: e.target.value }))}
+                value={linkForm.testSessionId}
+                onChange={(e) => setLinkForm((s) => ({ ...s, testSessionId: e.target.value }))}
               >
-                {tests.length ? (
-                  tests.map((t) => (
-                    <option key={`link-${t.version}`} value={t.version}>
-                      {t.title ? `${t.title} (${t.version})` : t.version}
+                {testSessions.length ? (
+                  testSessions.map((t) => (
+                    <option key={`link-${t.id}`} value={t.id}>
+                      {t.title} ({t.problem_set_id})
                     </option>
                   ))
                 ) : (
-                  <option value="">No tests</option>
+                  <option value="">No sessions</option>
                 )}
               </select>
             </div>
@@ -1623,7 +1858,7 @@ export default function AdminPage() {
                 <tr>
                   <th>Created</th>
                   <th>Expires</th>
-                  <th>Test</th>
+                      <th>Test Session</th>
                   <th>Link ID</th>
                   <th>Action</th>
                 </tr>
@@ -1635,7 +1870,11 @@ export default function AdminPage() {
                     <tr key={l.id}>
                       <td>{formatDateTime(l.created_at)}</td>
                       <td>{formatDateTime(l.expires_at)}{expired ? " (expired)" : ""}</td>
-                      <td>{l.test_version}</td>
+                      <td>
+                        {l.test_session_id
+                          ? `${testSessions.find((t) => t.id === l.test_session_id)?.title ?? l.test_session_id} (${testSessions.find((t) => t.id === l.test_session_id)?.problem_set_id ?? ""})`
+                          : l.test_version ?? ""}
+                      </td>
                       <td style={{ whiteSpace: "nowrap" }}>{l.id}</td>
                       <td>
                         <button className="btn" onClick={() => copyLink(l.id)}>Copy URL</button>
@@ -1652,10 +1891,10 @@ export default function AdminPage() {
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
-              <div className="admin-title">Tests</div>
-              <div className="admin-subtitle">公開テスト（模試/小テスト）の一覧です。</div>
+              <div className="admin-title">Problem Sets</div>
+              <div className="admin-subtitle">問題セット（CSV/Assets）の一覧です。</div>
             </div>
-            <button className="btn" onClick={() => fetchTests()}>Refresh Tests</button>
+            <button className="btn" onClick={() => fetchTests()}>Refresh Problem Sets</button>
           </div>
 
           <div className="admin-table-wrap" style={{ marginTop: 10 }}>
@@ -1664,7 +1903,7 @@ export default function AdminPage() {
                 <tr>
                   <th>Created</th>
                   <th>Type</th>
-                  <th>Version</th>
+                  <th>Problem Set ID</th>
                   <th>Title</th>
                   <th>Pass Rate</th>
                   <th>Public</th>
@@ -1716,8 +1955,8 @@ export default function AdminPage() {
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
-              <div className="admin-title">Content Import (CSV)</div>
-              <div className="admin-subtitle">CSVをSupabase Storageへアップロードし、DBへ登録します。</div>
+              <div className="admin-title">Problem Set Upload (CSV)</div>
+              <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します。</div>
             </div>
             <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
           </div>
@@ -1734,11 +1973,11 @@ export default function AdminPage() {
               </select>
             </div>
             <div className="field">
-              <label>Test Version</label>
+              <label>Problem Set ID</label>
               <input
                 value={assetForm.test_version}
                 onChange={(e) => setAssetForm((s) => ({ ...s, test_version: e.target.value }))}
-                placeholder="mock_v1"
+                placeholder="problem_set_v1"
               />
             </div>
             <div className="field">
@@ -1758,7 +1997,7 @@ export default function AdminPage() {
               />
             </div>
             <div className="field">
-              <label>CSV File (required for Create Exam)</label>
+              <label>CSV File (required)</label>
               <input
                 type="file"
                 accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
@@ -1767,12 +2006,14 @@ export default function AdminPage() {
                   setAssetFile(file);
                   if (file && file.name.toLowerCase().endsWith(".csv")) {
                     setAssetCsvFile(file);
-                    file.text().then((text) => {
-                      const detected = detectTestVersionFromCsvText(text);
-                      if (detected) {
-                        setAssetForm((s) => ({ ...s, test_version: detected }));
-                      }
-                    });
+                    if (!assetForm.test_version) {
+                      file.text().then((text) => {
+                        const detected = detectTestVersionFromCsvText(text);
+                        if (detected) {
+                          setAssetForm((s) => ({ ...s, test_version: detected }));
+                        }
+                      });
+                    }
                   }
                 }}
               />
@@ -1796,12 +2037,14 @@ export default function AdminPage() {
                   const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv"));
                   if (csvFile) {
                     setAssetCsvFile(csvFile);
-                    csvFile.text().then((text) => {
-                      const detected = detectTestVersionFromCsvText(text);
-                      if (detected) {
-                        setAssetForm((s) => ({ ...s, test_version: detected }));
-                      }
-                    });
+                    if (!assetForm.test_version) {
+                      csvFile.text().then((text) => {
+                        const detected = detectTestVersionFromCsvText(text);
+                        if (detected) {
+                          setAssetForm((s) => ({ ...s, test_version: detected }));
+                        }
+                      });
+                    }
                   }
                 }}
               />
@@ -1814,7 +2057,7 @@ export default function AdminPage() {
             <div className="field small">
               <label>&nbsp;</label>
               <button className="btn btn-primary" type="button" onClick={uploadAssets}>
-                Upload & Create Exam
+                Upload & Register Problem Set
               </button>
             </div>
           </div>
@@ -1823,7 +2066,7 @@ export default function AdminPage() {
             Bucket: <b>test-assets</b> / CSV, PNG, MP3 (他拡張子もOK)
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
-            Upload &amp; Create ExamでCSV/PNG/MP3をアップロードし、試験を作成します。
+            Upload &amp; Register Problem SetでCSV/PNG/MP3をアップロードします。
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
             CSVにはファイル名のみ記載してください。
@@ -1877,7 +2120,7 @@ export default function AdminPage() {
                 {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
                 {!previewMsg && previewQuestions.length === 0 ? (
                   <div className="admin-help" style={{ marginTop: 6 }}>
-                    No questions. Upload & Create ExamでCSVを取り込むか、CSVの`test_version`がこのテストと一致しているか確認してください。
+                    No questions. Upload & Register Problem SetでCSVを取り込むか、CSVの`test_version`がこの問題セットと一致しているか確認してください。
                   </div>
                 ) : null}
               </div>
