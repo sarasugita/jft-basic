@@ -455,8 +455,10 @@ export default function AdminPage() {
     name: "",
     from: "",
     to: "",
-    limit: 200
+    limit: 200,
+    testVersion: ""
   });
+  const [activeTab, setActiveTab] = useState("students");
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
   const [students, setStudents] = useState([]);
@@ -580,7 +582,7 @@ export default function AdminPage() {
   async function runSearch() {
     setLoading(true);
     setMsg("Loading...");
-    const { code, name, from, to, limit } = filters;
+    const { code, name, from, to, limit, testVersion } = filters;
 
     let query = supabase
       .from("attempts")
@@ -594,6 +596,7 @@ export default function AdminPage() {
     if (name) query = query.ilike("display_name", `%${name}%`);
     if (from) query = query.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
     if (to) query = query.lte("created_at", new Date(`${to}T23:59:59`).toISOString());
+    if (testVersion) query = query.eq("test_version", testVersion);
 
     const { data, error } = await query;
     if (error) {
@@ -607,6 +610,12 @@ export default function AdminPage() {
     setSelectedId(null);
     setMsg(data?.length ? "" : "No results.");
     setLoading(false);
+  }
+
+  function applyTestFilter(version) {
+    setFilters((s) => ({ ...s, testVersion: version || "" }));
+    setSelectedId(null);
+    setTimeout(() => runSearch(), 0);
   }
 
   async function fetchExamLinks() {
@@ -1525,28 +1534,49 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="admin-wrap">
-      <div className="admin-top">
-        <div>
-          <div className="admin-title">Admin Panel</div>
-          <div className="admin-subtitle">受験結果（attempts）を検索・詳細表示・CSV出力できます。</div>
+    <div className="admin-shell">
+      <aside className="admin-sidebar">
+        <div className="admin-brand">
+          <div className="admin-brand-title">Admin</div>
+          <div className="admin-brand-sub">JFT Mock</div>
         </div>
-        <div className="admin-meta">
-          <span className="admin-chip">user: {session.user.email}</span>
-          <span className="admin-chip">role: {profile.role}</span>
-          <div className="admin-actions">
-            <button className="btn" onClick={() => runSearch()}>Refresh</button>
-            <button className="btn" onClick={() => exportSummaryCsv(attempts)}>Export CSV (Summary)</button>
-            <button className="btn" onClick={() => exportDetailCsv(attempts)}>Export CSV (Detail)</button>
-            <button className="btn" onClick={() => exportQuizSummaryCsv()}>Export CSV (Quiz Summary)</button>
-            <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
-          </div>
-          {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
+        <div className="admin-nav">
+          <button
+            className={`admin-nav-item ${activeTab === "students" ? "active" : ""}`}
+            onClick={() => setActiveTab("students")}
+          >
+            <span className="admin-nav-dot" />
+            Student List
+          </button>
+          <button
+            className={`admin-nav-item ${activeTab === "tests" ? "active" : ""}`}
+            onClick={() => setActiveTab("tests")}
+          >
+            <span className="admin-nav-dot" />
+            Create Test
+          </button>
+          <button
+            className={`admin-nav-item ${activeTab === "results" ? "active" : ""}`}
+            onClick={() => setActiveTab("results")}
+          >
+            <span className="admin-nav-dot" />
+            Test Results
+          </button>
         </div>
-      </div>
+        <div className="admin-sidebar-footer">
+          <div className="admin-email">{session.user.email}</div>
+          <button className="admin-nav-item logout" onClick={() => supabase.auth.signOut()}>
+            Sign out
+          </button>
+        </div>
+      </aside>
 
-      <div className="admin-panel">
+      <div className="admin-main">
+        <div className="admin-wrap">
 
+          <div className="admin-panel">
+
+        {activeTab === "students" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
@@ -1688,7 +1718,10 @@ export default function AdminPage() {
 
           <div className="admin-msg">{studentMsg}</div>
         </div>
+        ) : null}
 
+        {activeTab === "tests" ? (
+        <>
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
@@ -2152,10 +2185,62 @@ export default function AdminPage() {
             </div>
           </div>
         ) : null}
+        </>
+        ) : null}
+
+        {activeTab === "results" ? (
+        <>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div>
+              <div className="admin-title">Test Results</div>
+              <div className="admin-subtitle">受験結果を検索・詳細表示・CSV出力できます。</div>
+            </div>
+            <div className="admin-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn" onClick={() => runSearch()}>Refresh</button>
+              <button className="btn" onClick={() => exportSummaryCsv(attempts)}>Export CSV (Summary)</button>
+              <button className="btn" onClick={() => exportDetailCsv(attempts)}>Export CSV (Detail)</button>
+              <button className="btn" onClick={() => exportQuizSummaryCsv()}>Export CSV (Quiz Summary)</button>
+            </div>
+          </div>
+          {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
+        </div>
 
         <div style={{ marginBottom: 12 }}>
-          <div className="admin-title">Attempts</div>
-          <div className="admin-subtitle">受験結果を検索・詳細表示・CSV出力できます。</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Tests</div>
+              <div className="admin-subtitle">テストを選ぶと結果を絞り込みます。</div>
+            </div>
+            <button className="btn" onClick={() => applyTestFilter("")}>Clear Filter</button>
+          </div>
+          {filters.testVersion ? (
+            <div className="admin-help" style={{ marginTop: 6 }}>
+              Filter: <b>{filters.testVersion}</b>
+            </div>
+          ) : null}
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Problem Set ID</th>
+                  <th>Title</th>
+                  <th>Questions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tests.map((t) => (
+                  <tr key={`result-test-${t.id}`} onClick={() => applyTestFilter(t.version)}>
+                    <td>{formatDateTime(t.created_at)}</td>
+                    <td>{t.version ?? ""}</td>
+                    <td>{t.title ?? ""}</td>
+                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <form
@@ -2335,6 +2420,10 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+        </>
+        ) : null}
           </div>
         </div>
       </div>

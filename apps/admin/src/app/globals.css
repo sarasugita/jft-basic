@@ -6,6 +6,30 @@ body { padding: 0; }
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
+@media (max-width: 900px) {
+  .admin-shell {
+    flex-direction: column;
+  }
+  .admin-sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    overflow-x: auto;
+    height: auto;
+    position: static;
+  }
+  .admin-nav {
+    flex-direction: row;
+    gap: 6px;
+  }
+  .admin-sidebar-footer {
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
 .btn {
   appearance: none;
   border: 1px solid #2b2b2b;
@@ -23,8 +47,102 @@ body { padding: 0; }
 .btn-danger { background: #b00020; border-color: #7a0016; color: #fff; }
 .btn:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
 
+.admin-shell {
+  display: flex;
+  min-height: 100vh;
+  background: #f2f4f7;
+}
+
+.admin-sidebar {
+  width: 240px;
+  background: #fff;
+  border-right: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+}
+
+.admin-brand-title {
+  font-size: 22px;
+  font-weight: 900;
+  color: #1f2937;
+}
+.admin-brand-sub {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-nav-item {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #1f2937;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.admin-nav-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #cbd5f5;
+  display: inline-block;
+}
+
+.admin-nav-item.active {
+  background: #eef6ff;
+  border-color: #c5ddff;
+  color: #1d4ed8;
+}
+.admin-nav-item.active .admin-nav-dot {
+  background: #3b82f6;
+}
+
+.admin-sidebar-footer {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-start;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-nav-item.logout {
+  color: #b00020;
+  border: 1px solid rgba(176, 0, 32, 0.2);
+  align-self: flex-start;
+}
+
+.admin-email {
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
+}
+
+.admin-main {
+  flex: 1;
+}
+
 .admin-wrap {
-  padding: 14px;
+  padding: 18px 20px;
   max-width: 1280px;
   margin: 0 auto;
 }

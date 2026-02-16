@@ -106,3 +106,4 @@ alter table public.exam_links
 -- alter table public.attempts
 --   add constraint attempts_test_version_fkey foreign key (test_version)
 --   references public.tests(version) on delete set null;
+

@@ -93,6 +93,15 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function hasLinkParam() {
+  try {
+    const url = new URL(window.location.href);
+    return Boolean(url.searchParams.get("link"));
+  } catch {
+    return false;
+  }
+}
+
 function mapDbQuestion(row, version) {
   const data = row.data ?? {};
   const base = {
@@ -321,7 +330,7 @@ function getActivePassRate() {
 }
 
 function renderLogin(app) {
-  const showGuest = Boolean(state.linkId || state.linkLoginRequired);
+  const showGuest = hasLinkParam();
   const emailPrefill = authState.session?.user?.email ?? "";
   app.innerHTML = `
     <div class="app">
@@ -329,8 +338,8 @@ function renderLogin(app) {
         <div style="max-width:420px;margin:40px auto;padding:20px;border:1px solid #ddd;border-radius:12px;background:#fff;">
           <h2 style="margin:0 0 6px;">Student Login</h2>
           <p style="margin-top:0;line-height:1.6;">
-            メールとパスワードでログインします。
-            ${showGuest ? `<br/>※このリンクからゲスト受験もできます。` : ""}
+            Log in with email and password.
+            ${showGuest ? `<br/>You can also take this test as a guest from this link.` : ""}
           </p>
 
           <label>Email</label>
@@ -339,9 +348,13 @@ function renderLogin(app) {
           <label>Password</label>
           <input id="password" type="password" style="width:100%;padding:10px;margin:6px 0 12px;" />
 
-          <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button class="btn btn-primary" id="loginBtn" style="flex:1; min-width: 160px;">Log in</button>
-            ${showGuest ? `<button class="btn btn-guest" id="guestBtn" style="flex:1; min-width: 160px;">Take as Guest</button>` : ""}
+          <div>
+            <button class="btn btn-primary" id="loginBtn" style="width:100%; min-width: 160px;">Log in</button>
+            ${
+              showGuest
+                ? `<button class="btn btn-guest" id="guestBtn" style="width:100%; min-width: 160px; margin-top:10px;">Take as Guest</button>`
+                : ""
+            }
           </div>
 
           <button class="nav-btn ghost" id="resetBtn" style="width:100%;margin-top:10px;">Forgot password</button>
@@ -1739,7 +1752,13 @@ function render() {
   if (!state.linkChecked || !authState.checked) return renderLoading(app);
   if (state.linkInvalid) return renderLinkInvalid(app);
   if (authState.session && authState.mustChangePassword) return renderSetPassword(app);
-  if (state.requireLogin || state.linkLoginRequired) return renderLogin(app);
+  if (state.requireLogin || state.linkLoginRequired) {
+    if (state.phase !== "login") {
+      state.phase = "login";
+      saveState();
+    }
+    return renderLogin(app);
+  }
   if (!authState.session && !state.linkId) return renderLogin(app);
 
   const needsQuestions = ["intro", "sectionIntro", "quiz", "result"].includes(state.phase);
