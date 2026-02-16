@@ -84,6 +84,61 @@ body { padding: 0; }
   gap: 8px;
 }
 
+.admin-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 6px 8px;
+  border-radius: 14px;
+}
+
+.admin-nav-group.active {
+  background: #f5f9ff;
+  border: 1px solid #dbe7ff;
+}
+
+.admin-group-toggle {
+  position: relative;
+  justify-content: space-between;
+}
+
+.admin-nav-arrow {
+  margin-left: auto;
+  font-size: 12px;
+  color: #6b7280;
+  transition: transform 0.2s ease;
+}
+
+.admin-nav-arrow.open {
+  transform: rotate(180deg);
+}
+
+.admin-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 22px;
+}
+
+.admin-subnav-item {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #4b5563;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.admin-subnav-item.active {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
 .admin-nav-item {
   appearance: none;
   border: 1px solid transparent;
@@ -117,6 +172,16 @@ body { padding: 0; }
   background: #3b82f6;
 }
 
+.admin-nav-group.active .admin-nav-item.active {
+  background: transparent;
+  border-color: transparent;
+  color: #1f2937;
+}
+
+.admin-nav-group.active .admin-nav-item.active .admin-nav-dot {
+  background: #6b7280;
+}
+
 .admin-sidebar-footer {
   margin-top: auto;
   display: flex;
@@ -129,6 +194,27 @@ body { padding: 0; }
   color: #b00020;
   border: 1px solid rgba(176, 0, 32, 0.2);
   align-self: flex-start;
+}
+
+.admin-subtabs {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+
+.admin-subtab {
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: #fff;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-subtab.active {
+  background: #6aa332;
+  color: #fff;
+  border-color: #6aa332;
 }
 
 .admin-email {

@@ -3,6 +3,7 @@
   --panel: #ffffff;
   --text: #111827;
   --muted: #6b7280;
+  --topbar-height: 72px;
 
   --green: #5b7f2a;
   --green2: #6aa332;
@@ -24,6 +25,10 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   grid-template-rows: auto 1fr auto;
 }
 
+.app.has-topbar {
+  padding-top: var(--topbar-height);
+}
+
 /* Top bar */
 .topbar {
   background: #111;
@@ -33,6 +38,13 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   gap: 16px;
   padding: 10px 14px;
   align-items: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  min-height: var(--topbar-height);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
 }
 
 .topbar-left { display: grid; gap: 6px; }
@@ -315,6 +327,16 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   padding: 12px;
   border-radius: 6px;
   margin: 10px 0;
+}
+
+.focus-warning {
+  background: #fff4e5;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-weight: 700;
+  margin-bottom: 12px;
 }
 
 .question-block{

@@ -145,6 +145,41 @@ function buildAttemptDetailRows(answersJson) {
   return rows;
 }
 
+function buildAttemptDetailRowsFromList(answersJson, questionsList) {
+  const answers = answersJson ?? {};
+  const rows = [];
+  for (const q of questionsList ?? []) {
+    if (q.parts?.length) {
+      const ans = answers[q.id];
+      q.parts.forEach((part, i) => {
+        const chosenIdx = ans?.partAnswers?.[i];
+        const correctIdx = part.answerIndex;
+        rows.push({
+          qid: `${q.id}-${i + 1}`,
+          section: getSectionTitle(q.sectionKey),
+          prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
+          chosen: getPartChoiceText(part, chosenIdx),
+          correct: getPartChoiceText(part, correctIdx),
+          isCorrect: chosenIdx === correctIdx
+        });
+      });
+      continue;
+    }
+
+    const chosenIdx = answers[q.id];
+    const correctIdx = q.answerIndex;
+    rows.push({
+      qid: String(q.id),
+      section: getSectionTitle(q.sectionKey),
+      prompt: getPromptText(q),
+      chosen: getChoiceText(q, chosenIdx),
+      correct: getChoiceText(q, correctIdx),
+      isCorrect: chosenIdx === correctIdx
+    });
+  }
+  return rows;
+}
+
 function buildSectionSummary(rows) {
   const summaryMap = new Map();
   for (const row of rows) {
@@ -176,7 +211,7 @@ function getScoreRate(attempt) {
   return correct / total;
 }
 
-function parseCsvRows(text) {
+function parseSeparatedRows(text, delimiter) {
   const rows = [];
   let row = [];
   let cur = "";
@@ -201,7 +236,7 @@ function parseCsvRows(text) {
       inQuotes = true;
       continue;
     }
-    if (ch === ",") {
+    if (ch === delimiter) {
       row.push(cur);
       cur = "";
       continue;
@@ -219,6 +254,45 @@ function parseCsvRows(text) {
   row.push(cur);
   rows.push(row);
   return rows.filter((r) => r.some((c) => String(c ?? "").trim().length));
+}
+
+function parseCsvRows(text) {
+  return parseSeparatedRows(text, ",");
+}
+
+function detectDelimiter(text) {
+  const firstLine = String(text ?? "").split(/\r?\n/)[0] ?? "";
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  return tabCount > commaCount ? "\t" : ",";
+}
+
+function normalizeHeaderName(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^\uFEFF/, "")
+    .toLowerCase();
+}
+
+function hashSeed(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    h = (h << 5) - h + str.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+function shuffleWithSeed(items, seedStr) {
+  const out = [...items];
+  let seed = hashSeed(seedStr);
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    seed = (seed * 9301 + 49297) % 233280;
+    const rand = seed / 233280;
+    const j = Math.floor(rand * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 function parseListCell(value) {
@@ -358,11 +432,143 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
   return { questions, choices, errors };
 }
 
+function parseDailyCsv(text, defaultTestVersion = "") {
+  const delimiter = detectDelimiter(text);
+  const rows = parseSeparatedRows(text, delimiter);
+  if (rows.length === 0) return { questions: [], choices: [], errors: ["CSV is empty."] };
+  const header = rows[0].map(normalizeHeaderName);
+  const findIdx = (names) => {
+    for (const name of names) {
+      const idx = header.indexOf(normalizeHeaderName(name));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+  const idxTest = findIdx(["testid", "test_id", "test id"]);
+  const idxNo = findIdx(["no.", "no", "number"]);
+  const idxQuestion = findIdx(["question"]);
+  const idxCorrect = findIdx(["correct answer", "correct"]);
+  const idxWrong1 = findIdx(["wrong option 1", "wrong1", "wrong option1"]);
+  const idxWrong2 = findIdx(["wrong option 2", "wrong2", "wrong option2"]);
+  const idxWrong3 = findIdx(["wrong option 3", "wrong3", "wrong option3"]);
+  const idxTarget = findIdx(["target"]);
+  const idxCanDo = findIdx(["can-do", "cando", "can do"]);
+  const idxIllustration = findIdx(["illustration"]);
+  const idxDescription = findIdx(["description"]);
+
+  if (idxQuestion === -1 || idxCorrect === -1) {
+    return { questions: [], choices: [], errors: ["CSV must include Question and Correct Answer."] };
+  }
+
+  const questions = [];
+  const choices = [];
+  const errors = [];
+
+  for (let r = 1; r < rows.length; r += 1) {
+    const row = rows[r];
+    const cell = (idx) => (idx === -1 ? "" : normalizeCsvValue(row[idx]));
+    const testVersion = defaultTestVersion || cell(idxTest);
+    const noValue = cell(idxNo);
+    const questionText = cell(idxQuestion);
+    const correct = cell(idxCorrect);
+    const wrongs = [cell(idxWrong1), cell(idxWrong2), cell(idxWrong3)].filter(Boolean);
+    const target = cell(idxTarget);
+    const canDo = cell(idxCanDo);
+    const illustration = cell(idxIllustration);
+    const description = cell(idxDescription);
+
+    if (!testVersion) {
+      errors.push(`Row ${r + 1}: TestID is required.`);
+      continue;
+    }
+    if (!questionText) {
+      errors.push(`Row ${r + 1}: Question is required.`);
+      continue;
+    }
+    if (!correct) {
+      errors.push(`Row ${r + 1}: Correct Answer is required.`);
+      continue;
+    }
+
+    const orderIndex = Number(noValue);
+    const questionId = `${testVersion}-${noValue || r}`;
+    const items = [
+      ...wrongs.map((text) => ({ text, correct: false })),
+      { text: correct, correct: true }
+    ].filter((i) => i.text);
+    if (items.length === 0) {
+      errors.push(`Row ${r + 1} (${questionId}): choices are required.`);
+      continue;
+    }
+
+    const shuffled = shuffleWithSeed(items, `${testVersion}-${questionId}`);
+    const choicesList = shuffled.map((i) => i.text);
+    const answerIndex = shuffled.findIndex((i) => i.correct);
+
+    if (answerIndex < 0) {
+      errors.push(`Row ${r + 1} (${questionId}): correct answer not found in choices.`);
+      continue;
+    }
+
+    const data = {
+      itemId: questionId,
+      stemKind: illustration ? "image" : null,
+      stemText: null,
+      stemAsset: illustration || null,
+      stemExtra: description || null,
+      boxText: null,
+      choices: choicesList,
+      target: target || null,
+      canDo: canDo || null
+    };
+
+    questions.push({
+      test_version: testVersion,
+      question_id: questionId,
+      section_key: "DAILY",
+      type: "daily",
+      prompt_en: questionText || null,
+      prompt_bn: null,
+      answer_index: answerIndex,
+      order_index: Number.isFinite(orderIndex) ? orderIndex : r,
+      data
+    });
+
+    choicesList.forEach((value, i) => {
+      const isImage = /\.(png|jpe?g|webp)$/i.test(value);
+      choices.push({
+        test_version: testVersion,
+        question_key: questionId,
+        part_index: null,
+        choice_index: i,
+        label: isImage ? null : value,
+        choice_image: isImage ? value : null
+      });
+    });
+  }
+
+  return { questions, choices, errors };
+}
+
 function detectTestVersionFromCsvText(text) {
   const rows = parseCsvRows(text);
   if (rows.length < 2) return "";
   const header = rows[0].map((h) => String(h ?? "").trim().replace(/^\uFEFF/, ""));
   const idx = header.indexOf("test_version");
+  if (idx === -1) return "";
+  for (let i = 1; i < rows.length; i += 1) {
+    const value = String(rows[i]?.[idx] ?? "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function detectDailyTestIdFromCsvText(text) {
+  const delimiter = detectDelimiter(text);
+  const rows = parseSeparatedRows(text, delimiter);
+  if (rows.length < 2) return "";
+  const header = rows[0].map(normalizeHeaderName);
+  const idx = header.indexOf("testid");
   if (idx === -1) return "";
   for (let i = 1; i < rows.length; i += 1) {
     const value = String(rows[i]?.[idx] ?? "").trim();
@@ -476,6 +682,8 @@ export default function AdminPage() {
     testVersion: ""
   });
   const [activeTab, setActiveTab] = useState("students");
+  const [modelSubTab, setModelSubTab] = useState("create");
+  const [dailySubTab, setDailySubTab] = useState("create");
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
   const [students, setStudents] = useState([]);
@@ -513,6 +721,9 @@ export default function AdminPage() {
   const [previewQuestions, setPreviewQuestions] = useState([]);
   const [previewAnswers, setPreviewAnswers] = useState({});
   const [previewMsg, setPreviewMsg] = useState("");
+  const [attemptQuestionsByVersion, setAttemptQuestionsByVersion] = useState({});
+  const [attemptQuestionsLoading, setAttemptQuestionsLoading] = useState(false);
+  const [attemptQuestionsError, setAttemptQuestionsError] = useState("");
   const [assetForm, setAssetForm] = useState({
     test_version: "test_exam",
     type: "mock",
@@ -523,6 +734,25 @@ export default function AdminPage() {
   const [assetCsvFile, setAssetCsvFile] = useState(null);
   const [assetUploadMsg, setAssetUploadMsg] = useState("");
   const [assetImportMsg, setAssetImportMsg] = useState("");
+  const [dailyForm, setDailyForm] = useState({
+    test_version: "",
+    pass_rate: "0.8"
+  });
+  const [dailyFile, setDailyFile] = useState(null);
+  const [dailyFiles, setDailyFiles] = useState([]);
+  const [dailyCsvFile, setDailyCsvFile] = useState(null);
+  const [dailyUploadMsg, setDailyUploadMsg] = useState("");
+  const [dailyImportMsg, setDailyImportMsg] = useState("");
+  const [dailySessionForm, setDailySessionForm] = useState({
+    problem_set_id: "",
+    title: "",
+    starts_at: "",
+    ends_at: "",
+    time_limit_min: "",
+    is_published: true,
+    link_expires_at: ""
+  });
+  const [dailySessionsMsg, setDailySessionsMsg] = useState("");
   function generateTempPassword(length = 10) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
     const bytes = new Uint8Array(length);
@@ -544,10 +774,39 @@ export default function AdminPage() {
     [students, selectedStudentId]
   );
 
-  const selectedAttemptRows = useMemo(
-    () => (selectedAttempt ? buildAttemptDetailRows(selectedAttempt.answers_json) : []),
-    [selectedAttempt]
+  const modelTests = useMemo(() => tests.filter((t) => t.type === "mock"), [tests]);
+  const dailyTests = useMemo(() => tests.filter((t) => t.type === "daily"), [tests]);
+  const modelSessions = useMemo(
+    () => testSessions.filter((s) => modelTests.some((t) => t.version === s.problem_set_id)),
+    [testSessions, modelTests]
   );
+  const dailySessions = useMemo(
+    () => testSessions.filter((s) => dailyTests.some((t) => t.version === s.problem_set_id)),
+    [testSessions, dailyTests]
+  );
+
+  const resultContext = useMemo(() => {
+    if (activeTab === "model" && modelSubTab === "results") {
+      return { type: "mock", title: "Model Test Results", tests: modelTests };
+    }
+    if (activeTab === "daily" && dailySubTab === "results") {
+      return { type: "daily", title: "Daily Test Results", tests: dailyTests };
+    }
+    return null;
+  }, [activeTab, modelSubTab, dailySubTab, modelTests, dailyTests]);
+
+  const selectedAttemptQuestions = useMemo(() => {
+    const version = selectedAttempt?.test_version;
+    return version ? attemptQuestionsByVersion[version] : null;
+  }, [selectedAttempt, attemptQuestionsByVersion]);
+
+  const selectedAttemptRows = useMemo(() => {
+    if (!selectedAttempt) return [];
+    if (selectedAttemptQuestions && selectedAttemptQuestions.length) {
+      return buildAttemptDetailRowsFromList(selectedAttempt.answers_json, selectedAttemptQuestions);
+    }
+    return buildAttemptDetailRows(selectedAttempt.answers_json);
+  }, [selectedAttempt, selectedAttemptQuestions]);
 
   const selectedAttemptSectionSummary = useMemo(
     () => buildSectionSummary(selectedAttemptRows),
@@ -610,7 +869,6 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!session || profile?.role !== "admin") return;
-    runSearch();
     fetchExamLinks();
     fetchStudents();
     fetchTests();
@@ -618,7 +876,46 @@ export default function AdminPage() {
     fetchAssets();
   }, [session, profile]);
 
-  async function runSearch() {
+  useEffect(() => {
+    if (!session || profile?.role !== "admin") return;
+    if (activeTab === "model" && modelSubTab === "results") {
+      runSearch("mock");
+    }
+    if (activeTab === "daily" && dailySubTab === "results") {
+      runSearch("daily");
+    }
+  }, [session, profile, activeTab, modelSubTab, dailySubTab, tests]);
+
+  useEffect(() => {
+    const version = selectedAttempt?.test_version;
+    if (!attemptDetailOpen || !version) return;
+    if (attemptQuestionsByVersion[version]) return;
+    let mounted = true;
+    setAttemptQuestionsLoading(true);
+    setAttemptQuestionsError("");
+    supabase
+      .from("questions")
+      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .eq("test_version", version)
+      .order("order_index", { ascending: true })
+      .then(({ data, error }) => {
+        if (!mounted) return;
+        if (error) {
+          console.error("attempt questions fetch error:", error);
+          setAttemptQuestionsError(error.message);
+          setAttemptQuestionsLoading(false);
+          return;
+        }
+        const list = (data ?? []).map(mapDbQuestion);
+        setAttemptQuestionsByVersion((prev) => ({ ...prev, [version]: list }));
+        setAttemptQuestionsLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [attemptDetailOpen, selectedAttempt, attemptQuestionsByVersion]);
+
+  async function runSearch(testType = "") {
     setLoading(true);
     setMsg("Loading...");
     const { code, name, from, to, limit, testVersion } = filters;
@@ -631,11 +928,29 @@ export default function AdminPage() {
       .order("created_at", { ascending: false })
       .limit(Number(limit || 200));
 
+    let allowedVersions = [];
+    if (testType) {
+      allowedVersions = tests.filter((t) => t.type === testType).map((t) => t.version);
+      if (testVersion && allowedVersions.length && !allowedVersions.includes(testVersion)) {
+        setFilters((s) => ({ ...s, testVersion: "" }));
+      }
+      if (allowedVersions.length) {
+        query = query.in("test_version", allowedVersions);
+      } else {
+        setAttempts([]);
+        setSelectedId(null);
+        setMsg("No tests.");
+        setLoading(false);
+        return;
+      }
+    }
     if (code) query = query.ilike("student_code", `%${code}%`);
     if (name) query = query.ilike("display_name", `%${name}%`);
     if (from) query = query.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
     if (to) query = query.lte("created_at", new Date(`${to}T23:59:59`).toISOString());
-    if (testVersion) query = query.eq("test_version", testVersion);
+    if (testVersion && (!testType || allowedVersions.includes(testVersion))) {
+      query = query.eq("test_version", testVersion);
+    }
 
     const { data, error } = await query;
     if (error) {
@@ -651,10 +966,10 @@ export default function AdminPage() {
     setLoading(false);
   }
 
-  function applyTestFilter(version) {
+  function applyTestFilter(version, testType = "") {
     setFilters((s) => ({ ...s, testVersion: version || "" }));
     setSelectedId(null);
-    setTimeout(() => runSearch(), 0);
+    setTimeout(() => runSearch(testType), 0);
   }
 
   async function fetchExamLinks() {
@@ -775,8 +1090,13 @@ export default function AdminPage() {
         question_count: counts[t.version] ?? 0
       }));
       setTests(withCounts);
-      if (withCounts.length && !testSessionForm.problem_set_id) {
-        setTestSessionForm((s) => ({ ...s, problem_set_id: withCounts[0].version }));
+      const firstModel = withCounts.find((t) => t.type === "mock");
+      const firstDaily = withCounts.find((t) => t.type === "daily");
+      if (firstModel && !testSessionForm.problem_set_id) {
+        setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
+      }
+      if (firstDaily && !dailySessionForm.problem_set_id) {
+        setDailySessionForm((s) => ({ ...s, problem_set_id: firstDaily.version }));
       }
       setTestsMsg(list.length ? "" : "No tests.");
       return;
@@ -786,8 +1106,13 @@ export default function AdminPage() {
       question_count: t.questions?.[0]?.count ?? 0
     }));
     setTests(withCounts);
-    if (withCounts.length && !testSessionForm.problem_set_id) {
-      setTestSessionForm((s) => ({ ...s, problem_set_id: withCounts[0].version }));
+    const firstModel = withCounts.find((t) => t.type === "mock");
+    const firstDaily = withCounts.find((t) => t.type === "daily");
+    if (firstModel && !testSessionForm.problem_set_id) {
+      setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
+    }
+    if (firstDaily && !dailySessionForm.problem_set_id) {
+      setDailySessionForm((s) => ({ ...s, problem_set_id: firstDaily.version }));
     }
     setTestsMsg(list.length ? "" : "No tests.");
   }
@@ -857,6 +1182,54 @@ export default function AdminPage() {
     }
     setTestSessionsMsg("Created (session + link).");
     setTestSessionForm((s) => ({ ...s, title: "" }));
+    fetchTestSessions();
+    fetchExamLinks();
+  }
+
+  async function createDailySession() {
+    setDailySessionsMsg("");
+    const problemSetId = dailySessionForm.problem_set_id.trim();
+    const title = dailySessionForm.title.trim();
+    const linkExpiresAt = dailySessionForm.link_expires_at;
+    if (!problemSetId) {
+      setDailySessionsMsg("Problem Set ID is required.");
+      return;
+    }
+    if (!title) {
+      setDailySessionsMsg("Title is required.");
+      return;
+    }
+    if (!linkExpiresAt) {
+      setDailySessionsMsg("Link Expires At is required.");
+      return;
+    }
+    const payload = {
+      problem_set_id: problemSetId,
+      title,
+      starts_at: dailySessionForm.starts_at ? new Date(dailySessionForm.starts_at).toISOString() : null,
+      ends_at: dailySessionForm.ends_at ? new Date(dailySessionForm.ends_at).toISOString() : null,
+      time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
+      is_published: Boolean(dailySessionForm.is_published)
+    };
+    const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
+    if (error || !created?.id) {
+      console.error("daily test_sessions insert error:", error);
+      setDailySessionsMsg(`Create failed: ${error.message}`);
+      return;
+    }
+    const { error: linkError } = await supabase.from("exam_links").insert({
+      test_session_id: created.id,
+      test_version: problemSetId,
+      expires_at: new Date(linkExpiresAt).toISOString()
+    });
+    if (linkError) {
+      console.error("daily exam_links insert error:", linkError);
+      setDailySessionsMsg(`Session created but link failed: ${linkError.message}`);
+      fetchTestSessions();
+      return;
+    }
+    setDailySessionsMsg("Created (session + link).");
+    setDailySessionForm((s) => ({ ...s, title: "" }));
     fetchTestSessions();
     fetchExamLinks();
   }
@@ -1376,6 +1749,254 @@ export default function AdminPage() {
     setAssetCsvFile(null);
   }
 
+  async function uploadDailyAssets() {
+    setDailyUploadMsg("");
+    const singleFile = dailyFile;
+    const folderFiles = dailyFiles || [];
+    let testVersion = dailyForm.test_version.trim();
+    const passRate = Number(dailyForm.pass_rate);
+    const type = "daily";
+
+    if (!testVersion && dailyCsvFile) {
+      const csvText = await dailyCsvFile.text();
+      const detectedVersion = detectDailyTestIdFromCsvText(csvText);
+      if (detectedVersion && detectedVersion !== testVersion) {
+        testVersion = detectedVersion;
+        setDailyForm((s) => ({ ...s, test_version: detectedVersion }));
+      }
+    }
+
+    if (!singleFile && folderFiles.length === 0) {
+      setDailyUploadMsg("File or folder is required.");
+      return;
+    }
+    if (!testVersion) {
+      setDailyUploadMsg("TestID is required.");
+      return;
+    }
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setDailyUploadMsg("pass_rate must be between 0 and 1.");
+      return;
+    }
+
+    const files = [];
+    if (singleFile) files.push(singleFile);
+    files.push(...folderFiles);
+    if (dailyCsvFile && !files.includes(dailyCsvFile)) files.unshift(dailyCsvFile);
+    const isCsvLike = (name) => {
+      const lower = String(name ?? "").toLowerCase();
+      return lower.endsWith(".csv") || lower.endsWith(".tsv");
+    };
+    if (singleFile && isCsvLike(singleFile.name)) {
+      setDailyCsvFile(singleFile);
+    }
+    const hasCsv =
+      (dailyCsvFile && isCsvLike(dailyCsvFile.name)) ||
+      (singleFile && isCsvLike(singleFile.name)) ||
+      files.some((f) => isCsvLike(f.name));
+    if (!hasCsv) {
+      setDailyUploadMsg("CSV file is required for Upload & Register Daily Test.");
+      return;
+    }
+
+    setDailyUploadMsg("Uploading...");
+    const ensure = await ensureTestRecord(testVersion, testVersion, type, passRate);
+    if (!ensure.ok) {
+      setDailyUploadMsg(ensure.message);
+      return;
+    }
+
+    let ok = 0;
+    let ng = 0;
+    for (const file of files) {
+      const { error } = await uploadSingleAsset(file, testVersion, type);
+      if (error) {
+        ng += 1;
+        console.error("daily asset upload error:", error);
+      } else {
+        ok += 1;
+      }
+      setDailyUploadMsg(`Uploading... ${ok + ng}/${files.length}`);
+    }
+
+    setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
+    fetchTests();
+    fetchAssets();
+
+    await importDailyQuestionsFromCsv();
+
+    setDailyFile(null);
+    setDailyFiles([]);
+  }
+
+  async function importDailyQuestionsFromCsv() {
+    setDailyImportMsg("");
+    const file = dailyCsvFile || dailyFile;
+    const testVersion = dailyForm.test_version.trim();
+    const type = "daily";
+    const passRate = Number(dailyForm.pass_rate);
+
+    if (!file) {
+      setDailyImportMsg("CSV file is required.");
+      return;
+    }
+    const isCsvLike = (name) => {
+      const lower = String(name ?? "").toLowerCase();
+      return lower.endsWith(".csv") || lower.endsWith(".tsv");
+    };
+    if (!isCsvLike(file.name)) {
+      setDailyImportMsg("CSV file is required.");
+      return;
+    }
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setDailyImportMsg("pass_rate must be between 0 and 1.");
+      return;
+    }
+
+    setDailyImportMsg("Parsing...");
+    const text = await file.text();
+    const { questions, choices, errors } = parseDailyCsv(text, testVersion);
+    if (errors.length) {
+      setDailyImportMsg(`CSV errors:\n${errors.slice(0, 5).join("\n")}`);
+      return;
+    }
+    if (questions.length === 0) {
+      setDailyImportMsg("No questions found.");
+      return;
+    }
+    const versionSet = new Set(questions.map((q) => q.test_version));
+    if (versionSet.size > 1) {
+      setDailyImportMsg("Multiple TestID values detected. Split CSV per TestID.");
+      return;
+    }
+    const resolvedVersion = Array.from(versionSet)[0] || testVersion;
+    if (resolvedVersion && resolvedVersion !== testVersion) {
+      setDailyForm((s) => ({ ...s, test_version: resolvedVersion }));
+    }
+    if (!resolvedVersion) {
+      setDailyImportMsg("TestID is required (either in form or CSV).");
+      return;
+    }
+
+    setDailyImportMsg("Resolving assets...");
+    const { data: assetRows, error: assetErr } = await supabase
+      .from("test_assets")
+      .select("path, original_name")
+      .eq("test_version", resolvedVersion);
+    if (assetErr) {
+      console.error("daily assets fetch error:", assetErr);
+      setDailyImportMsg(`Asset lookup failed: ${assetErr.message}`);
+      return;
+    }
+    const assetMap = {};
+    const baseUrl = `${supabaseUrl}/storage/v1/object/public/test-assets/`;
+    for (const row of assetRows ?? []) {
+      const name = row.original_name || row.path?.split("/").pop();
+      if (name) assetMap[name] = `${baseUrl}${row.path}`;
+    }
+    const { missing, invalid } = validateAssetRefs(questions, choices, assetMap);
+    if (invalid.length) {
+      setDailyImportMsg(`Invalid asset paths (use filename only):\n${invalid.slice(0, 5).join("\n")}`);
+      return;
+    }
+    if (missing.length) {
+      setDailyImportMsg(`Missing assets (upload first):\n${missing.slice(0, 5).join("\n")}`);
+      return;
+    }
+    applyAssetMap(questions, choices, assetMap);
+
+    setDailyImportMsg("Upserting tests...");
+    const ensure = await ensureTestRecord(resolvedVersion, resolvedVersion, type, passRate);
+    if (!ensure.ok) {
+      setDailyImportMsg(ensure.message);
+      return;
+    }
+
+    const questionIds = questions.map((q) => q.question_id);
+    if (questionIds.length) {
+      const notIn = `(${questionIds.map((id) => `"${id}"`).join(",")})`;
+      const { error: cleanupErr } = await supabase
+        .from("questions")
+        .delete()
+        .eq("test_version", resolvedVersion)
+        .not("question_id", "in", notIn);
+      if (cleanupErr) {
+        console.error("daily questions cleanup error:", cleanupErr);
+        setDailyImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+        return;
+      }
+    } else {
+      const { error: cleanupErr } = await supabase
+        .from("questions")
+        .delete()
+        .eq("test_version", resolvedVersion);
+      if (cleanupErr) {
+        console.error("daily questions cleanup error:", cleanupErr);
+        setDailyImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+        return;
+      }
+    }
+
+    setDailyImportMsg("Upserting questions...");
+    const { error: qError } = await supabase.from("questions").upsert(questions, {
+      onConflict: "test_version,question_id"
+    });
+    if (qError) {
+      console.error("daily questions upsert error:", qError);
+      setDailyImportMsg(`Question upsert failed: ${qError.message}`);
+      return;
+    }
+
+    const { data: qRows, error: qFetchErr } = await supabase
+      .from("questions")
+      .select("id, question_id")
+      .eq("test_version", resolvedVersion)
+      .in("question_id", questionIds);
+    if (qFetchErr) {
+      console.error("daily questions fetch error:", qFetchErr);
+      setDailyImportMsg(`Question fetch failed: ${qFetchErr.message}`);
+      return;
+    }
+
+    const idMap = {};
+    for (const row of qRows ?? []) {
+      idMap[row.question_id] = row.id;
+    }
+
+    const choiceRows = choices
+      .map((c) => ({
+        question_id: idMap[c.question_key],
+        part_index: c.part_index,
+        choice_index: c.choice_index,
+        label: c.label,
+        choice_image: c.choice_image
+      }))
+      .filter((c) => c.question_id);
+
+    const qUuidList = Object.values(idMap);
+    if (qUuidList.length) {
+      const { error: delErr } = await supabase.from("choices").delete().in("question_id", qUuidList);
+      if (delErr) {
+        console.error("daily choices delete error:", delErr);
+        setDailyImportMsg(`Choice cleanup failed: ${delErr.message}`);
+        return;
+      }
+    }
+
+    if (choiceRows.length) {
+      const { error: cErr } = await supabase.from("choices").insert(choiceRows);
+      if (cErr) {
+        console.error("daily choices insert error:", cErr);
+        setDailyImportMsg(`Choice insert failed: ${cErr.message}`);
+        return;
+      }
+    }
+
+    setDailyImportMsg(`Imported ${questions.length} questions / ${choiceRows.length} choices.`);
+    fetchTests();
+    setDailyCsvFile(null);
+  }
+
   async function handleCsvFile(file) {
     setCsvMsg("");
     if (!file) return;
@@ -1457,7 +2078,26 @@ export default function AdminPage() {
     downloadText(`quiz_attempts_summary_${Date.now()}.csv`, toCsv(rows), "text/csv");
   }
 
-  function exportDetailCsv(list) {
+  async function exportDetailCsv(list) {
+    const versions = Array.from(new Set((list ?? []).map((a) => a.test_version).filter(Boolean)));
+    let questionsByVersion = {};
+    if (versions.length) {
+      const { data, error } = await supabase
+        .from("questions")
+        .select("test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+        .in("test_version", versions);
+      if (error) {
+        console.error("export detail questions fetch error:", error);
+      } else {
+        for (const row of data ?? []) {
+          const version = row.test_version;
+          if (!version) continue;
+          if (!questionsByVersion[version]) questionsByVersion[version] = [];
+          questionsByVersion[version].push(mapDbQuestion(row));
+        }
+      }
+    }
+
     const rows = [
       [
         "attempt_id",
@@ -1474,7 +2114,10 @@ export default function AdminPage() {
       ]
     ];
     for (const a of list) {
-      const details = buildAttemptDetailRows(a.answers_json);
+      const questionsList = questionsByVersion[a.test_version] || null;
+      const details = questionsList && questionsList.length
+        ? buildAttemptDetailRowsFromList(a.answers_json, questionsList)
+        : buildAttemptDetailRows(a.answers_json);
       for (const d of details) {
         rows.push([
           a.id,
@@ -1615,20 +2258,78 @@ export default function AdminPage() {
             <span className="admin-nav-dot" />
             Student List
           </button>
-          <button
-            className={`admin-nav-item ${activeTab === "tests" ? "active" : ""}`}
-            onClick={() => setActiveTab("tests")}
-          >
-            <span className="admin-nav-dot" />
-            Create Test
-          </button>
-          <button
-            className={`admin-nav-item ${activeTab === "results" ? "active" : ""}`}
-            onClick={() => setActiveTab("results")}
-          >
-            <span className="admin-nav-dot" />
-            Test Results
-          </button>
+
+          <div className={`admin-nav-group ${activeTab === "model" ? "active" : ""}`}>
+            <button
+              className={`admin-nav-item admin-group-toggle ${activeTab === "model" ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("model");
+                setModelSubTab("create");
+              }}
+            >
+              <span className="admin-nav-dot" />
+              Model Test
+              <span className={`admin-nav-arrow ${activeTab === "model" ? "open" : ""}`}>▾</span>
+            </button>
+            {activeTab === "model" ? (
+              <div className="admin-subnav">
+                <button
+                  className={`admin-subnav-item ${modelSubTab === "create" ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveTab("model");
+                    setModelSubTab("create");
+                  }}
+                >
+                  Create Tests
+                </button>
+                <button
+                  className={`admin-subnav-item ${modelSubTab === "results" ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveTab("model");
+                    setModelSubTab("results");
+                  }}
+                >
+                  Results
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          <div className={`admin-nav-group ${activeTab === "daily" ? "active" : ""}`}>
+            <button
+              className={`admin-nav-item admin-group-toggle ${activeTab === "daily" ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("daily");
+                setDailySubTab("create");
+              }}
+            >
+              <span className="admin-nav-dot" />
+              Daily Test
+              <span className={`admin-nav-arrow ${activeTab === "daily" ? "open" : ""}`}>▾</span>
+            </button>
+            {activeTab === "daily" ? (
+              <div className="admin-subnav">
+                <button
+                  className={`admin-subnav-item ${dailySubTab === "create" ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveTab("daily");
+                    setDailySubTab("create");
+                  }}
+                >
+                  Create Tests
+                </button>
+                <button
+                  className={`admin-subnav-item ${dailySubTab === "results" ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveTab("daily");
+                    setDailySubTab("results");
+                  }}
+                >
+                  Results
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
         <div className="admin-sidebar-footer">
           <div className="admin-email">{session.user.email}</div>
@@ -1846,7 +2547,9 @@ export default function AdminPage() {
         </div>
         ) : null}
 
-        {activeTab === "tests" ? (
+        {activeTab === "model" ? (
+        <>
+        {modelSubTab === "create" ? (
         <>
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
@@ -1872,8 +2575,8 @@ export default function AdminPage() {
                 value={testSessionForm.problem_set_id}
                 onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
               >
-                {tests.length ? (
-                  tests.map((t) => (
+                {modelTests.length ? (
+                  modelTests.map((t) => (
                     <option key={`ps-${t.version}`} value={t.version}>
                       {t.version}
                     </option>
@@ -1963,7 +2666,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {testSessions.map((t) => (
+                {modelSessions.map((t) => (
                   <tr key={t.id}>
                     <td>{formatDateTime(t.created_at)}</td>
                     <td>{t.title ?? ""}</td>
@@ -2020,7 +2723,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {tests.map((t) => (
+                {modelTests.map((t) => (
                   <tr key={t.id} onClick={() => openPreview(t.version)}>
                     <td>{formatDateTime(t.created_at)}</td>
                     <td>{t.type ?? ""}</td>
@@ -2186,147 +2889,349 @@ export default function AdminPage() {
             </pre>
           ) : null}
 
-          <div className="admin-msg">{assetsMsg}</div>
+        <div className="admin-msg">{assetsMsg}</div>
         </div>
-
-        {previewOpen ? (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.35)",
-              zIndex: 1000,
-              padding: 16,
-              overflow: "auto",
-            }}
-          >
-            <div className="admin-panel" style={{ padding: 12, maxWidth: 1100, margin: "0 auto" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <div>
-                  <div className="admin-title">Preview: {previewTest}</div>
-                  <div className="admin-help">正解の選択肢を色で表示します。</div>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn" onClick={closePreview}>Exit Preview</button>
-                  <button className="btn" onClick={() => deleteTest(previewTest)}>Delete Test</button>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <div className="admin-help">
-                  Total: <b>{previewQuestions.length}</b>
-                </div>
-                {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
-                {!previewMsg && previewQuestions.length === 0 ? (
-                  <div className="admin-help" style={{ marginTop: 6 }}>
-                    No questions. Upload & Register Problem SetでCSVを取り込むか、CSVの`test_version`がこの問題セットと一致しているか確認してください。
-                  </div>
-                ) : null}
-              </div>
-
-              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
-                {previewQuestions.map((q, idx) => {
-                  const prompt = q.promptEn || q.promptBn || "";
-                  const choices = q.choices ?? q.choicesJa ?? [];
-                  const stemKind = q.stemKind || "";
-                  const stemText = q.stemText;
-                  const stemExtra = q.stemExtra;
-                  const stemAsset = q.stemAsset;
-                  const boxText = q.boxText;
-                  const isImageStem = ["image", "passage_image", "table_image"].includes(stemKind);
-                  const isAudioStem = stemKind === "audio";
-                  const shouldShowImage = isImageStem || (!stemKind && isImageAsset(stemAsset));
-                  const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
-                  const stemLines = splitStemLines(stemExtra);
-
-                  const renderChoices = () => (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-                      {choices.map((choice, i) => {
-                        const isCorrect = q.answerIndex === i;
-                        const isImage = isImageAsset(choice);
-                        return (
-                          <div
-                            key={`c-${i}`}
-                            className="btn"
-                            style={{
-                              border: isCorrect ? "2px solid #1a7f37" : "1px solid #ddd",
-                              background: isCorrect ? "#e7f7ee" : "#fff",
-                              padding: 8,
-                            }}
-                          >
-                            {isImage ? (
-                              <img src={choice} alt="choice" style={{ maxWidth: "100%" }} />
-                            ) : (
-                              choice
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-
-                  return (
-                    <div key={`${q.id}-${idx}`} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
-                      <div style={{ fontWeight: 700 }}>
-                        {q.id} {q.sectionKey ? `(${q.sectionKey})` : ""}
-                      </div>
-                      {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
-                      {stemText ? (
-                        <div
-                          style={{ marginTop: 6 }}
-                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
-                        />
-                      ) : null}
-                      {stemLines.length ? (
-                        <div style={{ marginTop: 6 }}>
-                          {stemLines.map((line, i2) => (
-                            <div
-                              key={`line-${i2}`}
-                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(line) }}
-                            />
-                          ))}
-                        </div>
-                      ) : null}
-                      {boxText ? (
-                        <div
-                          className="boxed"
-                          style={{ marginTop: 8 }}
-                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(boxText) }}
-                        />
-                      ) : null}
-                      {shouldShowImage && stemAsset ? (
-                        <img src={stemAsset} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} />
-                      ) : null}
-                      {shouldShowAudio && stemAsset ? (
-                        <audio controls src={stemAsset} style={{ marginTop: 8, width: "100%" }} />
-                      ) : null}
-
-                      <div style={{ marginTop: 10 }}>
-                        {choices.length ? renderChoices() : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+        </>
         ) : null}
         </>
         ) : null}
 
-        {activeTab === "results" ? (
+        {activeTab === "daily" ? (
+        <>
+        {dailySubTab === "create" ? (
+        <>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Daily Test Sessions</div>
+              <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
+            </div>
+            <button
+              className="btn"
+              onClick={() => {
+                fetchTestSessions();
+                fetchExamLinks();
+              }}
+            >
+              Refresh Sessions
+            </button>
+          </div>
+
+          <div className="admin-form" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label>Problem Set</label>
+              <select
+                value={dailySessionForm.problem_set_id}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
+              >
+                {dailyTests.length ? (
+                  dailyTests.map((t) => (
+                    <option key={`daily-ps-${t.version}`} value={t.version}>
+                      {t.version}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No daily tests</option>
+                )}
+              </select>
+            </div>
+            <div className="field">
+              <label>Title</label>
+              <input
+                value={dailySessionForm.title}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                placeholder="Daily Test"
+              />
+            </div>
+            <div className="field small">
+              <label>Starts At</label>
+              <input
+                type="datetime-local"
+                value={dailySessionForm.starts_at}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Ends At</label>
+              <input
+                type="datetime-local"
+                value={dailySessionForm.ends_at}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Link Expires At</label>
+              <input
+                type="datetime-local"
+                value={dailySessionForm.link_expires_at}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, link_expires_at: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Time Limit (min)</label>
+              <input
+                value={dailySessionForm.time_limit_min}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                placeholder="10"
+              />
+            </div>
+            <div className="field small">
+              <label>Published</label>
+              <select
+                value={dailySessionForm.is_published ? "yes" : "no"}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, is_published: e.target.value === "yes" }))}
+              >
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn btn-primary" type="button" onClick={createDailySession}>
+                Create Session
+              </button>
+            </div>
+          </div>
+
+          <div className="admin-help" style={{ marginTop: 6 }}>
+            Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Title</th>
+                  <th>Problem Set</th>
+                  <th>Published</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th>Link Expires</th>
+                  <th>Time (min)</th>
+                  <th>Link ID</th>
+                  <th>Action</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailySessions.map((t) => (
+                  <tr key={t.id}>
+                    <td>{formatDateTime(t.created_at)}</td>
+                    <td>{t.title ?? ""}</td>
+                    <td>{t.problem_set_id ?? ""}</td>
+                    <td>{t.is_published ? "Yes" : "No"}</td>
+                    <td>{formatDateTime(t.starts_at)}</td>
+                    <td>{formatDateTime(t.ends_at)}</td>
+                    <td>{formatDateTime(linkBySession[t.id]?.expires_at)}</td>
+                    <td>{t.time_limit_min ?? ""}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{linkBySession[t.id]?.id ?? ""}</td>
+                    <td>
+                      {linkBySession[t.id]?.id ? (
+                        <button className="btn" onClick={() => copyLink(linkBySession[t.id].id)}>Copy URL</button>
+                      ) : (
+                        ""
+                      )}
+                    </td>
+                    <td>
+                      <button className="btn btn-danger" onClick={() => deleteTestSession(t.id)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{dailySessionsMsg}</div>
+          <div className="admin-msg">{linkMsg}</div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Daily Tests</div>
+              <div className="admin-subtitle">Daily Test（CSV/Assets）の一覧です。</div>
+            </div>
+            <button className="btn" onClick={() => fetchTests()}>Refresh Daily Tests</button>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Problem Set ID</th>
+                  <th>Pass Rate</th>
+                  <th>Public</th>
+                  <th>Questions</th>
+                  <th>Preview</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailyTests.map((t) => (
+                  <tr key={t.id} onClick={() => openPreview(t.version)}>
+                    <td>{formatDateTime(t.created_at)}</td>
+                    <td>{t.version ?? ""}</td>
+                    <td>{t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""}</td>
+                    <td>{t.is_public ? "Yes" : "No"}</td>
+                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPreview(t.version);
+                        }}
+                      >
+                        Preview
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-danger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteTest(t.version);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{testsMsg}</div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Daily Test Upload (CSV)</div>
+              <div className="admin-subtitle">Daily Test用CSVとIllustrationをアップロードします。</div>
+            </div>
+            <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
+          </div>
+
+          <div className="admin-form" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label>TestID</label>
+              <input
+                value={dailyForm.test_version}
+                onChange={(e) => setDailyForm((s) => ({ ...s, test_version: e.target.value }))}
+                placeholder="daily_vocab_01"
+              />
+            </div>
+            <div className="field small">
+              <label>Pass Rate</label>
+              <input
+                value={dailyForm.pass_rate}
+                onChange={(e) => setDailyForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                placeholder="0.8"
+              />
+            </div>
+            <div className="field">
+              <label>CSV File (required)</label>
+              <input
+                type="file"
+                accept=".csv,.tsv"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  setDailyFile(file);
+                  if (file && (file.name.toLowerCase().endsWith(".csv") || file.name.toLowerCase().endsWith(".tsv"))) {
+                    setDailyCsvFile(file);
+                    if (!dailyForm.test_version) {
+                      file.text().then((text) => {
+                        const detected = detectDailyTestIdFromCsvText(text);
+                        if (detected) {
+                          setDailyForm((s) => ({ ...s, test_version: detected }));
+                        }
+                      });
+                    }
+                  }
+                }}
+              />
+              {dailyCsvFile ? (
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  CSV ready: {dailyCsvFile.name}
+                </div>
+              ) : null}
+            </div>
+            <div className="field">
+              <label>Folder (PNG)</label>
+              <input
+                type="file"
+                multiple
+                webkitdirectory="true"
+                directory="true"
+                accept=".csv,.tsv,.png,.jpg,.jpeg,.webp"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  setDailyFiles(files);
+                  const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv") || f.name.toLowerCase().endsWith(".tsv"));
+                  if (csvFile) {
+                    setDailyCsvFile(csvFile);
+                    if (!dailyForm.test_version) {
+                      csvFile.text().then((text) => {
+                        const detected = detectDailyTestIdFromCsvText(text);
+                        if (detected) {
+                          setDailyForm((s) => ({ ...s, test_version: detected }));
+                        }
+                      });
+                    }
+                  }
+                }}
+              />
+              {dailyFiles.length ? (
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  Selected: {dailyFiles.length} files
+                </div>
+              ) : null}
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn btn-primary" type="button" onClick={uploadDailyAssets}>
+                Upload & Register Daily Test
+              </button>
+            </div>
+          </div>
+
+          <div className="admin-help" style={{ marginTop: 6 }}>
+            Bucket: <b>test-assets</b> / CSV, PNG
+          </div>
+          <div className="admin-help" style={{ marginTop: 4 }}>
+            CSV header: <code>TestID, No., Question, Correct Answer, Wrong Option 1, Wrong Option 2, Wrong Option 3, Target, Can-do, Illustration, Description</code>
+          </div>
+          <div className="admin-msg">{dailyUploadMsg}</div>
+          {dailyImportMsg ? (
+            <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
+              {dailyImportMsg}
+            </pre>
+          ) : null}
+        </div>
+        </>
+        ) : null}
+        </>
+        ) : null}
+
+        {resultContext ? (
         <>
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div>
-              <div className="admin-title">Test Results</div>
+              <div className="admin-title">{resultContext.title}</div>
               <div className="admin-subtitle">受験結果を検索・詳細表示・CSV出力できます。</div>
             </div>
             <div className="admin-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn" onClick={() => runSearch()}>Refresh</button>
+              <button className="btn" onClick={() => runSearch(resultContext.type)}>Refresh</button>
               <button className="btn" onClick={() => exportSummaryCsv(attempts)}>Export CSV (Summary)</button>
               <button className="btn" onClick={() => exportDetailCsv(attempts)}>Export CSV (Detail)</button>
-              <button className="btn" onClick={() => exportQuizSummaryCsv()}>Export CSV (Quiz Summary)</button>
+              {resultContext.type === "mock" ? (
+                <button className="btn" onClick={() => exportQuizSummaryCsv()}>Export CSV (Quiz Summary)</button>
+              ) : null}
             </div>
           </div>
           {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
@@ -2338,7 +3243,7 @@ export default function AdminPage() {
               <div className="admin-title">Tests</div>
               <div className="admin-subtitle">テストを選ぶと結果を絞り込みます。</div>
             </div>
-            <button className="btn" onClick={() => applyTestFilter("")}>Clear Filter</button>
+            <button className="btn" onClick={() => applyTestFilter("", resultContext.type)}>Clear Filter</button>
           </div>
           {filters.testVersion ? (
             <div className="admin-help" style={{ marginTop: 6 }}>
@@ -2356,8 +3261,8 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {tests.map((t) => (
-                  <tr key={`result-test-${t.id}`} onClick={() => applyTestFilter(t.version)}>
+                {resultContext.tests.map((t) => (
+                  <tr key={`result-test-${t.id}`} onClick={() => applyTestFilter(t.version, resultContext.type)}>
                     <td>{formatDateTime(t.created_at)}</td>
                     <td>{t.version ?? ""}</td>
                     <td>{t.title ?? ""}</td>
@@ -2373,7 +3278,7 @@ export default function AdminPage() {
           className="admin-form"
           onSubmit={(e) => {
             e.preventDefault();
-            runSearch();
+            runSearch(resultContext.type);
           }}
         >
           <div className="field">
@@ -2510,6 +3415,129 @@ export default function AdminPage() {
         ) : null}
           </div>
 
+          {previewOpen ? (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.35)",
+                zIndex: 1000,
+                padding: 16,
+                overflow: "auto",
+              }}
+            >
+              <div className="admin-panel" style={{ padding: 12, maxWidth: 1100, margin: "0 auto" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div>
+                    <div className="admin-title">Preview: {previewTest}</div>
+                    <div className="admin-help">正解の選択肢を色で表示します。</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn" onClick={closePreview}>Exit Preview</button>
+                    <button className="btn" onClick={() => deleteTest(previewTest)}>Delete Test</button>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <div className="admin-help">
+                    Total: <b>{previewQuestions.length}</b>
+                  </div>
+                  {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
+                  {!previewMsg && previewQuestions.length === 0 ? (
+                    <div className="admin-help" style={{ marginTop: 6 }}>
+                      No questions. Upload & Register Problem SetでCSVを取り込むか、CSVの`test_version`がこの問題セットと一致しているか確認してください。
+                    </div>
+                  ) : null}
+                </div>
+
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
+                  {previewQuestions.map((q, idx) => {
+                    const prompt = q.promptEn || q.promptBn || "";
+                    const choices = q.choices ?? q.choicesJa ?? [];
+                    const stemKind = q.stemKind || "";
+                    const stemText = q.stemText;
+                    const stemExtra = q.stemExtra;
+                    const stemAsset = q.stemAsset;
+                    const boxText = q.boxText;
+                    const isImageStem = ["image", "passage_image", "table_image"].includes(stemKind);
+                    const isAudioStem = stemKind === "audio";
+                    const shouldShowImage = isImageStem || (!stemKind && isImageAsset(stemAsset));
+                    const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
+                    const stemLines = splitStemLines(stemExtra);
+
+                    const renderChoices = () => (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
+                        {choices.map((choice, i) => {
+                          const isCorrect = q.answerIndex === i;
+                          const isImage = isImageAsset(choice);
+                          return (
+                            <div
+                              key={`c-${i}`}
+                              className="btn"
+                              style={{
+                                border: isCorrect ? "2px solid #1a7f37" : "1px solid #ddd",
+                                background: isCorrect ? "#e7f7ee" : "#fff",
+                                padding: 8,
+                              }}
+                            >
+                              {isImage ? (
+                                <img src={choice} alt="choice" style={{ maxWidth: "100%" }} />
+                              ) : (
+                                choice
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+
+                    return (
+                      <div key={`${q.id}-${idx}`} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
+                        <div style={{ fontWeight: 700 }}>
+                          {q.id} {q.sectionKey ? `(${q.sectionKey})` : ""}
+                        </div>
+                        {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
+                        {stemText ? (
+                          <div
+                            style={{ marginTop: 6 }}
+                            dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
+                          />
+                        ) : null}
+                        {stemLines.length ? (
+                          <div style={{ marginTop: 6 }}>
+                            {stemLines.map((line, i2) => (
+                              <div
+                                key={`line-${i2}`}
+                                dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(line) }}
+                              />
+                            ))}
+                          </div>
+                        ) : null}
+                        {boxText ? (
+                          <div
+                            className="boxed"
+                            style={{ marginTop: 8 }}
+                            dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(boxText) }}
+                          />
+                        ) : null}
+                        {shouldShowImage && stemAsset ? (
+                          <img src={stemAsset} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} />
+                        ) : null}
+                        {shouldShowAudio && stemAsset ? (
+                          <audio controls src={stemAsset} style={{ marginTop: 8, width: "100%" }} />
+                        ) : null}
+
+                        <div style={{ marginTop: 10 }}>
+                          {choices.length ? renderChoices() : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {attemptDetailOpen && selectedAttempt ? (
             <div
               style={{
@@ -2561,6 +3589,8 @@ export default function AdminPage() {
                     </button>
                   </div>
                 </div>
+                {attemptQuestionsLoading ? <div className="admin-help">Loading questions...</div> : null}
+                {attemptQuestionsError ? <div className="admin-msg">{attemptQuestionsError}</div> : null}
 
                 <div className="admin-title" style={{ marginTop: 12 }}>Overview</div>
                 <div className="admin-table-wrap" style={{ marginTop: 10 }}>

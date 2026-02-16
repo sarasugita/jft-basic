@@ -78,6 +78,8 @@ const defaultState = {
   selectedTestVersion: "",
   selectedTestSessionId: "",
   studentTab: "take",
+  focusWarnings: 0,
+  focusWarningAt: 0,
 };
 
 
@@ -189,6 +191,8 @@ function resetAll() {
   state = { ...defaultState };
   state.testEndAt = null;
   state.requireLogin = true;
+  state.focusWarnings = 0;
+  state.focusWarningAt = 0;
   const url = new URL(window.location.href);
   const linkId = url.searchParams.get("link");
   if (!linkId) {
@@ -212,6 +216,8 @@ function exitToHome() {
   state.attemptSaved = false;
   state.requireLogin = false;
   state.linkLoginRequired = false;
+  state.focusWarnings = 0;
+  state.focusWarningAt = 0;
   saveState();
   render();
 }
@@ -230,7 +236,7 @@ function goIntro() {
 
 function renderLoading(app) {
   app.innerHTML = `
-    <div class="app">
+    <div class="app has-topbar">
       ${topbarHTML({ rightButtonLabel: "Loading", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
         <h1 class="prompt">Loading...</h1>
@@ -547,7 +553,7 @@ function renderLogin(app) {
 
 function renderSetPassword(app) {
   app.innerHTML = `
-    <div class="app">
+    <div class="app has-topbar">
       ${topbarHTML({ rightButtonLabel: "Reset", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
         <div style="max-width:420px;margin:20px auto;padding:20px;border:1px solid #ddd;border-radius:12px;background:#fff;">
@@ -766,6 +772,8 @@ function getCurrentQuestion() {
 function startTestTimer() {
   if (state.testStartAt) return;      // すでに開始してたら何もしない
   state.testStartAt = Date.now();
+  state.focusWarnings = 0;
+  state.focusWarningAt = 0;
   saveState();
 }
 
@@ -980,6 +988,15 @@ function banglaButtonHTML() {
       <button class="lang-btn" id="banglaBtn">
         ${state.showBangla ? "✓ " : ""}Bangla
       </button>
+    </div>
+  `;
+}
+
+function focusWarningHTML() {
+  if (!state.focusWarnings) return "";
+  return `
+    <div class="focus-warning">
+      <b>Warning:</b> You left the exam tab. Count: ${state.focusWarnings}
     </div>
   `;
 }
@@ -1789,7 +1806,7 @@ function renderTestSelect(app) {
 
 function renderLinkInvalid(app) {
   app.innerHTML = `
-    <div class="app">
+    <div class="app has-topbar">
       ${topbarHTML({ rightButtonLabel: "Not started", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
         <h1 class="prompt">Link is invalid / expired</h1>
@@ -1813,13 +1830,13 @@ function renderSectionIntro(app) {
   const questionCount = secQs.reduce((sum, g) => sum + (g.items?.length || 0), 0);
 
   const isFirstSection = state.sectionIndex === 0;
-  const btnLabel = isFirstSection ? "Start" : "Next";
+  const btnLabel = isFirstSection ? "Start Exam (Fullscreen)" : "Next";
   const hintLine = isFirstSection
     ? "When you press Start, the timer begins."
     : "Press Next to continue.";
 
   app.innerHTML = `
-    <div class="app">
+    <div class="app has-topbar">
       ${topbarHTML({
         rightButtonLabel: "Ready",
         rightButtonId: "disabledBtn",
@@ -1827,6 +1844,7 @@ function renderSectionIntro(app) {
       })}
 
       <main class="content" style="margin:12px;">
+        ${focusWarningHTML()}
         <h1 class="prompt section-title">${sec.title}</h1>
 
         <div style="line-height:1.7; margin-top:10px;">
@@ -1848,8 +1866,15 @@ function renderSectionIntro(app) {
 
   document.querySelector("#disabledBtn").disabled = true;
 
-  document.querySelector("#goBtn").addEventListener("click", () => {
-    if (isFirstSection) startTestTimer();   // ←最初だけ開始
+  document.querySelector("#goBtn").addEventListener("click", async () => {
+    if (isFirstSection) {
+      try {
+        await document.documentElement.requestFullscreen?.();
+      } catch (e) {
+        console.warn("fullscreen failed:", e);
+      }
+      startTestTimer();   // ←最初だけ開始
+    }
     state.phase = "quiz";
     saveState();
     render();
@@ -1873,11 +1898,12 @@ function renderQuiz(app) {
   const group = getCurrentQuestion();
 
   app.innerHTML = `
-    <div class="app">
+    <div class="app has-topbar">
       ${topbarHTML({ rightButtonLabel: "Finish Section", rightButtonId: "finishBtn" })}
       <div class="body">
         ${sidebarHTML()}
         <main class="content">
+          ${focusWarningHTML()}
           ${renderQuestionGroupHTML(group)}
         </main>
       </div>
@@ -1925,7 +1951,7 @@ function renderSectionEnd(app) {
   const activeSections = getActiveSections();
 
   app.innerHTML = `
-    <div class="app">
+    <div class="app has-topbar">
       ${topbarHTML({ rightButtonLabel: "Section ended", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
         <h1 class="prompt">${sec.title} — Completed</h1>
@@ -2086,7 +2112,7 @@ function renderResult(app) {
   // saveState();
 
   app.innerHTML = `
-    <div class="app">
+    <div class="app has-topbar">
       ${topbarHTML({ rightButtonLabel: "Finished", rightButtonId: "disabledBtn", hideTimer: true })}
       <main class="result">
         <h1>Result</h1>
@@ -2305,6 +2331,25 @@ supabase.auth.onAuthStateChange(() => {
   fetchTestSessions().finally(render);
 });
 
+function registerFocusWarning() {
+  const bumpWarning = () => {
+    const now = Date.now();
+    if (now - (state.focusWarningAt || 0) < 1000) return;
+    if (!["quiz", "sectionIntro"].includes(state.phase)) return;
+    state.focusWarnings = (state.focusWarnings || 0) + 1;
+    state.focusWarningAt = now;
+    saveState();
+    render();
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) bumpWarning();
+  });
+  window.addEventListener("blur", () => {
+    bumpWarning();
+  });
+}
+
 Promise.all([checkLinkFromUrl(), refreshAuthState()]).finally(render);
 fetchPublicTests().finally(render);
 fetchTestSessions().finally(render);
+registerFocusWarning();

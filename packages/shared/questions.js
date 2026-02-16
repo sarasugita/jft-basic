@@ -5,6 +5,7 @@ export const sections = [
   { key: "CE", title: "Conversation and Expression", timeSec: 5 * 60 },
   { key: "LC", title: "Listening Comprehension", timeSec: 5 * 60 },
   { key: "RC", title: "Reading Comprehension", timeSec: 5 * 60 },
+  { key: "DAILY", title: "Daily Test", timeSec: 5 * 60 },
 ];
 
 // 問題文（英語）だけ、Banglaに切り替えるための翻訳を持たせる

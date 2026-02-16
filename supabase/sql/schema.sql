@@ -10,7 +10,7 @@ create table if not exists public.tests (
   id uuid primary key default gen_random_uuid(),
   version text not null unique, -- Problem Set ID
   title text not null, -- Default title
-  type text not null check (type in ('mock', 'quiz')),
+  type text not null check (type in ('mock', 'quiz', 'daily')),
   pass_rate numeric not null default 0.8,
   is_public boolean not null default true,
   created_at timestamptz not null default now(),
@@ -68,7 +68,7 @@ create unique index if not exists choices_unique_idx
 create table if not exists public.test_assets (
   id uuid primary key default gen_random_uuid(),
   test_version text not null references public.tests(version) on delete cascade,
-  test_type text not null check (test_type in ('mock', 'quiz')),
+  test_type text not null check (test_type in ('mock', 'quiz', 'daily')),
   asset_type text not null,
   path text not null,
   mime_type text,
@@ -106,4 +106,3 @@ alter table public.exam_links
 -- alter table public.attempts
 --   add constraint attempts_test_version_fkey foreign key (test_version)
 --   references public.tests(version) on delete set null;
-
