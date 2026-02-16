@@ -140,6 +140,14 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 .section-title{
   font-weight: 700;
 }
+.test-title{
+  font-weight: 700;
+}
+.form-input.readonly{
+  background: #f3f4f6;
+  color: #111;
+  border: 1px solid var(--border);
+}
 
 .lang-buttons { display: grid; gap: 10px; width: 240px; margin-bottom: 18px; }
 .lang-btn {

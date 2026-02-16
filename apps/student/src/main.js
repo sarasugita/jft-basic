@@ -309,6 +309,7 @@ function getActivePassRate() {
 }
 
 function renderLogin(app) {
+  const showGuest = Boolean(state.linkId || state.linkLoginRequired);
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
@@ -316,7 +317,7 @@ function renderLogin(app) {
           <h2 style="margin:0 0 6px;">Student Login</h2>
           <p style="margin-top:0;line-height:1.6;">
             メールとパスワードでログインします。
-            ${state.linkId ? `<br/>※このリンクからゲスト受験もできます。` : ""}
+            ${showGuest ? `<br/>※このリンクからゲスト受験もできます。` : ""}
           </p>
 
           <label>Email</label>
@@ -327,7 +328,7 @@ function renderLogin(app) {
 
           <div style="display:flex; gap:10px; flex-wrap:wrap;">
             <button class="nav-btn" id="loginBtn" style="flex:1; min-width: 160px;">Log in</button>
-            ${state.linkId ? `<button class="nav-btn ghost" id="guestBtn" style="flex:1; min-width: 160px;">Continue as Guest</button>` : ""}
+            ${showGuest ? `<button class="nav-btn ghost" id="guestBtn" style="flex:1; min-width: 160px;">Take as Guest</button>` : ""}
           </div>
 
           <button class="nav-btn ghost" id="resetBtn" style="width:100%;margin-top:10px;">Forgot password</button>
@@ -377,7 +378,7 @@ function renderLogin(app) {
     msgEl.textContent = "Reset email sent. メールを確認してください。";
   });
 
-  if (state.linkId) {
+  if (showGuest) {
     app.querySelector("#guestBtn")?.addEventListener("click", () => {
       supabase.auth.signOut();
       state.linkLoginRequired = false;
@@ -1099,10 +1100,11 @@ function renderIntro(app) {
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
   const activeSession = testSessionsState.list.find((s) => s.id === activeSessionId);
   const activeTitle = activeSession?.title || activeVersion;
+  const isGuest = !authState.session;
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
-        <h1 class="prompt">Mock Test</h1>
+        <h1 class="prompt test-title">Test: ${escapeHtml(activeTitle)}</h1>
         <div style="line-height:1.7; margin-top:10px;">
           <p>• Sections: ${sections.map(s => `<b>${s.title}</b>`).join(" → ")}</p>
           <p>• Each section has a timer.</p>
@@ -1163,11 +1165,22 @@ function renderIntro(app) {
               `
           }
 
-          <label class="form-label">Name（任意）</label>
-          <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
+          ${
+            isGuest
+              ? `
+                <label class="form-label">Name（任意）</label>
+                <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
 
-          <label class="form-label" style="margin-top:10px;">ID（任意）</label>
-          <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
+                <label class="form-label" style="margin-top:10px;">ID（任意）</label>
+                <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
+              `
+              : `
+                <label class="form-label">Name</label>
+                <div class="form-input readonly">${escapeHtml(state.user?.name ?? "")}</div>
+                <label class="form-label" style="margin-top:10px;">ID</label>
+                <div class="form-input readonly">${escapeHtml(state.user?.id ?? "")}</div>
+              `
+          }
         </div>
 
         <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
@@ -1200,11 +1213,11 @@ function renderIntro(app) {
   }
 
   document.querySelector("#nextBtn").addEventListener("click", () => {
-    // 入力を保存してから次へ
-    const name = document.querySelector("#nameInput").value.trim();
-    const id = document.querySelector("#idInput").value.trim();
-
-    state.user = { name, id };
+    if (isGuest) {
+      const name = document.querySelector("#nameInput").value.trim();
+      const id = document.querySelector("#idInput").value.trim();
+      state.user = { name, id };
+    }
     state.phase = "sectionIntro";
     state.sectionIndex = 0;
     state.questionIndexInSection = 0;
@@ -1227,6 +1240,7 @@ function renderIntro(app) {
 function renderTestSelect(app) {
   const activeVersion = getActiveTestVersion();
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
+  const isGuest = !authState.session;
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
@@ -1282,11 +1296,22 @@ function renderTestSelect(app) {
               : ""
           }
 
-          <label class="form-label" style="margin-top:14px;">Name（任意）</label>
-          <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
+          ${
+            isGuest
+              ? `
+                <label class="form-label" style="margin-top:14px;">Name（任意）</label>
+                <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
 
-          <label class="form-label" style="margin-top:10px;">ID（任意）</label>
-          <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
+                <label class="form-label" style="margin-top:10px;">ID（任意）</label>
+                <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
+              `
+              : `
+                <label class="form-label" style="margin-top:14px;">Name</label>
+                <div class="form-input readonly">${escapeHtml(state.user?.name ?? "")}</div>
+                <label class="form-label" style="margin-top:10px;">ID</label>
+                <div class="form-input readonly">${escapeHtml(state.user?.id ?? "")}</div>
+              `
+          }
         </div>
 
         <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
@@ -1298,16 +1323,17 @@ function renderTestSelect(app) {
   `;
 
   document.querySelector("#startBtn").addEventListener("click", () => {
-    const name = document.querySelector("#nameInput").value.trim();
-    const id = document.querySelector("#idInput").value.trim();
+    if (isGuest) {
+      const name = document.querySelector("#nameInput").value.trim();
+      const id = document.querySelector("#idInput").value.trim();
+      state.user = { name, id };
+    }
     const selected = document.querySelector('input[name="testSelect"]:checked');
     if (selected) {
       state.selectedTestSessionId = selected.value;
       const session = testSessionsState.list.find((s) => s.id === selected.value);
       if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
     }
-
-    state.user = { name, id };
     state.phase = "sectionIntro";
     state.sectionIndex = 0;
     state.questionIndexInSection = 0;
