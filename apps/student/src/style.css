@@ -79,7 +79,7 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   grid-template-columns: 220px 1fr;
   gap: 12px;
   padding: 12px;
-  padding-bottom: 90px;
+  padding-bottom: 24px;
 }
 
 /* Sidebar */
@@ -178,6 +178,14 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 .illustration { max-width: 100%; width: auto; height: auto; }
 .illustration-small{ max-width: 360px; }
 .illustration-wide{ width: 100%; max-width: 760px; }
+.illustration-daily{ max-width: 320px; }
+
+.question-nav {
+  display: flex;
+  gap: 12px;
+  margin: 12px 0 20px;
+  flex-wrap: wrap;
+}
 .placeholder { color: var(--muted); }
 
 .choices { display: grid; gap: 14px; }
@@ -232,7 +240,8 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 }
 .nav-btn.ghost {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.35);
+  border: 1px solid var(--green2);
+  color: var(--green2);
   margin-right: 10px;
 }
 .nav-btn:disabled { opacity: 0.45; cursor: not-allowed; }

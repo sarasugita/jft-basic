@@ -331,7 +331,7 @@ async function fetchPublicTests() {
     testsState.loaded = true;
     return;
   }
-  const list = (data ?? []).filter((t) => t.type === "mock");
+  const list = (data ?? []).filter((t) => t.type === "mock" || t.type === "daily");
   testsState.list = list;
   testsState.loaded = true;
   if (!state.linkId && !state.selectedTestVersion && list.length) {
@@ -377,6 +377,26 @@ function getActiveTestVersion() {
     if (session?.problem_set_id) return session.problem_set_id;
   }
   return state.linkTestVersion || state.selectedTestVersion || TEST_VERSION;
+}
+
+function getActiveTestSession() {
+  const sessionId = state.linkTestSessionId || state.selectedTestSessionId;
+  if (!sessionId) return null;
+  return testSessionsState.list.find((s) => s.id === sessionId) || null;
+}
+
+function getActiveTestTitle() {
+  const session = getActiveTestSession();
+  if (session?.title) return session.title;
+  const version = getActiveTestVersion();
+  const test = testsState.list.find((t) => t.version === version);
+  return test?.title || version || "Test";
+}
+
+function getActiveTestType() {
+  const version = getActiveTestVersion();
+  const test = testsState.list.find((t) => t.version === version);
+  return test?.type || "";
 }
 
 function getActivePassRate() {
@@ -466,7 +486,8 @@ async function fetchQuestionsForDetail(version) {
 }
 
 function renderLogin(app) {
-  const showGuest = hasLinkParam();
+  const isDaily = getActiveTestType() === "daily";
+  const showGuest = hasLinkParam() && testsState.loaded && !isDaily;
   const emailPrefill = authState.session?.user?.email ?? "";
   app.innerHTML = `
     <div class="app">
@@ -942,13 +963,20 @@ async function saveAttemptIfNeeded() {
 }
 
 /** ===== UI helpers ===== */
-function topbarHTML({ rightButtonLabel = "Finish Section", rightButtonId = "finishBtn" } = {}) {
+function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishBtn" } = {}) {
   const sec = getCurrentSection();
   const hideQA =
     state.phase === "intro" ||
     state.phase === "sectionIntro" ||
     state.phase === "result";
   // intro / sectionIntro / result などで「セクション表示を出さない」モード
+
+  const testType = getActiveTestType();
+  const testTitle = getActiveTestTitle();
+  const testLabel =
+    testType === "daily"
+      ? `Daily Test — ${testTitle}`
+      : "Test: Japan Foundation Test for Basic Japanese";
 
   return `
     <header class="topbar">
@@ -962,7 +990,7 @@ function topbarHTML({ rightButtonLabel = "Finish Section", rightButtonId = "fini
                  <div><span class="muted">Section:</span> <b>${sec?.title ?? "—"}</b></div>`
           }
         </div>
-        <div class="topbar-test">Test: Japan Foundation Test for Basic Japanese</div>
+        <div class="topbar-test">${escapeHtml(testLabel)}</div>
       </div>
 
       <div class="topbar-center">
@@ -1076,6 +1104,7 @@ function renderChoicesImages(q, choices) {
 
 function renderStemHTML(q, opts = {}) {
   if (opts.skipStem) return "";
+  const isDaily = getActiveTestType() === "daily";
   const parts = [];
   if (q.stemKind === "dialog") {
     const lines = splitStemLinesPreserveIndent(q.stemExtra || q.stemText || "");
@@ -1113,8 +1142,9 @@ function renderStemHTML(q, opts = {}) {
     const assets = splitAssetList(q.stemAsset);
     const audioAssets = assets.filter((src) => isAudioAssetValue(src));
     const imageAssets = assets.filter((src) => isImageChoiceValue(src));
-    const imgClass =
-      q.sectionKey === "CE"
+    const imgClass = isDaily
+      ? "illustration illustration-daily"
+      : q.sectionKey === "CE"
         ? "illustration illustration-wide"
         : q.sectionKey === "SV"
           ? "illustration illustration-small"
@@ -1137,8 +1167,9 @@ function renderStemHTML(q, opts = {}) {
   }
   if (["image", "passage_image", "table_image"].includes(q.stemKind) && q.stemAsset) {
     const assets = splitAssetList(q.stemAsset);
-    const cls =
-      q.stemKind === "image"
+    const cls = isDaily
+      ? "illustration illustration-daily"
+      : q.stemKind === "image"
         ? q.sectionKey === "CE"
           ? "illustration illustration-wide"
           : q.sectionKey === "SV"
@@ -1161,7 +1192,7 @@ function renderStemHTML(q, opts = {}) {
   if (!q.stemKind && q.stemAsset && isImageChoiceValue(q.stemAsset)) {
     parts.push(`
       <div class="question-area">
-        <img class="illustration" src="${q.stemAsset}" alt="stem" />
+        <img class="${isDaily ? "illustration illustration-daily" : "illustration"}" src="${q.stemAsset}" alt="stem" />
       </div>
     `);
   }
@@ -1298,10 +1329,9 @@ function sidebarHTML() {
 function renderIntro(app) {
   const activeSections = getActiveSections();
   const activeVersion = getActiveTestVersion();
-  const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
-  const activeSession = testSessionsState.list.find((s) => s.id === activeSessionId);
-  const activeTitle = activeSession?.title || activeVersion;
+  const activeTitle = getActiveTestTitle();
   const isGuest = !authState.session;
+  const isDaily = getActiveTestType() === "daily";
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
@@ -1312,19 +1342,15 @@ function renderIntro(app) {
               ? activeSections.map((s) => `<b>${s.title}</b>`).join(" → ")
               : "—"
           }</p>
-          <p>• Each section has a timer.</p>
+          ${isDaily ? "" : `<p>• Each section has a timer.</p>`}
           <p>• Answers are saved automatically.</p>
           ${
             state.linkId
               ? `<p style="margin-top:6px;"><b>Guest link active</b> (expires: ${state.linkExpiresAt ? new Date(state.linkExpiresAt).toLocaleString() : "—"})</p>`
               : ""
           }
-          <p style="margin-top:6px;"><b>Test</b>: ${escapeHtml(activeTitle)}</p>
-          ${
-            authState.session
-              ? `<p style="margin-top:6px;"><b>Logged in</b> (${escapeHtml(authState.session.user.email ?? "")})</p>`
-              : ""
-          }
+          ${isDaily ? "" : `<p style="margin-top:6px;"><b>Test</b>: ${escapeHtml(activeTitle)}</p>`}
+          ${isDaily ? "" : (authState.session ? `<p style="margin-top:6px;"><b>Logged in</b> (${escapeHtml(authState.session.user.email ?? "")})</p>` : "")}
         </div>
 
         <div class="intro-form" style="margin-top:16px; max-width:520px;">
@@ -1373,17 +1399,29 @@ function renderIntro(app) {
           ${
             isGuest
               ? `
-                <label class="form-label">Name（任意）</label>
-                <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
+                ${
+                  isDaily
+                    ? ""
+                    : `
+                      <label class="form-label">Name（任意）</label>
+                      <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
 
-                <label class="form-label" style="margin-top:10px;">ID（任意）</label>
-                <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
+                      <label class="form-label" style="margin-top:10px;">ID（任意）</label>
+                      <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
+                    `
+                }
               `
               : `
-                <label class="form-label">Name</label>
-                <div class="form-input readonly">${escapeHtml(state.user?.name ?? "")}</div>
-                <label class="form-label" style="margin-top:10px;">ID</label>
-                <div class="form-input readonly">${escapeHtml(state.user?.id ?? "")}</div>
+                ${
+                  isDaily
+                    ? ""
+                    : `
+                      <label class="form-label">Name</label>
+                      <div class="form-input readonly">${escapeHtml(state.user?.name ?? "")}</div>
+                      <label class="form-label" style="margin-top:10px;">ID</label>
+                      <div class="form-input readonly">${escapeHtml(state.user?.id ?? "")}</div>
+                    `
+                }
               `
           }
         </div>
@@ -1395,11 +1433,6 @@ function renderIntro(app) {
           <button class="nav-btn ghost" id="resetBtn">Reset</button>
         </div>
       </main>
-
-      <footer class="bottombar">
-        <div class="bottom-left"><button class="icon-btn">⚙️</button><button class="icon-btn">▦</button></div>
-        <div class="bottom-right"></div>
-      </footer>
     </div>
   `;
 
@@ -1856,11 +1889,6 @@ function renderSectionIntro(app) {
           <button class="nav-btn" id="goBtn">${btnLabel}</button>
         </div>
       </main>
-
-      <footer class="bottombar">
-        <div class="bottom-left"><button class="icon-btn">⚙️</button><button class="icon-btn">▦</button></div>
-        <div class="bottom-right"></div>
-      </footer>
     </div>
   `;
 
@@ -1899,21 +1927,18 @@ function renderQuiz(app) {
 
   app.innerHTML = `
     <div class="app has-topbar">
-      ${topbarHTML({ rightButtonLabel: "Finish Section", rightButtonId: "finishBtn" })}
+      ${topbarHTML({ rightButtonLabel: "Finish Test", rightButtonId: "finishBtn" })}
       <div class="body">
         ${sidebarHTML()}
         <main class="content">
           ${focusWarningHTML()}
           ${renderQuestionGroupHTML(group)}
+          <div class="question-nav">
+            <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
+            <button class="nav-btn" id="nextBtn">Next ▶</button>
+          </div>
         </main>
       </div>
-      <footer class="bottombar">
-        <div class="bottom-left"><button class="icon-btn">⚙️</button><button class="icon-btn">▦</button></div>
-        <div class="bottom-right">
-          <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
-          <button class="nav-btn" id="nextBtn">Next ▶</button>
-        </div>
-      </footer>
     </div>
   `;
 
@@ -1962,11 +1987,6 @@ function renderSectionEnd(app) {
           <button class="nav-btn ghost" id="reviewBtn">Review this section</button>
         </div>
       </main>
-
-      <footer class="bottombar">
-        <div class="bottom-left"><button class="icon-btn">⚙️</button><button class="icon-btn">▦</button></div>
-        <div class="bottom-right"></div>
-      </footer>
     </div>
   `;
   document.querySelector("#disabledBtn").disabled = true;
@@ -2187,11 +2207,6 @@ function renderResult(app) {
           </table>
         </div>
       </main>
-
-      <footer class="bottombar">
-        <div class="bottom-left"><button class="icon-btn">⚙️</button><button class="icon-btn">▦</button></div>
-        <div class="bottom-right"></div>
-      </footer>
     </div>
   `;
 
