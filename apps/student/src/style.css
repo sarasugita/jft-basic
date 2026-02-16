@@ -518,6 +518,11 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   border-color: #2f520b;
   color: #fff;
 }
+.btn-guest{
+  background: #ffffff;
+  border-color: #2f520b;
+  color: #2f520b;
+}
 
 .btn-danger {
   background: #b00020; /* 赤っぽく */

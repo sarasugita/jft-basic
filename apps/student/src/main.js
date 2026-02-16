@@ -58,6 +58,7 @@ const defaultState = {
   linkChecked: false,
   linkInvalid: false,
   linkLoginRequired: false,
+  requireLogin: true,
   selectedTestVersion: "",
   selectedTestSessionId: "",
 };
@@ -78,7 +79,12 @@ function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...defaultState };
-    return { ...defaultState, ...JSON.parse(raw) };
+    const loaded = { ...defaultState, ...JSON.parse(raw) };
+    loaded.requireLogin = true;
+    if (!["quiz", "sectionIntro", "result"].includes(loaded.phase)) {
+      loaded.phase = "login";
+    }
+    return loaded;
   } catch {
     return { ...defaultState };
   }
@@ -157,6 +163,7 @@ function getQuestions() {
 function resetAll() {
   state = { ...defaultState };
   state.testEndAt = null;
+  state.requireLogin = true;
   const url = new URL(window.location.href);
   const linkId = url.searchParams.get("link");
   if (!linkId) {
@@ -194,6 +201,9 @@ function renderLoading(app) {
 }
 
 async function refreshAuthState() {
+  if (!["quiz", "sectionIntro", "result"].includes(state.phase)) {
+    state.requireLogin = true;
+  }
   const { data, error } = await supabase.auth.getSession();
   if (error) console.error("getSession error:", error);
   authState.session = data?.session ?? null;
@@ -226,9 +236,11 @@ async function refreshAuthState() {
   }
 
   if (authState.session && state.linkId) {
-    state.linkLoginRequired = false;
-    if (state.phase === "login") state.phase = "intro";
-    saveState();
+    if (state.phase === "login" && !state.requireLogin) {
+      state.linkLoginRequired = false;
+      state.phase = "intro";
+      saveState();
+    }
   }
 
   authState.checked = true;
@@ -310,6 +322,7 @@ function getActivePassRate() {
 
 function renderLogin(app) {
   const showGuest = Boolean(state.linkId || state.linkLoginRequired);
+  const emailPrefill = authState.session?.user?.email ?? "";
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
@@ -321,14 +334,14 @@ function renderLogin(app) {
           </p>
 
           <label>Email</label>
-          <input id="email" type="email" style="width:100%;padding:10px;margin:6px 0 12px;" />
+          <input id="email" type="email" style="width:100%;padding:10px;margin:6px 0 12px;" value="${escapeHtml(emailPrefill)}" />
 
           <label>Password</label>
           <input id="password" type="password" style="width:100%;padding:10px;margin:6px 0 12px;" />
 
           <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button class="nav-btn" id="loginBtn" style="flex:1; min-width: 160px;">Log in</button>
-            ${showGuest ? `<button class="nav-btn ghost" id="guestBtn" style="flex:1; min-width: 160px;">Take as Guest</button>` : ""}
+            <button class="btn btn-primary" id="loginBtn" style="flex:1; min-width: 160px;">Log in</button>
+            ${showGuest ? `<button class="btn btn-guest" id="guestBtn" style="flex:1; min-width: 160px;">Take as Guest</button>` : ""}
           </div>
 
           <button class="nav-btn ghost" id="resetBtn" style="width:100%;margin-top:10px;">Forgot password</button>
@@ -356,6 +369,7 @@ function renderLogin(app) {
       msgEl.textContent = error.message;
       return;
     }
+    state.requireLogin = false;
     state.linkLoginRequired = false;
     state.phase = "intro";
     saveState();
@@ -381,6 +395,7 @@ function renderLogin(app) {
   if (showGuest) {
     app.querySelector("#guestBtn")?.addEventListener("click", () => {
       supabase.auth.signOut();
+      state.requireLogin = false;
       state.linkLoginRequired = false;
       goIntro();
     });
@@ -1104,7 +1119,7 @@ function renderIntro(app) {
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
-        <h1 class="prompt test-title">Test: ${escapeHtml(activeTitle)}</h1>
+        <h1 class="prompt test-title">${escapeHtml(activeTitle)}</h1>
         <div style="line-height:1.7; margin-top:10px;">
           <p>• Sections: ${sections.map(s => `<b>${s.title}</b>`).join(" → ")}</p>
           <p>• Each section has a timer.</p>
@@ -1228,7 +1243,13 @@ function renderIntro(app) {
     render();
   });
 
-  document.querySelector("#signOutBtn")?.addEventListener("click", () => supabase.auth.signOut());
+  document.querySelector("#signOutBtn")?.addEventListener("click", () => {
+    supabase.auth.signOut();
+    state.requireLogin = true;
+    state.phase = "login";
+    saveState();
+    render();
+  });
   document.querySelector("#loginNavBtn")?.addEventListener("click", () => {
     state.phase = "login";
     saveState();
@@ -1344,7 +1365,13 @@ function renderTestSelect(app) {
     render();
   });
 
-  document.querySelector("#signOutBtn")?.addEventListener("click", () => supabase.auth.signOut());
+  document.querySelector("#signOutBtn")?.addEventListener("click", () => {
+    supabase.auth.signOut();
+    state.requireLogin = true;
+    state.phase = "login";
+    saveState();
+    render();
+  });
 }
 
 function renderLinkInvalid(app) {
@@ -1711,8 +1738,8 @@ function render() {
   const app = document.querySelector("#app");
   if (!state.linkChecked || !authState.checked) return renderLoading(app);
   if (state.linkInvalid) return renderLinkInvalid(app);
-  if (state.linkLoginRequired) return renderLogin(app);
   if (authState.session && authState.mustChangePassword) return renderSetPassword(app);
+  if (state.requireLogin || state.linkLoginRequired) return renderLogin(app);
   if (!authState.session && !state.linkId) return renderLogin(app);
 
   const needsQuestions = ["intro", "sectionIntro", "quiz", "result"].includes(state.phase);
@@ -1809,6 +1836,7 @@ async function checkLinkFromUrl() {
     state.linkInvalid = false;
     state.linkChecked = true;
     state.linkLoginRequired = true;
+    state.requireLogin = true;
     state.phase = "login";
     saveState();
   } catch {
