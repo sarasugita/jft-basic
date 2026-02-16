@@ -132,10 +132,13 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 }
 
 .prompt {
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   font-size: 24px;
-  font-weight: 700;
+  font-weight: 400;
   color: #111;
+}
+.section-title{
+  font-weight: 700;
 }
 
 .lang-buttons { display: grid; gap: 10px; width: 240px; margin-bottom: 18px; }
@@ -150,7 +153,10 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 }
 
 .question-area { display: flex; justify-content: center; margin: 8px 0 18px; }
-.illustration { max-width: 260px; height: auto; }
+.question-area.left { justify-content: flex-start; }
+.illustration { max-width: 100%; width: auto; height: auto; }
+.illustration-small{ max-width: 360px; }
+.illustration-wide{ width: 100%; max-width: 760px; }
 .placeholder { color: var(--muted); }
 
 .choices { display: grid; gap: 14px; }
@@ -165,6 +171,9 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 .choice.selected {
   border-color: var(--orange);
   background: var(--orange-soft);
+}
+.choice.jp{
+  font-weight: 700;
 }
 
 /* Bottom bar */
@@ -259,8 +268,18 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 }
 .jp-sentence{
   font-size: 26px;
-  font-weight: 700;
+  font-weight: 400;
   letter-spacing: 0.02em;
+}
+.jp-bold{
+  font-weight: 700;
+}
+.sv-stem{
+  margin-top: 8px;
+}
+.sv-stem .jp-sentence{
+  font-size: 30px;
+  font-weight: 700;
 }
 
 /* underline for kanji part */
@@ -281,6 +300,10 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   padding: 12px;
   border-radius: 6px;
   margin: 10px 0;
+}
+
+.question-block{
+  margin: 14px 0 20px;
 }
 
 .stem-text{
@@ -312,7 +335,18 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   grid-template-columns: 1fr 220px;
   gap: 20px;
   align-items: start;
-  margin: 12px 0 18px;
+  margin: 12px 0 28px;
+}
+.dialog-img{
+  display:flex;
+  flex-direction:column;
+  gap: 10px;
+}
+.dialog-lines{
+  font-size: 20px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  margin-bottom: 28px;
 }
 .dialog-line{
   font-size: 20px;
@@ -652,5 +686,3 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   padding: 6px 4px;
   text-align: center;
 }
-
-

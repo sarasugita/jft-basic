@@ -450,7 +450,6 @@ export default function AdminPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
-  const [linkMsg, setLinkMsg] = useState("");
   const [filters, setFilters] = useState({
     code: "",
     name: "",
@@ -460,10 +459,6 @@ export default function AdminPage() {
   });
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
-  const [linkForm, setLinkForm] = useState({
-    testSessionId: "",
-    expiresAt: ""
-  });
   const [students, setStudents] = useState([]);
   const [studentMsg, setStudentMsg] = useState("");
   const [inviteForm, setInviteForm] = useState({
@@ -478,13 +473,15 @@ export default function AdminPage() {
   const [testsMsg, setTestsMsg] = useState("");
   const [testSessions, setTestSessions] = useState([]);
   const [testSessionsMsg, setTestSessionsMsg] = useState("");
+  const [linkMsg, setLinkMsg] = useState("");
   const [testSessionForm, setTestSessionForm] = useState({
     problem_set_id: "",
     title: "",
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
-    is_published: true
+    is_published: true,
+    link_expires_at: ""
   });
   const [assets, setAssets] = useState([]);
   const [assetsMsg, setAssetsMsg] = useState("");
@@ -496,7 +493,6 @@ export default function AdminPage() {
   const [previewMsg, setPreviewMsg] = useState("");
   const [assetForm, setAssetForm] = useState({
     test_version: "test_exam",
-    title: "",
     type: "mock",
     pass_rate: "0.8"
   });
@@ -520,6 +516,23 @@ export default function AdminPage() {
     () => attempts.find((a) => a.id === selectedId) ?? null,
     [attempts, selectedId]
   );
+
+  const linkBySession = useMemo(() => {
+    const map = {};
+    for (const link of examLinks) {
+      const sid = link.test_session_id;
+      if (!sid) continue;
+      const prev = map[sid];
+      if (!prev) {
+        map[sid] = link;
+        continue;
+      }
+      const prevTime = prev.created_at ? new Date(prev.created_at).getTime() : 0;
+      const curTime = link.created_at ? new Date(link.created_at).getTime() : 0;
+      if (curTime >= prevTime) map[sid] = link;
+    }
+    return map;
+  }, [examLinks]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data, error }) => {
@@ -611,34 +624,6 @@ export default function AdminPage() {
     }
     setExamLinks(data ?? []);
     setLinkMsg(data?.length ? "" : "No links.");
-  }
-
-  async function createExamLink() {
-    setLinkMsg("");
-    if (!linkForm.testSessionId) {
-      setLinkMsg("テストを選択してください。");
-      return;
-    }
-    if (!linkForm.expiresAt) {
-      setLinkMsg("期限（expires_at）を入力してください。");
-      return;
-    }
-    const session = testSessions.find((t) => t.id === linkForm.testSessionId);
-    const problemSetId = session?.problem_set_id || "";
-    const payload = {
-      test_session_id: linkForm.testSessionId,
-      test_version: problemSetId || undefined,
-      expires_at: new Date(linkForm.expiresAt).toISOString()
-    };
-    const { error } = await supabase.from("exam_links").insert(payload);
-    if (error) {
-      console.error("exam_links insert error:", error);
-      setLinkMsg(`Create failed: ${error.message}`);
-      return;
-    }
-    setLinkMsg("Created.");
-    setLinkForm((s) => ({ ...s, expiresAt: "" }));
-    fetchExamLinks();
   }
 
   function getStudentBaseUrl() {
@@ -756,9 +741,6 @@ export default function AdminPage() {
     const list = data ?? [];
     setTestSessions(list);
     setTestSessionsMsg(list.length ? "" : "No test sessions.");
-    if (list.length && !list.find((t) => t.id === linkForm.testSessionId)) {
-      setLinkForm((s) => ({ ...s, testSessionId: list[0].id }));
-    }
     if (list.length && !testSessionForm.problem_set_id) {
       setTestSessionForm((s) => ({ ...s, problem_set_id: list[0].problem_set_id || "" }));
     }
@@ -768,12 +750,17 @@ export default function AdminPage() {
     setTestSessionsMsg("");
     const problemSetId = testSessionForm.problem_set_id.trim();
     const title = testSessionForm.title.trim();
+    const linkExpiresAt = testSessionForm.link_expires_at;
     if (!problemSetId) {
       setTestSessionsMsg("Problem Set ID is required.");
       return;
     }
     if (!title) {
       setTestSessionsMsg("Title is required.");
+      return;
+    }
+    if (!linkExpiresAt) {
+      setTestSessionsMsg("Link Expires At is required.");
       return;
     }
     const payload = {
@@ -784,15 +771,27 @@ export default function AdminPage() {
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
       is_published: Boolean(testSessionForm.is_published)
     };
-    const { error } = await supabase.from("test_sessions").insert(payload);
-    if (error) {
+    const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
+    if (error || !created?.id) {
       console.error("test_sessions insert error:", error);
       setTestSessionsMsg(`Create failed: ${error.message}`);
       return;
     }
-    setTestSessionsMsg("Created.");
+    const { error: linkError } = await supabase.from("exam_links").insert({
+      test_session_id: created.id,
+      test_version: problemSetId,
+      expires_at: new Date(linkExpiresAt).toISOString()
+    });
+    if (linkError) {
+      console.error("exam_links insert error:", linkError);
+      setTestSessionsMsg(`Session created but link failed: ${linkError.message}`);
+      fetchTestSessions();
+      return;
+    }
+    setTestSessionsMsg("Created (session + link).");
     setTestSessionForm((s) => ({ ...s, title: "" }));
     fetchTestSessions();
+    fetchExamLinks();
   }
 
   async function deleteTestSession(id) {
@@ -821,9 +820,6 @@ export default function AdminPage() {
     }
     const existing = (data ?? [])[0] ?? null;
     if (existing) {
-      if (title && existing.title && title !== existing.title) {
-        return { ok: false, message: "Test version already exists with a different title. Use a new version." };
-      }
       const { error: updateError } = await supabase
         .from("tests")
         .update({ pass_rate: passRate, type, updated_at: new Date().toISOString() })
@@ -1062,7 +1058,7 @@ export default function AdminPage() {
     const singleFile = assetFile;
     const folderFiles = assetFiles || [];
     let testVersion = assetForm.test_version.trim();
-    const title = assetForm.title.trim() || testVersion;
+    const title = testVersion;
     const type = assetForm.type;
     const passRate = Number(assetForm.pass_rate);
 
@@ -1139,7 +1135,7 @@ export default function AdminPage() {
     setAssetImportMsg("");
     const file = assetCsvFile || assetFile;
     const testVersion = assetForm.test_version.trim();
-    const title = assetForm.title.trim();
+    const title = "";
     const type = assetForm.type;
     const passRate = Number(assetForm.pass_rate);
 
@@ -1184,7 +1180,7 @@ export default function AdminPage() {
       setAssetImportMsg("test_version is required (either in form or CSV).");
       return;
     }
-    const resolvedTitle = title || resolvedVersion;
+    const resolvedTitle = resolvedVersion;
 
     setAssetImportMsg("Resolving assets...");
     const { data: assetRows, error: assetErr } = await supabase
@@ -1699,7 +1695,15 @@ export default function AdminPage() {
               <div className="admin-title">Test Sessions</div>
               <div className="admin-subtitle">Problem Setから実施テストを作成します。</div>
             </div>
-            <button className="btn" onClick={() => fetchTestSessions()}>Refresh Sessions</button>
+            <button
+              className="btn"
+              onClick={() => {
+                fetchTestSessions();
+                fetchExamLinks();
+              }}
+            >
+              Refresh Sessions
+            </button>
           </div>
 
           <div className="admin-form" style={{ marginTop: 10 }}>
@@ -1712,7 +1716,7 @@ export default function AdminPage() {
                 {tests.length ? (
                   tests.map((t) => (
                     <option key={`ps-${t.version}`} value={t.version}>
-                      {t.title ? `${t.title} (${t.version})` : t.version}
+                      {t.version}
                     </option>
                   ))
                 ) : (
@@ -1745,6 +1749,14 @@ export default function AdminPage() {
               />
             </div>
             <div className="field small">
+              <label>Link Expires At</label>
+              <input
+                type="datetime-local"
+                value={testSessionForm.link_expires_at}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, link_expires_at: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
               <label>Time Limit (min)</label>
               <input
                 value={testSessionForm.time_limit_min}
@@ -1770,6 +1782,10 @@ export default function AdminPage() {
             </div>
           </div>
 
+          <div className="admin-help" style={{ marginTop: 6 }}>
+            Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
+          </div>
+
           <div className="admin-table-wrap" style={{ marginTop: 10 }}>
             <table className="admin-table" style={{ minWidth: 860 }}>
               <thead>
@@ -1780,7 +1796,10 @@ export default function AdminPage() {
                   <th>Published</th>
                   <th>Start</th>
                   <th>End</th>
+                  <th>Link Expires</th>
                   <th>Time (min)</th>
+                  <th>Link ID</th>
+                  <th>Action</th>
                   <th>Delete</th>
                 </tr>
               </thead>
@@ -1793,7 +1812,16 @@ export default function AdminPage() {
                     <td>{t.is_published ? "Yes" : "No"}</td>
                     <td>{formatDateTime(t.starts_at)}</td>
                     <td>{formatDateTime(t.ends_at)}</td>
+                    <td>{formatDateTime(linkBySession[t.id]?.expires_at)}</td>
                     <td>{t.time_limit_min ?? ""}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{linkBySession[t.id]?.id ?? ""}</td>
+                    <td>
+                      {linkBySession[t.id]?.id ? (
+                        <button className="btn" onClick={() => copyLink(linkBySession[t.id].id)}>Copy URL</button>
+                      ) : (
+                        ""
+                      )}
+                    </td>
                     <td>
                       <button className="btn btn-danger" onClick={() => deleteTestSession(t.id)}>
                         Delete
@@ -1805,86 +1833,6 @@ export default function AdminPage() {
             </table>
           </div>
           <div className="admin-msg">{testSessionsMsg}</div>
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
-              <div className="admin-title">Exam Links</div>
-              <div className="admin-subtitle">期限付きの模試リンクを発行します（A: 期限のみ）。</div>
-            </div>
-            <button className="btn" onClick={() => fetchExamLinks()}>Refresh Links</button>
-          </div>
-
-          <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field">
-              <label>Test Session</label>
-              <select
-                value={linkForm.testSessionId}
-                onChange={(e) => setLinkForm((s) => ({ ...s, testSessionId: e.target.value }))}
-              >
-                {testSessions.length ? (
-                  testSessions.map((t) => (
-                    <option key={`link-${t.id}`} value={t.id}>
-                      {t.title} ({t.problem_set_id})
-                    </option>
-                  ))
-                ) : (
-                  <option value="">No sessions</option>
-                )}
-              </select>
-            </div>
-            <div className="field">
-              <label>Expires At</label>
-              <input
-                type="datetime-local"
-                value={linkForm.expiresAt}
-                onChange={(e) => setLinkForm((s) => ({ ...s, expiresAt: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Student Base URL</label>
-              <input value={getStudentBaseUrl()} readOnly />
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button className="btn btn-primary" type="button" onClick={createExamLink}>Create Link</button>
-            </div>
-          </div>
-
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Expires</th>
-                      <th>Test Session</th>
-                  <th>Link ID</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {examLinks.map((l) => {
-                  const expired = l.expires_at && new Date(l.expires_at).getTime() < Date.now();
-                  return (
-                    <tr key={l.id}>
-                      <td>{formatDateTime(l.created_at)}</td>
-                      <td>{formatDateTime(l.expires_at)}{expired ? " (expired)" : ""}</td>
-                      <td>
-                        {l.test_session_id
-                          ? `${testSessions.find((t) => t.id === l.test_session_id)?.title ?? l.test_session_id} (${testSessions.find((t) => t.id === l.test_session_id)?.problem_set_id ?? ""})`
-                          : l.test_version ?? ""}
-                      </td>
-                      <td style={{ whiteSpace: "nowrap" }}>{l.id}</td>
-                      <td>
-                        <button className="btn" onClick={() => copyLink(l.id)}>Copy URL</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
           <div className="admin-msg">{linkMsg}</div>
         </div>
 
@@ -1956,7 +1904,7 @@ export default function AdminPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div className="admin-title">Problem Set Upload (CSV)</div>
-              <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します。</div>
+              <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します（タイトルはTest Sessionで設定）。</div>
             </div>
             <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
           </div>
@@ -1978,14 +1926,6 @@ export default function AdminPage() {
                 value={assetForm.test_version}
                 onChange={(e) => setAssetForm((s) => ({ ...s, test_version: e.target.value }))}
                 placeholder="problem_set_v1"
-              />
-            </div>
-            <div className="field">
-              <label>Title</label>
-              <input
-                value={assetForm.title}
-                onChange={(e) => setAssetForm((s) => ({ ...s, title: e.target.value }))}
-                placeholder="Mock Test v1"
               />
             </div>
             <div className="field small">

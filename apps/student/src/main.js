@@ -3,6 +3,7 @@ import { questions, sections } from "../../../packages/shared/questions.js";
 import { supabase, publicSupabase } from "./supabaseClient";
 
 const STORAGE_KEY = "jft_mock_state_v3";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
 const TEST_VERSION = "test_exam";
@@ -65,6 +66,14 @@ const defaultState = {
 
 let state = loadState();
 
+const legacyQuestionMap = (() => {
+  const map = new Map();
+  for (const q of questions ?? []) {
+    if (q?.id) map.set(q.id, q);
+  }
+  return map;
+})();
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -78,9 +87,9 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function mapDbQuestion(row) {
+function mapDbQuestion(row, version) {
   const data = row.data ?? {};
-  return {
+  const base = {
     id: data.itemId || row.question_id,
     qid: data.qid || null,
     subId: data.subId || null,
@@ -99,6 +108,7 @@ function mapDbQuestion(row) {
     blankStyle: data.blankStyle || null,
     target: data.target || null,
   };
+  return normalizeQuestionAssets(base, version);
 }
 
 async function fetchQuestionsForVersion(version, updatedAt = "") {
@@ -116,7 +126,7 @@ async function fetchQuestionsForVersion(version, updatedAt = "") {
     questionsState.list = [];
     questionsState.error = error.message || "Failed to load questions.";
   } else {
-    questionsState.list = (data ?? []).map(mapDbQuestion);
+    questionsState.list = (data ?? []).map((row) => mapDbQuestion(row, version));
   }
   questionsState.loaded = true;
   questionsState.loading = false;
@@ -446,7 +456,9 @@ function escapeHtml(str) {
 
 function renderUnderlines(text) {
   const escaped = escapeHtml(text ?? "");
-  return escaped.replace(/【(.*?)】/g, '<span class="u">$1</span>');
+  return escaped
+    .replace(/【(.*?)】/g, '<span class="u">$1</span>')
+    .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, '<span class="blank-red"></span>');
 }
 
 function splitStemLines(text) {
@@ -456,12 +468,83 @@ function splitStemLines(text) {
     .filter(Boolean);
 }
 
+function splitStemLinesPreserveIndent(text) {
+  return String(text ?? "")
+    .split(/\r?\n|\|/)
+    .map((s) => s.replace(/\s+$/g, ""))
+    .filter((s) => s.trim().length);
+}
+
 function isImageChoiceValue(value) {
-  return /\.(png|jpe?g|webp)$/i.test(String(value ?? "").trim());
+  return /\.(png|jpe?g|webp)(\?.*)?$/i.test(String(value ?? "").trim());
 }
 
 function isAudioAssetValue(value) {
-  return /\.(mp3|wav|m4a|ogg)$/i.test(String(value ?? "").trim());
+  return /\.(mp3|wav|m4a|ogg)(\?.*)?$/i.test(String(value ?? "").trim());
+}
+
+function splitAssetList(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  if (raw.includes("|") || raw.includes("\n")) {
+    return splitStemLines(raw);
+  }
+  return [raw];
+}
+
+function getAssetBaseUrl(testVersion, assetType) {
+  if (!SUPABASE_URL || !testVersion) return "";
+  const test = testsState.list.find((t) => t.version === testVersion);
+  const type = test?.type || "mock";
+  return `${SUPABASE_URL}/storage/v1/object/public/test-assets/${type}/${testVersion}/${assetType}/`;
+}
+
+function resolveAssetUrl(value, testVersion) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.includes("/")) return raw;
+  const isAudio = /\.(mp3|wav|m4a|ogg)$/i.test(raw);
+  const isImage = /\.(png|jpe?g|webp)$/i.test(raw);
+  if (!isAudio && !isImage) return raw;
+  const assetType = isAudio ? "audio" : "image";
+  const base = getAssetBaseUrl(testVersion, assetType);
+  return base ? `${base}${raw}` : raw;
+}
+
+function normalizeQuestionAssets(q, version) {
+  const next = { ...q };
+  if (next.stemAsset) {
+    const assets = splitAssetList(next.stemAsset).map((v) => resolveAssetUrl(v, version));
+    next.stemAsset = assets.join("|");
+  }
+  if (next.stemKind === "dialog") {
+    const parts = splitAssetList(next.stemAsset);
+    const hasImage = parts.some((p) => isImageChoiceValue(p));
+    if (!hasImage) {
+      const legacy = legacyQuestionMap.get(next.id);
+      const legacyImage = legacy?.image || legacy?.stemImage || null;
+      if (legacyImage) {
+        parts.push(legacyImage);
+        next.stemAsset = parts.filter(Boolean).join("|");
+      }
+    }
+  }
+  if (next.stemKind === "audio") {
+    const parts = splitAssetList(next.stemAsset);
+    const hasImage = parts.some((p) => isImageChoiceValue(p));
+    if (!hasImage) {
+      const legacy = legacyQuestionMap.get(next.id);
+      const legacyImage = legacy?.stemImage || legacy?.image || legacy?.passageImage || null;
+      if (legacyImage) {
+        parts.push(legacyImage);
+        next.stemAsset = parts.filter(Boolean).join("|");
+      }
+    }
+  }
+  if (Array.isArray(next.choices)) {
+    next.choices = next.choices.map((v) => resolveAssetUrl(v, version));
+  }
+  return next;
 }
 
 
@@ -469,9 +552,28 @@ function getCurrentSection() {
   return sections[state.sectionIndex];
 }
 function getSectionQuestions(sectionKey) {
-  return getQuestions()
+  const list = getQuestions()
     .filter((q) => q.sectionKey === sectionKey)
     .sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+  const groups = [];
+  const map = new Map();
+  for (const q of list) {
+    const key = q.qid || q.id;
+    let group = map.get(key);
+    if (!group) {
+      group = { key, items: [], orderIndex: q.orderIndex ?? 0 };
+      map.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(q);
+    if (q.orderIndex != null && q.orderIndex < group.orderIndex) {
+      group.orderIndex = q.orderIndex;
+    }
+  }
+  for (const group of groups) {
+    group.items.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+  }
+  return groups.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
 }
 function getCurrentQuestion() {
   const sec = getCurrentSection();
@@ -698,21 +800,48 @@ function banglaButtonHTML() {
   `;
 }
 
-function promptHTML(q) {
+function promptBoxHTML(q, opts = {}) {
+  const showPrompt = opts.showPrompt !== false;
+  const includeStemInPrompt = Boolean(opts.includeStemInPrompt);
+  const includeBoxTextInPrompt = Boolean(opts.includeBoxTextInPrompt);
   const main = q.promptEn ?? "";
   const sub = q.promptBn ?? "";
-  return `
-    <h1 class="prompt">${main}</h1>
-    ${banglaButtonHTML()}
-    ${state.showBangla ? `<div class="prompt-sub">${sub}</div>` : ``}
-  `;
+  const lines = [];
+  if (showPrompt && main) lines.push(`<div class="prompt">${escapeHtml(main)}</div>`);
+  if (showPrompt && state.showBangla && sub) lines.push(`<div class="prompt-sub">${escapeHtml(sub)}</div>`);
+  if (includeStemInPrompt) {
+    const stemLines = splitStemLines(q.stemText || q.stemExtra || "");
+    if (stemLines.length) {
+      lines.push(
+        `<div class="sv-stem">${stemLines
+          .map((l) => `<div class="jp-sentence">${renderUnderlines(l)}</div>`)
+          .join("")}</div>`
+      );
+    }
+  }
+  if (includeBoxTextInPrompt && q.boxText) {
+    const subPrefix = q.subId && q.subId !== "N/A" ? `(${q.subId}) ` : "";
+    const jpClass = q.sectionKey === "LC" || q.sectionKey === "RC" ? "jp-sentence jp-bold" : "jp-sentence";
+    lines.push(`<div class="${jpClass}">${renderUnderlines(`${subPrefix}${q.boxText}`)}</div>`);
+  }
+  if (!lines.length) return "";
+  return `<div class="blue-box">${lines.join("")}</div>`;
 }
 
 /** ===== Render question blocks by type ===== */
 function getChoices(q) {
-  if (Array.isArray(q.choices)) return q.choices;
-  if (Array.isArray(q.choicesJa)) return q.choicesJa;
-  return [];
+  const raw = Array.isArray(q.choices)
+    ? q.choices
+    : Array.isArray(q.choicesJa)
+      ? q.choicesJa
+      : [];
+  return raw
+    .map((v) => (v == null ? "" : String(v).trim()))
+    .filter((v) => v && v.toUpperCase() !== "N/A");
+}
+
+function isJapaneseText(value) {
+  return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(String(value ?? ""));
 }
 
 function renderChoicesText(q, choices) {
@@ -721,7 +850,8 @@ function renderChoicesText(q, choices) {
     <div class="choices">
       ${choices.map((c, i) => {
         const sel = chosen === i ? "selected" : "";
-        return `<button class="choice ${sel}" data-choice="${i}">${escapeHtml(c)}</button>`;
+        const jp = isJapaneseText(c) ? "jp" : "";
+        return `<button class="choice ${sel} ${jp}" data-choice="${i}" data-qid="${q.id}">${escapeHtml(c)}</button>`;
       }).join("")}
     </div>
   `;
@@ -734,7 +864,7 @@ function renderChoicesImages(q, choices) {
       ${choices.map((src, i) => {
         const sel = chosen === i ? "selected" : "";
         return `
-          <button class="img-choice ${sel}" data-choice="${i}">
+          <button class="img-choice ${sel}" data-choice="${i}" data-qid="${q.id}">
             <img src="${src}" alt="choice ${i + 1}" />
           </button>
         `;
@@ -743,30 +873,80 @@ function renderChoicesImages(q, choices) {
   `;
 }
 
-function renderStemHTML(q) {
+function renderStemHTML(q, opts = {}) {
+  if (opts.skipStem) return "";
   const parts = [];
-  if (q.stemText) {
-    parts.push(`<div class="stem-text">${renderUnderlines(q.stemText)}</div>`);
-  }
-  if (q.stemExtra) {
-    const lines = splitStemLines(q.stemExtra);
-    if (lines.length) {
-      parts.push(
-        `<div class="stem-extra">${lines.map((l) => `<div>${renderUnderlines(l)}</div>`).join("")}</div>`
-      );
+  if (q.stemKind === "dialog") {
+    const lines = splitStemLinesPreserveIndent(q.stemExtra || q.stemText || "");
+    const dialogLines = lines.length
+      ? `<div class="dialog-lines">${lines.map((l) => `<div class="dialog-line">${renderUnderlines(l)}</div>`).join("")}</div>`
+      : "";
+    const assets = splitAssetList(q.stemAsset).filter(Boolean);
+    if (assets.length) {
+      parts.push(`
+        <div class="dialog-row">
+          ${dialogLines}
+          <div class="dialog-img">
+            ${assets.map((src) => `<img src="${src}" alt="dialog" />`).join("")}
+          </div>
+        </div>
+      `);
+    } else if (dialogLines) {
+      parts.push(dialogLines);
+    }
+  } else {
+    if (!opts.skipStemText && q.stemText) {
+      parts.push(`<div class="stem-text">${renderUnderlines(q.stemText)}</div>`);
+    }
+    if (!opts.skipStemExtra && q.stemExtra) {
+      const lines = splitStemLines(q.stemExtra);
+      if (lines.length) {
+        parts.push(
+          `<div class="stem-extra">${lines.map((l) => `<div>${renderUnderlines(l)}</div>`).join("")}</div>`
+        );
+      }
     }
   }
+
   if (q.stemKind === "audio" && q.stemAsset) {
-    parts.push(`
-      <div style="margin:10px 0 12px;">
-        <audio controls preload="auto" src="${q.stemAsset}"></audio>
-      </div>
-    `);
+    const assets = splitAssetList(q.stemAsset);
+    const audioAssets = assets.filter((src) => isAudioAssetValue(src));
+    const imageAssets = assets.filter((src) => isImageChoiceValue(src));
+    const imgClass =
+      q.sectionKey === "CE"
+        ? "illustration illustration-wide"
+        : q.sectionKey === "SV"
+          ? "illustration illustration-small"
+          : "illustration";
+    const imgWrapClass = q.sectionKey === "LC" ? "question-area left" : "question-area";
+    if (audioAssets.length) {
+      parts.push(`
+        <div style="margin:10px 0 12px;">
+          ${audioAssets.map((src) => `<audio controls preload="auto" src="${src}"></audio>`).join("")}
+        </div>
+      `);
+    }
+    if (imageAssets.length) {
+      parts.push(`
+        <div class="${imgWrapClass}">
+          ${imageAssets.map((src) => `<img class="${imgClass}" src="${src}" alt="stem" />`).join("")}
+        </div>
+      `);
+    }
   }
   if (["image", "passage_image", "table_image"].includes(q.stemKind) && q.stemAsset) {
+    const assets = splitAssetList(q.stemAsset);
+    const cls =
+      q.stemKind === "image"
+        ? q.sectionKey === "CE"
+          ? "illustration illustration-wide"
+          : q.sectionKey === "SV"
+            ? "illustration illustration-small"
+            : "illustration"
+        : "passage-img";
     parts.push(`
       <div class="question-area">
-        <img class="illustration" src="${q.stemAsset}" alt="stem" />
+        ${assets.map((src) => `<img class="${cls}" src="${src}" alt="stem" />`).join("")}
       </div>
     `);
   }
@@ -784,25 +964,114 @@ function renderStemHTML(q) {
       </div>
     `);
   }
-  if (q.boxText) {
+  if (!opts.skipBoxText && q.boxText) {
     parts.push(`<div class="boxed">${renderUnderlines(q.boxText)}</div>`);
   }
   return parts.join("");
 }
 
-function questionBodyHTML(q) {
+function questionBodyHTML(q, opts = {}) {
   const choices = getChoices(q);
   const hasImageChoices = choices.length > 0 && choices.every((c) => isImageChoiceValue(c));
   return `
-    ${renderStemHTML(q)}
+    ${renderStemHTML(q, opts)}
     ${choices.length ? (hasImageChoices ? renderChoicesImages(q, choices) : renderChoicesText(q, choices)) : ""}
   `;
+}
+
+function hasSharedPrompt(items) {
+  if (!items.length) return null;
+  const first = items[0];
+  const key = `${first.promptEn ?? ""}|||${first.promptBn ?? ""}`;
+  if (!key.trim()) return null;
+  for (const item of items) {
+    const cur = `${item.promptEn ?? ""}|||${item.promptBn ?? ""}`;
+    if (cur !== key) return null;
+  }
+  return first;
+}
+
+function getSharedStem(items) {
+  if (items.length < 2) return null;
+  const first = items[0];
+  const keys = ["stemKind", "stemText", "stemExtra", "stemAsset"];
+  for (const item of items) {
+    for (const k of keys) {
+      if ((item[k] ?? null) !== (first[k] ?? null)) return null;
+    }
+  }
+  if (!first.stemKind && !first.stemText && !first.stemExtra && !first.stemAsset) return null;
+  return first;
+}
+
+function renderQuestionBlock(q, opts = {}) {
+  const promptBox = promptBoxHTML(q, opts);
+  const body = questionBodyHTML(q, opts);
+  return `<div class="question-block">${promptBox}${body}</div>`;
+}
+
+function renderQuestionGroupHTML(group) {
+  const items = group?.items ?? [];
+  if (!items.length) return `<div class="placeholder">No question</div>`;
+
+  if (items.length === 1) {
+    const q = items[0];
+    const includeStemInPrompt = q.sectionKey === "SV";
+    const includeBoxTextInPrompt = !q.promptEn && Boolean(q.boxText);
+    const promptBox = promptBoxHTML(q, {
+      showPrompt: true,
+      includeStemInPrompt,
+      includeBoxTextInPrompt,
+    });
+    const body = questionBodyHTML(q, {
+      skipStemText: includeStemInPrompt,
+      skipBoxText: includeBoxTextInPrompt,
+    });
+    return `
+      ${promptBox}
+      ${banglaButtonHTML()}
+      <div class="question-block">${body}</div>
+    `;
+  }
+
+  const sharedPrompt = hasSharedPrompt(items);
+  const sharedStem = getSharedStem(items);
+  const blocks = [];
+
+  if (sharedPrompt) {
+    const promptBox = promptBoxHTML(sharedPrompt, { showPrompt: true });
+    if (promptBox) blocks.push(promptBox);
+  }
+  blocks.push(banglaButtonHTML());
+
+  if (sharedStem) {
+    blocks.push(renderStemHTML({ ...sharedStem, boxText: null }, { skipBoxText: true }));
+  }
+
+  items.forEach((q) => {
+    const includeStemInPrompt = q.sectionKey === "SV";
+    const includeBoxTextInPrompt = Boolean(q.boxText);
+    const showPrompt = !sharedPrompt;
+    blocks.push(
+      renderQuestionBlock(q, {
+        showPrompt,
+        includeStemInPrompt,
+        includeBoxTextInPrompt,
+        skipStemText: includeStemInPrompt,
+        skipBoxText: includeBoxTextInPrompt,
+        skipStem: Boolean(sharedStem),
+      })
+    );
+  });
+
+  return blocks.join("");
 }
 
 /** ===== Sidebar ===== */
 function sidebarHTML() {
   const sec = getCurrentSection();
   const secQs = getSectionQuestions(sec.key);
+  const questionCount = secQs.reduce((sum, g) => sum + (g.items?.length || 0), 0);
   return `
     <aside class="sidebar">
       <div class="side-title">intro</div>
@@ -1075,6 +1344,7 @@ function renderLinkInvalid(app) {
 function renderSectionIntro(app) {
   const sec = getCurrentSection();
   const secQs = getSectionQuestions(sec.key);
+  const questionCount = secQs.reduce((sum, g) => sum + (g.items?.length || 0), 0);
 
   const isFirstSection = state.sectionIndex === 0;
   const btnLabel = isFirstSection ? "Start" : "Next";
@@ -1091,10 +1361,10 @@ function renderSectionIntro(app) {
       })}
 
       <main class="content" style="margin:12px;">
-        <h1 class="prompt">${sec.title}</h1>
+        <h1 class="prompt section-title">${sec.title}</h1>
 
         <div style="line-height:1.7; margin-top:10px;">
-          <p>• Questions in this section: <b>${secQs.length}</b></p>
+          <p>• Questions in this section: <b>${questionCount}</b></p>
           <p>• ${hintLine}</p>
         </div>
 
@@ -1134,7 +1404,7 @@ function renderQuiz(app) {
 
   const sec = getCurrentSection();
   const secQs = getSectionQuestions(sec.key);
-  const q = getCurrentQuestion();
+  const group = getCurrentQuestion();
 
   app.innerHTML = `
     <div class="app">
@@ -1142,8 +1412,7 @@ function renderQuiz(app) {
       <div class="body">
         ${sidebarHTML()}
         <main class="content">
-          ${promptHTML(q)}
-          ${questionBodyHTML(q)}
+          ${renderQuestionGroupHTML(group)}
         </main>
       </div>
       <footer class="bottombar">
@@ -1168,10 +1437,12 @@ function renderQuiz(app) {
   document.querySelectorAll("[data-choice]").forEach((btn) => {
     const part = btn.dataset.part;
     const choice = Number(btn.dataset.choice);
+    const qid = btn.dataset.qid || "";
+    if (!qid) return;
     if (part == null) {
-      btn.addEventListener("click", () => setSingleAnswer(q.id, choice));
+      btn.addEventListener("click", () => setSingleAnswer(qid, choice));
     } else {
-      btn.addEventListener("click", () => setPartAnswer(q.id, Number(part), choice));
+      btn.addEventListener("click", () => setPartAnswer(qid, Number(part), choice));
     }
   });
 
