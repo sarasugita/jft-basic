@@ -145,6 +145,21 @@ function buildAttemptDetailRows(answersJson) {
   return rows;
 }
 
+function buildSectionSummary(rows) {
+  const summaryMap = new Map();
+  for (const row of rows) {
+    const key = row.section || "Unknown";
+    const cur = summaryMap.get(key) || { section: key, total: 0, correct: 0 };
+    cur.total += 1;
+    if (row.isCorrect) cur.correct += 1;
+    summaryMap.set(key, cur);
+  }
+  return Array.from(summaryMap.values()).map((s) => ({
+    ...s,
+    rate: s.total ? s.correct / s.total : 0
+  }));
+}
+
 function formatDateTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -448,6 +463,8 @@ export default function AdminPage() {
   const [attempts, setAttempts] = useState([]);
   const [examLinks, setExamLinks] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedAttemptObj, setSelectedAttemptObj] = useState(null);
+  const [attemptDetailOpen, setAttemptDetailOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
   const [filters, setFilters] = useState({
@@ -463,6 +480,9 @@ export default function AdminPage() {
   const [loginMsg, setLoginMsg] = useState("");
   const [students, setStudents] = useState([]);
   const [studentMsg, setStudentMsg] = useState("");
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [studentAttempts, setStudentAttempts] = useState([]);
+  const [studentAttemptsMsg, setStudentAttemptsMsg] = useState("");
   const [inviteForm, setInviteForm] = useState({
     email: "",
     display_name: "",
@@ -514,9 +534,24 @@ export default function AdminPage() {
     return out;
   }
 
-  const selectedAttempt = useMemo(
-    () => attempts.find((a) => a.id === selectedId) ?? null,
-    [attempts, selectedId]
+  const selectedAttempt = useMemo(() => {
+    if (selectedAttemptObj) return selectedAttemptObj;
+    return attempts.find((a) => a.id === selectedId) ?? null;
+  }, [attempts, selectedAttemptObj, selectedId]);
+
+  const selectedStudent = useMemo(
+    () => students.find((s) => s.id === selectedStudentId) ?? null,
+    [students, selectedStudentId]
+  );
+
+  const selectedAttemptRows = useMemo(
+    () => (selectedAttempt ? buildAttemptDetailRows(selectedAttempt.answers_json) : []),
+    [selectedAttempt]
+  );
+
+  const selectedAttemptSectionSummary = useMemo(
+    () => buildSectionSummary(selectedAttemptRows),
+    [selectedAttemptRows]
   );
 
   const linkBySession = useMemo(() => {
@@ -552,6 +587,10 @@ export default function AdminPage() {
       setProfile(null);
       setAttempts([]);
       setSelectedId(null);
+      setSelectedAttemptObj(null);
+      setSelectedStudentId("");
+      setStudentAttempts([]);
+      setStudentAttemptsMsg("");
       return;
     }
     supabase
@@ -667,6 +706,25 @@ export default function AdminPage() {
     const list = (data ?? []).filter((p) => p.role === "student");
     setStudents(list);
     setStudentMsg(list.length ? "" : "No students.");
+  }
+
+  async function fetchStudentAttempts(studentId) {
+    if (!studentId) return;
+    setStudentAttemptsMsg("Loading...");
+    const { data, error } = await supabase
+      .from("attempts")
+      .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
+      .eq("student_id", studentId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      console.error("student attempts fetch error:", error);
+      setStudentAttempts([]);
+      setStudentAttemptsMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    setStudentAttempts(data ?? []);
+    setStudentAttemptsMsg(data?.length ? "" : "No attempts.");
   }
 
   async function fetchTests() {
@@ -942,6 +1000,15 @@ export default function AdminPage() {
     if (selectedId === attemptId) setSelectedId(null);
     setMsg(`Deleted: ${attemptId}`);
     runSearch();
+  }
+
+  function getAttemptTitle(attempt) {
+    if (!attempt) return "";
+    if (attempt.test_session_id) {
+      const session = testSessions.find((s) => s.id === attempt.test_session_id);
+      if (session?.title) return session.title;
+    }
+    return getProblemSetTitle(attempt.test_version, tests);
   }
 
   function setPreviewAnswer(questionId, choiceIndex) {
@@ -1668,7 +1735,13 @@ export default function AdminPage() {
               </thead>
               <tbody>
                 {students.map((s) => (
-                  <tr key={s.id}>
+                  <tr
+                    key={s.id}
+                    onClick={() => {
+                      setSelectedStudentId(s.id);
+                      fetchStudentAttempts(s.id);
+                    }}
+                  >
                     <td>{formatDateTime(s.created_at)}</td>
                     <td>{s.email ?? ""}</td>
                     <td>{s.display_name ?? ""}</td>
@@ -1678,7 +1751,10 @@ export default function AdminPage() {
                     <td>
                       <button
                         className="btn btn-danger"
-                        onClick={() => deleteStudent(s.id, s.email)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteStudent(s.id, s.email);
+                        }}
                       >
                         Delete
                       </button>
@@ -1688,6 +1764,56 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+
+          {selectedStudentId ? (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div className="admin-title">Student Attempts</div>
+                  <div className="admin-subtitle">
+                    {selectedStudent?.display_name ?? ""} {selectedStudent?.student_code ? `(${selectedStudent.student_code})` : ""}
+                  </div>
+                </div>
+                <button className="btn" onClick={() => fetchStudentAttempts(selectedStudentId)}>Refresh Attempts</button>
+              </div>
+
+              <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                <table className="admin-table" style={{ minWidth: 860 }}>
+                  <thead>
+                    <tr>
+                      <th>Created</th>
+                      <th>Test</th>
+                      <th>Score</th>
+                      <th>Rate</th>
+                      <th>Attempt ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {studentAttempts.map((a) => {
+                      const score = `${a.correct}/${a.total}`;
+                      const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                      return (
+                        <tr
+                          key={`student-attempt-${a.id}`}
+                          onClick={() => {
+                            setSelectedAttemptObj(a);
+                            setAttemptDetailOpen(true);
+                          }}
+                        >
+                          <td>{formatDateTime(a.created_at)}</td>
+                          <td>{getAttemptTitle(a)}</td>
+                          <td>{score}</td>
+                          <td>{rate}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="admin-msg">{studentAttemptsMsg}</div>
+            </div>
+          ) : null}
 
           {inviteResults.length ? (
             <div className="admin-table-wrap" style={{ marginTop: 10 }}>
@@ -2300,131 +2426,195 @@ export default function AdminPage() {
           </div>
         </form>
 
-        <div className="admin-grid" style={{ marginTop: 12 }}>
-          <div>
-            <div className="admin-kpi">
-              <div className="box">
-                <div className="label">Attempts</div>
-                <div className="value">{kpi.count}</div>
-              </div>
-              <div className="box">
-                <div className="label">Avg rate</div>
-                <div className="value">{(kpi.avgRate * 100).toFixed(1)}%</div>
-              </div>
-              <div className="box">
-                <div className="label">Max rate</div>
-                <div className="value">{(kpi.maxRate * 100).toFixed(1)}%</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12 }} className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Created</th>
-                    <th>Name</th>
-                    <th>Code</th>
-                  <th>Score</th>
-                  <th>Rate</th>
-                  <th>Test</th>
-                  <th>Attempt ID</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {attempts.map((a) => {
-                  const score = `${a.correct}/${a.total}`;
-                  const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
-                  return (
-                    <tr key={a.id} onClick={() => setSelectedId(a.id)}>
-                      <td>{formatDateTime(a.created_at)}</td>
-                      <td>{a.display_name ?? ""}</td>
-                      <td>{a.student_code ?? ""}</td>
-                      <td>{score}</td>
-                      <td>{rate}</td>
-                      <td>{a.test_version ?? ""}</td>
-                      <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
-                      <td>
-                        <button
-                          className="btn btn-danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteAttempt(a.id);
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <div className="admin-kpi">
+          <div className="box">
+            <div className="label">Attempts</div>
+            <div className="value">{kpi.count}</div>
           </div>
-            <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+          <div className="box">
+            <div className="label">Avg rate</div>
+            <div className="value">{(kpi.avgRate * 100).toFixed(1)}%</div>
           </div>
-
-          <div>
-            <div className="admin-panel" style={{ padding: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <h3 style={{ margin: 0 }}>Attempt Detail</h3>
-                <div className="admin-actions">
-                  <button
-                    className="btn"
-                    type="button"
-                    onClick={() => selectedAttempt && exportSelectedAttemptCsv(selectedAttempt)}
-                  >
-                    Export CSV (Selected)
-                  </button>
-                </div>
-              </div>
-
-              {!selectedAttempt ? (
-                <div className="admin-help" style={{ marginTop: 6 }}>左の一覧から選択してください。</div>
-              ) : (
-                <div className="admin-detail">
-                  <div className="admin-help">
-                    <b>{selectedAttempt.display_name ?? ""}</b> ({selectedAttempt.student_code ?? ""})
-                    <br />
-                    created: {formatDateTime(selectedAttempt.created_at)}
-                    <br />
-                    score: <b>{selectedAttempt.correct}/{selectedAttempt.total}</b> (
-                    {(getScoreRate(selectedAttempt) * 100).toFixed(1)}%)
-                  </div>
-                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                    <table className="admin-table" style={{ minWidth: 860 }}>
-                      <thead>
-                        <tr>
-                          <th>QID</th>
-                          <th>Section</th>
-                          <th>Prompt</th>
-                          <th>Chosen</th>
-                          <th>Correct</th>
-                          <th>OK</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {buildAttemptDetailRows(selectedAttempt.answers_json).map((r) => (
-                          <tr key={r.qid}>
-                            <td style={{ whiteSpace: "nowrap" }}>{r.qid}</td>
-                            <td style={{ whiteSpace: "nowrap" }}>{r.section}</td>
-                            <td>{r.prompt}</td>
-                            <td>{r.chosen}</td>
-                            <td>{r.correct}</td>
-                            <td style={{ textAlign: "center" }}>{r.isCorrect ? "○" : "×"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
+          <div className="box">
+            <div className="label">Max rate</div>
+            <div className="value">{(kpi.maxRate * 100).toFixed(1)}%</div>
           </div>
         </div>
+
+        <div style={{ marginTop: 12 }} className="admin-table-wrap">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>Name</th>
+                <th>Code</th>
+                <th>Score</th>
+                <th>Rate</th>
+                <th>Test</th>
+                <th>Attempt ID</th>
+                <th>Detail CSV</th>
+                <th>Delete</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attempts.map((a) => {
+                const score = `${a.correct}/${a.total}`;
+                const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                return (
+                  <tr
+                    key={a.id}
+                    onClick={() => {
+                      setSelectedId(a.id);
+                      setSelectedAttemptObj(null);
+                      setAttemptDetailOpen(true);
+                    }}
+                  >
+                    <td>{formatDateTime(a.created_at)}</td>
+                    <td>{a.display_name ?? ""}</td>
+                    <td>{a.student_code ?? ""}</td>
+                    <td>{score}</td>
+                    <td>{rate}</td>
+                    <td>{a.test_version ?? ""}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          exportSelectedAttemptCsv(a);
+                        }}
+                      >
+                        Download
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-danger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteAttempt(a.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+
         </>
         ) : null}
           </div>
+
+          {attemptDetailOpen && selectedAttempt ? (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.35)",
+                zIndex: 1000,
+                padding: 16,
+                overflow: "auto",
+              }}
+              onClick={() => {
+                setAttemptDetailOpen(false);
+                setSelectedAttemptObj(null);
+              }}
+            >
+              <div
+                className="admin-panel"
+                style={{ padding: 12, maxWidth: 1100, margin: "0 auto", background: "#fff" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div>
+                    <div className="admin-title">Attempt Detail</div>
+                    <div className="admin-help">
+                      <b>{selectedAttempt.display_name ?? ""}</b> ({selectedAttempt.student_code ?? ""})
+                      <br />
+                      created: {formatDateTime(selectedAttempt.created_at)}
+                      <br />
+                      score: <b>{selectedAttempt.correct}/{selectedAttempt.total}</b> (
+                      {(getScoreRate(selectedAttempt) * 100).toFixed(1)}%)
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => exportSelectedAttemptCsv(selectedAttempt)}
+                    >
+                      Export CSV
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setAttemptDetailOpen(false);
+                        setSelectedAttemptObj(null);
+                      }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+
+                <div className="admin-title" style={{ marginTop: 12 }}>Overview</div>
+                <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                  <table className="admin-table" style={{ minWidth: 520 }}>
+                    <thead>
+                      <tr>
+                        <th>Section</th>
+                        <th>Correct</th>
+                        <th>Total</th>
+                        <th>Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedAttemptSectionSummary.map((s) => (
+                        <tr key={`sum-${s.section}`}>
+                          <td>{s.section}</td>
+                          <td>{s.correct}</td>
+                          <td>{s.total}</td>
+                          <td>{(s.rate * 100).toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                  <table className="admin-table" style={{ minWidth: 860 }}>
+                    <thead>
+                      <tr>
+                        <th>QID</th>
+                        <th>Section</th>
+                        <th>Prompt</th>
+                        <th>Chosen</th>
+                        <th>Correct</th>
+                        <th>OK</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedAttemptRows.map((r) => (
+                        <tr key={r.qid}>
+                          <td style={{ whiteSpace: "nowrap" }}>{r.qid}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{r.section}</td>
+                          <td>{r.prompt}</td>
+                          <td>{r.chosen}</td>
+                          <td>{r.correct}</td>
+                          <td style={{ textAlign: "center" }}>{r.isCorrect ? "○" : "×"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

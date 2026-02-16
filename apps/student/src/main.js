@@ -23,6 +23,22 @@ let testsState = {
   error: "",
 };
 
+let studentResultsState = {
+  loaded: false,
+  loading: false,
+  list: [],
+  error: "",
+  userId: "",
+};
+
+let resultDetailState = {
+  open: false,
+  attempt: null,
+  loading: false,
+  error: "",
+  questionsByVersion: {},
+};
+
 let testSessionsState = {
   loaded: false,
   list: [],
@@ -61,6 +77,7 @@ const defaultState = {
   requireLogin: true,
   selectedTestVersion: "",
   selectedTestSessionId: "",
+  studentTab: "take",
 };
 
 
@@ -80,9 +97,8 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...defaultState };
     const loaded = { ...defaultState, ...JSON.parse(raw) };
-    loaded.requireLogin = true;
     if (!["quiz", "sectionIntro", "result"].includes(loaded.phase)) {
-      loaded.phase = "login";
+      loaded.phase = "intro";
     }
     return loaded;
   } catch {
@@ -185,6 +201,21 @@ function resetAll() {
   checkLinkFromUrl().finally(render);
 }
 
+function exitToHome() {
+  state.phase = "intro";
+  state.sectionIndex = 0;
+  state.questionIndexInSection = 0;
+  state.showBangla = false;
+  state.testStartAt = null;
+  state.testEndAt = null;
+  state.answers = {};
+  state.attemptSaved = false;
+  state.requireLogin = false;
+  state.linkLoginRequired = false;
+  saveState();
+  render();
+}
+
 function goIntro() {
   state.phase = "intro";
   state.sectionIndex = 0;
@@ -210,9 +241,6 @@ function renderLoading(app) {
 }
 
 async function refreshAuthState() {
-  if (!["quiz", "sectionIntro", "result"].includes(state.phase)) {
-    state.requireLogin = true;
-  }
   const { data, error } = await supabase.auth.getSession();
   if (error) console.error("getSession error:", error);
   authState.session = data?.session ?? null;
@@ -222,7 +250,12 @@ async function refreshAuthState() {
   authState.recoveryMode = Boolean(isRecovery && authState.session);
 
   if (!authState.session) {
+    state.requireLogin = true;
     authState.checked = true;
+    studentResultsState.userId = "";
+    studentResultsState.loaded = false;
+    studentResultsState.list = [];
+    studentResultsState.error = "";
     return;
   }
 
@@ -253,6 +286,24 @@ async function refreshAuthState() {
   }
 
   authState.checked = true;
+
+  if (!state.linkLoginRequired) {
+    state.requireLogin = false;
+    if (state.phase === "login") {
+      state.phase = "intro";
+      saveState();
+    }
+  }
+  const currentUserId = authState.session.user.id;
+  if (studentResultsState.userId !== currentUserId) {
+    studentResultsState.userId = currentUserId;
+    studentResultsState.loaded = false;
+    studentResultsState.list = [];
+    studentResultsState.error = "";
+  }
+  if (authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
+    fetchStudentResults().finally(render);
+  }
 }
 
 async function fetchPublicTests() {
@@ -327,6 +378,85 @@ function getActivePassRate() {
   const test = testsState.list.find((t) => t.version === version);
   const passRate = Number(test?.pass_rate ?? PASS_RATE_DEFAULT);
   return Number.isFinite(passRate) ? passRate : PASS_RATE_DEFAULT;
+}
+
+function getPassRateForVersion(version) {
+  const test = testsState.list.find((t) => t.version === version);
+  const passRate = Number(test?.pass_rate ?? PASS_RATE_DEFAULT);
+  return Number.isFinite(passRate) ? passRate : PASS_RATE_DEFAULT;
+}
+
+function getScoreRateFromAttempt(attempt) {
+  const rate = Number(attempt?.score_rate);
+  if (Number.isFinite(rate)) return rate;
+  const total = Number(attempt?.total) || 0;
+  const correct = Number(attempt?.correct) || 0;
+  return total ? correct / total : 0;
+}
+
+function getAttemptTitle(attempt) {
+  if (attempt?.test_session_id) {
+    const session = testSessionsState.list.find((s) => s.id === attempt.test_session_id);
+    if (session?.title) return session.title;
+  }
+  const test = testsState.list.find((t) => t.version === attempt?.test_version);
+  return test?.title || attempt?.test_version || "Test";
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString();
+}
+
+async function fetchStudentResults() {
+  if (!authState.session) return;
+  if (studentResultsState.loading) return;
+  studentResultsState.loading = true;
+  studentResultsState.error = "";
+  const { data, error } = await supabase
+    .from("attempts")
+    .select("id, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
+    .eq("student_id", authState.session.user.id)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) {
+    studentResultsState.list = [];
+    studentResultsState.error = error.message || "Failed to load results.";
+  } else {
+    studentResultsState.list = data ?? [];
+  }
+  studentResultsState.loaded = true;
+  studentResultsState.loading = false;
+}
+
+async function fetchQuestionsForDetail(version) {
+  if (!version) return [];
+  if (resultDetailState.questionsByVersion[version]) {
+    resultDetailState.loading = false;
+    resultDetailState.error = "";
+    return resultDetailState.questionsByVersion[version];
+  }
+  resultDetailState.loading = true;
+  resultDetailState.error = "";
+  const { data, error } = await publicSupabase
+    .from("questions")
+    .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+    .eq("test_version", version)
+    .order("order_index", { ascending: true });
+  if (error) {
+    resultDetailState.error = error.message || "Failed to load questions.";
+    resultDetailState.loading = false;
+    return [];
+  }
+  const list = (data ?? []).map((row) => mapDbQuestion(row, version));
+  resultDetailState.questionsByVersion = {
+    ...resultDetailState.questionsByVersion,
+    [version]: list,
+  };
+  resultDetailState.loading = false;
+  return list;
 }
 
 function renderLogin(app) {
@@ -483,6 +613,14 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+function getSectionTitle(sectionKey) {
+  return sections.find((s) => s.key === sectionKey)?.title ?? sectionKey ?? "";
+}
+
+function getQuestionPrompt(q) {
+  return q.boxText || q.stemText || q.stemExtra || q.promptEn || "";
+}
+
 function renderUnderlines(text) {
   const escaped = escapeHtml(text ?? "");
   return escaped
@@ -578,7 +716,14 @@ function normalizeQuestionAssets(q, version) {
 
 
 function getCurrentSection() {
-  return sections[state.sectionIndex];
+  const active = getActiveSections();
+  if (active.length === 0) return sections[state.sectionIndex] || sections[0];
+  if (state.sectionIndex >= active.length) {
+    state.sectionIndex = 0;
+    state.questionIndexInSection = 0;
+    saveState();
+  }
+  return active[state.sectionIndex];
 }
 function getSectionQuestions(sectionKey) {
   const list = getQuestions()
@@ -603,6 +748,14 @@ function getSectionQuestions(sectionKey) {
     group.items.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
   }
   return groups.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+}
+
+function getActiveSections() {
+  const all = sections ?? [];
+  const list = getQuestions();
+  if (!list || list.length === 0) return all;
+  const keys = new Set(list.map((q) => q.sectionKey).filter(Boolean));
+  return all.filter((s) => keys.has(s.key));
 }
 function getCurrentQuestion() {
   const sec = getCurrentSection();
@@ -708,10 +861,11 @@ function finishSection() {
 }
 
 function goNextSectionOrResult() {
+  const activeSections = getActiveSections();
   const nextSectionIndex = state.sectionIndex + 1;
 
   // 最後のセクションが終わったら結果へ
-  if (nextSectionIndex >= sections.length) {
+  if (nextSectionIndex >= activeSections.length) {
   state.testEndAt = state.testEndAt ?? Date.now(); // ★固定
   state.phase = "result";
   saveState();
@@ -774,13 +928,14 @@ async function saveAttemptIfNeeded() {
   }
 
   state.attemptSaved = true;
+  studentResultsState.loaded = false;
   saveState();
   if (statusEl) statusEl.textContent = "Saved";
 }
 
 /** ===== UI helpers ===== */
 function topbarHTML({ rightButtonLabel = "Finish Section", rightButtonId = "finishBtn" } = {}) {
-  const sec = sections[state.sectionIndex]; // getCurrentSection()より安全に直参照
+  const sec = getCurrentSection();
   const hideQA =
     state.phase === "intro" ||
     state.phase === "sectionIntro" ||
@@ -1124,6 +1279,7 @@ function sidebarHTML() {
 
 /** ===== Renders ===== */
 function renderIntro(app) {
+  const activeSections = getActiveSections();
   const activeVersion = getActiveTestVersion();
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
   const activeSession = testSessionsState.list.find((s) => s.id === activeSessionId);
@@ -1134,7 +1290,11 @@ function renderIntro(app) {
       <main class="content" style="margin:12px;">
         <h1 class="prompt test-title">${escapeHtml(activeTitle)}</h1>
         <div style="line-height:1.7; margin-top:10px;">
-          <p>• Sections: ${sections.map(s => `<b>${s.title}</b>`).join(" → ")}</p>
+          <p>• Sections: ${
+            activeSections.length
+              ? activeSections.map((s) => `<b>${s.title}</b>`).join(" → ")
+              : "—"
+          }</p>
           <p>• Each section has a timer.</p>
           <p>• Answers are saved automatically.</p>
           ${
@@ -1272,113 +1432,353 @@ function renderIntro(app) {
 }
 
 function renderTestSelect(app) {
-  const activeVersion = getActiveTestVersion();
+  const activeSections = getActiveSections();
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
   const isGuest = !authState.session;
+  const showTabs = Boolean(authState.session);
+  const activeTab = showTabs ? state.studentTab : "take";
+  const showResults = showTabs && activeTab === "results";
+  const showTakeTest = !showResults;
+  const canStart = activeSections.length > 0;
+
+  const studentInfoHtml = authState.session
+    ? `
+        <div class="student-topbar">
+          <span>Name: ${escapeHtml(state.user?.name ?? "")}</span>
+          <span>ID: ${escapeHtml(state.user?.id ?? "")}</span>
+          <button class="student-logout" id="studentLogoutBtn" aria-label="Sign out" title="Sign out">⎋</button>
+        </div>
+      `
+    : "";
+
+  const resultsHtml = showResults
+    ? (() => {
+        if (!authState.session) {
+          return `<div class="text-muted">Log in to see results.</div>`;
+        }
+        if (studentResultsState.loading) {
+          return `<div class="text-muted">Loading results...</div>`;
+        }
+        if (studentResultsState.error) {
+          return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
+        }
+        if (!studentResultsState.list.length) {
+          return `<div class="text-muted">No results yet.</div>`;
+        }
+        return `
+          <div class="student-results">
+            ${studentResultsState.list
+              .map((attempt) => {
+                const rate = getScoreRateFromAttempt(attempt);
+                const passRate = getPassRateForVersion(attempt.test_version);
+                const isPass = rate >= passRate;
+                const title = getAttemptTitle(attempt);
+                const dateLabel = formatDateTime(attempt.ended_at || attempt.created_at);
+                return `
+                  <div class="result-card" data-attempt-id="${attempt.id}">
+                    <div class="result-title">${escapeHtml(title)}</div>
+                    <div class="result-meta">
+                      <span>${escapeHtml(attempt.test_version || "")}</span>
+                      <span>${escapeHtml(dateLabel)}</span>
+                    </div>
+                    <div class="result-score">
+                      ${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}
+                      <span class="result-rate">(${(rate * 100).toFixed(1)}%)</span>
+                    </div>
+                    <div>
+                      <span class="result-badge ${isPass ? "pass" : "fail"}">${isPass ? "Pass" : "Fail"}</span>
+                      <span class="result-pass">Pass threshold: ${(passRate * 100).toFixed(0)}%</span>
+                    </div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
+      })()
+    : "";
+
+  let resultDetailHtml = "";
+  if (resultDetailState.open && resultDetailState.attempt) {
+    const attempt = resultDetailState.attempt;
+    const title = getAttemptTitle(attempt);
+    const rate = getScoreRateFromAttempt(attempt);
+    const passRate = getPassRateForVersion(attempt.test_version);
+    const isPass = rate >= passRate;
+    const dateLabel = formatDateTime(attempt.ended_at || attempt.created_at);
+    const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
+    const detailRows = buildAttemptDetailRows(attempt, questionsList);
+    const summaryRows = buildSectionSummary(detailRows);
+    const detailBody = resultDetailState.loading
+      ? `<div class="text-muted">Loading details...</div>`
+      : resultDetailState.error
+        ? `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`
+        : detailRows.length
+          ? `
+            <div class="detail-section">
+              <div class="detail-title">Overview</div>
+              <div class="detail-table-wrap">
+                <table class="detail-table">
+                  <thead>
+                    <tr>
+                      <th>Section</th>
+                      <th>Correct</th>
+                      <th>Total</th>
+                      <th>Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${summaryRows
+                      .map(
+                        (s) => `
+                          <tr>
+                            <td>${escapeHtml(s.section)}</td>
+                            <td>${s.correct}</td>
+                            <td>${s.total}</td>
+                            <td>${(s.rate * 100).toFixed(1)}%</td>
+                          </tr>
+                        `
+                      )
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="detail-section">
+              <div class="detail-title">Questions</div>
+              <div class="detail-table-wrap">
+                <table class="detail-table wide">
+                  <thead>
+                    <tr>
+                      <th>QID</th>
+                      <th>Section</th>
+                      <th>Prompt</th>
+                      <th>Chosen</th>
+                      <th>Correct</th>
+                      <th>OK</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${detailRows
+                      .map(
+                        (r) => `
+                          <tr>
+                            <td>${escapeHtml(r.qid)}</td>
+                            <td>${escapeHtml(r.section)}</td>
+                            <td>${escapeHtml(r.prompt)}</td>
+                            <td>${escapeHtml(r.chosen || "—")}</td>
+                            <td>${escapeHtml(r.correct || "—")}</td>
+                            <td style="text-align:center;">${r.isCorrect ? "○" : "×"}</td>
+                          </tr>
+                        `
+                      )
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `
+          : `<div class="text-muted">No details available.</div>`;
+
+    resultDetailHtml = `
+      <div class="result-modal-overlay" id="resultDetailOverlay">
+        <div class="result-modal">
+          <div class="result-modal-header">
+            <div>
+              <div class="result-modal-title">${escapeHtml(title)}</div>
+              <div class="result-modal-meta">${escapeHtml(dateLabel)}</div>
+              <div class="result-modal-score">
+                ${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}
+                <span class="result-rate">(${(rate * 100).toFixed(1)}%)</span>
+                <span class="result-badge ${isPass ? "pass" : "fail"}">${isPass ? "Pass" : "Fail"}</span>
+              </div>
+            </div>
+            <button class="btn" id="resultDetailClose">Close</button>
+          </div>
+          ${detailBody}
+        </div>
+      </div>
+    `;
+  }
+
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
-        <h1 class="prompt">Select Test</h1>
-        <div style="line-height:1.7; margin-top:10px;">
-          <p>• Choose a mock test and start.</p>
-          <p>• Answers are saved automatically.</p>
-          ${
-            authState.session
-              ? `<p style="margin-top:6px;"><b>Logged in</b> (${escapeHtml(authState.session.user.email ?? "")})</p>`
-              : ""
-          }
-        </div>
+        ${
+          showTabs
+            ? `
+              <div class="student-tabs">
+                <button class="student-tab ${activeTab === "take" ? "active" : ""}" id="tabTake">Take Test</button>
+                <button class="student-tab ${activeTab === "results" ? "active" : ""}" id="tabResults">Test Results</button>
+              </div>
+            `
+            : ""
+        }
+        ${studentInfoHtml}
 
-        <div class="intro-form" style="margin-top:16px; max-width:640px;">
-          <label class="form-label">Test Session</label>
-          <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
-            ${
-              testSessionsState.list.length
-                ? testSessionsState.list
-                    .map((t) => {
-                      const problemSet = testsState.list.find((ps) => ps.version === t.problem_set_id);
-                      const passRate = Number(problemSet?.pass_rate ?? PASS_RATE_DEFAULT);
-                      return `
-                        <label style="display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;">
-                          <input type="radio" name="testSelect" value="${escapeHtml(t.id)}" ${
-                            t.id === activeSessionId ? "checked" : ""
-                          } />
-                          <div>
-                            <div style="font-weight:600;">${escapeHtml(t.title)}</div>
-                            <div style="font-size:12px;color:#666;">${escapeHtml(t.problem_set_id)} • pass ${(passRate * 100).toFixed(0)}%</div>
-                          </div>
-                        </label>
-                      `;
-                    })
-                    .join("")
-                : `<div style="color:#666;">公開テストがありません。</div>`
-            }
-          </div>
-          ${
-            testsState.error
-              ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testsState.error)}</div>`
-              : ""
-          }
-          ${
-            questionsState.error
-              ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(questionsState.error)}</div>`
-              : ""
-          }
-          ${
-            testSessionsState.error
-              ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testSessionsState.error)}</div>`
-              : ""
-          }
+        ${
+          showTakeTest
+            ? `
+              <h1 class="prompt section-title">Select Test</h1>
+              <div style="line-height:1.7; margin-top:10px;">
+                <p>• Choose a mock test and start.</p>
+                <p>• Answers are saved automatically.</p>
+              </div>
 
-          ${
-            isGuest
-              ? `
-                <label class="form-label" style="margin-top:14px;">Name（任意）</label>
-                <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
+              <div class="intro-form" style="margin-top:16px; max-width:640px;">
+                ${
+                  activeSections.length === 0
+                    ? `<div style="color:#b00;margin-bottom:10px;">No questions available.</div>`
+                    : ""
+                }
+                <label class="form-label">Test Session</label>
+                <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
+                  ${
+                    testSessionsState.list.length
+                      ? testSessionsState.list
+                          .map((t) => {
+                            const problemSet = testsState.list.find((ps) => ps.version === t.problem_set_id);
+                            const passRate = Number(problemSet?.pass_rate ?? PASS_RATE_DEFAULT);
+                            return `
+                              <label style="display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;">
+                                <input type="radio" name="testSelect" value="${escapeHtml(t.id)}" ${
+                                  t.id === activeSessionId ? "checked" : ""
+                                } />
+                                <div>
+                                  <div style="font-weight:600;">${escapeHtml(t.title)}</div>
+                                  <div style="font-size:12px;color:#666;">${escapeHtml(t.problem_set_id)} • pass ${(passRate * 100).toFixed(0)}%</div>
+                                </div>
+                              </label>
+                            `;
+                          })
+                          .join("")
+                      : `<div style="color:#666;">公開テストがありません。</div>`
+                  }
+                </div>
+                ${
+                  testsState.error
+                    ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testsState.error)}</div>`
+                    : ""
+                }
+                ${
+                  questionsState.error
+                    ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(questionsState.error)}</div>`
+                    : ""
+                }
+                ${
+                  testSessionsState.error
+                    ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testSessionsState.error)}</div>`
+                    : ""
+                }
 
-                <label class="form-label" style="margin-top:10px;">ID（任意）</label>
-                <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
-              `
-              : `
-                <label class="form-label" style="margin-top:14px;">Name</label>
-                <div class="form-input readonly">${escapeHtml(state.user?.name ?? "")}</div>
-                <label class="form-label" style="margin-top:10px;">ID</label>
-                <div class="form-input readonly">${escapeHtml(state.user?.id ?? "")}</div>
-              `
-          }
-        </div>
+                ${
+                  isGuest
+                    ? `
+                      <label class="form-label" style="margin-top:14px;">Name（任意）</label>
+                      <input class="form-input" id="nameInput" placeholder="e.g., Taro Yamada" value="${escapeHtml(state.user?.name ?? "")}" />
 
-        <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="nav-btn" id="startBtn">Start</button>
-          <button class="nav-btn ghost" id="signOutBtn">Sign out</button>
-        </div>
+                      <label class="form-label" style="margin-top:10px;">ID（任意）</label>
+                      <input class="form-input" id="idInput" placeholder="e.g., ID001" value="${escapeHtml(state.user?.id ?? "")}" />
+                    `
+                    : ``
+                }
+              </div>
+
+              <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="nav-btn" id="startBtn" ${canStart ? "" : "disabled"}>Start</button>
+                <button class="nav-btn ghost" id="signOutBtn">Sign out</button>
+              </div>
+            `
+            : `
+              <div class="intro-form" style="margin-top:16px; max-width:760px;">
+                ${resultsHtml}
+              </div>
+              <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="nav-btn ghost" id="signOutBtn">Sign out</button>
+              </div>
+            `
+        }
       </main>
+      ${resultDetailHtml}
     </div>
   `;
 
-  document.querySelector("#startBtn").addEventListener("click", () => {
-    if (isGuest) {
-      const name = document.querySelector("#nameInput").value.trim();
-      const id = document.querySelector("#idInput").value.trim();
-      state.user = { name, id };
-    }
-    const selected = document.querySelector('input[name="testSelect"]:checked');
-    if (selected) {
-      state.selectedTestSessionId = selected.value;
-      const session = testSessionsState.list.find((s) => s.id === selected.value);
-      if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
-    }
-    state.phase = "sectionIntro";
-    state.sectionIndex = 0;
-    state.questionIndexInSection = 0;
-    state.sectionStartAt = null;
-    state.showBangla = false;
-
+  app.querySelector("#studentLogoutBtn")?.addEventListener("click", () => {
+    resultDetailState.open = false;
+    resultDetailState.attempt = null;
+    supabase.auth.signOut();
+    state.requireLogin = true;
+    state.phase = "login";
     saveState();
     render();
   });
 
+  if (showTabs) {
+    document.querySelector("#tabTake")?.addEventListener("click", () => {
+      state.studentTab = "take";
+      saveState();
+      render();
+    });
+    document.querySelector("#tabResults")?.addEventListener("click", () => {
+      state.studentTab = "results";
+      saveState();
+      if (!studentResultsState.loaded) {
+        fetchStudentResults().finally(render);
+      }
+      render();
+    });
+  }
+
+  if (showTakeTest) {
+    document.querySelector("#startBtn")?.addEventListener("click", () => {
+      if (!canStart) return;
+      if (isGuest) {
+        const name = document.querySelector("#nameInput").value.trim();
+        const id = document.querySelector("#idInput").value.trim();
+        state.user = { name, id };
+      }
+      const selected = document.querySelector('input[name="testSelect"]:checked');
+      if (selected) {
+        state.selectedTestSessionId = selected.value;
+        const session = testSessionsState.list.find((s) => s.id === selected.value);
+        if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
+      }
+      state.phase = "sectionIntro";
+      state.sectionIndex = 0;
+      state.questionIndexInSection = 0;
+      state.sectionStartAt = null;
+      state.showBangla = false;
+
+      saveState();
+      render();
+    });
+  }
+
+  if (showResults) {
+    app.querySelectorAll("[data-attempt-id]").forEach((card) => {
+      card.addEventListener("click", async () => {
+        const attemptId = card.dataset.attemptId;
+        const attempt = studentResultsState.list.find((a) => a.id === attemptId);
+        if (!attempt) return;
+        resultDetailState.open = true;
+        resultDetailState.attempt = attempt;
+        if (attempt.test_version) {
+          await fetchQuestionsForDetail(attempt.test_version);
+        }
+        render();
+      });
+    });
+  }
+
+  app.querySelector("#resultDetailClose")?.addEventListener("click", () => {
+    resultDetailState.open = false;
+    resultDetailState.attempt = null;
+    render();
+  });
+
   document.querySelector("#signOutBtn")?.addEventListener("click", () => {
+    resultDetailState.open = false;
+    resultDetailState.attempt = null;
     supabase.auth.signOut();
     state.requireLogin = true;
     state.phase = "login";
@@ -1522,16 +1922,17 @@ function renderQuiz(app) {
 function renderSectionEnd(app) {
   const sec = getCurrentSection();
   const secQs = getSectionQuestions(sec.key);
+  const activeSections = getActiveSections();
 
   app.innerHTML = `
     <div class="app">
       ${topbarHTML({ rightButtonLabel: "Section ended", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
         <h1 class="prompt">${sec.title} — Completed</h1>
-        <p style="color:var(--muted);">Next: ${state.sectionIndex === sections.length - 1 ? "Results" : sections[state.sectionIndex + 1].title}</p>
+        <p style="color:var(--muted);">Next: ${state.sectionIndex === activeSections.length - 1 ? "Results" : activeSections[state.sectionIndex + 1].title}</p>
 
         <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="nav-btn" id="nextSectionBtn">${state.sectionIndex === sections.length - 1 ? "Go to Results" : "Next Section"}</button>
+          <button class="nav-btn" id="nextSectionBtn">${state.sectionIndex === activeSections.length - 1 ? "Go to Results" : "Next Section"}</button>
           <button class="nav-btn ghost" id="reviewBtn">Review this section</button>
         </div>
       </main>
@@ -1545,24 +1946,25 @@ function renderSectionEnd(app) {
   document.querySelector("#disabledBtn").disabled = true;
 
   document.querySelector("#nextSectionBtn").addEventListener("click", () => {
-  const nextSectionIndex = state.sectionIndex + 1;
+    const activeSectionsInner = getActiveSections();
+    const nextSectionIndex = state.sectionIndex + 1;
 
-  if (nextSectionIndex >= sections.length) {
-    state.phase = "result";
+    if (nextSectionIndex >= activeSectionsInner.length) {
+      state.phase = "result";
+      saveState();
+      render();
+      return;
+    }
+
+    state.sectionIndex = nextSectionIndex;
+    state.questionIndexInSection = 0;
+    state.sectionStartAt = null;
+    state.showBangla = false;
+    state.phase = "sectionIntro";
+
     saveState();
     render();
-    return;
-  }
-
-  state.sectionIndex = nextSectionIndex;
-  state.questionIndexInSection = 0;
-  state.sectionStartAt = null;
-  state.showBangla = false;
-  state.phase = "sectionIntro";
-
-  saveState();
-  render();
-});
+  });
 
   document.querySelector("#reviewBtn").addEventListener("click", () => {
     state.phase = "quiz";
@@ -1636,6 +2038,37 @@ function buildResultRows() {
   return rows;
 }
 
+function buildAttemptDetailRows(attempt, questionsList) {
+  const answers = attempt?.answers_json ?? {};
+  return (questionsList ?? []).map((q) => {
+    const chosenIdx = answers[q.id];
+    const correctIdx = q.answerIndex;
+    return {
+      qid: String(q.id),
+      section: getSectionTitle(q.sectionKey),
+      prompt: getQuestionPrompt(q),
+      chosen: getChoiceText(q, chosenIdx),
+      correct: getChoiceText(q, correctIdx),
+      isCorrect: chosenIdx === correctIdx,
+    };
+  });
+}
+
+function buildSectionSummary(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = row.section || "Unknown";
+    const cur = map.get(key) || { section: key, total: 0, correct: 0 };
+    cur.total += 1;
+    if (row.isCorrect) cur.correct += 1;
+    map.set(key, cur);
+  });
+  return Array.from(map.values()).map((s) => ({
+    ...s,
+    rate: s.total ? s.correct / s.total : 0,
+  }));
+}
+
 
 
 
@@ -1646,6 +2079,7 @@ function renderResult(app) {
   const scoreRate = total === 0 ? 0 : correct / total;
   const passRate = getActivePassRate();
   const isPass = scoreRate >= passRate;
+  const showExit = Boolean(authState.session);
 
   // ★ Resultに入った瞬間にタイマーを止めたい場合（testEndAt方式を入れてるなら）
   // state.testEndAt = state.testEndAt ?? Date.now();
@@ -1670,7 +2104,7 @@ function renderResult(app) {
         <div class="save-status" id="saveStatus"></div>
 
         <div class="finish-actions">
-          <button class="btn btn-primary" id="takeAgainBtn">Take Again</button>
+          ${showExit ? `<button class="btn btn-primary" id="exitTestBtn">Exit Test</button>` : ``}
         </div>
 
         <div class="result-table-wrap">
@@ -1739,7 +2173,7 @@ function renderResult(app) {
   document.querySelector("#disabledBtn").disabled = true;
 
   // actions
-  document.querySelector("#takeAgainBtn")?.addEventListener("click", resetAll);
+  document.querySelector("#exitTestBtn")?.addEventListener("click", exitToHome);
 
   saveAttemptIfNeeded();
 }
