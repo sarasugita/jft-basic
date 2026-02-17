@@ -88,7 +88,7 @@ body { padding: 0; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 6px 6px 8px;
+  padding: 6px 0 8px;
   border-radius: 14px;
 }
 
@@ -332,6 +332,16 @@ body { padding: 0; }
 .admin-table th { position: sticky; top: 0; background: #f7f7f7; z-index: 1; text-align: left; font-weight: 900; white-space: nowrap; }
 .admin-table tbody tr:hover { background: rgba(106, 163, 50, 0.08); cursor: pointer; }
 
+.attendance-table tbody tr:hover {
+  background: transparent;
+  cursor: default;
+}
+
+.attendance-modal-table tbody tr:hover {
+  background: transparent;
+  cursor: default;
+}
+
 .admin-kpi {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -365,11 +375,63 @@ body { padding: 0; }
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
 }
 
+.attendance-modal {
+  max-width: 980px;
+  width: min(980px, 95vw);
+}
+
 .admin-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.link-btn {
+  background: transparent;
+  border: 0;
+  color: #0f172a;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+}
+
+.attendance-table th,
+.attendance-table td {
+  text-align: center;
+}
+.attendance-table td:nth-child(2),
+.attendance-table th:nth-child(2) {
+  text-align: left;
+}
+
+.att-cell { font-weight: 800; text-align: center; }
+.att-P { background: #d8f5c2; color: #1f6f2a; }
+.att-L { background: #ffe7a3; color: #8a5b00; }
+.att-E { background: #ffd1a6; color: #92400e; }
+.att-A { background: #ffc1c1; color: #9b1c1c; }
+
+.att-status-btn {
+  border: 1px solid rgba(0,0,0,0.2);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: #fff;
+  cursor: pointer;
+  font-weight: 800;
+  width: 38px;
+}
+.att-status-btn.active { outline: 2px solid rgba(0,0,0,0.2); }
+.att-status-btn.att-P.active { background: #d8f5c2; color: #1f6f2a; }
+.att-status-btn.att-L.active { background: #ffe7a3; color: #8a5b00; }
+.att-status-btn.att-E.active { background: #ffd1a6; color: #92400e; }
+.att-status-btn.att-A.active { background: #ffc1c1; color: #9b1c1c; }
+
+.attendance-modal-table td input {
+  width: 100%;
+  border: 1px solid rgba(0,0,0,0.2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
 }
 
 .boxed {

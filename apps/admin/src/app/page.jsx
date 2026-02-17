@@ -202,6 +202,13 @@ function formatDateTime(iso) {
   return d.toLocaleString();
 }
 
+function formatDateShort(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
+}
+
 function getScoreRate(attempt) {
   const rate = Number(attempt?.score_rate);
   if (Number.isFinite(rate)) return rate;
@@ -762,6 +769,18 @@ export default function AdminPage() {
     show_answers: false
   });
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
+  const [attendanceDays, setAttendanceDays] = useState([]);
+  const [attendanceEntries, setAttendanceEntries] = useState({});
+  const [attendanceMsg, setAttendanceMsg] = useState("");
+  const [attendanceDate, setAttendanceDate] = useState(() => {
+    const today = new Date();
+    if (Number.isNaN(today.getTime())) return "";
+    return today.toISOString().slice(0, 10);
+  });
+  const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
+  const [attendanceModalDay, setAttendanceModalDay] = useState(null);
+  const [attendanceDraft, setAttendanceDraft] = useState({});
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
   function generateTempPassword(length = 10) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
     const bytes = new Uint8Array(length);
@@ -820,6 +839,20 @@ export default function AdminPage() {
   const selectedAttemptSectionSummary = useMemo(
     () => buildSectionSummary(selectedAttemptRows),
     [selectedAttemptRows]
+  );
+
+  const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
+
+  const attendanceDayColumns = useMemo(() => {
+    return attendanceDays.map((d) => ({
+      ...d,
+      label: formatDateShort(d.day_date),
+    }));
+  }, [attendanceDays]);
+
+  const activeStudents = useMemo(
+    () => (students ?? []).filter((s) => !s.is_withdrawn),
+    [students]
   );
 
   const linkBySession = useMemo(() => {
@@ -1018,7 +1051,7 @@ export default function AdminPage() {
     setStudentMsg("Loading...");
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, email, role, display_name, student_code, created_at")
+      .select("id, email, role, display_name, student_code, created_at, is_withdrawn")
       .order("created_at", { ascending: false })
       .limit(500);
     if (error) {
@@ -1031,6 +1064,28 @@ export default function AdminPage() {
     setStudents(list);
     setStudentMsg(list.length ? "" : "No students.");
   }
+
+  async function toggleWithdrawn(student, nextValue) {
+    if (!student?.id) return;
+    setStudentMsg("");
+    const { error } = await supabase
+      .from("profiles")
+      .update({ is_withdrawn: Boolean(nextValue) })
+      .eq("id", student.id);
+    if (error) {
+      console.error("withdrawn update error:", error);
+      setStudentMsg(`Update failed: ${error.message}`);
+      return;
+    }
+    fetchStudents();
+  }
+
+  useEffect(() => {
+    if (activeTab === "attendance") {
+      if (!students.length) fetchStudents();
+      fetchAttendanceDays();
+    }
+  }, [activeTab]);
 
   async function fetchStudentAttempts(studentId) {
     if (!studentId) return;
@@ -1145,6 +1200,114 @@ export default function AdminPage() {
     if (list.length && !testSessionForm.problem_set_id) {
       setTestSessionForm((s) => ({ ...s, problem_set_id: list[0].problem_set_id || "" }));
     }
+  }
+
+  async function fetchAttendanceDays() {
+    setAttendanceMsg("Loading attendance...");
+    const { data, error } = await supabase
+      .from("attendance_days")
+      .select("id, day_date, created_at")
+      .order("day_date", { ascending: false })
+      .limit(60);
+    if (error) {
+      console.error("attendance_days fetch error:", error);
+      setAttendanceDays([]);
+      setAttendanceMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const list = data ?? [];
+    setAttendanceDays(list);
+    setAttendanceMsg(list.length ? "" : "No attendance days yet.");
+    if (list.length) {
+      fetchAttendanceEntries(list.map((d) => d.id));
+    } else {
+      setAttendanceEntries({});
+    }
+  }
+
+  async function fetchAttendanceEntries(dayIds) {
+    if (!dayIds?.length) {
+      setAttendanceEntries({});
+      return;
+    }
+    const { data, error } = await supabase
+      .from("attendance_entries")
+      .select("day_id, student_id, status, comment")
+      .in("day_id", dayIds);
+    if (error) {
+      console.error("attendance_entries fetch error:", error);
+      setAttendanceEntries({});
+      setAttendanceMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const map = {};
+    (data ?? []).forEach((row) => {
+      if (!row?.day_id || !row?.student_id) return;
+      if (!map[row.day_id]) map[row.day_id] = {};
+      map[row.day_id][row.student_id] = {
+        status: row.status,
+        comment: row.comment ?? ""
+      };
+    });
+    setAttendanceEntries(map);
+  }
+
+  async function openAttendanceDay(dayDate) {
+    if (!dayDate) return;
+    setAttendanceMsg("");
+    setAttendanceModalOpen(true);
+    setAttendanceSaving(false);
+    const { data, error } = await supabase
+      .from("attendance_days")
+      .upsert({ day_date: dayDate }, { onConflict: "day_date" })
+      .select()
+      .single();
+    if (error || !data?.id) {
+      console.error("attendance day upsert error:", error);
+      setAttendanceMsg(`Open day failed: ${error?.message ?? "Unknown error"}`);
+      setAttendanceModalOpen(false);
+      return;
+    }
+    const day = data;
+    setAttendanceModalDay(day);
+    const existing = attendanceEntriesByDay[day.id] ?? {};
+    const draft = {};
+    (activeStudents ?? []).forEach((s) => {
+      const entry = existing[s.id] || {};
+      draft[s.id] = {
+        status: entry.status || "P",
+        comment: entry.comment || ""
+      };
+    });
+    setAttendanceDraft(draft);
+    await fetchAttendanceDays();
+  }
+
+  async function saveAttendanceDay() {
+    if (!attendanceModalDay?.id) return;
+    setAttendanceSaving(true);
+    const rows = Object.entries(attendanceDraft || {})
+      .map(([studentId, v]) => ({
+        day_id: attendanceModalDay.id,
+        student_id: studentId,
+        status: v.status,
+        comment: v.comment?.trim() || null
+      }))
+      .filter((r) => r.status);
+    const { error } = await supabase
+      .from("attendance_entries")
+      .upsert(rows, { onConflict: "day_id,student_id" });
+    if (error) {
+      console.error("attendance save error:", error);
+      setAttendanceMsg(`Save failed: ${error.message}`);
+      setAttendanceSaving(false);
+      return;
+    }
+    setAttendanceSaving(false);
+    setAttendanceModalOpen(false);
+    setAttendanceModalDay(null);
+    setAttendanceDraft({});
+    fetchAttendanceDays();
   }
 
   async function createTestSession() {
@@ -2317,6 +2480,14 @@ export default function AdminPage() {
             Student List
           </button>
 
+          <button
+            className={`admin-nav-item ${activeTab === "attendance" ? "active" : ""}`}
+            onClick={() => setActiveTab("attendance")}
+          >
+            <span className="admin-nav-dot" />
+            Attendance
+          </button>
+
           <div className={`admin-nav-group ${activeTab === "model" ? "active" : ""}`}>
             <button
               className={`admin-nav-item admin-group-toggle ${activeTab === "model" ? "active" : ""}`}
@@ -2490,6 +2661,7 @@ export default function AdminPage() {
                   <th>User ID</th>
                   <th>Temp Password</th>
                   <th>Reissue Password</th>
+                  <th>Withdrawn</th>
                   <th>Delete</th>
                 </tr>
               </thead>
@@ -2522,6 +2694,17 @@ export default function AdminPage() {
                         }}
                       >
                         Reissue Password
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className={`btn ${s.is_withdrawn ? "" : "btn-danger"}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleWithdrawn(s, !s.is_withdrawn);
+                        }}
+                      >
+                        {s.is_withdrawn ? "Undo" : "Withdraw"}
                       </button>
                     </td>
                     <td>
@@ -2619,6 +2802,81 @@ export default function AdminPage() {
           ) : null}
 
           <div className="admin-msg">{studentMsg}</div>
+        </div>
+        ) : null}
+
+        {activeTab === "attendance" ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div>
+              <div className="admin-title">Attendance</div>
+              <div className="admin-subtitle">P / L / E / A を日別で管理します。</div>
+            </div>
+            <button className="btn" onClick={() => fetchAttendanceDays()}>Refresh</button>
+          </div>
+
+          <div className="admin-form" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label>Date</label>
+              <input
+                type="date"
+                value={attendanceDate}
+                onChange={(e) => setAttendanceDate(e.target.value)}
+              />
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn btn-primary" type="button" onClick={() => openAttendanceDay(attendanceDate)}>
+                Open Day
+              </button>
+            </div>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table attendance-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Student Name</th>
+                  <th>Attendance Rate</th>
+                  <th>Unexcused Absence</th>
+                  {attendanceDayColumns.map((d) => (
+                    <th key={d.id}>
+                      <button className="link-btn" onClick={() => openAttendanceDay(d.day_date)}>
+                        {d.label}
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {activeStudents.map((s, idx) => {
+                  const perDay = attendanceDayColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
+                  const total = perDay.filter(Boolean).length;
+                  const present = perDay.filter((v) => v === "P").length;
+                  const absences = perDay.filter((v) => v === "A").length;
+                  const rate = total ? (present / total) * 100 : 0;
+                  return (
+                    <tr key={s.id}>
+                      <td>{idx + 1}</td>
+                      <td>{s.display_name ?? s.email ?? s.id}</td>
+                      <td>{rate.toFixed(2)}%</td>
+                      <td>{absences}</td>
+                      {attendanceDayColumns.map((d) => {
+                        const status = attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "";
+                        return (
+                          <td key={`${s.id}-${d.id}`} className={`att-cell ${status ? `att-${status}` : ""}`}>
+                            {status || ""}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{attendanceMsg}</div>
         </div>
         ) : null}
 
@@ -3400,6 +3658,96 @@ export default function AdminPage() {
                   disabled={reissueLoading}
                 >
                   {reissueLoading ? "Generating..." : "Reissue Temp Password"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {attendanceModalOpen && attendanceModalDay ? (
+          <div
+            className="admin-modal-overlay"
+            onClick={() => {
+              setAttendanceModalOpen(false);
+              setAttendanceModalDay(null);
+              setAttendanceDraft({});
+              setAttendanceSaving(false);
+            }}
+          >
+            <div className="admin-modal attendance-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">Attendance — {attendanceModalDay.day_date}</div>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setAttendanceModalOpen(false);
+                    setAttendanceModalDay(null);
+                    setAttendanceDraft({});
+                    setAttendanceSaving(false);
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="admin-table-wrap" style={{ marginTop: 10, maxHeight: "60vh" }}>
+                <table className="admin-table attendance-modal-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Student</th>
+                      <th>P</th>
+                      <th>L</th>
+                      <th>E</th>
+                      <th>A</th>
+                      <th>Comment</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeStudents.map((s, idx) => {
+                      const entry = attendanceDraft?.[s.id] || { status: "", comment: "" };
+                      return (
+                        <tr key={`att-${s.id}`}>
+                          <td>{idx + 1}</td>
+                          <td>{s.display_name ?? s.email ?? s.id}</td>
+                          {["P", "L", "E", "A"].map((code) => (
+                            <td key={`${s.id}-${code}`}>
+                              <button
+                                className={`att-status-btn ${entry.status === code ? "active" : ""} att-${code}`}
+                                type="button"
+                                onClick={() =>
+                                  setAttendanceDraft((prev) => ({
+                                    ...prev,
+                                    [s.id]: { ...entry, status: code }
+                                  }))
+                                }
+                              >
+                                {code}
+                              </button>
+                            </td>
+                          ))}
+                          <td>
+                            <input
+                              value={entry.comment || ""}
+                              onChange={(e) =>
+                                setAttendanceDraft((prev) => ({
+                                  ...prev,
+                                  [s.id]: { ...entry, comment: e.target.value }
+                                }))
+                              }
+                              placeholder="(optional)"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="btn btn-primary" onClick={saveAttendanceDay} disabled={attendanceSaving}>
+                  {attendanceSaving ? "Saving..." : "Save Attendance"}
                 </button>
               </div>
             </div>

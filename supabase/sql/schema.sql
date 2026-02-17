@@ -3,7 +3,8 @@
 -- profiles additions (if not already applied)
 alter table public.profiles
   add column if not exists email text,
-  add column if not exists force_password_change boolean not null default false;
+  add column if not exists force_password_change boolean not null default false,
+  add column if not exists is_withdrawn boolean not null default false;
 
 -- tests master
 create table if not exists public.tests (
@@ -107,3 +108,24 @@ alter table public.exam_links
 -- alter table public.attempts
 --   add constraint attempts_test_version_fkey foreign key (test_version)
 --   references public.tests(version) on delete set null;
+
+-- attendance
+create table if not exists public.attendance_days (
+  id uuid primary key default gen_random_uuid(),
+  day_date date not null unique,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.attendance_entries (
+  id uuid primary key default gen_random_uuid(),
+  day_id uuid not null references public.attendance_days(id) on delete cascade,
+  student_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null check (status in ('P','L','E','A')),
+  comment text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (day_id, student_id)
+);
+
+create index if not exists attendance_entries_day_idx on public.attendance_entries (day_id);
+create index if not exists attendance_entries_student_idx on public.attendance_entries (student_id);
