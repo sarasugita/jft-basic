@@ -606,7 +606,7 @@ async function fetchStudentAttendance() {
         status: e.status,
         comment: e.comment ?? ""
       }))
-      .sort((a, b) => String(a.day_date).localeCompare(String(b.day_date)));
+      .sort((a, b) => String(b.day_date).localeCompare(String(a.day_date)));
   }
   studentAttendanceState.loaded = true;
   studentAttendanceState.loading = false;
