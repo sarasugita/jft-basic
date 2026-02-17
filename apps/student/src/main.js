@@ -31,6 +31,14 @@ let studentResultsState = {
   userId: "",
 };
 
+let studentAttendanceState = {
+  loaded: false,
+  loading: false,
+  list: [],
+  error: "",
+  userId: "",
+};
+
 let resultDetailState = {
   open: false,
   attempt: null,
@@ -277,6 +285,10 @@ async function refreshAuthState() {
     studentResultsState.loaded = false;
     studentResultsState.list = [];
     studentResultsState.error = "";
+    studentAttendanceState.userId = "";
+    studentAttendanceState.loaded = false;
+    studentAttendanceState.list = [];
+    studentAttendanceState.error = "";
     return;
   }
 
@@ -321,6 +333,12 @@ async function refreshAuthState() {
     studentResultsState.loaded = false;
     studentResultsState.list = [];
     studentResultsState.error = "";
+  }
+  if (studentAttendanceState.userId !== currentUserId) {
+    studentAttendanceState.userId = currentUserId;
+    studentAttendanceState.loaded = false;
+    studentAttendanceState.list = [];
+    studentAttendanceState.error = "";
   }
   if (authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
@@ -461,6 +479,69 @@ function formatDateTime(value) {
   return d.toLocaleString();
 }
 
+function formatDateShort(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[2]}/${m[3]}`;
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
+}
+
+function formatWeekday(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) {
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return d.toLocaleDateString(undefined, { weekday: "short" });
+    }
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { weekday: "short" });
+}
+
+function buildAttendanceSummary(list) {
+  const monthKeys = Array.from(
+    new Set(
+      list
+        .map((r) => String(r.day_date || ""))
+        .filter(Boolean)
+        .map((d) => d.slice(0, 7))
+    )
+  ).sort();
+
+  const calc = (rows) => {
+    const total = rows.length;
+    const present = rows.filter((r) => r.status === "P" || r.status === "L").length;
+    const late = rows.filter((r) => r.status === "L").length;
+    const excused = rows.filter((r) => r.status === "E").length;
+    const unexcused = rows.filter((r) => r.status === "A").length;
+    const rate = total ? (present / total) * 100 : null;
+    return { total, present, late, excused, unexcused, rate };
+  };
+
+  const overall = calc(list);
+  const months = monthKeys.map((key, idx) => {
+    const rows = list.filter((r) => String(r.day_date || "").startsWith(key));
+    const stats = calc(rows);
+    const parts = key.split("-");
+    const labelMonth = parts.length === 2
+      ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined, { month: "short" })
+      : key;
+    return {
+      key,
+      label: `Month ${idx + 1} (${labelMonth})`,
+      stats
+    };
+  });
+
+  return { overall, months };
+}
+
 async function fetchStudentResults() {
   if (!authState.session) return;
   if (studentResultsState.loading) return;
@@ -480,6 +561,55 @@ async function fetchStudentResults() {
   }
   studentResultsState.loaded = true;
   studentResultsState.loading = false;
+}
+
+async function fetchStudentAttendance() {
+  if (!authState.session) return;
+  if (studentAttendanceState.loading) return;
+  studentAttendanceState.loading = true;
+  studentAttendanceState.error = "";
+  const { data, error } = await supabase
+    .from("attendance_entries")
+    .select("day_id, status, comment")
+    .eq("student_id", authState.session.user.id);
+  if (error) {
+    studentAttendanceState.list = [];
+    studentAttendanceState.error = error.message || "Failed to load attendance.";
+    studentAttendanceState.loaded = true;
+    studentAttendanceState.loading = false;
+    return;
+  }
+  const entries = data ?? [];
+  const dayIds = entries.map((e) => e.day_id).filter(Boolean);
+  if (!dayIds.length) {
+    studentAttendanceState.list = [];
+    studentAttendanceState.loaded = true;
+    studentAttendanceState.loading = false;
+    return;
+  }
+  const { data: daysData, error: daysError } = await supabase
+    .from("attendance_days")
+    .select("id, day_date")
+    .in("id", dayIds);
+  if (daysError) {
+    studentAttendanceState.list = [];
+    studentAttendanceState.error = daysError.message || "Failed to load attendance.";
+  } else {
+    const dayMap = {};
+    (daysData ?? []).forEach((d) => {
+      dayMap[d.id] = d.day_date;
+    });
+    studentAttendanceState.list = entries
+      .map((e) => ({
+        day_id: e.day_id,
+        day_date: dayMap[e.day_id] ?? "",
+        status: e.status,
+        comment: e.comment ?? ""
+      }))
+      .sort((a, b) => String(a.day_date).localeCompare(String(b.day_date)));
+  }
+  studentAttendanceState.loaded = true;
+  studentAttendanceState.loading = false;
 }
 
 async function fetchQuestionsForDetail(version) {
@@ -1542,8 +1672,13 @@ function renderTestSelect(app) {
   const showTabs = Boolean(authState.session);
   const activeTab = showTabs ? state.studentTab : "take";
   const showResults = showTabs && activeTab === "results";
-  const showTakeTest = !showResults;
+  const showAttendance = showTabs && activeTab === "attendance";
+  const showTakeTest = !showResults && !showAttendance;
   const canStart = activeSections.length > 0;
+
+  if (showAttendance && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
+    fetchStudentAttendance().finally(render);
+  }
 
   const studentInfoHtml = authState.session
     ? `
@@ -1597,6 +1732,99 @@ function renderTestSelect(app) {
                 `;
               })
               .join("")}
+          </div>
+        `;
+      })()
+    : "";
+
+  const attendanceHtml = showAttendance
+    ? (() => {
+        if (!authState.session) {
+          return `<div class="text-muted">Log in to see attendance.</div>`;
+        }
+        if (studentAttendanceState.loading) {
+          return `<div class="text-muted">Loading attendance...</div>`;
+        }
+        if (studentAttendanceState.error) {
+          return `<div class="text-error">${escapeHtml(studentAttendanceState.error)}</div>`;
+        }
+        if (!studentAttendanceState.list.length) {
+          return `<div class="text-muted">No attendance records.</div>`;
+        }
+        const summary = buildAttendanceSummary(studentAttendanceState.list);
+        return `
+          <div class="detail-section">
+            <div class="detail-title">Summary</div>
+            <div class="detail-table-wrap">
+              <table class="detail-table wide">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Overall</th>
+                    ${summary.months.map((m) => `<th>${escapeHtml(m.label)}</th>`).join("")}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Attendance %</td>
+                    <td>${summary.overall.rate == null ? "N/A" : `${summary.overall.rate.toFixed(2)}%`}</td>
+                    ${summary.months.map((m) => `<td>${m.stats.rate == null ? "N/A" : `${m.stats.rate.toFixed(2)}%`}</td>`).join("")}
+                  </tr>
+                  <tr>
+                    <td>Total Days</td>
+                    <td>${summary.overall.total || "-"}</td>
+                    ${summary.months.map((m) => `<td>${m.stats.total || "-"}</td>`).join("")}
+                  </tr>
+                  <tr>
+                    <td>Present (Days)</td>
+                    <td>${summary.overall.present || "-"}</td>
+                    ${summary.months.map((m) => `<td>${m.stats.present || "-"}</td>`).join("")}
+                  </tr>
+                  <tr>
+                    <td>Late/Left early (Days)</td>
+                    <td>${summary.overall.late || "-"}</td>
+                    ${summary.months.map((m) => `<td>${m.stats.late || "-"}</td>`).join("")}
+                  </tr>
+                  <tr>
+                    <td>Excused Absence (Days)</td>
+                    <td>${summary.overall.excused || "-"}</td>
+                    ${summary.months.map((m) => `<td>${m.stats.excused || "-"}</td>`).join("")}
+                  </tr>
+                  <tr>
+                    <td>Unexcused Absence (Days)</td>
+                    <td>${summary.overall.unexcused || "-"}</td>
+                    ${summary.months.map((m) => `<td>${m.stats.unexcused || "-"}</td>`).join("")}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-title">Daily Records</div>
+            <div class="detail-table-wrap">
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th>Comment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${studentAttendanceState.list
+                    .map(
+                      (r) => `
+                        <tr>
+                          <td>${escapeHtml(`${formatDateShort(r.day_date)} (${formatWeekday(r.day_date)})`)}</td>
+                          <td>${escapeHtml(r.status ?? "")}</td>
+                          <td>${escapeHtml(r.comment ?? "")}</td>
+                        </tr>
+                      `
+                    )
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
           </div>
         `;
       })()
@@ -1715,6 +1943,7 @@ function renderTestSelect(app) {
               <div class="student-tabs">
                 <button class="student-tab ${activeTab === "take" ? "active" : ""}" id="tabTake">Take Test</button>
                 <button class="student-tab ${activeTab === "results" ? "active" : ""}" id="tabResults">Test Results</button>
+                <button class="student-tab ${activeTab === "attendance" ? "active" : ""}" id="tabAttendance">Attendance</button>
               </div>
             `
             : ""
@@ -1795,8 +2024,8 @@ function renderTestSelect(app) {
               </div>
             `
             : `
-              <div class="intro-form" style="margin-top:16px; max-width:760px;">
-                ${resultsHtml}
+              <div class="intro-form" style="margin-top:16px; max-width:900px;">
+                ${showResults ? resultsHtml : attendanceHtml}
               </div>
               <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
                 <button class="nav-btn ghost" id="signOutBtn">Sign out</button>
@@ -1829,6 +2058,14 @@ function renderTestSelect(app) {
       saveState();
       if (!studentResultsState.loaded) {
         fetchStudentResults().finally(render);
+      }
+      render();
+    });
+    document.querySelector("#tabAttendance")?.addEventListener("click", () => {
+      state.studentTab = "attendance";
+      saveState();
+      if (!studentAttendanceState.loaded) {
+        fetchStudentAttendance().finally(render);
       }
       render();
     });

@@ -297,6 +297,20 @@ body { padding: 0; }
 .admin-form .field { grid-column: span 2; }
 .admin-form .field.small { grid-column: span 1; }
 
+.attendance-filter-box {
+  background: #f8fafc;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.attendance-control-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
 .admin-form label { display: block; font-weight: 800; margin-bottom: 6px; }
 .admin-form input, .admin-form select {
   width: 100%;
@@ -331,6 +345,14 @@ body { padding: 0; }
 .admin-table td:last-child { border-right: none; }
 .admin-table th { position: sticky; top: 0; background: #f7f7f7; z-index: 1; text-align: left; font-weight: 900; white-space: nowrap; }
 .admin-table tbody tr:hover { background: rgba(106, 163, 50, 0.08); cursor: pointer; }
+.admin-table tbody tr.row-withdrawn { background: #e5e7eb; }
+.admin-table tbody tr.row-withdrawn:hover { background: #e5e7eb; }
+
+.btn-withdrawn {
+  background: #4b5563;
+  color: #fff;
+  border: 1px solid #4b5563;
+}
 
 .attendance-table tbody tr:hover {
   background: transparent;
@@ -354,6 +376,27 @@ body { padding: 0; }
 .admin-detail { border-top: 1px solid rgba(0, 0, 0, 0.1); margin-top: 12px; padding-top: 12px; }
 .admin-detail h3 { margin: 0 0 8px; }
 .admin-msg { margin-top: 10px; color: #b00020; font-weight: 700; min-height: 20px; }
+
+.admin-mini-tabs {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.admin-mini-tab {
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  background: #fff;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-mini-tab.active {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+  color: #0369a1;
+}
 
 .admin-modal-overlay {
   position: fixed;
@@ -394,6 +437,7 @@ body { padding: 0; }
   font-weight: 800;
   cursor: pointer;
   padding: 0;
+  text-decoration: underline;
 }
 
 .attendance-table th,
@@ -404,6 +448,33 @@ body { padding: 0; }
 .attendance-table th:nth-child(2) {
   text-align: left;
 }
+
+.att-col-code { width: 70px; white-space: nowrap; }
+.att-col-name { width: 160px; white-space: nowrap; }
+.att-col-rate { width: 90px; }
+.att-col-absent { width: 110px; }
+
+.attendance-table .att-sticky-1,
+.attendance-table .att-sticky-2,
+.attendance-table .att-sticky-3,
+.attendance-table .att-sticky-4 {
+  position: sticky;
+  background: #fff;
+  z-index: 2;
+}
+
+.attendance-table th.att-sticky-1,
+.attendance-table th.att-sticky-2,
+.attendance-table th.att-sticky-3,
+.attendance-table th.att-sticky-4 {
+  background: #f7f7f7;
+  z-index: 3;
+}
+
+.attendance-table .att-sticky-1 { left: 0; }
+.attendance-table .att-sticky-2 { left: 70px; }
+.attendance-table .att-sticky-3 { left: 230px; }
+.attendance-table .att-sticky-4 { left: 320px; }
 
 .att-cell { font-weight: 800; text-align: center; }
 .att-P { background: #d8f5c2; color: #1f6f2a; }

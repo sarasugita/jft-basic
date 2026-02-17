@@ -204,9 +204,27 @@ function formatDateTime(iso) {
 
 function formatDateShort(value) {
   if (!value) return "";
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[2]}/${m[3]}`;
+  }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
+}
+
+function formatWeekday(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) {
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return d.toLocaleDateString(undefined, { weekday: "short" });
+    }
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { weekday: "short" });
 }
 
 function getScoreRate(attempt) {
@@ -703,8 +721,11 @@ export default function AdminPage() {
   const [reissueLoading, setReissueLoading] = useState(false);
   const [reissueMsg, setReissueMsg] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [selectedStudentTab, setSelectedStudentTab] = useState("attempts");
   const [studentAttempts, setStudentAttempts] = useState([]);
   const [studentAttemptsMsg, setStudentAttemptsMsg] = useState("");
+  const [studentAttendance, setStudentAttendance] = useState([]);
+  const [studentAttendanceMsg, setStudentAttendanceMsg] = useState("");
   const [inviteForm, setInviteForm] = useState({
     email: "",
     display_name: "",
@@ -781,6 +802,12 @@ export default function AdminPage() {
   const [attendanceModalDay, setAttendanceModalDay] = useState(null);
   const [attendanceDraft, setAttendanceDraft] = useState({});
   const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [attendanceFilter, setAttendanceFilter] = useState({
+    minRate: "",
+    minAbsences: "",
+    startDate: "",
+    endDate: ""
+  });
   function generateTempPassword(length = 10) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
     const bytes = new Uint8Array(length);
@@ -841,19 +868,105 @@ export default function AdminPage() {
     [selectedAttemptRows]
   );
 
+  const attendanceSummary = useMemo(() => {
+    const list = studentAttendance ?? [];
+    const monthKeys = Array.from(
+      new Set(
+        list
+          .map((r) => String(r.day_date || ""))
+          .filter(Boolean)
+          .map((d) => d.slice(0, 7))
+      )
+    ).sort();
+
+    const calc = (rows) => {
+      const total = rows.length;
+      const present = rows.filter((r) => r.status === "P" || r.status === "L").length;
+      const late = rows.filter((r) => r.status === "L").length;
+      const excused = rows.filter((r) => r.status === "E").length;
+      const unexcused = rows.filter((r) => r.status === "A").length;
+      const rate = total ? (present / total) * 100 : null;
+      return { total, present, late, excused, unexcused, rate };
+    };
+
+    const overall = calc(list);
+    const months = monthKeys.map((key, idx) => {
+      const rows = list.filter((r) => String(r.day_date || "").startsWith(key));
+      const stats = calc(rows);
+      const parts = key.split("-");
+      const labelMonth = parts.length === 2
+        ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined, { month: "short" })
+        : key;
+      return {
+        key,
+        label: `Month ${idx + 1} (${labelMonth})`,
+        stats
+      };
+    });
+    return { overall, months };
+  }, [studentAttendance]);
+
   const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
+
+  const sortedStudents = useMemo(() => {
+    const list = [...(students ?? [])];
+    const codeNum = (code) => {
+      const m = String(code ?? "").match(/(\d+)/);
+      return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+    };
+    list.sort((a, b) => {
+      const aNum = codeNum(a.student_code);
+      const bNum = codeNum(b.student_code);
+      if (aNum !== bNum) return aNum - bNum;
+      const aCode = String(a.student_code ?? "");
+      const bCode = String(b.student_code ?? "");
+      if (aCode !== bCode) return aCode.localeCompare(bCode);
+      const aName = String(a.display_name ?? "");
+      const bName = String(b.display_name ?? "");
+      if (aName !== bName) return aName.localeCompare(bName);
+      return String(a.email ?? "").localeCompare(String(b.email ?? ""));
+    });
+    return list;
+  }, [students]);
 
   const attendanceDayColumns = useMemo(() => {
     return attendanceDays.map((d) => ({
       ...d,
-      label: formatDateShort(d.day_date),
+      label: `${formatDateShort(d.day_date)} (${formatWeekday(d.day_date)})`,
     }));
   }, [attendanceDays]);
 
+  const attendanceRangeColumns = useMemo(() => {
+    const start = attendanceFilter.startDate;
+    const end = attendanceFilter.endDate;
+    if (!start && !end) return attendanceDayColumns;
+    return attendanceDayColumns.filter((d) => {
+      const day = d.day_date;
+      if (start && day < start) return false;
+      if (end && day > end) return false;
+      return true;
+    });
+  }, [attendanceDayColumns, attendanceFilter.startDate, attendanceFilter.endDate]);
+
   const activeStudents = useMemo(
-    () => (students ?? []).filter((s) => !s.is_withdrawn),
-    [students]
+    () => (sortedStudents ?? []).filter((s) => !s.is_withdrawn),
+    [sortedStudents]
   );
+
+  const attendanceFilteredStudents = useMemo(() => {
+    const minRate = attendanceFilter.minRate === "" ? null : Number(attendanceFilter.minRate);
+    const minAbsences = attendanceFilter.minAbsences === "" ? null : Number(attendanceFilter.minAbsences);
+    return activeStudents.filter((s) => {
+      const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
+      const total = perDay.filter(Boolean).length;
+      const present = perDay.filter((v) => v === "P" || v === "L").length;
+      const absences = perDay.filter((v) => v === "A").length;
+      const rate = total ? (present / total) * 100 : 0;
+      if (minRate != null && rate >= minRate) return false;
+      if (minAbsences != null && absences < minAbsences) return false;
+      return true;
+    });
+  }, [activeStudents, attendanceFilter, attendanceRangeColumns, attendanceEntriesByDay]);
 
   const linkBySession = useMemo(() => {
     const map = {};
@@ -1063,6 +1176,21 @@ export default function AdminPage() {
     const list = (data ?? []).filter((p) => p.role === "student");
     setStudents(list);
     setStudentMsg(list.length ? "" : "No students.");
+    if (!list.length) {
+      setSelectedStudentId("");
+      setStudentAttempts([]);
+      setStudentAttendance([]);
+      setStudentAttemptsMsg("");
+      setStudentAttendanceMsg("");
+      return;
+    }
+    const exists = selectedStudentId && list.some((s) => s.id === selectedStudentId);
+    if (!exists) {
+      const first = list[0];
+      setSelectedStudentId(first.id);
+      setSelectedStudentTab("attempts");
+      fetchStudentAttempts(first.id);
+    }
   }
 
   async function toggleWithdrawn(student, nextValue) {
@@ -1104,6 +1232,52 @@ export default function AdminPage() {
     }
     setStudentAttempts(data ?? []);
     setStudentAttemptsMsg(data?.length ? "" : "No attempts.");
+  }
+
+  async function fetchStudentAttendance(studentId) {
+    if (!studentId) return;
+    setStudentAttendanceMsg("Loading...");
+    const { data, error } = await supabase
+      .from("attendance_entries")
+      .select("day_id, status, comment")
+      .eq("student_id", studentId);
+    if (error) {
+      console.error("student attendance fetch error:", error);
+      setStudentAttendance([]);
+      setStudentAttendanceMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const entries = data ?? [];
+    const dayIds = entries.map((e) => e.day_id).filter(Boolean);
+    if (!dayIds.length) {
+      setStudentAttendance([]);
+      setStudentAttendanceMsg("No attendance records.");
+      return;
+    }
+    const { data: daysData, error: daysError } = await supabase
+      .from("attendance_days")
+      .select("id, day_date")
+      .in("id", dayIds);
+    if (daysError) {
+      console.error("attendance days fetch error:", daysError);
+      setStudentAttendance([]);
+      setStudentAttendanceMsg(`Load failed: ${daysError.message}`);
+      return;
+    }
+    const dayMap = {};
+    (daysData ?? []).forEach((d) => {
+      dayMap[d.id] = d.day_date;
+    });
+    const list = entries
+      .map((e) => ({
+        day_id: e.day_id,
+        day_date: dayMap[e.day_id] ?? "",
+        status: e.status,
+        comment: e.comment ?? ""
+      }))
+      .sort((a, b) => String(a.day_date).localeCompare(String(b.day_date)));
+    setStudentAttendance(list);
+    setStudentAttendanceMsg(list.length ? "" : "No attendance records.");
   }
 
   async function fetchTests() {
@@ -1207,7 +1381,7 @@ export default function AdminPage() {
     const { data, error } = await supabase
       .from("attendance_days")
       .select("id, day_date, created_at")
-      .order("day_date", { ascending: false })
+      .order("day_date", { ascending: true })
       .limit(60);
     if (error) {
       console.error("attendance_days fetch error:", error);
@@ -1304,6 +1478,25 @@ export default function AdminPage() {
       return;
     }
     setAttendanceSaving(false);
+    setAttendanceModalOpen(false);
+    setAttendanceModalDay(null);
+    setAttendanceDraft({});
+    fetchAttendanceDays();
+  }
+
+  async function deleteAttendanceDay(day) {
+    if (!day?.id) return;
+    const ok = window.confirm(`Delete attendance for ${day.day_date}?`);
+    if (!ok) return;
+    const { error } = await supabase
+      .from("attendance_days")
+      .delete()
+      .eq("id", day.id);
+    if (error) {
+      console.error("attendance delete error:", error);
+      setAttendanceMsg(`Delete failed: ${error.message}`);
+      return;
+    }
     setAttendanceModalOpen(false);
     setAttendanceModalDay(null);
     setAttendanceDraft({});
@@ -2654,31 +2847,31 @@ export default function AdminPage() {
             <table className="admin-table" style={{ minWidth: 860 }}>
               <thead>
                 <tr>
-                  <th>Created</th>
-                  <th>Email</th>
-                  <th>Name</th>
                   <th>Code</th>
-                  <th>User ID</th>
+                  <th>Name</th>
+                  <th>Email</th>
                   <th>Temp Password</th>
                   <th>Reissue Password</th>
-                  <th>Withdrawn</th>
+                  <th>Withdraw</th>
                   <th>Delete</th>
                 </tr>
               </thead>
               <tbody>
-                {students.map((s) => (
+                {sortedStudents.map((s) => (
                   <tr
                     key={s.id}
                     onClick={() => {
                       setSelectedStudentId(s.id);
+                      setSelectedStudentTab("attempts");
+                      setStudentAttendance([]);
+                      setStudentAttendanceMsg("");
                       fetchStudentAttempts(s.id);
                     }}
+                    className={s.is_withdrawn ? "row-withdrawn" : ""}
                   >
-                    <td>{formatDateTime(s.created_at)}</td>
-                    <td>{s.email ?? ""}</td>
-                    <td>{s.display_name ?? ""}</td>
                     <td>{s.student_code ?? ""}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{s.id}</td>
+                    <td>{s.display_name ?? ""}</td>
+                    <td>{s.email ?? ""}</td>
                     <td>{studentTempMap[s.id] ?? ""}</td>
                     <td>
                       <button
@@ -2698,13 +2891,13 @@ export default function AdminPage() {
                     </td>
                     <td>
                       <button
-                        className={`btn ${s.is_withdrawn ? "" : "btn-danger"}`}
+                        className={`btn ${s.is_withdrawn ? "btn-withdrawn" : ""}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleWithdrawn(s, !s.is_withdrawn);
                         }}
                       >
-                        {s.is_withdrawn ? "Undo" : "Withdraw"}
+                        {s.is_withdrawn ? "Withdrawn" : "Withdraw"}
                       </button>
                     </td>
                     <td>
@@ -2733,44 +2926,157 @@ export default function AdminPage() {
                     {selectedStudent?.display_name ?? ""} {selectedStudent?.student_code ? `(${selectedStudent.student_code})` : ""}
                   </div>
                 </div>
-                <button className="btn" onClick={() => fetchStudentAttempts(selectedStudentId)}>Refresh Attempts</button>
+                <button className="btn" onClick={() => {
+                  if (selectedStudentTab === "attendance") {
+                    fetchStudentAttendance(selectedStudentId);
+                  } else {
+                    fetchStudentAttempts(selectedStudentId);
+                  }
+                }}>Refresh</button>
               </div>
 
-              <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                <table className="admin-table" style={{ minWidth: 860 }}>
-                  <thead>
-                    <tr>
-                      <th>Created</th>
-                      <th>Test</th>
-                      <th>Score</th>
-                      <th>Rate</th>
-                      <th>Attempt ID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {studentAttempts.map((a) => {
-                      const score = `${a.correct}/${a.total}`;
-                      const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
-                      return (
-                        <tr
-                          key={`student-attempt-${a.id}`}
-                          onClick={() => {
-                            setSelectedAttemptObj(a);
-                            setAttemptDetailOpen(true);
-                          }}
-                        >
-                          <td>{formatDateTime(a.created_at)}</td>
-                          <td>{getAttemptTitle(a)}</td>
-                          <td>{score}</td>
-                          <td>{rate}</td>
-                          <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="admin-mini-tabs">
+                <button
+                  className={`admin-mini-tab ${selectedStudentTab === "attempts" ? "active" : ""}`}
+                  onClick={() => {
+                    setSelectedStudentTab("attempts");
+                    fetchStudentAttempts(selectedStudentId);
+                  }}
+                >
+                  Attempts
+                </button>
+                <button
+                  className={`admin-mini-tab ${selectedStudentTab === "attendance" ? "active" : ""}`}
+                  onClick={() => {
+                    setSelectedStudentTab("attendance");
+                    fetchStudentAttendance(selectedStudentId);
+                  }}
+                >
+                  Attendance
+                </button>
               </div>
-              <div className="admin-msg">{studentAttemptsMsg}</div>
+
+              {selectedStudentTab === "attempts" ? (
+                <>
+                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                    <table className="admin-table" style={{ minWidth: 860 }}>
+                      <thead>
+                        <tr>
+                          <th>Created</th>
+                          <th>Test</th>
+                          <th>Score</th>
+                          <th>Rate</th>
+                          <th>Attempt ID</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {studentAttempts.map((a) => {
+                          const score = `${a.correct}/${a.total}`;
+                          const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                          return (
+                            <tr
+                              key={`student-attempt-${a.id}`}
+                              onClick={() => {
+                                setSelectedAttemptObj(a);
+                                setAttemptDetailOpen(true);
+                              }}
+                            >
+                              <td>{formatDateTime(a.created_at)}</td>
+                              <td>{getAttemptTitle(a)}</td>
+                              <td>{score}</td>
+                              <td>{rate}</td>
+                              <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="admin-msg">{studentAttemptsMsg}</div>
+                </>
+              ) : (
+                <>
+                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                    <table className="admin-table" style={{ minWidth: 760 }}>
+                      <thead>
+                        <tr>
+                          <th></th>
+                          <th>Overall</th>
+                          {attendanceSummary.months.map((m) => (
+                            <th key={m.key}>{m.label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>Attendance %</td>
+                          <td>{attendanceSummary.overall.rate == null ? "N/A" : `${attendanceSummary.overall.rate.toFixed(2)}%`}</td>
+                          {attendanceSummary.months.map((m) => (
+                            <td key={`${m.key}-rate`}>{m.stats.rate == null ? "N/A" : `${m.stats.rate.toFixed(2)}%`}</td>
+                          ))}
+                        </tr>
+                        <tr>
+                          <td>Total Days</td>
+                          <td>{attendanceSummary.overall.total || "-"}</td>
+                          {attendanceSummary.months.map((m) => (
+                            <td key={`${m.key}-total`}>{m.stats.total || "-"}</td>
+                          ))}
+                        </tr>
+                        <tr>
+                          <td>Present (Days)</td>
+                          <td>{attendanceSummary.overall.present || "-"}</td>
+                          {attendanceSummary.months.map((m) => (
+                            <td key={`${m.key}-present`}>{m.stats.present || "-"}</td>
+                          ))}
+                        </tr>
+                        <tr>
+                          <td>Late/Left early (Days)</td>
+                          <td>{attendanceSummary.overall.late || "-"}</td>
+                          {attendanceSummary.months.map((m) => (
+                            <td key={`${m.key}-late`}>{m.stats.late || "-"}</td>
+                          ))}
+                        </tr>
+                        <tr>
+                          <td>Excused Absence (Days)</td>
+                          <td>{attendanceSummary.overall.excused || "-"}</td>
+                          {attendanceSummary.months.map((m) => (
+                            <td key={`${m.key}-excused`}>{m.stats.excused || "-"}</td>
+                          ))}
+                        </tr>
+                        <tr>
+                          <td>Unexcused Absence (Days)</td>
+                          <td>{attendanceSummary.overall.unexcused || "-"}</td>
+                          {attendanceSummary.months.map((m) => (
+                            <td key={`${m.key}-unexcused`}>{m.stats.unexcused || "-"}</td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                    <table className="admin-table" style={{ minWidth: 760 }}>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Status</th>
+                          <th>Comment</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {studentAttendance.map((r, idx) => (
+                          <tr key={`att-row-${idx}`}>
+                            <td>{`${formatDateShort(r.day_date)} (${formatWeekday(r.day_date)})`}</td>
+                            <td>{r.status}</td>
+                            <td>{r.comment}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="admin-msg">{studentAttendanceMsg}</div>
+                </>
+              )}
             </div>
           ) : null}
 
@@ -2812,23 +3118,74 @@ export default function AdminPage() {
               <div className="admin-title">Attendance</div>
               <div className="admin-subtitle">P / L / E / A を日別で管理します。</div>
             </div>
-            <button className="btn" onClick={() => fetchAttendanceDays()}>Refresh</button>
           </div>
 
-          <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field">
-              <label>Date</label>
+          <div className="attendance-control-row" style={{ marginTop: 10 }}>
+            <div className="admin-form">
+              <div className="field">
+                <label>Date</label>
+                <input
+                  type="date"
+                  value={attendanceDate}
+                  onChange={(e) => setAttendanceDate(e.target.value)}
+                />
+              </div>
+              <div className="field small">
+                <label>&nbsp;</label>
+                <button className="btn btn-primary" type="button" onClick={() => openAttendanceDay(attendanceDate)}>
+                  Open Day
+                </button>
+              </div>
+            </div>
+
+            <div className="admin-form attendance-filter-box">
+            <div className="field small">
+              <label>Filter (Rate &lt;)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="e.g. 80"
+                value={attendanceFilter.minRate}
+                onChange={(e) => setAttendanceFilter((s) => ({ ...s, minRate: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Filter (Unexcused ≥)</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="e.g. 3"
+                value={attendanceFilter.minAbsences}
+                onChange={(e) => setAttendanceFilter((s) => ({ ...s, minAbsences: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Range From</label>
               <input
                 type="date"
-                value={attendanceDate}
-                onChange={(e) => setAttendanceDate(e.target.value)}
+                value={attendanceFilter.startDate}
+                onChange={(e) => setAttendanceFilter((s) => ({ ...s, startDate: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Range To</label>
+              <input
+                type="date"
+                value={attendanceFilter.endDate}
+                onChange={(e) => setAttendanceFilter((s) => ({ ...s, endDate: e.target.value }))}
               />
             </div>
             <div className="field small">
               <label>&nbsp;</label>
-              <button className="btn btn-primary" type="button" onClick={() => openAttendanceDay(attendanceDate)}>
-                Open Day
+              <button
+                className="btn"
+                type="button"
+                onClick={() => setAttendanceFilter({ minRate: "", minAbsences: "", startDate: "", endDate: "" })}
+              >
+                Clear Filter
               </button>
+            </div>
             </div>
           </div>
 
@@ -2836,10 +3193,10 @@ export default function AdminPage() {
             <table className="admin-table attendance-table">
               <thead>
                 <tr>
-                  <th>#</th>
-                  <th>Student Name</th>
-                  <th>Attendance Rate</th>
-                  <th>Unexcused Absence</th>
+                  <th className="att-col-code att-sticky-1">ID</th>
+                  <th className="att-col-name att-sticky-2">Student Name</th>
+                  <th className="att-col-rate att-sticky-3">Attendance<br />Rate</th>
+                  <th className="att-col-absent att-sticky-4">Unexcused<br />Absence</th>
                   {attendanceDayColumns.map((d) => (
                     <th key={d.id}>
                       <button className="link-btn" onClick={() => openAttendanceDay(d.day_date)}>
@@ -2850,18 +3207,18 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {activeStudents.map((s, idx) => {
-                  const perDay = attendanceDayColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
+                {attendanceFilteredStudents.map((s) => {
+                  const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
                   const total = perDay.filter(Boolean).length;
-                  const present = perDay.filter((v) => v === "P").length;
+                  const present = perDay.filter((v) => v === "P" || v === "L").length;
                   const absences = perDay.filter((v) => v === "A").length;
                   const rate = total ? (present / total) * 100 : 0;
                   return (
                     <tr key={s.id}>
-                      <td>{idx + 1}</td>
-                      <td>{s.display_name ?? s.email ?? s.id}</td>
-                      <td>{rate.toFixed(2)}%</td>
-                      <td>{absences}</td>
+                      <td className="att-col-code att-sticky-1">{s.student_code ?? ""}</td>
+                      <td className="att-col-name att-sticky-2">{s.display_name ?? s.email ?? s.id}</td>
+                      <td className="att-col-rate att-sticky-3">{rate.toFixed(2)}%</td>
+                      <td className="att-col-absent att-sticky-4">{absences}</td>
                       {attendanceDayColumns.map((d) => {
                         const status = attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "";
                         return (
@@ -3694,7 +4051,7 @@ export default function AdminPage() {
                 <table className="admin-table attendance-modal-table">
                   <thead>
                     <tr>
-                      <th>#</th>
+                      <th>Code</th>
                       <th>Student</th>
                       <th>P</th>
                       <th>L</th>
@@ -3704,11 +4061,11 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {activeStudents.map((s, idx) => {
+                    {activeStudents.map((s) => {
                       const entry = attendanceDraft?.[s.id] || { status: "", comment: "" };
                       return (
                         <tr key={`att-${s.id}`}>
-                          <td>{idx + 1}</td>
+                          <td>{s.student_code ?? ""}</td>
                           <td>{s.display_name ?? s.email ?? s.id}</td>
                           {["P", "L", "E", "A"].map((code) => (
                             <td key={`${s.id}-${code}`}>
@@ -3748,6 +4105,9 @@ export default function AdminPage() {
               <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button className="btn btn-primary" onClick={saveAttendanceDay} disabled={attendanceSaving}>
                   {attendanceSaving ? "Saving..." : "Save Attendance"}
+                </button>
+                <button className="btn btn-danger" onClick={() => deleteAttendanceDay(attendanceModalDay)}>
+                  Delete Day
                 </button>
               </div>
             </div>
