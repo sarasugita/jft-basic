@@ -2216,21 +2216,41 @@ function renderQuiz(app) {
   const sec = getCurrentSection();
   const secQs = getSectionQuestions(sec.key);
   const group = getCurrentQuestion();
+  const isDaily = getActiveTestType() === "daily";
 
   app.innerHTML = `
-    <div class="app has-topbar">
+    <div class="app has-topbar ${isDaily ? "" : "has-bottombar"}">
       ${topbarHTML({ rightButtonLabel: "Finish Test", rightButtonId: "finishBtn" })}
       <div class="body">
         ${sidebarHTML()}
         <main class="content">
           ${focusWarningHTML()}
           ${renderQuestionGroupHTML(group)}
-          <div class="question-nav">
-            <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
-            <button class="nav-btn" id="nextBtn">Next ▶</button>
-          </div>
+          ${
+            isDaily
+              ? `
+                <div class="question-nav">
+                  <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
+                  <button class="nav-btn" id="nextBtn">Next ▶</button>
+                </div>
+              `
+              : ""
+          }
         </main>
       </div>
+      ${
+        isDaily
+          ? ""
+          : `
+            <footer class="bottombar">
+              <div class="bottom-left"><button class="icon-btn">⚙️</button><button class="icon-btn">▦</button></div>
+              <div class="bottom-right">
+                <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
+                <button class="nav-btn" id="nextBtn">Next ▶</button>
+              </div>
+            </footer>
+          `
+      }
     </div>
   `;
 

@@ -29,6 +29,10 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   padding-top: var(--topbar-height);
 }
 
+.app.has-bottombar .body {
+  padding-bottom: 90px;
+}
+
 /* Top bar */
 .topbar {
   background: #111;

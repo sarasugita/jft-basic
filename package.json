@@ -12,5 +12,8 @@
     "build:student": "npm -w apps/student run build",
     "dev:admin": "npm -w apps/admin run dev",
     "build:admin": "npm -w apps/admin run build"
+  },
+  "dependencies": {
+    "@vercel/analytics": "^1.6.1"
   }
 }
