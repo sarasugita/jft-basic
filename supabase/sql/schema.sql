@@ -88,6 +88,7 @@ create table if not exists public.test_sessions (
   ends_at timestamptz,
   time_limit_min int,
   is_published boolean not null default true,
+  show_answers boolean not null default true,
   created_at timestamptz not null default now()
 );
 

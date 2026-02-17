@@ -206,6 +206,21 @@ function resetAll() {
 }
 
 function exitToHome() {
+  if (authState.session && state.linkId) {
+    state.linkId = null;
+    state.linkExpiresAt = null;
+    state.linkTestVersion = null;
+    state.linkTestSessionId = null;
+    state.linkInvalid = false;
+    state.linkLoginRequired = false;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("link");
+      window.history.replaceState({}, "", url.toString());
+    } catch {
+      // ignore URL update failures
+    }
+  }
   state.phase = "intro";
   state.sectionIndex = 0;
   state.questionIndexInSection = 0;
@@ -345,7 +360,7 @@ async function fetchTestSessions() {
   testSessionsState.error = "";
   const { data, error } = await publicSupabase
     .from("test_sessions")
-    .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, created_at")
+    .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, created_at")
     .eq("is_published", true)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -427,6 +442,16 @@ function getAttemptTitle(attempt) {
   }
   const test = testsState.list.find((t) => t.version === attempt?.test_version);
   return test?.title || attempt?.test_version || "Test";
+}
+
+function shouldShowAnswers(attempt) {
+  if (attempt?.test_session_id) {
+    const session = testSessionsState.list.find((s) => s.id === attempt.test_session_id);
+    if (typeof session?.show_answers === "boolean") return session.show_answers;
+  }
+  const test = testsState.list.find((t) => t.version === attempt?.test_version);
+  if (test?.type === "daily") return false;
+  return true;
 }
 
 function formatDateTime(value) {
@@ -514,8 +539,6 @@ function renderLogin(app) {
             }
           </div>
 
-          <button class="nav-btn ghost" id="resetBtn" style="width:100%;margin-top:10px;">Forgot password</button>
-
           <p id="msg" style="color:#b00;margin-top:12px;min-height:20px;"></p>
         </div>
       </main>
@@ -545,23 +568,6 @@ function renderLogin(app) {
     saveState();
   });
 
-  app.querySelector("#resetBtn").addEventListener("click", async () => {
-    msgEl.textContent = "";
-    const email = emailEl.value.trim();
-    if (!email) {
-      msgEl.textContent = "Email を入力してください。";
-      return;
-    }
-    const redirectTo = `${window.location.origin}/reset`;
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
-    if (error) {
-      msgEl.textContent = error.message;
-      return;
-    }
-    msgEl.style.color = "green";
-    msgEl.textContent = "Reset email sent. メールを確認してください。";
-  });
-
   if (showGuest) {
     app.querySelector("#guestBtn")?.addEventListener("click", () => {
       supabase.auth.signOut();
@@ -570,6 +576,22 @@ function renderLogin(app) {
       goIntro();
     });
   }
+}
+
+function eyeIcon() {
+  return `
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M12 5c5.5 0 9.6 4.1 10.7 6.6.2.4.2.8 0 1.1C21.6 15.9 17.5 20 12 20S2.4 15.9 1.3 12.7c-.2-.4-.2-.8 0-1.1C2.4 9.1 6.5 5 12 5zm0 2.2c-4.1 0-7.4 2.9-8.4 4.9 1 2 4.3 4.9 8.4 4.9s7.4-2.9 8.4-4.9c-1-2-4.3-4.9-8.4-4.9zm0 1.8a3.9 3.9 0 1 1 0 7.8 3.9 3.9 0 0 1 0-7.8z"/>
+    </svg>
+  `;
+}
+
+function eyeOffIcon() {
+  return `
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M3 4.3 4.3 3 21 19.7 19.7 21l-2.4-2.4c-1.6.8-3.4 1.4-5.3 1.4-5.5 0-9.6-4.1-10.7-6.6-.2-.4-.2-.8 0-1.1.7-1.7 2.3-3.6 4.6-4.9L3 4.3zm5 5 1.7 1.7a3.9 3.9 0 0 0 4.6 4.6l1.7 1.7c-1 .5-2.1.7-3.4.7a3.9 3.9 0 0 1-3.9-3.9c0-1.3.3-2.4.8-3.4zM12 7.2c1.2 0 2.3.3 3.2.8l-1.7 1.7a3.9 3.9 0 0 0-4.6 4.6L6.2 10c1.5-1.7 3.7-2.8 5.8-2.8zm9.2 4.8c-.5 1.1-1.4 2.4-2.8 3.5l-1.4-1.4c1-.8 1.7-1.7 2.1-2.1-.8-1.6-3.1-4.1-6.1-4.6l-1.8-1.8c4.2.4 7.5 3.2 8.5 4.7.2.4.2.8 0 1.1z"/>
+    </svg>
+  `;
 }
 
 function renderSetPassword(app) {
@@ -582,7 +604,20 @@ function renderSetPassword(app) {
           <p style="margin-top:0;line-height:1.6;">新しいパスワードを設定します。</p>
 
           <label>New Password</label>
-          <input id="newPass" type="password" style="width:100%;padding:10px;margin:6px 0 12px;" />
+          <div class="pass-field">
+            <input id="newPass" type="password" class="pass-input" />
+            <button class="pass-toggle" type="button" id="toggleNewPass" aria-label="Show password">
+              ${eyeOffIcon()}
+            </button>
+          </div>
+
+          <label>Confirm Password</label>
+          <div class="pass-field">
+            <input id="confirmPass" type="password" class="pass-input" />
+            <button class="pass-toggle" type="button" id="toggleConfirmPass" aria-label="Show password">
+              ${eyeOffIcon()}
+            </button>
+          </div>
 
           <button class="nav-btn" id="updateBtn" style="width:100%;">Update password</button>
           <p id="msg" style="color:#b00;margin-top:12px;min-height:20px;"></p>
@@ -592,12 +627,31 @@ function renderSetPassword(app) {
   `;
   document.querySelector("#disabledBtn").disabled = true;
   const passEl = app.querySelector("#newPass");
+  const confirmEl = app.querySelector("#confirmPass");
   const msgEl = app.querySelector("#msg");
+  const toggleNew = app.querySelector("#toggleNewPass");
+  const toggleConfirm = app.querySelector("#toggleConfirmPass");
+
+  toggleNew?.addEventListener("click", () => {
+    const next = passEl.type === "password" ? "text" : "password";
+    passEl.type = next;
+    toggleNew.innerHTML = next === "text" ? eyeIcon() : eyeOffIcon();
+  });
+  toggleConfirm?.addEventListener("click", () => {
+    const next = confirmEl.type === "password" ? "text" : "password";
+    confirmEl.type = next;
+    toggleConfirm.innerHTML = next === "text" ? eyeIcon() : eyeOffIcon();
+  });
   app.querySelector("#updateBtn").addEventListener("click", async () => {
     msgEl.textContent = "";
     const password = passEl.value;
+    const confirm = confirmEl.value;
     if (!password || password.length < 8) {
       msgEl.textContent = "8文字以上のパスワードを入力してください。";
+      return;
+    }
+    if (password !== confirm) {
+      msgEl.textContent = "パスワードが一致しません。";
       return;
     }
     const { error } = await supabase.auth.updateUser({ password });
@@ -1552,6 +1606,7 @@ function renderTestSelect(app) {
   if (resultDetailState.open && resultDetailState.attempt) {
     const attempt = resultDetailState.attempt;
     const title = getAttemptTitle(attempt);
+    const showAnswers = shouldShowAnswers(attempt);
     const rate = getScoreRateFromAttempt(attempt);
     const passRate = getPassRateForVersion(attempt.test_version);
     const isPass = rate >= passRate;
@@ -1604,7 +1659,7 @@ function renderTestSelect(app) {
                       <th>Section</th>
                       <th>Prompt</th>
                       <th>Chosen</th>
-                      <th>Correct</th>
+                      ${showAnswers ? "<th>Correct</th>" : ""}
                       <th>OK</th>
                     </tr>
                   </thead>
@@ -1617,7 +1672,7 @@ function renderTestSelect(app) {
                             <td>${escapeHtml(r.section)}</td>
                             <td>${escapeHtml(r.prompt)}</td>
                             <td>${escapeHtml(r.chosen || "—")}</td>
-                            <td>${escapeHtml(r.correct || "—")}</td>
+                            ${showAnswers ? `<td>${escapeHtml(r.correct || "—")}</td>` : ""}
                             <td style="text-align:center;">${r.isCorrect ? "○" : "×"}</td>
                           </tr>
                         `

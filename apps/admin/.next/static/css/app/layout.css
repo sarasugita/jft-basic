@@ -357,6 +357,33 @@ body { padding: 0; }
 .admin-detail h3 { margin: 0 0 8px; }
 .admin-msg { margin-top: 10px; color: #b00020; font-weight: 700; min-height: 20px; }
 
+.admin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.admin-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 18px;
+  max-width: 520px;
+  width: 100%;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+}
+
+.admin-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .boxed {
   border: 2px solid #111;
   padding: 12px;

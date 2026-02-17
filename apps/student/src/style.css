@@ -246,6 +246,36 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 }
 .nav-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.pass-field {
+  position: relative;
+  margin: 6px 0 12px;
+}
+
+.pass-input {
+  width: 100%;
+  padding: 10px 42px 10px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.pass-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  padding: 4px;
+  cursor: pointer;
+  color: #111;
+}
+
+.pass-toggle svg {
+  display: block;
+  fill: currentColor;
+}
+
 /* Result screen */
 .result {
   padding: 22px;

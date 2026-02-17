@@ -688,6 +688,13 @@ export default function AdminPage() {
   const [loginMsg, setLoginMsg] = useState("");
   const [students, setStudents] = useState([]);
   const [studentMsg, setStudentMsg] = useState("");
+  const [studentTempMap, setStudentTempMap] = useState({});
+  const [reissueOpen, setReissueOpen] = useState(false);
+  const [reissueStudent, setReissueStudent] = useState(null);
+  const [reissuePassword, setReissuePassword] = useState("");
+  const [reissueIssuedPassword, setReissueIssuedPassword] = useState("");
+  const [reissueLoading, setReissueLoading] = useState(false);
+  const [reissueMsg, setReissueMsg] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [studentAttempts, setStudentAttempts] = useState([]);
   const [studentAttemptsMsg, setStudentAttemptsMsg] = useState("");
@@ -711,7 +718,8 @@ export default function AdminPage() {
     ends_at: "",
     time_limit_min: "",
     is_published: true,
-    link_expires_at: ""
+    link_expires_at: "",
+    show_answers: true
   });
   const [assets, setAssets] = useState([]);
   const [assetsMsg, setAssetsMsg] = useState("");
@@ -750,7 +758,8 @@ export default function AdminPage() {
     ends_at: "",
     time_limit_min: "",
     is_published: true,
-    link_expires_at: ""
+    link_expires_at: "",
+    show_answers: false
   });
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
   function generateTempPassword(length = 10) {
@@ -1121,7 +1130,7 @@ export default function AdminPage() {
     setTestSessionsMsg("Loading...");
     const { data, error } = await supabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, created_at")
+      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
     if (error) {
@@ -1161,7 +1170,8 @@ export default function AdminPage() {
       starts_at: testSessionForm.starts_at ? new Date(testSessionForm.starts_at).toISOString() : null,
       ends_at: testSessionForm.ends_at ? new Date(testSessionForm.ends_at).toISOString() : null,
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
-      is_published: Boolean(testSessionForm.is_published)
+      is_published: Boolean(testSessionForm.is_published),
+      show_answers: Boolean(testSessionForm.show_answers)
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
     if (error || !created?.id) {
@@ -1209,7 +1219,8 @@ export default function AdminPage() {
       starts_at: dailySessionForm.starts_at ? new Date(dailySessionForm.starts_at).toISOString() : null,
       ends_at: dailySessionForm.ends_at ? new Date(dailySessionForm.ends_at).toISOString() : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
-      is_published: Boolean(dailySessionForm.is_published)
+      is_published: Boolean(dailySessionForm.is_published),
+      show_answers: Boolean(dailySessionForm.show_answers)
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
     if (error || !created?.id) {
@@ -1419,8 +1430,55 @@ export default function AdminPage() {
     setInviteResults(results);
     const okCount = results.filter((r) => r.ok).length;
     const ngCount = results.length - okCount;
+    setStudentTempMap((prev) => {
+      const next = { ...prev };
+      results.forEach((r) => {
+        if (r.ok && r.user_id && r.temp_password) {
+          next[r.user_id] = r.temp_password;
+        }
+      });
+      return next;
+    });
     setStudentMsg(`Created: ${okCount} ok / ${ngCount} failed`);
     fetchStudents();
+  }
+
+  async function reissueTempPassword(student, tempPasswordInput) {
+    if (!student?.id) return;
+    setStudentMsg("");
+    setReissueMsg("Generating new pass...");
+    setReissueLoading(true);
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      setReissueMsg("Session expired. Please log in again.");
+      setReissueLoading(false);
+      return;
+    }
+    const body = { user_id: student.id, email: student.email };
+    if (tempPasswordInput) body.temp_password = tempPasswordInput;
+    const { data, error } = await supabase.functions.invoke("reissue-temp-password", {
+      body,
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (error) {
+      console.error("reissue-temp-password error:", error);
+      setReissueMsg(`Reissue failed: ${error.message}`);
+      setReissueLoading(false);
+      return;
+    }
+    if (data?.error) {
+      setReissueMsg(`Reissue failed: ${data.error}`);
+      setReissueLoading(false);
+      return;
+    }
+    const tempPassword = data?.temp_password ?? "";
+    if (tempPassword) {
+      setStudentTempMap((prev) => ({ ...prev, [student.id]: tempPassword }));
+    }
+    setReissueIssuedPassword(tempPassword);
+    setReissueMsg("");
+    setReissueLoading(false);
+    setStudentMsg(`Reissued temp password for ${student.email || student.id}`);
   }
 
   async function deleteStudent(userId, email) {
@@ -2431,6 +2489,7 @@ export default function AdminPage() {
                   <th>Code</th>
                   <th>User ID</th>
                   <th>Temp Password</th>
+                  <th>Reissue Password</th>
                   <th>Delete</th>
                 </tr>
               </thead>
@@ -2448,7 +2507,23 @@ export default function AdminPage() {
                     <td>{s.display_name ?? ""}</td>
                     <td>{s.student_code ?? ""}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{s.id}</td>
-                    <td></td>
+                    <td>{studentTempMap[s.id] ?? ""}</td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReissueStudent(s);
+                          setReissuePassword("");
+                          setReissueIssuedPassword("");
+                          setReissueLoading(false);
+                          setReissueMsg("");
+                          setReissueOpen(true);
+                        }}
+                      >
+                        Reissue Password
+                      </button>
+                    </td>
                     <td>
                       <button
                         className="btn btn-danger"
@@ -2637,6 +2712,16 @@ export default function AdminPage() {
               </select>
             </div>
             <div className="field small">
+              <label>Show Answers</label>
+              <select
+                value={testSessionForm.show_answers ? "yes" : "no"}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+              >
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="field small">
               <label>&nbsp;</label>
               <button className="btn btn-primary" type="button" onClick={createTestSession}>
                 Create Session
@@ -2656,6 +2741,7 @@ export default function AdminPage() {
                   <th>Title</th>
                   <th>Problem Set</th>
                   <th>Published</th>
+                  <th>Show Answers</th>
                   <th>Start</th>
                   <th>End</th>
                   <th>Link Expires</th>
@@ -2672,6 +2758,7 @@ export default function AdminPage() {
                     <td>{t.title ?? ""}</td>
                     <td>{t.problem_set_id ?? ""}</td>
                     <td>{t.is_published ? "Yes" : "No"}</td>
+                    <td>{t.show_answers ? "Yes" : "No"}</td>
                     <td>{formatDateTime(t.starts_at)}</td>
                     <td>{formatDateTime(t.ends_at)}</td>
                     <td>{formatDateTime(linkBySession[t.id]?.expires_at)}</td>
@@ -2986,6 +3073,16 @@ export default function AdminPage() {
               </select>
             </div>
             <div className="field small">
+              <label>Show Answers</label>
+              <select
+                value={dailySessionForm.show_answers ? "yes" : "no"}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+              >
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div className="field small">
               <label>&nbsp;</label>
               <button className="btn btn-primary" type="button" onClick={createDailySession}>
                 Create Session
@@ -3005,6 +3102,7 @@ export default function AdminPage() {
                   <th>Title</th>
                   <th>Problem Set</th>
                   <th>Published</th>
+                  <th>Show Answers</th>
                   <th>Start</th>
                   <th>End</th>
                   <th>Link Expires</th>
@@ -3021,6 +3119,7 @@ export default function AdminPage() {
                     <td>{t.title ?? ""}</td>
                     <td>{t.problem_set_id ?? ""}</td>
                     <td>{t.is_published ? "Yes" : "No"}</td>
+                    <td>{t.show_answers ? "Yes" : "No"}</td>
                     <td>{formatDateTime(t.starts_at)}</td>
                     <td>{formatDateTime(t.ends_at)}</td>
                     <td>{formatDateTime(linkBySession[t.id]?.expires_at)}</td>
@@ -3214,7 +3313,97 @@ export default function AdminPage() {
         </div>
         </>
         ) : null}
+
         </>
+        ) : null}
+
+        {reissueOpen && reissueStudent ? (
+          <div
+            className="admin-modal-overlay"
+            onClick={() => {
+              setReissueOpen(false);
+              setReissueStudent(null);
+              setReissuePassword("");
+              setReissueIssuedPassword("");
+              setReissueLoading(false);
+              setReissueMsg("");
+            }}
+          >
+            <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">Reissue Temp Password</div>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setReissueOpen(false);
+                    setReissueStudent(null);
+                    setReissuePassword("");
+                    setReissueIssuedPassword("");
+                    setReissueLoading(false);
+                    setReissueMsg("");
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="admin-help" style={{ marginTop: 6 }}>
+                {reissueStudent.display_name ?? ""} {reissueStudent.student_code ? `(${reissueStudent.student_code})` : ""}
+              </div>
+              <div className="admin-help">{reissueStudent.email ?? reissueStudent.id}</div>
+
+              <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className="field">
+                  <label>Temp Password</label>
+                  <input
+                    value={reissuePassword}
+                    onChange={(e) => setReissuePassword(e.target.value)}
+                    placeholder="Leave blank to auto-generate"
+                  />
+                </div>
+                <div className="field small">
+                  <label>&nbsp;</label>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => setReissuePassword(generateTempPassword())}
+                  >
+                    Generate
+                  </button>
+                </div>
+              </div>
+
+              {reissueMsg ? <div className="admin-msg">{reissueMsg}</div> : null}
+
+              {reissueIssuedPassword ? (
+                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(reissueIssuedPassword);
+                        setReissueMsg("Copied to clipboard.");
+                      } catch {
+                        setReissueMsg("Copy failed. Please copy manually.");
+                      }
+                    }}
+                  >
+                    Copy to Clipboard
+                  </button>
+                </div>
+              ) : null}
+
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => reissueTempPassword(reissueStudent, reissuePassword.trim())}
+                  disabled={reissueLoading}
+                >
+                  {reissueLoading ? "Generating..." : "Reissue Temp Password"}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
 
         {resultContext ? (
