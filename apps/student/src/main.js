@@ -1,6 +1,9 @@
 import "./style.css";
+import { inject } from "@vercel/analytics";
 import { questions, sections } from "../../../packages/shared/questions.js";
 import { supabase, publicSupabase } from "./supabaseClient";
+
+inject();
 
 const STORAGE_KEY = "jft_mock_state_v3";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
