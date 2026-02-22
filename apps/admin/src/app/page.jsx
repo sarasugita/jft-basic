@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 
@@ -10,6 +10,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Missing Supabase env vars for admin app.");
 }
 const supabase = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
+const DEFAULT_MODEL_CATEGORY = "Book Review";
 
 function downloadText(filename, text, mime = "text/plain") {
   const blob = new Blob([text], { type: mime });
@@ -709,6 +710,21 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState("students");
   const [modelSubTab, setModelSubTab] = useState("create");
   const [dailySubTab, setDailySubTab] = useState("create");
+  const [dailyResultsCategory, setDailyResultsCategory] = useState("");
+  const [modelResultsCategory, setModelResultsCategory] = useState("");
+  const [dailyCategorySelect, setDailyCategorySelect] = useState("__custom__");
+  const [editingTestId, setEditingTestId] = useState("");
+  const [editingTestMsg, setEditingTestMsg] = useState("");
+  const [editingCategorySelect, setEditingCategorySelect] = useState("__custom__");
+  const [editingTestForm, setEditingTestForm] = useState({
+    id: "",
+    originalVersion: "",
+    version: "",
+    title: "",
+    pass_rate: "",
+    is_public: true,
+    type: ""
+  });
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
   const [students, setStudents] = useState([]);
@@ -763,8 +779,10 @@ export default function AdminPage() {
   const [assetForm, setAssetForm] = useState({
     test_version: "test_exam",
     type: "mock",
-    pass_rate: "0.8"
+    pass_rate: "0.8",
+    category: DEFAULT_MODEL_CATEGORY
   });
+  const [assetCategorySelect, setAssetCategorySelect] = useState(DEFAULT_MODEL_CATEGORY);
   const [assetFile, setAssetFile] = useState(null);
   const [assetFiles, setAssetFiles] = useState([]);
   const [assetCsvFile, setAssetCsvFile] = useState(null);
@@ -772,8 +790,10 @@ export default function AdminPage() {
   const [assetImportMsg, setAssetImportMsg] = useState("");
   const [dailyForm, setDailyForm] = useState({
     test_version: "",
-    pass_rate: "0.8"
+    pass_rate: "0.8",
+    category: ""
   });
+  const modelCategorySeededRef = useRef(false);
   const [dailyFile, setDailyFile] = useState(null);
   const [dailyFiles, setDailyFiles] = useState([]);
   const [dailyCsvFile, setDailyCsvFile] = useState(null);
@@ -839,6 +859,82 @@ export default function AdminPage() {
     () => testSessions.filter((s) => dailyTests.some((t) => t.version === s.problem_set_id)),
     [testSessions, dailyTests]
   );
+
+  const buildCategories = (list, fallbackLabel = "Uncategorized") => {
+    const map = new Map();
+    (list ?? []).forEach((t) => {
+      const name = String(t.title ?? "").trim() || fallbackLabel;
+      if (!map.has(name)) map.set(name, []);
+      map.get(name).push(t);
+    });
+    const categories = Array.from(map.entries()).map(([name, items]) => {
+      const ordered = [...items].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
+      return { name, tests: ordered };
+    });
+    categories.sort((a, b) => a.name.localeCompare(b.name));
+    return categories;
+  };
+
+  const dailyCategories = useMemo(() => buildCategories(dailyTests), [dailyTests]);
+  const modelCategories = useMemo(() => buildCategories(modelTests, DEFAULT_MODEL_CATEGORY), [modelTests]);
+
+  const selectedDailyCategory = useMemo(() => {
+    if (!dailyCategories.length) return null;
+    return dailyCategories.find((c) => c.name === dailyResultsCategory) ?? dailyCategories[0];
+  }, [dailyCategories, dailyResultsCategory]);
+
+  const selectedModelCategory = useMemo(() => {
+    if (!modelCategories.length) return null;
+    return modelCategories.find((c) => c.name === modelResultsCategory) ?? modelCategories[0];
+  }, [modelCategories, modelResultsCategory]);
+
+  useEffect(() => {
+    if (!dailyCategories.length) return;
+    if (!dailyResultsCategory || !dailyCategories.some((c) => c.name === dailyResultsCategory)) {
+      setDailyResultsCategory(dailyCategories[0].name);
+    }
+  }, [dailyCategories, dailyResultsCategory]);
+
+  useEffect(() => {
+    if (!modelCategories.length) return;
+    if (!modelResultsCategory || !modelCategories.some((c) => c.name === modelResultsCategory)) {
+      setModelResultsCategory(modelCategories[0].name);
+    }
+  }, [modelCategories, modelResultsCategory]);
+
+  useEffect(() => {
+    if (!dailyCategories.length) return;
+    if (dailyForm.category && dailyCategories.some((c) => c.name === dailyForm.category)) {
+      setDailyCategorySelect(dailyForm.category);
+      return;
+    }
+    if (!dailyForm.category && dailyCategories.length) {
+      setDailyCategorySelect(dailyCategories[0].name);
+      setDailyForm((s) => ({ ...s, category: dailyCategories[0].name }));
+    } else {
+      setDailyCategorySelect("__custom__");
+    }
+  }, [dailyCategories, dailyForm.category]);
+
+  useEffect(() => {
+    if (!modelCategories.length) {
+      setAssetCategorySelect(DEFAULT_MODEL_CATEGORY);
+      if (!assetForm.category) {
+        setAssetForm((s) => ({ ...s, category: DEFAULT_MODEL_CATEGORY }));
+      }
+      return;
+    }
+    if (assetForm.category && modelCategories.some((c) => c.name === assetForm.category)) {
+      setAssetCategorySelect(assetForm.category);
+      return;
+    }
+    if (!assetForm.category && modelCategories.length) {
+      setAssetCategorySelect(modelCategories[0].name);
+      setAssetForm((s) => ({ ...s, category: modelCategories[0].name }));
+    } else {
+      setAssetCategorySelect("__custom__");
+    }
+  }, [modelCategories, assetForm.category]);
 
   const resultContext = useMemo(() => {
     if (activeTab === "model" && modelSubTab === "results") {
@@ -928,6 +1024,66 @@ export default function AdminPage() {
     });
     return list;
   }, [students]);
+
+  const dailyResultsMatrix = useMemo(() => {
+    const testsForCategory = selectedDailyCategory?.tests ?? [];
+    if (!testsForCategory.length) return { tests: [], rows: [] };
+    const versions = testsForCategory.map((t) => t.version);
+    const versionSet = new Set(versions);
+    const byStudent = new Map();
+    (attempts ?? []).forEach((a) => {
+      if (!a?.student_id) return;
+      if (!versionSet.has(a.test_version)) return;
+      const key = a.student_id;
+      const perStudent = byStudent.get(key) ?? new Map();
+      const existing = perStudent.get(a.test_version);
+      const nextTime = new Date(a.ended_at || a.created_at || 0).getTime();
+      const existingTime = existing
+        ? new Date(existing.ended_at || existing.created_at || 0).getTime()
+        : -1;
+      if (!existing || nextTime >= existingTime) {
+        perStudent.set(a.test_version, a);
+      }
+      byStudent.set(key, perStudent);
+    });
+
+    const rows = (sortedStudents ?? []).map((s, idx) => {
+      const perStudent = byStudent.get(s.id) ?? new Map();
+      const cells = versions.map((v) => perStudent.get(v) ?? null);
+      return { index: idx + 1, student: s, cells };
+    });
+    return { tests: testsForCategory, rows };
+  }, [attempts, sortedStudents, selectedDailyCategory]);
+
+  const modelResultsMatrix = useMemo(() => {
+    const testsForCategory = selectedModelCategory?.tests ?? [];
+    if (!testsForCategory.length) return { tests: [], rows: [] };
+    const versions = testsForCategory.map((t) => t.version);
+    const versionSet = new Set(versions);
+    const byStudent = new Map();
+    (attempts ?? []).forEach((a) => {
+      if (!a?.student_id) return;
+      if (!versionSet.has(a.test_version)) return;
+      const key = a.student_id;
+      const perStudent = byStudent.get(key) ?? new Map();
+      const existing = perStudent.get(a.test_version);
+      const nextTime = new Date(a.ended_at || a.created_at || 0).getTime();
+      const existingTime = existing
+        ? new Date(existing.ended_at || existing.created_at || 0).getTime()
+        : -1;
+      if (!existing || nextTime >= existingTime) {
+        perStudent.set(a.test_version, a);
+      }
+      byStudent.set(key, perStudent);
+    });
+
+    const rows = (sortedStudents ?? []).map((s, idx) => {
+      const perStudent = byStudent.get(s.id) ?? new Map();
+      const cells = versions.map((v) => perStudent.get(v) ?? null);
+      return { index: idx + 1, student: s, cells };
+    });
+    return { tests: testsForCategory, rows };
+  }, [attempts, sortedStudents, selectedModelCategory]);
 
   const attendanceDayColumns = useMemo(() => {
     return attendanceDays.map((d) => ({
@@ -1037,9 +1193,36 @@ export default function AdminPage() {
       runSearch("mock");
     }
     if (activeTab === "daily" && dailySubTab === "results") {
+      if (!students.length) fetchStudents();
       runSearch("daily");
     }
+    if (activeTab === "model" && modelSubTab === "results") {
+      if (!students.length) fetchStudents();
+      runSearch("mock");
+    }
   }, [session, profile, activeTab, modelSubTab, dailySubTab, tests]);
+
+  useEffect(() => {
+    if (
+      !(
+        (activeTab === "daily" && dailySubTab === "results") ||
+        (activeTab === "model" && modelSubTab === "results")
+      )
+    ) {
+      return;
+    }
+    setFilters((s) => {
+      if (!s.code && !s.name && !s.from && !s.to && !s.testVersion) return s;
+      return {
+        ...s,
+        code: "",
+        name: "",
+        from: "",
+        to: "",
+        testVersion: ""
+      };
+    });
+  }, [activeTab, dailySubTab, modelSubTab]);
 
   useEffect(() => {
     const version = selectedAttempt?.test_version;
@@ -1078,7 +1261,7 @@ export default function AdminPage() {
     let query = supabase
       .from("attempts")
       .select(
-        "id, student_id, display_name, student_code, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json"
+        "id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, ended_at, created_at, answers_json"
       )
       .order("created_at", { ascending: false })
       .limit(Number(limit || 200));
@@ -1125,6 +1308,124 @@ export default function AdminPage() {
     setFilters((s) => ({ ...s, testVersion: version || "" }));
     setSelectedId(null);
     setTimeout(() => runSearch(testType), 0);
+  }
+
+  function openAttemptDetail(attempt) {
+    if (!attempt?.id) return;
+    setSelectedId(attempt.id);
+    setSelectedAttemptObj(attempt);
+    setAttemptDetailOpen(true);
+  }
+
+  function startEditTest(test, categoryOptions) {
+    if (!test?.id) return;
+    const normalizedTitle = String(test.title ?? "").trim() || "Uncategorized";
+    const hasCategory = (categoryOptions ?? []).some((c) => c.name === normalizedTitle);
+    setEditingTestId(test.id);
+    setEditingTestMsg("");
+    setEditingCategorySelect(hasCategory ? normalizedTitle : "__custom__");
+    setEditingTestForm({
+      id: test.id,
+      originalVersion: test.version ?? "",
+      version: test.version ?? "",
+      title: normalizedTitle,
+      pass_rate: test.pass_rate != null ? String(test.pass_rate) : "",
+      is_public: Boolean(test.is_public),
+      type: test.type ?? ""
+    });
+  }
+
+  function cancelEditTest() {
+    setEditingTestId("");
+    setEditingTestMsg("");
+    setEditingCategorySelect("__custom__");
+  }
+
+  async function updateVersionInTable(table, column, oldVersion, newVersion) {
+    const { error } = await supabase
+      .from(table)
+      .update({ [column]: newVersion })
+      .eq(column, oldVersion);
+    if (error) throw new Error(`${table}: ${error.message}`);
+  }
+
+  async function saveTestEdits(categoryOptions) {
+    if (!editingTestForm.id) return;
+    setEditingTestMsg("Saving...");
+    const nextVersion = editingTestForm.version.trim();
+    if (!nextVersion) {
+      setEditingTestMsg("Test ID is required.");
+      return;
+    }
+    const passRate = Number(editingTestForm.pass_rate);
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setEditingTestMsg("Pass Rate must be between 0 and 1.");
+      return;
+    }
+    const nextTitleRaw = editingCategorySelect === "__custom__"
+      ? editingTestForm.title
+      : editingCategorySelect;
+    const nextTitle = String(nextTitleRaw ?? "").trim() || "Uncategorized";
+
+    if (nextVersion !== editingTestForm.originalVersion) {
+      const { data: exists, error: existsErr } = await supabase
+        .from("tests")
+        .select("id")
+        .eq("version", nextVersion)
+        .limit(1);
+      if (existsErr) {
+        setEditingTestMsg(`Check failed: ${existsErr.message}`);
+        return;
+      }
+      if (exists?.length && exists[0].id !== editingTestForm.id) {
+        setEditingTestMsg("That Test ID already exists.");
+        return;
+      }
+      const ok = window.confirm(
+        `Rename Test ID from ${editingTestForm.originalVersion} to ${nextVersion}? This updates sessions, attempts, links, questions, assets.`
+      );
+      if (!ok) {
+        setEditingTestMsg("Rename cancelled.");
+        return;
+      }
+    }
+
+    const updatePayload = {
+      title: nextTitle,
+      pass_rate: passRate,
+      is_public: editingTestForm.is_public,
+      updated_at: new Date().toISOString()
+    };
+    if (nextVersion !== editingTestForm.originalVersion) {
+      updatePayload.version = nextVersion;
+    }
+
+    const { error: updateErr } = await supabase.from("tests").update(updatePayload).eq("id", editingTestForm.id);
+    if (updateErr) {
+      setEditingTestMsg(`Save failed: ${updateErr.message}`);
+      return;
+    }
+
+    if (nextVersion !== editingTestForm.originalVersion) {
+      try {
+        await updateVersionInTable("questions", "test_version", editingTestForm.originalVersion, nextVersion);
+        await updateVersionInTable("attempts", "test_version", editingTestForm.originalVersion, nextVersion);
+        await updateVersionInTable("test_sessions", "problem_set_id", editingTestForm.originalVersion, nextVersion);
+        await updateVersionInTable("exam_links", "test_version", editingTestForm.originalVersion, nextVersion);
+        await updateVersionInTable("test_assets", "test_version", editingTestForm.originalVersion, nextVersion);
+      } catch (err) {
+        console.error("rename error:", err);
+        setEditingTestMsg(`Saved, but rename failed: ${err.message}`);
+      }
+    }
+
+    setEditingTestMsg("Saved.");
+    setEditingTestId("");
+    fetchTests();
+    fetchTestSessions();
+    fetchExamLinks();
+    if (activeTab === "daily" && dailySubTab === "results") runSearch("daily");
+    if (activeTab === "model" && modelSubTab === "results") runSearch("mock");
   }
 
   async function fetchExamLinks() {
@@ -1280,6 +1581,36 @@ export default function AdminPage() {
     setStudentAttendanceMsg(list.length ? "" : "No attendance records.");
   }
 
+  async function seedModelCategory(list) {
+    if (modelCategorySeededRef.current) return list;
+    const mockTests = (list ?? []).filter((t) => t.type === "mock");
+    if (!mockTests.length) {
+      modelCategorySeededRef.current = true;
+      return list;
+    }
+    const shouldSeed = mockTests.every((t) => !String(t.title ?? "").trim());
+    if (!shouldSeed) {
+      modelCategorySeededRef.current = true;
+      return list;
+    }
+    const ids = mockTests.map((t) => t.id).filter(Boolean);
+    if (!ids.length) {
+      modelCategorySeededRef.current = true;
+      return list;
+    }
+    const { error } = await supabase
+      .from("tests")
+      .update({ title: DEFAULT_MODEL_CATEGORY, updated_at: new Date().toISOString() })
+      .in("id", ids);
+    if (error) {
+      console.error("model category seed error:", error);
+      modelCategorySeededRef.current = true;
+      return list;
+    }
+    modelCategorySeededRef.current = true;
+    return list.map((t) => (t.type === "mock" ? { ...t, title: DEFAULT_MODEL_CATEGORY } : t));
+  }
+
   async function fetchTests() {
     setTestsMsg("Loading...");
     const { data, error } = await supabase
@@ -1307,9 +1638,10 @@ export default function AdminPage() {
           ...t,
           question_count: counts[t.version] ?? 0
         }));
-        setTests(withCounts);
-        if (withCounts.length && !testSessionForm.problem_set_id) {
-          setTestSessionForm((s) => ({ ...s, problem_set_id: withCounts[0].version }));
+        const seeded = await seedModelCategory(withCounts);
+        setTests(seeded);
+        if (seeded.length && !testSessionForm.problem_set_id) {
+          setTestSessionForm((s) => ({ ...s, problem_set_id: seeded[0].version }));
         }
         setTestsMsg(list.length ? "" : "No tests.");
         return;
@@ -1327,9 +1659,10 @@ export default function AdminPage() {
         ...t,
         question_count: counts[t.version] ?? 0
       }));
-      setTests(withCounts);
-      const firstModel = withCounts.find((t) => t.type === "mock");
-      const firstDaily = withCounts.find((t) => t.type === "daily");
+      const seeded = await seedModelCategory(withCounts);
+      setTests(seeded);
+      const firstModel = seeded.find((t) => t.type === "mock");
+      const firstDaily = seeded.find((t) => t.type === "daily");
       if (firstModel && !testSessionForm.problem_set_id) {
         setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
       }
@@ -1343,9 +1676,10 @@ export default function AdminPage() {
       ...t,
       question_count: t.questions?.[0]?.count ?? 0
     }));
-    setTests(withCounts);
-    const firstModel = withCounts.find((t) => t.type === "mock");
-    const firstDaily = withCounts.find((t) => t.type === "daily");
+    const seeded = await seedModelCategory(withCounts);
+    setTests(seeded);
+    const firstModel = seeded.find((t) => t.type === "mock");
+    const firstDaily = seeded.find((t) => t.type === "daily");
     if (firstModel && !testSessionForm.problem_set_id) {
       setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
     }
@@ -1627,9 +1961,15 @@ export default function AdminPage() {
     }
     const existing = (data ?? [])[0] ?? null;
     if (existing) {
+      const updatePayload = {
+        pass_rate: passRate,
+        type,
+        updated_at: new Date().toISOString()
+      };
+      if (title) updatePayload.title = title;
       const { error: updateError } = await supabase
         .from("tests")
-        .update({ pass_rate: passRate, type, updated_at: new Date().toISOString() })
+        .update(updatePayload)
         .eq("version", testVersion);
       if (updateError) {
         console.error("tests update error:", updateError);
@@ -1921,8 +2261,9 @@ export default function AdminPage() {
     const singleFile = assetFile;
     const folderFiles = assetFiles || [];
     let testVersion = assetForm.test_version.trim();
-    const title = testVersion;
     const type = assetForm.type;
+    const category = assetForm.category.trim();
+    const title = type === "mock" ? (category || DEFAULT_MODEL_CATEGORY) : testVersion;
     const passRate = Number(assetForm.pass_rate);
 
     if (!testVersion && assetCsvFile) {
@@ -1998,8 +2339,8 @@ export default function AdminPage() {
     setAssetImportMsg("");
     const file = assetCsvFile || assetFile;
     const testVersion = assetForm.test_version.trim();
-    const title = "";
     const type = assetForm.type;
+    const category = assetForm.category.trim();
     const passRate = Number(assetForm.pass_rate);
 
     if (!file) {
@@ -2043,7 +2384,7 @@ export default function AdminPage() {
       setAssetImportMsg("test_version is required (either in form or CSV).");
       return;
     }
-    const resolvedTitle = resolvedVersion;
+    const resolvedTitle = type === "mock" ? (category || DEFAULT_MODEL_CATEGORY) : resolvedVersion;
 
     setAssetImportMsg("Resolving assets...");
     const { data: assetRows, error: assetErr } = await supabase
@@ -2168,6 +2509,7 @@ export default function AdminPage() {
     const singleFile = dailyFile;
     const folderFiles = dailyFiles || [];
     let testVersion = dailyForm.test_version.trim();
+    const category = dailyForm.category.trim();
     const passRate = Number(dailyForm.pass_rate);
     const type = "daily";
 
@@ -2214,7 +2556,7 @@ export default function AdminPage() {
     }
 
     setDailyUploadMsg("Uploading...");
-    const ensure = await ensureTestRecord(testVersion, testVersion, type, passRate);
+    const ensure = await ensureTestRecord(testVersion, category || testVersion, type, passRate);
     if (!ensure.ok) {
       setDailyUploadMsg(ensure.message);
       return;
@@ -2247,6 +2589,7 @@ export default function AdminPage() {
     setDailyImportMsg("");
     const file = dailyCsvFile || dailyFile;
     const testVersion = dailyForm.test_version.trim();
+    const category = dailyForm.category.trim();
     const type = "daily";
     const passRate = Number(dailyForm.pass_rate);
 
@@ -2320,7 +2663,7 @@ export default function AdminPage() {
     applyAssetMap(questions, choices, assetMap);
 
     setDailyImportMsg("Upserting tests...");
-    const ensure = await ensureTestRecord(resolvedVersion, resolvedVersion, type, passRate);
+    const ensure = await ensureTestRecord(resolvedVersion, category || resolvedVersion, type, passRate);
     if (!ensure.ok) {
       setDailyImportMsg(ensure.message);
       return;
@@ -3416,23 +3759,87 @@ export default function AdminPage() {
                   <th>Created</th>
                   <th>Type</th>
                   <th>Problem Set ID</th>
-                  <th>Title</th>
+                  <th>Category</th>
                   <th>Pass Rate</th>
                   <th>Public</th>
                   <th>Questions</th>
                   <th>Preview</th>
+                  <th>Edit</th>
                   <th>Delete</th>
                 </tr>
               </thead>
               <tbody>
                 {modelTests.map((t) => (
-                  <tr key={t.id} onClick={() => openPreview(t.version)}>
+                  <tr
+                    key={t.id}
+                    onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
+                  >
                     <td>{formatDateTime(t.created_at)}</td>
                     <td>{t.type ?? ""}</td>
-                    <td>{t.version ?? ""}</td>
-                    <td>{t.title ?? ""}</td>
-                    <td>{t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""}</td>
-                    <td>{t.is_public ? "Yes" : "No"}</td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <input
+                          value={editingTestForm.version}
+                          onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                        />
+                      ) : (
+                        t.version ?? ""
+                      )}
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <>
+                          <select
+                            value={editingCategorySelect}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setEditingCategorySelect(next);
+                              if (next !== "__custom__") {
+                                setEditingTestForm((s) => ({ ...s, title: next }));
+                              }
+                            }}
+                          >
+                            {modelCategories.map((c) => (
+                              <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
+                            ))}
+                            <option value="__custom__">Custom...</option>
+                          </select>
+                          {editingCategorySelect === "__custom__" ? (
+                            <input
+                              value={editingTestForm.title}
+                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
+                              placeholder="Grammar Review"
+                              style={{ marginTop: 6 }}
+                            />
+                          ) : null}
+                        </>
+                      ) : (
+                        t.title ?? ""
+                      )}
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <input
+                          value={editingTestForm.pass_rate}
+                          onChange={(e) => setEditingTestForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                        />
+                      ) : (
+                        t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""
+                      )}
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <select
+                          value={editingTestForm.is_public ? "yes" : "no"}
+                          onChange={(e) => setEditingTestForm((s) => ({ ...s, is_public: e.target.value === "yes" }))}
+                        >
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      ) : (
+                        t.is_public ? "Yes" : "No"
+                      )}
+                    </td>
                     <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
                     <td>
                       <button
@@ -3444,6 +3851,40 @@ export default function AdminPage() {
                       >
                         Preview
                       </button>
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveTestEdits(modelCategories);
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cancelEditTest();
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditTest(t, modelCategories);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      )}
                     </td>
                     <td>
                       <button
@@ -3461,6 +3902,7 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+          {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
           <div className="admin-msg">{testsMsg}</div>
         </div>
 
@@ -3492,6 +3934,34 @@ export default function AdminPage() {
                 placeholder="problem_set_v1"
               />
             </div>
+            {assetForm.type === "mock" ? (
+              <div className="field">
+                <label>Category</label>
+                <select
+                  value={assetCategorySelect}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setAssetCategorySelect(next);
+                    if (next !== "__custom__") {
+                      setAssetForm((s) => ({ ...s, category: next }));
+                    }
+                  }}
+                >
+                  {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((c) => (
+                    <option key={`asset-cat-${c.name}`} value={c.name}>{c.name}</option>
+                  ))}
+                  <option value="__custom__">Custom...</option>
+                </select>
+                {assetCategorySelect === "__custom__" ? (
+                  <input
+                    value={assetForm.category}
+                    onChange={(e) => setAssetForm((s) => ({ ...s, category: e.target.value }))}
+                    placeholder="Book Review"
+                    style={{ marginTop: 6 }}
+                  />
+                ) : null}
+              </div>
+            ) : null}
             <div className="field small">
               <label>Pass Rate</label>
               <input
@@ -3629,7 +4099,7 @@ export default function AdminPage() {
                 {dailyTests.length ? (
                   dailyTests.map((t) => (
                     <option key={`daily-ps-${t.version}`} value={t.version}>
-                      {t.version}
+                      {(t.title ? `${t.title} (${t.version})` : t.version)}
                     </option>
                   ))
                 ) : (
@@ -3775,21 +4245,87 @@ export default function AdminPage() {
               <thead>
                 <tr>
                   <th>Created</th>
-                  <th>Problem Set ID</th>
+                  <th>Category</th>
+                  <th>Test ID</th>
                   <th>Pass Rate</th>
                   <th>Public</th>
                   <th>Questions</th>
                   <th>Preview</th>
+                  <th>Edit</th>
                   <th>Delete</th>
                 </tr>
               </thead>
               <tbody>
                 {dailyTests.map((t) => (
-                  <tr key={t.id} onClick={() => openPreview(t.version)}>
+                  <tr
+                    key={t.id}
+                    onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
+                  >
                     <td>{formatDateTime(t.created_at)}</td>
-                    <td>{t.version ?? ""}</td>
-                    <td>{t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""}</td>
-                    <td>{t.is_public ? "Yes" : "No"}</td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <>
+                          <select
+                            value={editingCategorySelect}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setEditingCategorySelect(next);
+                              if (next !== "__custom__") {
+                                setEditingTestForm((s) => ({ ...s, title: next }));
+                              }
+                            }}
+                          >
+                            {dailyCategories.map((c) => (
+                              <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
+                            ))}
+                            <option value="__custom__">Custom...</option>
+                          </select>
+                          {editingCategorySelect === "__custom__" ? (
+                            <input
+                              value={editingTestForm.title}
+                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
+                              placeholder="Vocabulary Test"
+                              style={{ marginTop: 6 }}
+                            />
+                          ) : null}
+                        </>
+                      ) : (
+                        t.title ?? ""
+                      )}
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <input
+                          value={editingTestForm.version}
+                          onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                        />
+                      ) : (
+                        t.version ?? ""
+                      )}
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <input
+                          value={editingTestForm.pass_rate}
+                          onChange={(e) => setEditingTestForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                        />
+                      ) : (
+                        t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""
+                      )}
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <select
+                          value={editingTestForm.is_public ? "yes" : "no"}
+                          onChange={(e) => setEditingTestForm((s) => ({ ...s, is_public: e.target.value === "yes" }))}
+                        >
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      ) : (
+                        t.is_public ? "Yes" : "No"
+                      )}
+                    </td>
                     <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
                     <td>
                       <button
@@ -3801,6 +4337,40 @@ export default function AdminPage() {
                       >
                         Preview
                       </button>
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveTestEdits(dailyCategories);
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cancelEditTest();
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditTest(t, dailyCategories);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      )}
                     </td>
                     <td>
                       <button
@@ -3818,6 +4388,7 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+          {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
           <div className="admin-msg">{testsMsg}</div>
         </div>
 
@@ -3838,6 +4409,42 @@ export default function AdminPage() {
                 onChange={(e) => setDailyForm((s) => ({ ...s, test_version: e.target.value }))}
                 placeholder="daily_vocab_01"
               />
+            </div>
+            <div className="field">
+              <label>Category</label>
+              {dailyCategories.length ? (
+                <>
+                  <select
+                    value={dailyCategorySelect}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setDailyCategorySelect(next);
+                      if (next !== "__custom__") {
+                        setDailyForm((s) => ({ ...s, category: next }));
+                      }
+                    }}
+                  >
+                    {dailyCategories.map((c) => (
+                      <option key={`daily-cat-${c.name}`} value={c.name}>{c.name}</option>
+                    ))}
+                    <option value="__custom__">Custom...</option>
+                  </select>
+                  {dailyCategorySelect === "__custom__" ? (
+                    <input
+                      value={dailyForm.category}
+                      onChange={(e) => setDailyForm((s) => ({ ...s, category: e.target.value }))}
+                      placeholder="Vocabulary Test"
+                      style={{ marginTop: 6 }}
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <input
+                  value={dailyForm.category}
+                  onChange={(e) => setDailyForm((s) => ({ ...s, category: e.target.value }))}
+                  placeholder="Vocabulary Test"
+                />
+              )}
             </div>
             <div className="field small">
               <label>Pass Rate</label>
@@ -4134,179 +4741,273 @@ export default function AdminPage() {
           {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
         </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
-              <div className="admin-title">Tests</div>
-              <div className="admin-subtitle">テストを選ぶと結果を絞り込みます。</div>
-            </div>
-            <button className="btn" onClick={() => applyTestFilter("", resultContext.type)}>Clear Filter</button>
-          </div>
-          {filters.testVersion ? (
-            <div className="admin-help" style={{ marginTop: 6 }}>
-              Filter: <b>{filters.testVersion}</b>
-            </div>
-          ) : null}
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Problem Set ID</th>
-                  <th>Title</th>
-                  <th>Questions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resultContext.tests.map((t) => (
-                  <tr key={`result-test-${t.id}`} onClick={() => applyTestFilter(t.version, resultContext.type)}>
-                    <td>{formatDateTime(t.created_at)}</td>
-                    <td>{t.version ?? ""}</td>
-                    <td>{t.title ?? ""}</td>
-                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <form
-          className="admin-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            runSearch(resultContext.type);
-          }}
-        >
-          <div className="field">
-            <label>Student Code（部分一致）</label>
-            <input
-              placeholder="ID001"
-              value={filters.code}
-              onChange={(e) => setFilters((s) => ({ ...s, code: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label>Display Name（部分一致）</label>
-            <input
-              placeholder="Taro"
-              value={filters.name}
-              onChange={(e) => setFilters((s) => ({ ...s, name: e.target.value }))}
-            />
-          </div>
-          <div className="field small">
-            <label>From（created_at）</label>
-            <input
-              type="date"
-              value={filters.from}
-              onChange={(e) => setFilters((s) => ({ ...s, from: e.target.value }))}
-            />
-          </div>
-          <div className="field small">
-            <label>To（created_at）</label>
-            <input
-              type="date"
-              value={filters.to}
-              onChange={(e) => setFilters((s) => ({ ...s, to: e.target.value }))}
-            />
-          </div>
-          <div className="field small">
-            <label>Limit</label>
-            <select
-              value={filters.limit}
-              onChange={(e) => setFilters((s) => ({ ...s, limit: Number(e.target.value) }))}
-            >
-              <option value={50}>50</option>
-              <option value={200}>200</option>
-              <option value={500}>500</option>
-              <option value={1000}>1000</option>
-            </select>
-          </div>
-          <div className="field small">
-            <label>&nbsp;</label>
-            <button className="btn btn-primary" type="submit">Search</button>
-          </div>
-        </form>
-
-        <div className="admin-kpi">
-          <div className="box">
-            <div className="label">Attempts</div>
-            <div className="value">{kpi.count}</div>
-          </div>
-          <div className="box">
-            <div className="label">Avg rate</div>
-            <div className="value">{(kpi.avgRate * 100).toFixed(1)}%</div>
-          </div>
-          <div className="box">
-            <div className="label">Max rate</div>
-            <div className="value">{(kpi.maxRate * 100).toFixed(1)}%</div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 12 }} className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Created</th>
-                <th>Name</th>
-                <th>Code</th>
-                <th>Score</th>
-                <th>Rate</th>
-                <th>Test</th>
-                <th>Attempt ID</th>
-                <th>Detail CSV</th>
-                <th>Delete</th>
-              </tr>
-            </thead>
-            <tbody>
-              {attempts.map((a) => {
-                const score = `${a.correct}/${a.total}`;
-                const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
-                return (
-                  <tr
-                    key={a.id}
+        {resultContext.type === "daily" || resultContext.type === "mock" ? (
+          <>
+            {(resultContext.type === "daily" ? dailyCategories : modelCategories).length ? (
+              <div className="admin-mini-tabs" style={{ marginBottom: 10 }}>
+                {(resultContext.type === "daily" ? dailyCategories : modelCategories).map((c) => (
+                  <button
+                    key={`daily-cat-${c.name}`}
+                    className={`admin-mini-tab ${((resultContext.type === "daily"
+                      ? selectedDailyCategory
+                      : selectedModelCategory)?.name === c.name)
+                      ? "active"
+                      : ""}`}
                     onClick={() => {
-                      setSelectedId(a.id);
-                      setSelectedAttemptObj(null);
-                      setAttemptDetailOpen(true);
+                      if (resultContext.type === "daily") {
+                        setDailyResultsCategory(c.name);
+                      } else {
+                        setModelResultsCategory(c.name);
+                      }
                     }}
                   >
-                    <td>{formatDateTime(a.created_at)}</td>
-                    <td>{a.display_name ?? ""}</td>
-                    <td>{a.student_code ?? ""}</td>
-                    <td>{score}</td>
-                    <td>{rate}</td>
-                    <td>{a.test_version ?? ""}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
-                    <td>
-                      <button
-                        className="btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          exportSelectedAttemptCsv(a);
-                        }}
-                      >
-                        Download
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteAttempt(a.id);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="admin-msg">No test categories yet.</div>
+            )}
+
+            <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+              <table
+                className="admin-table daily-results-table"
+                style={{
+                  minWidth: Math.max(
+                    860,
+                    360 + ((resultContext.type === "daily"
+                      ? dailyResultsMatrix.tests.length
+                      : modelResultsMatrix.tests.length) || 0) * 140
+                  )
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th className="daily-sticky-1 daily-col-no">No.</th>
+                    <th className="daily-sticky-2 daily-col-name">Student Name</th>
+                    {(resultContext.type === "daily" ? dailyResultsMatrix.tests : modelResultsMatrix.tests).map((t) => (
+                      <th key={`daily-col-${t.version}`}>
+                        <div className="daily-col-title">{t.version ?? ""}</div>
+                        <div className="daily-col-date">{formatDateShort(t.created_at)}</div>
+                      </th>
+                    ))}
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+                </thead>
+                <tbody>
+                  {(resultContext.type === "daily" ? dailyResultsMatrix.rows : modelResultsMatrix.rows).map((row) => (
+                    <tr
+                      key={`daily-row-${row.student.id}`}
+                      className={row.student.is_withdrawn ? "row-withdrawn" : ""}
+                    >
+                      <td className="daily-sticky-1 daily-col-no">{row.index}</td>
+                      <td className="daily-sticky-2 daily-col-name">
+                        <div className="daily-name">{row.student.display_name ?? ""}</div>
+                        <div className="daily-code">{row.student.student_code ?? ""}</div>
+                      </td>
+                      {row.cells.map((attempt, idx) => {
+                        const test = (resultContext.type === "daily"
+                          ? dailyResultsMatrix.tests
+                          : modelResultsMatrix.tests)[idx];
+                        if (!attempt) return <td key={`daily-cell-${row.student.id}-${idx}`}>—</td>;
+                        const rateValue = getScoreRate(attempt);
+                        const label = `${(rateValue * 100).toFixed(1)}%`;
+                        const passRate = Number(test?.pass_rate ?? 0);
+                        const isLow = Number.isFinite(passRate) && passRate > 0 && rateValue < passRate;
+                        return (
+                          <td key={`daily-cell-${row.student.id}-${idx}`}>
+                            <button
+                              className={`daily-score-btn ${isLow ? "low" : ""}`}
+                              onClick={() => openAttemptDetail(attempt)}
+                            >
+                              {label}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+          </>
+        ) : (
+          <>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div className="admin-title">Tests</div>
+                  <div className="admin-subtitle">テストを選ぶと結果を絞り込みます。</div>
+                </div>
+                <button className="btn" onClick={() => applyTestFilter("", resultContext.type)}>Clear Filter</button>
+              </div>
+              {filters.testVersion ? (
+                <div className="admin-help" style={{ marginTop: 6 }}>
+                  Filter: <b>{filters.testVersion}</b>
+                </div>
+              ) : null}
+              <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                <table className="admin-table" style={{ minWidth: 860 }}>
+                  <thead>
+                    <tr>
+                      <th>Created</th>
+                      <th>Problem Set ID</th>
+                      <th>Title</th>
+                      <th>Questions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultContext.tests.map((t) => (
+                      <tr key={`result-test-${t.id}`} onClick={() => applyTestFilter(t.version, resultContext.type)}>
+                        <td>{formatDateTime(t.created_at)}</td>
+                        <td>{t.version ?? ""}</td>
+                        <td>{t.title ?? ""}</td>
+                        <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <form
+              className="admin-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                runSearch(resultContext.type);
+              }}
+            >
+              <div className="field">
+                <label>Student Code（部分一致）</label>
+                <input
+                  placeholder="ID001"
+                  value={filters.code}
+                  onChange={(e) => setFilters((s) => ({ ...s, code: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label>Display Name（部分一致）</label>
+                <input
+                  placeholder="Taro"
+                  value={filters.name}
+                  onChange={(e) => setFilters((s) => ({ ...s, name: e.target.value }))}
+                />
+              </div>
+              <div className="field small">
+                <label>From（created_at）</label>
+                <input
+                  type="date"
+                  value={filters.from}
+                  onChange={(e) => setFilters((s) => ({ ...s, from: e.target.value }))}
+                />
+              </div>
+              <div className="field small">
+                <label>To（created_at）</label>
+                <input
+                  type="date"
+                  value={filters.to}
+                  onChange={(e) => setFilters((s) => ({ ...s, to: e.target.value }))}
+                />
+              </div>
+              <div className="field small">
+                <label>Limit</label>
+                <select
+                  value={filters.limit}
+                  onChange={(e) => setFilters((s) => ({ ...s, limit: Number(e.target.value) }))}
+                >
+                  <option value={50}>50</option>
+                  <option value={200}>200</option>
+                  <option value={500}>500</option>
+                  <option value={1000}>1000</option>
+                </select>
+              </div>
+              <div className="field small">
+                <label>&nbsp;</label>
+                <button className="btn btn-primary" type="submit">Search</button>
+              </div>
+            </form>
+
+            <div className="admin-kpi">
+              <div className="box">
+                <div className="label">Attempts</div>
+                <div className="value">{kpi.count}</div>
+              </div>
+              <div className="box">
+                <div className="label">Avg rate</div>
+                <div className="value">{(kpi.avgRate * 100).toFixed(1)}%</div>
+              </div>
+              <div className="box">
+                <div className="label">Max rate</div>
+                <div className="value">{(kpi.maxRate * 100).toFixed(1)}%</div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12 }} className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Created</th>
+                    <th>Name</th>
+                    <th>Code</th>
+                    <th>Score</th>
+                    <th>Rate</th>
+                    <th>Test</th>
+                    <th>Attempt ID</th>
+                    <th>Detail CSV</th>
+                    <th>Delete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attempts.map((a) => {
+                    const score = `${a.correct}/${a.total}`;
+                    const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                    return (
+                      <tr
+                        key={a.id}
+                        onClick={() => {
+                          setSelectedId(a.id);
+                          setSelectedAttemptObj(null);
+                          setAttemptDetailOpen(true);
+                        }}
+                      >
+                        <td>{formatDateTime(a.created_at)}</td>
+                        <td>{a.display_name ?? ""}</td>
+                        <td>{a.student_code ?? ""}</td>
+                        <td>{score}</td>
+                        <td>{rate}</td>
+                        <td>{a.test_version ?? ""}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
+                        <td>
+                          <button
+                            className="btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              exportSelectedAttemptCsv(a);
+                            }}
+                          >
+                            Download
+                          </button>
+                        </td>
+                        <td>
+                          <button
+                            className="btn btn-danger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteAttempt(a.id);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+          </>
+        )}
 
         </>
         ) : null}
