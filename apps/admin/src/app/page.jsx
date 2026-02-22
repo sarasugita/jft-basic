@@ -708,7 +708,7 @@ export default function AdminPage() {
     testVersion: ""
   });
   const [activeTab, setActiveTab] = useState("students");
-  const [modelSubTab, setModelSubTab] = useState("create");
+  const [modelSubTab, setModelSubTab] = useState("conduct");
   const [dailySubTab, setDailySubTab] = useState("create");
   const [dailyResultsCategory, setDailyResultsCategory] = useState("");
   const [modelResultsCategory, setModelResultsCategory] = useState("");
@@ -3040,7 +3040,7 @@ export default function AdminPage() {
               className={`admin-nav-item admin-group-toggle ${activeTab === "model" ? "active" : ""}`}
               onClick={() => {
                 setActiveTab("model");
-                setModelSubTab("create");
+                setModelSubTab("conduct");
               }}
             >
               <span className="admin-nav-icon" aria-hidden="true">
@@ -3055,13 +3055,22 @@ export default function AdminPage() {
             {activeTab === "model" ? (
               <div className="admin-subnav">
                 <button
-                  className={`admin-subnav-item ${modelSubTab === "create" ? "active" : ""}`}
+                  className={`admin-subnav-item ${modelSubTab === "conduct" ? "active" : ""}`}
                   onClick={() => {
                     setActiveTab("model");
-                    setModelSubTab("create");
+                    setModelSubTab("conduct");
                   }}
                 >
-                  Create Tests
+                  Conduct Test
+                </button>
+                <button
+                  className={`admin-subnav-item ${modelSubTab === "upload" ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveTab("model");
+                    setModelSubTab("upload");
+                  }}
+                >
+                  Upload Questions
                 </button>
                 <button
                   className={`admin-subnav-item ${modelSubTab === "results" ? "active" : ""}`}
@@ -3081,7 +3090,7 @@ export default function AdminPage() {
               className={`admin-nav-item admin-group-toggle ${activeTab === "daily" ? "active" : ""}`}
               onClick={() => {
                 setActiveTab("daily");
-                setDailySubTab("create");
+                setDailySubTab("conduct");
               }}
             >
               <span className="admin-nav-icon" aria-hidden="true">
@@ -3097,13 +3106,22 @@ export default function AdminPage() {
             {activeTab === "daily" ? (
               <div className="admin-subnav">
                 <button
-                  className={`admin-subnav-item ${dailySubTab === "create" ? "active" : ""}`}
+                  className={`admin-subnav-item ${dailySubTab === "conduct" ? "active" : ""}`}
                   onClick={() => {
                     setActiveTab("daily");
-                    setDailySubTab("create");
+                    setDailySubTab("conduct");
                   }}
                 >
-                  Create Tests
+                  Conduct Test
+                </button>
+                <button
+                  className={`admin-subnav-item ${dailySubTab === "upload" ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveTab("daily");
+                    setDailySubTab("upload");
+                  }}
+                >
+                  Upload Questions
                 </button>
                 <button
                   className={`admin-subnav-item ${dailySubTab === "results" ? "active" : ""}`}
@@ -3604,8 +3622,7 @@ export default function AdminPage() {
 
         {activeTab === "model" ? (
         <>
-        {modelSubTab === "create" ? (
-        <>
+        {modelSubTab === "conduct" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
@@ -3753,6 +3770,10 @@ export default function AdminPage() {
           <div className="admin-msg">{linkMsg}</div>
         </div>
 
+        ) : null}
+
+        {modelSubTab === "upload" ? (
+        <>
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
@@ -4058,8 +4079,7 @@ export default function AdminPage() {
               {assetImportMsg}
             </pre>
           ) : null}
-
-        <div className="admin-msg">{assetsMsg}</div>
+          <div className="admin-msg">{assetsMsg}</div>
         </div>
         </>
         ) : null}
@@ -4068,8 +4088,7 @@ export default function AdminPage() {
 
         {activeTab === "daily" ? (
         <>
-        {dailySubTab === "create" ? (
-        <>
+        {dailySubTab === "conduct" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
@@ -4217,6 +4236,10 @@ export default function AdminPage() {
           <div className="admin-msg">{linkMsg}</div>
         </div>
 
+        ) : null}
+
+        {dailySubTab === "upload" ? (
+        <>
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
