@@ -1179,13 +1179,10 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
   return `
     <header class="topbar">
       <div class="topbar-left">
-        <button class="menu-btn" id="topbarMenuBtn" aria-expanded="false" aria-controls="topbarMenu" aria-label="Open menu">☰</button>
-        <div class="topbar-left-content">
-          <div class="topbar-meta">
-            ${metaHtml}
-          </div>
-          <div class="topbar-test">${escapeHtml(testLabel)}</div>
+        <div class="topbar-meta">
+          ${metaHtml}
         </div>
+        <div class="topbar-test">${escapeHtml(testLabel)}</div>
       </div>
 
       <div class="topbar-center">
@@ -1198,58 +1195,73 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
           Candidate: <b>${renderCandidateLabel()}</b>
         </div>
       </div>
-
-      <div class="topbar-menu" id="topbarMenu" hidden>
-        <div class="topbar-meta">
-          ${metaHtml}
-        </div>
-        <div class="topbar-test">${escapeHtml(testLabel)}</div>
-        <div class="topbar-menu-candidate">
-          Candidate: <b>${renderCandidateLabel()}</b>
-        </div>
-      </div>
     </header>
   `;
 }
 
-function setTopbarMenuOpen(isOpen) {
-  const menu = document.querySelector("#topbarMenu");
-  const btn = document.querySelector("#topbarMenuBtn");
-  if (!menu || !btn) return;
+function setStudentMenuOpen(isOpen) {
+  const overlay = document.querySelector("#studentMenuOverlay");
+  const btn = document.querySelector("#studentMenuBtn");
+  if (!overlay || !btn) return;
   btn.setAttribute("aria-expanded", String(isOpen));
-  menu.hidden = !isOpen;
+  overlay.hidden = !isOpen;
 }
 
-function closeTopbarMenu() {
-  setTopbarMenuOpen(false);
+function closeStudentMenu() {
+  setStudentMenuOpen(false);
 }
 
-function registerTopbarMenu() {
+function registerStudentMenu() {
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
-    const menu = document.querySelector("#topbarMenu");
-    const btn = document.querySelector("#topbarMenuBtn");
-    if (!menu || !btn) return;
+    const overlay = document.querySelector("#studentMenuOverlay");
+    const menu = document.querySelector("#studentMenu");
+    const btn = document.querySelector("#studentMenuBtn");
+    if (!overlay || !menu || !btn) return;
 
-    const clickedButton = event.target.closest("#topbarMenuBtn");
-    const clickedMenu = event.target.closest("#topbarMenu");
+    const clickedButton = event.target.closest("#studentMenuBtn");
+    const clickedMenu = event.target.closest("#studentMenu");
+    const clickedTab = event.target.closest("[data-student-tab]");
+    const clickedClose = event.target.closest("[data-student-menu-close]");
 
-    if (clickedButton) {
-      setTopbarMenuOpen(menu.hidden);
+    if (clickedClose) {
+      closeStudentMenu();
       return;
     }
 
-    if (!menu.hidden && !clickedMenu) {
-      closeTopbarMenu();
+    if (clickedTab) {
+      const nextTab = clickedTab.dataset.studentTab || "take";
+      state.studentTab = nextTab;
+      saveState();
+      closeStudentMenu();
+      if (nextTab === "results" && !studentResultsState.loaded) {
+        fetchStudentResults().finally(render);
+        return;
+      }
+      if (nextTab === "attendance" && !studentAttendanceState.loaded) {
+        fetchStudentAttendance().finally(render);
+        return;
+      }
+      render();
+      return;
+    }
+
+    if (clickedButton) {
+      setStudentMenuOpen(overlay.hidden);
+      return;
+    }
+
+    if (!overlay.hidden && !clickedMenu) {
+      closeStudentMenu();
     }
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeTopbarMenu();
+    if (event.key === "Escape") closeStudentMenu();
   });
 
   window.addEventListener("resize", () => {
-    if (window.innerWidth > 900) closeTopbarMenu();
+    if (window.innerWidth > 900) closeStudentMenu();
   });
 }
 
@@ -1740,12 +1752,22 @@ function renderTestSelect(app) {
     fetchStudentAttendance().finally(render);
   }
 
-  const studentInfoHtml = authState.session
+  const studentInfoHtml = showTabs
     ? `
-        <div class="student-topbar">
-          <span>Name: ${escapeHtml(state.user?.name ?? "")}</span>
-          <span>ID: ${escapeHtml(state.user?.id ?? "")}</span>
-          <button class="student-logout" id="studentLogoutBtn" aria-label="Sign out" title="Sign out">⎋</button>
+        <header class="student-topbar">
+          <div class="student-topbar-title">JFT Navi</div>
+          <div class="student-topbar-spacer"></div>
+          <button class="menu-btn student-menu-btn" id="studentMenuBtn" aria-expanded="false" aria-controls="studentMenu" aria-label="Open menu">☰</button>
+        </header>
+        <div class="student-menu-overlay" id="studentMenuOverlay" hidden>
+          <nav class="student-menu-panel" id="studentMenu" aria-label="Student menu">
+            <div class="student-menu-header">
+              <button class="student-menu-close" type="button" data-student-menu-close aria-label="Close menu">×</button>
+            </div>
+            <button class="student-menu-item" data-student-tab="take">Take Test</button>
+            <button class="student-menu-item" data-student-tab="results">Test Results</button>
+            <button class="student-menu-item" data-student-tab="attendance">Attendance</button>
+          </nav>
         </div>
       `
     : "";
@@ -1995,21 +2017,9 @@ function renderTestSelect(app) {
   }
 
   app.innerHTML = `
-    <div class="app">
+    <div class="app ${showTabs ? "has-student-topbar" : ""}">
+      ${studentInfoHtml}
       <main class="content" style="margin:12px;">
-        ${
-          showTabs
-            ? `
-              <div class="student-tabs">
-                <button class="student-tab ${activeTab === "take" ? "active" : ""}" id="tabTake">Take Test</button>
-                <button class="student-tab ${activeTab === "results" ? "active" : ""}" id="tabResults">Test Results</button>
-                <button class="student-tab ${activeTab === "attendance" ? "active" : ""}" id="tabAttendance">Attendance</button>
-              </div>
-            `
-            : ""
-        }
-        ${studentInfoHtml}
-
         ${
           showTakeTest
             ? `
@@ -2097,39 +2107,6 @@ function renderTestSelect(app) {
     </div>
   `;
 
-  app.querySelector("#studentLogoutBtn")?.addEventListener("click", () => {
-    resultDetailState.open = false;
-    resultDetailState.attempt = null;
-    supabase.auth.signOut();
-    state.requireLogin = true;
-    state.phase = "login";
-    saveState();
-    render();
-  });
-
-  if (showTabs) {
-    document.querySelector("#tabTake")?.addEventListener("click", () => {
-      state.studentTab = "take";
-      saveState();
-      render();
-    });
-    document.querySelector("#tabResults")?.addEventListener("click", () => {
-      state.studentTab = "results";
-      saveState();
-      if (!studentResultsState.loaded) {
-        fetchStudentResults().finally(render);
-      }
-      render();
-    });
-    document.querySelector("#tabAttendance")?.addEventListener("click", () => {
-      state.studentTab = "attendance";
-      saveState();
-      if (!studentAttendanceState.loaded) {
-        fetchStudentAttendance().finally(render);
-      }
-      render();
-    });
-  }
 
   if (showTakeTest) {
     document.querySelector("#startBtn")?.addEventListener("click", () => {
@@ -2740,4 +2717,4 @@ Promise.all([checkLinkFromUrl(), refreshAuthState()]).finally(render);
 fetchPublicTests().finally(render);
 fetchTestSessions().finally(render);
 registerFocusWarning();
-registerTopbarMenu();
+registerStudentMenu();
