@@ -77,6 +77,41 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 .finish-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .candidate { font-size: 12px; opacity: 0.9; }
 
+.menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  background: transparent;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.topbar-left-content { display: grid; gap: 6px; }
+
+.topbar-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #111;
+  color: #fff;
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+}
+
+.topbar-menu[hidden] { display: none; }
+.topbar-menu .topbar-meta { gap: 10px; }
+.topbar-menu-candidate { font-size: 13px; opacity: 0.9; }
+
 /* Body layout */
 .body {
   display: grid;
@@ -499,12 +534,31 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   }
 
   .topbar {
-    grid-template-columns: 1fr;   /* 1列にする */
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+  }
+
+  .menu-btn { display: inline-flex; }
+
+  .topbar-left {
+    grid-auto-flow: column;
+    align-items: center;
     gap: 8px;
   }
 
+  .topbar-left-content { display: none; }
+
   .topbar-right {
-    justify-items: start;
+    grid-auto-flow: column;
+    justify-items: end;
+    gap: 8px;
+  }
+
+  .topbar-right .candidate { display: none; }
+
+  .topbar-menu .topbar-meta {
+    flex-direction: column;
+    gap: 6px;
   }
 
   .prompt {
@@ -525,6 +579,24 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 }
 
 @media (max-width: 520px) {
+  .topbar {
+    padding: 8px 10px;
+  }
+
+  .finish-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .timer {
+    font-size: 14px;
+  }
+
+  .menu-btn {
+    width: 34px;
+    height: 30px;
+  }
+
   .img-choice-grid {
     grid-template-columns: 1fr;   /* さらに小さいときは1列 */
   }

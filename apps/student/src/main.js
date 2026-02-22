@@ -1150,7 +1150,7 @@ async function saveAttemptIfNeeded() {
 }
 
 /** ===== UI helpers ===== */
-function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishBtn" } = {}) {
+function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishBtn", hideTimer = false } = {}) {
   const sec = getCurrentSection();
   const hideQA =
     state.phase === "intro" ||
@@ -1164,26 +1164,32 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
     testType === "daily"
       ? `Daily Test — ${testTitle}`
       : "Test: Japan Foundation Test for Basic Japanese";
+  const metaHtml = hideQA
+    ? `<div><span class="muted">Question:</span> <b>—</b></div>
+       <div><span class="muted">Section:</span> <b>—</b></div>`
+    : `<div><span class="muted">Question:</span> <b>${state.questionIndexInSection + 1}</b></div>
+       <div><span class="muted">Section:</span> <b>${sec?.title ?? "—"}</b></div>`;
+  const timerHtml = hideTimer
+    ? ""
+    : `
+        <div class="timer-label">Test Time Remaining</div>
+        <div class="timer">${formatTime(getTotalTimeLeftSec())}</div>
+      `;
 
   return `
     <header class="topbar">
       <div class="topbar-left">
-        <div class="topbar-meta">
-          ${
-            hideQA
-              ? `<div><span class="muted">Question:</span> <b>—</b></div>
-                 <div><span class="muted">Section:</span> <b>—</b></div>`
-              : `<div><span class="muted">Question:</span> <b>${state.questionIndexInSection + 1}</b></div>
-                 <div><span class="muted">Section:</span> <b>${sec?.title ?? "—"}</b></div>`
-          }
+        <button class="menu-btn" id="topbarMenuBtn" aria-expanded="false" aria-controls="topbarMenu" aria-label="Open menu">☰</button>
+        <div class="topbar-left-content">
+          <div class="topbar-meta">
+            ${metaHtml}
+          </div>
+          <div class="topbar-test">${escapeHtml(testLabel)}</div>
         </div>
-        <div class="topbar-test">${escapeHtml(testLabel)}</div>
       </div>
 
       <div class="topbar-center">
-        <div class="timer-label">Test Time Remaining</div>
-        <div class="timer">${formatTime(getTotalTimeLeftSec())}</div>
-
+        ${timerHtml}
       </div>
 
       <div class="topbar-right">
@@ -1192,8 +1198,59 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
           Candidate: <b>${renderCandidateLabel()}</b>
         </div>
       </div>
+
+      <div class="topbar-menu" id="topbarMenu" hidden>
+        <div class="topbar-meta">
+          ${metaHtml}
+        </div>
+        <div class="topbar-test">${escapeHtml(testLabel)}</div>
+        <div class="topbar-menu-candidate">
+          Candidate: <b>${renderCandidateLabel()}</b>
+        </div>
+      </div>
     </header>
   `;
+}
+
+function setTopbarMenuOpen(isOpen) {
+  const menu = document.querySelector("#topbarMenu");
+  const btn = document.querySelector("#topbarMenuBtn");
+  if (!menu || !btn) return;
+  btn.setAttribute("aria-expanded", String(isOpen));
+  menu.hidden = !isOpen;
+}
+
+function closeTopbarMenu() {
+  setTopbarMenuOpen(false);
+}
+
+function registerTopbarMenu() {
+  document.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const menu = document.querySelector("#topbarMenu");
+    const btn = document.querySelector("#topbarMenuBtn");
+    if (!menu || !btn) return;
+
+    const clickedButton = event.target.closest("#topbarMenuBtn");
+    const clickedMenu = event.target.closest("#topbarMenu");
+
+    if (clickedButton) {
+      setTopbarMenuOpen(menu.hidden);
+      return;
+    }
+
+    if (!menu.hidden && !clickedMenu) {
+      closeTopbarMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeTopbarMenu();
+  });
+
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 900) closeTopbarMenu();
+  });
 }
 
 
@@ -2683,3 +2740,4 @@ Promise.all([checkLinkFromUrl(), refreshAuthState()]).finally(render);
 fetchPublicTests().finally(render);
 fetchTestSessions().finally(render);
 registerFocusWarning();
+registerTopbarMenu();
