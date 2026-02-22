@@ -762,7 +762,6 @@ export default function AdminPage() {
     ends_at: "",
     time_limit_min: "",
     is_published: true,
-    link_expires_at: "",
     show_answers: true
   });
   const [assets, setAssets] = useState([]);
@@ -778,7 +777,6 @@ export default function AdminPage() {
   const [attemptQuestionsError, setAttemptQuestionsError] = useState("");
   const [assetForm, setAssetForm] = useState({
     test_version: "test_exam",
-    type: "mock",
     pass_rate: "0.8",
     category: DEFAULT_MODEL_CATEGORY
   });
@@ -806,7 +804,6 @@ export default function AdminPage() {
     ends_at: "",
     time_limit_min: "",
     is_published: true,
-    link_expires_at: "",
     show_answers: false
   });
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
@@ -1841,7 +1838,7 @@ export default function AdminPage() {
     setTestSessionsMsg("");
     const problemSetId = testSessionForm.problem_set_id.trim();
     const title = testSessionForm.title.trim();
-    const linkExpiresAt = testSessionForm.link_expires_at;
+    const endsAt = testSessionForm.ends_at;
     if (!problemSetId) {
       setTestSessionsMsg("Problem Set ID is required.");
       return;
@@ -1850,15 +1847,15 @@ export default function AdminPage() {
       setTestSessionsMsg("Title is required.");
       return;
     }
-    if (!linkExpiresAt) {
-      setTestSessionsMsg("Link Expires At is required.");
+    if (!endsAt) {
+      setTestSessionsMsg("End time is required.");
       return;
     }
     const payload = {
       problem_set_id: problemSetId,
       title,
       starts_at: testSessionForm.starts_at ? new Date(testSessionForm.starts_at).toISOString() : null,
-      ends_at: testSessionForm.ends_at ? new Date(testSessionForm.ends_at).toISOString() : null,
+      ends_at: endsAt ? new Date(endsAt).toISOString() : null,
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
       is_published: Boolean(testSessionForm.is_published),
       show_answers: Boolean(testSessionForm.show_answers)
@@ -1872,7 +1869,7 @@ export default function AdminPage() {
     const { error: linkError } = await supabase.from("exam_links").insert({
       test_session_id: created.id,
       test_version: problemSetId,
-      expires_at: new Date(linkExpiresAt).toISOString()
+      expires_at: new Date(endsAt).toISOString()
     });
     if (linkError) {
       console.error("exam_links insert error:", linkError);
@@ -1890,7 +1887,7 @@ export default function AdminPage() {
     setDailySessionsMsg("");
     const problemSetId = dailySessionForm.problem_set_id.trim();
     const title = dailySessionForm.title.trim();
-    const linkExpiresAt = dailySessionForm.link_expires_at;
+    const endsAt = dailySessionForm.ends_at;
     if (!problemSetId) {
       setDailySessionsMsg("Problem Set ID is required.");
       return;
@@ -1899,15 +1896,15 @@ export default function AdminPage() {
       setDailySessionsMsg("Title is required.");
       return;
     }
-    if (!linkExpiresAt) {
-      setDailySessionsMsg("Link Expires At is required.");
+    if (!endsAt) {
+      setDailySessionsMsg("End time is required.");
       return;
     }
     const payload = {
       problem_set_id: problemSetId,
       title,
       starts_at: dailySessionForm.starts_at ? new Date(dailySessionForm.starts_at).toISOString() : null,
-      ends_at: dailySessionForm.ends_at ? new Date(dailySessionForm.ends_at).toISOString() : null,
+      ends_at: endsAt ? new Date(endsAt).toISOString() : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
       is_published: Boolean(dailySessionForm.is_published),
       show_answers: Boolean(dailySessionForm.show_answers)
@@ -1921,7 +1918,7 @@ export default function AdminPage() {
     const { error: linkError } = await supabase.from("exam_links").insert({
       test_session_id: created.id,
       test_version: problemSetId,
-      expires_at: new Date(linkExpiresAt).toISOString()
+      expires_at: new Date(endsAt).toISOString()
     });
     if (linkError) {
       console.error("daily exam_links insert error:", linkError);
@@ -2261,7 +2258,7 @@ export default function AdminPage() {
     const singleFile = assetFile;
     const folderFiles = assetFiles || [];
     let testVersion = assetForm.test_version.trim();
-    const type = assetForm.type;
+    const type = "mock";
     const category = assetForm.category.trim();
     const title = type === "mock" ? (category || DEFAULT_MODEL_CATEGORY) : testVersion;
     const passRate = Number(assetForm.pass_rate);
@@ -2339,7 +2336,7 @@ export default function AdminPage() {
     setAssetImportMsg("");
     const file = assetCsvFile || assetFile;
     const testVersion = assetForm.test_version.trim();
-    const type = assetForm.type;
+    const type = "mock";
     const category = assetForm.category.trim();
     const passRate = Number(assetForm.pass_rate);
 
@@ -3644,14 +3641,6 @@ export default function AdminPage() {
               />
             </div>
             <div className="field small">
-              <label>Link Expires At</label>
-              <input
-                type="datetime-local"
-                value={testSessionForm.link_expires_at}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, link_expires_at: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
               <label>Time Limit (min)</label>
               <input
                 value={testSessionForm.time_limit_min}
@@ -3702,9 +3691,7 @@ export default function AdminPage() {
                   <th>Show Answers</th>
                   <th>Start</th>
                   <th>End</th>
-                  <th>Link Expires</th>
                   <th>Time (min)</th>
-                  <th>Link ID</th>
                   <th>Action</th>
                   <th>Delete</th>
                 </tr>
@@ -3719,9 +3706,7 @@ export default function AdminPage() {
                     <td>{t.show_answers ? "Yes" : "No"}</td>
                     <td>{formatDateTime(t.starts_at)}</td>
                     <td>{formatDateTime(t.ends_at)}</td>
-                    <td>{formatDateTime(linkBySession[t.id]?.expires_at)}</td>
                     <td>{t.time_limit_min ?? ""}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{linkBySession[t.id]?.id ?? ""}</td>
                     <td>
                       {linkBySession[t.id]?.id ? (
                         <button className="btn" onClick={() => copyLink(linkBySession[t.id].id)}>Copy URL</button>
@@ -3916,16 +3901,6 @@ export default function AdminPage() {
           </div>
 
           <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field small">
-              <label>Type</label>
-              <select
-                value={assetForm.type}
-                onChange={(e) => setAssetForm((s) => ({ ...s, type: e.target.value }))}
-              >
-                <option value="mock">mock</option>
-                <option value="quiz">quiz</option>
-              </select>
-            </div>
             <div className="field">
               <label>Problem Set ID</label>
               <input
@@ -3934,34 +3909,32 @@ export default function AdminPage() {
                 placeholder="problem_set_v1"
               />
             </div>
-            {assetForm.type === "mock" ? (
-              <div className="field">
-                <label>Category</label>
-                <select
-                  value={assetCategorySelect}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    setAssetCategorySelect(next);
-                    if (next !== "__custom__") {
-                      setAssetForm((s) => ({ ...s, category: next }));
-                    }
-                  }}
-                >
-                  {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((c) => (
-                    <option key={`asset-cat-${c.name}`} value={c.name}>{c.name}</option>
-                  ))}
-                  <option value="__custom__">Custom...</option>
-                </select>
-                {assetCategorySelect === "__custom__" ? (
-                  <input
-                    value={assetForm.category}
-                    onChange={(e) => setAssetForm((s) => ({ ...s, category: e.target.value }))}
-                    placeholder="Book Review"
-                    style={{ marginTop: 6 }}
-                  />
-                ) : null}
-              </div>
-            ) : null}
+            <div className="field">
+              <label>Category</label>
+              <select
+                value={assetCategorySelect}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setAssetCategorySelect(next);
+                  if (next !== "__custom__") {
+                    setAssetForm((s) => ({ ...s, category: next }));
+                  }
+                }}
+              >
+                {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((c) => (
+                  <option key={`asset-cat-${c.name}`} value={c.name}>{c.name}</option>
+                ))}
+                <option value="__custom__">Custom...</option>
+              </select>
+              {assetCategorySelect === "__custom__" ? (
+                <input
+                  value={assetForm.category}
+                  onChange={(e) => setAssetForm((s) => ({ ...s, category: e.target.value }))}
+                  placeholder="Book Review"
+                  style={{ marginTop: 6 }}
+                />
+              ) : null}
+            </div>
             <div className="field small">
               <label>Pass Rate</label>
               <input
@@ -4132,14 +4105,6 @@ export default function AdminPage() {
               />
             </div>
             <div className="field small">
-              <label>Link Expires At</label>
-              <input
-                type="datetime-local"
-                value={dailySessionForm.link_expires_at}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, link_expires_at: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
               <label>Time Limit (min)</label>
               <input
                 value={dailySessionForm.time_limit_min}
@@ -4190,9 +4155,7 @@ export default function AdminPage() {
                   <th>Show Answers</th>
                   <th>Start</th>
                   <th>End</th>
-                  <th>Link Expires</th>
                   <th>Time (min)</th>
-                  <th>Link ID</th>
                   <th>Action</th>
                   <th>Delete</th>
                 </tr>
@@ -4207,9 +4170,7 @@ export default function AdminPage() {
                     <td>{t.show_answers ? "Yes" : "No"}</td>
                     <td>{formatDateTime(t.starts_at)}</td>
                     <td>{formatDateTime(t.ends_at)}</td>
-                    <td>{formatDateTime(linkBySession[t.id]?.expires_at)}</td>
                     <td>{t.time_limit_min ?? ""}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{linkBySession[t.id]?.id ?? ""}</td>
                     <td>
                       {linkBySession[t.id]?.id ? (
                         <button className="btn" onClick={() => copyLink(linkBySession[t.id].id)}>Copy URL</button>
@@ -4814,10 +4775,18 @@ export default function AdminPage() {
                         const passRate = Number(test?.pass_rate ?? 0);
                         const isLow = Number.isFinite(passRate) && passRate > 0 && rateValue < passRate;
                         return (
-                          <td key={`daily-cell-${row.student.id}-${idx}`}>
+                          <td
+                            key={`daily-cell-${row.student.id}-${idx}`}
+                            className="daily-score-cell"
+                            onClick={() => openAttemptDetail(attempt)}
+                          >
                             <button
                               className={`daily-score-btn ${isLow ? "low" : ""}`}
-                              onClick={() => openAttemptDetail(attempt)}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAttemptDetail(attempt);
+                              }}
                             >
                               {label}
                             </button>
