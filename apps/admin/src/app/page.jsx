@@ -790,6 +790,7 @@ export default function AdminPage() {
     ends_at: "",
     time_limit_min: "",
     show_answers: false,
+    allow_multiple_attempts: true,
     pass_rate: ""
   });
   const [testSessionForm, setTestSessionForm] = useState({
@@ -799,6 +800,7 @@ export default function AdminPage() {
     ends_at: "",
     time_limit_min: "",
     show_answers: true,
+    allow_multiple_attempts: true,
     pass_rate: "0.8"
   });
   const [assets, setAssets] = useState([]);
@@ -839,6 +841,7 @@ export default function AdminPage() {
     ends_at: "",
     time_limit_min: "",
     show_answers: false,
+    allow_multiple_attempts: true,
     pass_rate: "0.8"
   });
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
@@ -1807,7 +1810,7 @@ export default function AdminPage() {
     setTestSessionsMsg("Loading...");
     const { data, error } = await supabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, created_at")
+      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
     if (error) {
@@ -1980,7 +1983,8 @@ export default function AdminPage() {
       ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
       is_published: true,
-      show_answers: Boolean(testSessionForm.show_answers)
+      show_answers: Boolean(testSessionForm.show_answers),
+      allow_multiple_attempts: Boolean(testSessionForm.allow_multiple_attempts)
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
     if (error || !created?.id) {
@@ -2042,7 +2046,8 @@ export default function AdminPage() {
       ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
       is_published: true,
-      show_answers: Boolean(dailySessionForm.show_answers)
+      show_answers: Boolean(dailySessionForm.show_answers),
+      allow_multiple_attempts: Boolean(dailySessionForm.allow_multiple_attempts)
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
     if (error || !created?.id) {
@@ -2088,6 +2093,7 @@ export default function AdminPage() {
       ends_at: formatDateTimeInput(session.ends_at),
       time_limit_min: session.time_limit_min ?? "",
       show_answers: Boolean(session.show_answers),
+      allow_multiple_attempts: session.allow_multiple_attempts !== false,
       pass_rate: passRate != null ? String(passRate) : ""
     });
   }
@@ -2103,13 +2109,23 @@ export default function AdminPage() {
       ends_at: "",
       time_limit_min: "",
       show_answers: false,
+      allow_multiple_attempts: true,
       pass_rate: ""
     });
   }
 
   async function saveSessionEdits() {
     if (!editingSessionId) return;
-    const { title, starts_at, ends_at, time_limit_min, show_answers, pass_rate, problem_set_id } = editingSessionForm;
+    const {
+      title,
+      starts_at,
+      ends_at,
+      time_limit_min,
+      show_answers,
+      pass_rate,
+      problem_set_id,
+      allow_multiple_attempts
+    } = editingSessionForm;
     if (!title.trim()) {
       setEditingSessionMsg("Title is required.");
       return;
@@ -2129,7 +2145,8 @@ export default function AdminPage() {
       starts_at: starts_at ? fromBangladeshInput(starts_at) : null,
       ends_at: ends_at ? fromBangladeshInput(ends_at) : null,
       time_limit_min: time_limit_min ? Number(time_limit_min) : null,
-      show_answers: Boolean(show_answers)
+      show_answers: Boolean(show_answers),
+      allow_multiple_attempts: Boolean(allow_multiple_attempts)
     };
     const { error } = await supabase.from("test_sessions").update(payload).eq("id", editingSessionId);
     if (error) {
@@ -3936,6 +3953,18 @@ export default function AdminPage() {
               </select>
             </div>
             <div className="field small">
+              <label>Attempts</label>
+              <select
+                value={testSessionForm.allow_multiple_attempts ? "multiple" : "once"}
+                onChange={(e) =>
+                  setTestSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
+                }
+              >
+                <option value="once">Only once</option>
+                <option value="multiple">Allow multiple</option>
+              </select>
+            </div>
+            <div className="field small">
               <label>Pass Rate</label>
               <input
                 value={testSessionForm.pass_rate}
@@ -3963,6 +3992,7 @@ export default function AdminPage() {
                   <th>Title</th>
                   <th>Problem Set</th>
                   <th>Show Answers</th>
+                  <th>Attempts</th>
                   <th>Start</th>
                   <th>End</th>
                   <th>Time (min)</th>
@@ -3998,6 +4028,21 @@ export default function AdminPage() {
                         </select>
                       ) : (
                         t.show_answers ? "Yes" : "No"
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <select
+                          value={editingSessionForm.allow_multiple_attempts ? "multiple" : "once"}
+                          onChange={(e) =>
+                            setEditingSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
+                          }
+                        >
+                          <option value="once">Only once</option>
+                          <option value="multiple">Allow multiple</option>
+                        </select>
+                      ) : (
+                        t.allow_multiple_attempts === false ? "Only once" : "Allow multiple"
                       )}
                     </td>
                     <td>
@@ -4475,6 +4520,18 @@ export default function AdminPage() {
               >
                 <option value="yes">Yes</option>
                 <option value="no">No</option>
+              </select>
+            </div>
+            <div className="field small">
+              <label>Attempts</label>
+              <select
+                value={dailySessionForm.allow_multiple_attempts ? "multiple" : "once"}
+                onChange={(e) =>
+                  setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
+                }
+              >
+                <option value="once">Only once</option>
+                <option value="multiple">Allow multiple</option>
               </select>
             </div>
             <div className="field small">

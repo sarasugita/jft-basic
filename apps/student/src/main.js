@@ -272,6 +272,20 @@ function renderLoading(app) {
   document.querySelector("#disabledBtn").disabled = true;
 }
 
+function syncTopbarHeight() {
+  const topbar = document.querySelector(".topbar");
+  if (!topbar) return;
+  const height = Math.ceil(topbar.getBoundingClientRect().height);
+  if (height > 0) {
+    document.documentElement.style.setProperty("--topbar-height", `${height}px`);
+  }
+}
+
+function renderAndSync(fn, app) {
+  fn(app);
+  requestAnimationFrame(syncTopbarHeight);
+}
+
 async function refreshAuthState() {
   const { data, error } = await supabase.auth.getSession();
   if (error) console.error("getSession error:", error);
@@ -381,7 +395,7 @@ async function fetchTestSessions() {
   testSessionsState.error = "";
   const { data, error } = await publicSupabase
     .from("test_sessions")
-    .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, created_at")
+    .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
     .eq("is_published", true)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -433,6 +447,21 @@ function getActiveTestType() {
   const version = getActiveTestVersion();
   const test = testsState.list.find((t) => t.version === version);
   return test?.type || "";
+}
+
+function getSessionTestType(session) {
+  if (!session?.problem_set_id) return "";
+  const test = testsState.list.find((t) => t.version === session.problem_set_id);
+  return test?.type || "";
+}
+
+function allowMultipleAttempts(session) {
+  return session?.allow_multiple_attempts !== false;
+}
+
+function hasAttemptForSession(sessionId) {
+  if (!sessionId) return false;
+  return (studentResultsState.list ?? []).some((a) => a.test_session_id === sessionId);
 }
 
 function getActivePassRate() {
@@ -1180,7 +1209,7 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
   const testTitle = getActiveTestTitle();
   const testLabel =
     testType === "daily"
-      ? `Daily Test — ${testTitle}`
+      ? (testTitle?.trim() || "Daily Test")
       : "Test: Japan Foundation Test for Basic Japanese";
   const metaHtml = hideQA
     ? `<div><span class="muted">Question:</span> <b>—</b></div>
@@ -1285,6 +1314,7 @@ function registerStudentMenu() {
 
 
 function banglaButtonHTML() {
+  if (getActiveTestType() === "daily") return "";
   return `
     <div class="lang-buttons">
       <button class="lang-btn" id="banglaBtn">
@@ -1903,7 +1933,11 @@ function renderTestSelect(app) {
                   const startLabel = formatTimeBdt(session.starts_at);
                   const name = session.title || session.problem_set_id || "Test";
                   const startMs = new Date(session.starts_at).getTime();
-                  const canStart = Number.isFinite(startMs) && nowMs >= startMs;
+                  const alreadyTaken =
+                    studentResultsState.loaded &&
+                    !allowMultipleAttempts(session) &&
+                    hasAttemptForSession(session.id);
+                  const canStart = Number.isFinite(startMs) && nowMs >= startMs && !alreadyTaken;
                   return `
                     <div class="student-home-card">
                       <div>
@@ -1915,7 +1949,7 @@ function renderTestSelect(app) {
                         data-session-id="${escapeHtml(session.id)}"
                         ${canStart ? "" : "disabled"}
                       >
-                        Start
+                        ${alreadyTaken ? "Completed" : "Start"}
                       </button>
                     </div>
                   `;
@@ -2153,14 +2187,23 @@ function renderTestSelect(app) {
                           .map((t) => {
                             const problemSet = testsState.list.find((ps) => ps.version === t.problem_set_id);
                             const passRate = Number(problemSet?.pass_rate ?? PASS_RATE_DEFAULT);
+                            const alreadyTaken =
+                              studentResultsState.loaded &&
+                              !allowMultipleAttempts(t) &&
+                              hasAttemptForSession(t.id);
                             return `
                               <label style="display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;">
                                 <input type="radio" name="testSelect" value="${escapeHtml(t.id)}" ${
                                   t.id === activeSessionId ? "checked" : ""
-                                } />
+                                } ${alreadyTaken ? "disabled" : ""} />
                                 <div>
                                   <div style="font-weight:600;">${escapeHtml(t.title)}</div>
                                   <div style="font-size:12px;color:#666;">${escapeHtml(t.problem_set_id)} • pass ${(passRate * 100).toFixed(0)}%</div>
+                                  ${
+                                    alreadyTaken
+                                      ? `<div style="font-size:12px;color:#b00;margin-top:4px;">Already taken</div>`
+                                      : ""
+                                  }
                                 </div>
                               </label>
                             `;
@@ -2229,10 +2272,15 @@ function renderTestSelect(app) {
         state.user = { name, id };
       }
       const selected = document.querySelector('input[name="testSelect"]:checked');
+      let session = null;
       if (selected) {
         state.selectedTestSessionId = selected.value;
-        const session = testSessionsState.list.find((s) => s.id === selected.value);
+        session = testSessionsState.list.find((s) => s.id === selected.value);
         if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
+      }
+      if (!allowMultipleAttempts(session) && hasAttemptForSession(session?.id)) {
+        window.alert("You have already taken this test.");
+        return;
       }
       state.phase = "sectionIntro";
       state.sectionIndex = 0;
@@ -2252,9 +2300,19 @@ function renderTestSelect(app) {
         const sessionId = btn.dataset.sessionId;
         if (!sessionId) return;
         const session = testSessionsState.list.find((s) => s.id === sessionId);
+        if (!session?.starts_at) return;
+        const startMs = new Date(session.starts_at).getTime();
+        if (!Number.isFinite(startMs) || Date.now() < startMs) return;
+        if (!allowMultipleAttempts(session) && hasAttemptForSession(sessionId)) {
+          return;
+        }
         if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
         state.selectedTestSessionId = sessionId;
-        state.studentTab = "take";
+        state.phase = "sectionIntro";
+        state.sectionIndex = 0;
+        state.questionIndexInSection = 0;
+        state.sectionStartAt = null;
+        state.showBangla = false;
         saveState();
         render();
       });
@@ -2321,6 +2379,9 @@ function renderSectionIntro(app) {
   const sec = getCurrentSection();
   const secQs = getSectionQuestions(sec.key);
   const questionCount = secQs.reduce((sum, g) => sum + (g.items?.length || 0), 0);
+  const isDaily = getActiveTestType() === "daily";
+  const activeTitle = getActiveTestTitle();
+  const sectionTitle = isDaily && activeTitle ? activeTitle : sec.title;
 
   const isFirstSection = state.sectionIndex === 0;
   const btnLabel = isFirstSection ? "Start Exam (Fullscreen)" : "Next";
@@ -2338,7 +2399,7 @@ function renderSectionIntro(app) {
 
       <main class="content" style="margin:12px;">
         ${focusWarningHTML()}
-        <h1 class="prompt section-title">${sec.title}</h1>
+        <h1 class="prompt section-title">${escapeHtml(sectionTitle)}</h1>
 
         <div style="line-height:1.7; margin-top:10px;">
           <p>• Questions in this section: <b>${questionCount}</b></p>
@@ -2704,17 +2765,30 @@ function renderResult(app) {
 
 function render() {
   const app = document.querySelector("#app");
-  if (!state.linkChecked || !authState.checked) return renderLoading(app);
-  if (state.linkInvalid) return renderLinkInvalid(app);
-  if (authState.session && authState.mustChangePassword) return renderSetPassword(app);
+  if (!state.linkChecked || !authState.checked) {
+    renderAndSync(renderLoading, app);
+    return;
+  }
+  if (state.linkInvalid) {
+    renderAndSync(renderLinkInvalid, app);
+    return;
+  }
+  if (authState.session && authState.mustChangePassword) {
+    renderAndSync(renderSetPassword, app);
+    return;
+  }
   if (state.requireLogin || state.linkLoginRequired) {
     if (state.phase !== "login") {
       state.phase = "login";
       saveState();
     }
-    return renderLogin(app);
+    renderAndSync(renderLogin, app);
+    return;
   }
-  if (!authState.session && !state.linkId) return renderLogin(app);
+  if (!authState.session && !state.linkId) {
+    renderAndSync(renderLogin, app);
+    return;
+  }
 
   const needsQuestions = ["intro", "sectionIntro", "quiz", "result"].includes(state.phase);
   const sessionsReady = testSessionsState.loaded || Boolean(state.linkId);
@@ -2725,12 +2799,29 @@ function render() {
     }
   }
 
-  if (authState.session && !state.linkId && state.phase === "intro") return renderTestSelect(app);
-  if (state.phase === "login") return renderLogin(app);
-  if (state.phase === "intro") return renderIntro(app);
-  if (state.phase === "sectionIntro") return renderSectionIntro(app); // ←追加
-  if (state.phase === "quiz") return renderQuiz(app);
-  if (state.phase === "result") return renderResult(app);
+  if (authState.session && !state.linkId && state.phase === "intro") {
+    renderAndSync(renderTestSelect, app);
+    return;
+  }
+  if (state.phase === "login") {
+    renderAndSync(renderLogin, app);
+    return;
+  }
+  if (state.phase === "intro") {
+    renderAndSync(renderIntro, app);
+    return;
+  }
+  if (state.phase === "sectionIntro") {
+    renderAndSync(renderSectionIntro, app); // ←追加
+    return;
+  }
+  if (state.phase === "quiz") {
+    renderAndSync(renderQuiz, app);
+    return;
+  }
+  if (state.phase === "result") {
+    renderAndSync(renderResult, app);
+  }
 }
 
 

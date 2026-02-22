@@ -64,6 +64,9 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   padding: 6px 10px;
   border-radius: 3px;
   font-size: 13px;
+  line-height: 1.2;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .topbar-center { text-align: center; }
@@ -519,11 +522,16 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 
 /* ===== Responsive ===== */
 @media (max-width: 900px) {
+  :root {
+    --topbar-height: 96px;
+  }
+
   .body {
     grid-template-columns: 1fr;   /* サイドバーを下に回す */
   }
 
   .sidebar {
+    display: none;
     order: 2;                     /* メインの後ろに */
   }
 
@@ -532,13 +540,20 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   }
 
   .topbar {
-    grid-template-columns: 1fr;
-    gap: 8px;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "left right"
+      "center center";
+    gap: 8px 12px;
   }
 
   .topbar-right {
-    justify-items: start;
+    justify-items: end;
   }
+
+  .topbar-left { grid-area: left; }
+  .topbar-center { grid-area: center; text-align: left; }
+  .topbar-right { grid-area: right; }
 
   .student-menu-panel {
     width: min(84vw, 320px);
@@ -559,11 +574,45 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   .img-choice-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr)); /* 3→2列 */
   }
+
+  .result {
+    padding: 16px;
+    align-items: stretch;
+  }
+
+  .result h1 {
+    text-align: left;
+  }
+
+  .score-correct{ font-size: 48px; }
+  .score-slash{ font-size: 34px; }
+  .score-total{ font-size: 34px; }
+
+  .result-table{
+    min-width: 640px;
+  }
+
+  .result-table th,
+  .result-table td{
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .result-thumb{
+    width: 72px;
+    height: 40px;
+  }
+
+  .result-choice-big{
+    width: 160px;
+    height: 90px;
+  }
 }
 
 @media (max-width: 520px) {
   :root {
     --student-topbar-height: 52px;
+    --topbar-height: 110px;
   }
 
   .student-topbar {
@@ -616,6 +665,18 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 
   .student-tab {
     min-width: 100%;
+  }
+
+  .result {
+    padding: 12px;
+  }
+
+  .score-correct{ font-size: 40px; }
+  .score-slash{ font-size: 28px; }
+  .score-total{ font-size: 28px; }
+
+  .result-table{
+    min-width: 560px;
   }
 }
 
