@@ -203,6 +203,14 @@ function formatDateTime(iso) {
   return d.toLocaleString();
 }
 
+function formatDateTimeInput(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 function formatDateShort(value) {
   if (!value) return "";
   if (typeof value === "string") {
@@ -755,14 +763,26 @@ export default function AdminPage() {
   const [testSessions, setTestSessions] = useState([]);
   const [testSessionsMsg, setTestSessionsMsg] = useState("");
   const [linkMsg, setLinkMsg] = useState("");
+  const [editingSessionId, setEditingSessionId] = useState("");
+  const [editingSessionMsg, setEditingSessionMsg] = useState("");
+  const [editingSessionForm, setEditingSessionForm] = useState({
+    id: "",
+    problem_set_id: "",
+    title: "",
+    starts_at: "",
+    ends_at: "",
+    time_limit_min: "",
+    show_answers: false,
+    pass_rate: ""
+  });
   const [testSessionForm, setTestSessionForm] = useState({
     problem_set_id: "",
     title: "",
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
-    is_published: true,
-    show_answers: true
+    show_answers: true,
+    pass_rate: "0.8"
   });
   const [assets, setAssets] = useState([]);
   const [assetsMsg, setAssetsMsg] = useState("");
@@ -777,7 +797,6 @@ export default function AdminPage() {
   const [attemptQuestionsError, setAttemptQuestionsError] = useState("");
   const [assetForm, setAssetForm] = useState({
     test_version: "test_exam",
-    pass_rate: "0.8",
     category: DEFAULT_MODEL_CATEGORY
   });
   const [assetCategorySelect, setAssetCategorySelect] = useState(DEFAULT_MODEL_CATEGORY);
@@ -788,7 +807,6 @@ export default function AdminPage() {
   const [assetImportMsg, setAssetImportMsg] = useState("");
   const [dailyForm, setDailyForm] = useState({
     test_version: "",
-    pass_rate: "0.8",
     category: ""
   });
   const modelCategorySeededRef = useRef(false);
@@ -803,8 +821,8 @@ export default function AdminPage() {
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
-    is_published: true,
-    show_answers: false
+    show_answers: false,
+    pass_rate: "0.8"
   });
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
   const [attendanceDays, setAttendanceDays] = useState([]);
@@ -857,6 +875,14 @@ export default function AdminPage() {
     [testSessions, dailyTests]
   );
 
+  const testPassRateByVersion = useMemo(() => {
+    const map = {};
+    (tests ?? []).forEach((t) => {
+      if (t?.version) map[t.version] = t.pass_rate ?? null;
+    });
+    return map;
+  }, [tests]);
+
   const buildCategories = (list, fallbackLabel = "Uncategorized") => {
     const map = new Map();
     (list ?? []).forEach((t) => {
@@ -874,6 +900,22 @@ export default function AdminPage() {
 
   const dailyCategories = useMemo(() => buildCategories(dailyTests), [dailyTests]);
   const modelCategories = useMemo(() => buildCategories(modelTests, DEFAULT_MODEL_CATEGORY), [modelTests]);
+
+  const [modelConductCategory, setModelConductCategory] = useState("");
+  const [dailyConductCategory, setDailyConductCategory] = useState("");
+
+  const selectedModelConductCategory = useMemo(() => {
+    if (!modelCategories.length) return null;
+    return modelCategories.find((c) => c.name === modelConductCategory) ?? modelCategories[0];
+  }, [modelCategories, modelConductCategory]);
+
+  const selectedDailyConductCategory = useMemo(() => {
+    if (!dailyCategories.length) return null;
+    return dailyCategories.find((c) => c.name === dailyConductCategory) ?? dailyCategories[0];
+  }, [dailyCategories, dailyConductCategory]);
+
+  const modelConductTests = selectedModelConductCategory?.tests ?? [];
+  const dailyConductTests = selectedDailyConductCategory?.tests ?? [];
 
   const selectedDailyCategory = useMemo(() => {
     if (!dailyCategories.length) return null;
@@ -932,6 +974,52 @@ export default function AdminPage() {
       setAssetCategorySelect("__custom__");
     }
   }, [modelCategories, assetForm.category]);
+
+  useEffect(() => {
+    if (!modelCategories.length) return;
+    if (!modelConductCategory || !modelCategories.some((c) => c.name === modelConductCategory)) {
+      setModelConductCategory(modelCategories[0].name);
+    }
+  }, [modelCategories, modelConductCategory]);
+
+  useEffect(() => {
+    if (!dailyCategories.length) return;
+    if (!dailyConductCategory || !dailyCategories.some((c) => c.name === dailyConductCategory)) {
+      setDailyConductCategory(dailyCategories[0].name);
+    }
+  }, [dailyCategories, dailyConductCategory]);
+
+  useEffect(() => {
+    if (!modelConductTests.length) return;
+    if (!modelConductTests.some((t) => t.version === testSessionForm.problem_set_id)) {
+      setTestSessionForm((s) => ({ ...s, problem_set_id: modelConductTests[0].version }));
+    }
+  }, [modelConductTests, testSessionForm.problem_set_id]);
+
+  useEffect(() => {
+    if (!dailyConductTests.length) return;
+    if (!dailyConductTests.some((t) => t.version === dailySessionForm.problem_set_id)) {
+      setDailySessionForm((s) => ({ ...s, problem_set_id: dailyConductTests[0].version }));
+    }
+  }, [dailyConductTests, dailySessionForm.problem_set_id]);
+
+  useEffect(() => {
+    const version = testSessionForm.problem_set_id;
+    if (!version) return;
+    const passRate = testPassRateByVersion[version];
+    if (passRate != null) {
+      setTestSessionForm((s) => ({ ...s, pass_rate: String(passRate) }));
+    }
+  }, [testSessionForm.problem_set_id, testPassRateByVersion]);
+
+  useEffect(() => {
+    const version = dailySessionForm.problem_set_id;
+    if (!version) return;
+    const passRate = testPassRateByVersion[version];
+    if (passRate != null) {
+      setDailySessionForm((s) => ({ ...s, pass_rate: String(passRate) }));
+    }
+  }, [dailySessionForm.problem_set_id, testPassRateByVersion]);
 
   const resultContext = useMemo(() => {
     if (activeTab === "model" && modelSubTab === "results") {
@@ -1839,6 +1927,7 @@ export default function AdminPage() {
     const problemSetId = testSessionForm.problem_set_id.trim();
     const title = testSessionForm.title.trim();
     const endsAt = testSessionForm.ends_at;
+    const passRate = Number(testSessionForm.pass_rate);
     if (!problemSetId) {
       setTestSessionsMsg("Problem Set ID is required.");
       return;
@@ -1851,13 +1940,17 @@ export default function AdminPage() {
       setTestSessionsMsg("End time is required.");
       return;
     }
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setTestSessionsMsg("Pass rate must be between 0 and 1.");
+      return;
+    }
     const payload = {
       problem_set_id: problemSetId,
       title,
       starts_at: testSessionForm.starts_at ? new Date(testSessionForm.starts_at).toISOString() : null,
       ends_at: endsAt ? new Date(endsAt).toISOString() : null,
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
-      is_published: Boolean(testSessionForm.is_published),
+      is_published: true,
       show_answers: Boolean(testSessionForm.show_answers)
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
@@ -1865,6 +1958,14 @@ export default function AdminPage() {
       console.error("test_sessions insert error:", error);
       setTestSessionsMsg(`Create failed: ${error.message}`);
       return;
+    }
+    const { error: passRateError } = await supabase
+      .from("tests")
+      .update({ pass_rate: passRate, updated_at: new Date().toISOString() })
+      .eq("version", problemSetId);
+    if (passRateError) {
+      console.error("test pass_rate update error:", passRateError);
+      setTestSessionsMsg(`Session created but pass rate update failed: ${passRateError.message}`);
     }
     const { error: linkError } = await supabase.from("exam_links").insert({
       test_session_id: created.id,
@@ -1888,6 +1989,7 @@ export default function AdminPage() {
     const problemSetId = dailySessionForm.problem_set_id.trim();
     const title = dailySessionForm.title.trim();
     const endsAt = dailySessionForm.ends_at;
+    const passRate = Number(dailySessionForm.pass_rate);
     if (!problemSetId) {
       setDailySessionsMsg("Problem Set ID is required.");
       return;
@@ -1900,13 +2002,17 @@ export default function AdminPage() {
       setDailySessionsMsg("End time is required.");
       return;
     }
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setDailySessionsMsg("Pass rate must be between 0 and 1.");
+      return;
+    }
     const payload = {
       problem_set_id: problemSetId,
       title,
       starts_at: dailySessionForm.starts_at ? new Date(dailySessionForm.starts_at).toISOString() : null,
       ends_at: endsAt ? new Date(endsAt).toISOString() : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
-      is_published: Boolean(dailySessionForm.is_published),
+      is_published: true,
       show_answers: Boolean(dailySessionForm.show_answers)
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
@@ -1914,6 +2020,14 @@ export default function AdminPage() {
       console.error("daily test_sessions insert error:", error);
       setDailySessionsMsg(`Create failed: ${error.message}`);
       return;
+    }
+    const { error: passRateError } = await supabase
+      .from("tests")
+      .update({ pass_rate: passRate, updated_at: new Date().toISOString() })
+      .eq("version", problemSetId);
+    if (passRateError) {
+      console.error("daily pass_rate update error:", passRateError);
+      setDailySessionsMsg(`Session created but pass rate update failed: ${passRateError.message}`);
     }
     const { error: linkError } = await supabase.from("exam_links").insert({
       test_session_id: created.id,
@@ -1930,6 +2044,92 @@ export default function AdminPage() {
     setDailySessionForm((s) => ({ ...s, title: "" }));
     fetchTestSessions();
     fetchExamLinks();
+  }
+
+  function startEditSession(session) {
+    if (!session?.id) return;
+    const passRate = testPassRateByVersion[session.problem_set_id];
+    setEditingSessionId(session.id);
+    setEditingSessionMsg("");
+    setEditingSessionForm({
+      id: session.id,
+      problem_set_id: session.problem_set_id ?? "",
+      title: session.title ?? "",
+      starts_at: formatDateTimeInput(session.starts_at),
+      ends_at: formatDateTimeInput(session.ends_at),
+      time_limit_min: session.time_limit_min ?? "",
+      show_answers: Boolean(session.show_answers),
+      pass_rate: passRate != null ? String(passRate) : ""
+    });
+  }
+
+  function cancelEditSession() {
+    setEditingSessionId("");
+    setEditingSessionMsg("");
+    setEditingSessionForm({
+      id: "",
+      problem_set_id: "",
+      title: "",
+      starts_at: "",
+      ends_at: "",
+      time_limit_min: "",
+      show_answers: false,
+      pass_rate: ""
+    });
+  }
+
+  async function saveSessionEdits() {
+    if (!editingSessionId) return;
+    const { title, starts_at, ends_at, time_limit_min, show_answers, pass_rate, problem_set_id } = editingSessionForm;
+    if (!title.trim()) {
+      setEditingSessionMsg("Title is required.");
+      return;
+    }
+    if (!ends_at) {
+      setEditingSessionMsg("End time is required.");
+      return;
+    }
+    const passRateValue = Number(pass_rate);
+    if (!Number.isFinite(passRateValue) || passRateValue <= 0 || passRateValue > 1) {
+      setEditingSessionMsg("Pass rate must be between 0 and 1.");
+      return;
+    }
+    setEditingSessionMsg("Saving...");
+    const payload = {
+      title: title.trim(),
+      starts_at: starts_at ? new Date(starts_at).toISOString() : null,
+      ends_at: ends_at ? new Date(ends_at).toISOString() : null,
+      time_limit_min: time_limit_min ? Number(time_limit_min) : null,
+      show_answers: Boolean(show_answers)
+    };
+    const { error } = await supabase.from("test_sessions").update(payload).eq("id", editingSessionId);
+    if (error) {
+      console.error("session update error:", error);
+      setEditingSessionMsg(`Save failed: ${error.message}`);
+      return;
+    }
+    const { error: linkError } = await supabase
+      .from("exam_links")
+      .update({ expires_at: new Date(ends_at).toISOString() })
+      .eq("test_session_id", editingSessionId);
+    if (linkError) {
+      console.error("session link update error:", linkError);
+      setEditingSessionMsg(`Saved, but link update failed: ${linkError.message}`);
+    }
+    if (problem_set_id) {
+      const { error: passRateError } = await supabase
+        .from("tests")
+        .update({ pass_rate: passRateValue, updated_at: new Date().toISOString() })
+        .eq("version", problem_set_id);
+      if (passRateError) {
+        console.error("session pass_rate update error:", passRateError);
+        setEditingSessionMsg(`Saved, but pass rate update failed: ${passRateError.message}`);
+      }
+    }
+    cancelEditSession();
+    fetchTestSessions();
+    fetchExamLinks();
+    fetchTests();
   }
 
   async function deleteTestSession(id) {
@@ -1959,10 +2159,10 @@ export default function AdminPage() {
     const existing = (data ?? [])[0] ?? null;
     if (existing) {
       const updatePayload = {
-        pass_rate: passRate,
         type,
         updated_at: new Date().toISOString()
       };
+      if (Number.isFinite(passRate)) updatePayload.pass_rate = passRate;
       if (title) updatePayload.title = title;
       const { error: updateError } = await supabase
         .from("tests")
@@ -1980,7 +2180,7 @@ export default function AdminPage() {
       version: testVersion,
       title: effectiveTitle,
       type,
-      pass_rate: passRate,
+      pass_rate: Number.isFinite(passRate) ? passRate : null,
       is_public: true,
       updated_at: new Date().toISOString()
     });
@@ -2261,7 +2461,6 @@ export default function AdminPage() {
     const type = "mock";
     const category = assetForm.category.trim();
     const title = type === "mock" ? (category || DEFAULT_MODEL_CATEGORY) : testVersion;
-    const passRate = Number(assetForm.pass_rate);
 
     if (!testVersion && assetCsvFile) {
       const csvText = await assetCsvFile.text();
@@ -2280,11 +2479,6 @@ export default function AdminPage() {
       setAssetUploadMsg("test_version is required.");
       return;
     }
-    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
-      setAssetUploadMsg("pass_rate must be between 0 and 1.");
-      return;
-    }
-
     const files = [];
     if (singleFile) files.push(singleFile);
     files.push(...folderFiles);
@@ -2303,7 +2497,7 @@ export default function AdminPage() {
 
     setAssetUploadMsg("Uploading...");
 
-    const ensure = await ensureTestRecord(testVersion, title, type, passRate);
+    const ensure = await ensureTestRecord(testVersion, title, type, null);
     if (!ensure.ok) {
       setAssetUploadMsg(ensure.message);
       return;
@@ -2338,7 +2532,6 @@ export default function AdminPage() {
     const testVersion = assetForm.test_version.trim();
     const type = "mock";
     const category = assetForm.category.trim();
-    const passRate = Number(assetForm.pass_rate);
 
     if (!file) {
       setAssetImportMsg("CSV file is required.");
@@ -2352,11 +2545,6 @@ export default function AdminPage() {
       setAssetImportMsg("Only CSV is supported.");
       return;
     }
-    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
-      setAssetImportMsg("pass_rate must be between 0 and 1.");
-      return;
-    }
-
     setAssetImportMsg("Parsing...");
     const text = await file.text();
     const { questions, choices, errors } = parseQuestionCsv(text, testVersion);
@@ -2411,7 +2599,7 @@ export default function AdminPage() {
     applyAssetMap(questions, choices, assetMap);
 
     setAssetImportMsg("Upserting tests...");
-    const ensure = await ensureTestRecord(resolvedVersion, resolvedTitle, type, passRate);
+    const ensure = await ensureTestRecord(resolvedVersion, resolvedTitle, type, null);
     if (!ensure.ok) {
       setAssetImportMsg(ensure.message);
       return;
@@ -2507,7 +2695,6 @@ export default function AdminPage() {
     const folderFiles = dailyFiles || [];
     let testVersion = dailyForm.test_version.trim();
     const category = dailyForm.category.trim();
-    const passRate = Number(dailyForm.pass_rate);
     const type = "daily";
 
     if (!testVersion && dailyCsvFile) {
@@ -2525,10 +2712,6 @@ export default function AdminPage() {
     }
     if (!testVersion) {
       setDailyUploadMsg("TestID is required.");
-      return;
-    }
-    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
-      setDailyUploadMsg("pass_rate must be between 0 and 1.");
       return;
     }
 
@@ -2553,7 +2736,7 @@ export default function AdminPage() {
     }
 
     setDailyUploadMsg("Uploading...");
-    const ensure = await ensureTestRecord(testVersion, category || testVersion, type, passRate);
+    const ensure = await ensureTestRecord(testVersion, category || testVersion, type, null);
     if (!ensure.ok) {
       setDailyUploadMsg(ensure.message);
       return;
@@ -2588,7 +2771,6 @@ export default function AdminPage() {
     const testVersion = dailyForm.test_version.trim();
     const category = dailyForm.category.trim();
     const type = "daily";
-    const passRate = Number(dailyForm.pass_rate);
 
     if (!file) {
       setDailyImportMsg("CSV file is required.");
@@ -2600,10 +2782,6 @@ export default function AdminPage() {
     };
     if (!isCsvLike(file.name)) {
       setDailyImportMsg("CSV file is required.");
-      return;
-    }
-    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
-      setDailyImportMsg("pass_rate must be between 0 and 1.");
       return;
     }
 
@@ -2660,7 +2838,7 @@ export default function AdminPage() {
     applyAssetMap(questions, choices, assetMap);
 
     setDailyImportMsg("Upserting tests...");
-    const ensure = await ensureTestRecord(resolvedVersion, category || resolvedVersion, type, passRate);
+    const ensure = await ensureTestRecord(resolvedVersion, category || resolvedVersion, type, null);
     if (!ensure.ok) {
       setDailyImportMsg(ensure.message);
       return;
@@ -3642,13 +3820,30 @@ export default function AdminPage() {
 
           <div className="admin-form" style={{ marginTop: 10 }}>
             <div className="field">
+              <label>Category</label>
+              <select
+                value={modelConductCategory}
+                onChange={(e) => setModelConductCategory(e.target.value)}
+              >
+                {modelCategories.length ? (
+                  modelCategories.map((c) => (
+                    <option key={`model-cat-${c.name}`} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No categories</option>
+                )}
+              </select>
+            </div>
+            <div className="field">
               <label>Problem Set</label>
               <select
                 value={testSessionForm.problem_set_id}
                 onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
               >
-                {modelTests.length ? (
-                  modelTests.map((t) => (
+                {modelConductTests.length ? (
+                  modelConductTests.map((t) => (
                     <option key={`ps-${t.version}`} value={t.version}>
                       {t.version}
                     </option>
@@ -3691,16 +3886,6 @@ export default function AdminPage() {
               />
             </div>
             <div className="field small">
-              <label>Published</label>
-              <select
-                value={testSessionForm.is_published ? "yes" : "no"}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, is_published: e.target.value === "yes" }))}
-              >
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </div>
-            <div className="field small">
               <label>Show Answers</label>
               <select
                 value={testSessionForm.show_answers ? "yes" : "no"}
@@ -3709,6 +3894,14 @@ export default function AdminPage() {
                 <option value="yes">Yes</option>
                 <option value="no">No</option>
               </select>
+            </div>
+            <div className="field small">
+              <label>Pass Rate</label>
+              <input
+                value={testSessionForm.pass_rate}
+                onChange={(e) => setTestSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                placeholder="0.8"
+              />
             </div>
             <div className="field small">
               <label>&nbsp;</label>
@@ -3729,12 +3922,13 @@ export default function AdminPage() {
                   <th>Created</th>
                   <th>Title</th>
                   <th>Problem Set</th>
-                  <th>Published</th>
                   <th>Show Answers</th>
                   <th>Start</th>
                   <th>End</th>
                   <th>Time (min)</th>
+                  <th>Pass Rate</th>
                   <th>Action</th>
+                  <th>Edit</th>
                   <th>Delete</th>
                 </tr>
               </thead>
@@ -3742,18 +3936,95 @@ export default function AdminPage() {
                 {modelSessions.map((t) => (
                   <tr key={t.id}>
                     <td>{formatDateTime(t.created_at)}</td>
-                    <td>{t.title ?? ""}</td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          value={editingSessionForm.title}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
+                        />
+                      ) : (
+                        t.title ?? ""
+                      )}
+                    </td>
                     <td>{t.problem_set_id ?? ""}</td>
-                    <td>{t.is_published ? "Yes" : "No"}</td>
-                    <td>{t.show_answers ? "Yes" : "No"}</td>
-                    <td>{formatDateTime(t.starts_at)}</td>
-                    <td>{formatDateTime(t.ends_at)}</td>
-                    <td>{t.time_limit_min ?? ""}</td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <select
+                          value={editingSessionForm.show_answers ? "yes" : "no"}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                        >
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      ) : (
+                        t.show_answers ? "Yes" : "No"
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          type="datetime-local"
+                          value={editingSessionForm.starts_at}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                        />
+                      ) : (
+                        formatDateTime(t.starts_at)
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          type="datetime-local"
+                          value={editingSessionForm.ends_at}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                        />
+                      ) : (
+                        formatDateTime(t.ends_at)
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          value={editingSessionForm.time_limit_min}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                        />
+                      ) : (
+                        t.time_limit_min ?? ""
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          value={editingSessionForm.pass_rate}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                        />
+                      ) : (
+                        testPassRateByVersion[t.problem_set_id] != null
+                          ? `${Number(testPassRateByVersion[t.problem_set_id]) * 100}%`
+                          : ""
+                      )}
+                    </td>
                     <td>
                       {linkBySession[t.id]?.id ? (
                         <button className="btn" onClick={() => copyLink(linkBySession[t.id].id)}>Copy URL</button>
                       ) : (
                         ""
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button className="btn btn-primary" onClick={saveSessionEdits}>
+                            Save
+                          </button>
+                          <button className="btn" onClick={cancelEditSession}>
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button className="btn" onClick={() => startEditSession(t)}>
+                          Edit
+                        </button>
                       )}
                     </td>
                     <td>
@@ -3768,6 +4039,7 @@ export default function AdminPage() {
           </div>
           <div className="admin-msg">{testSessionsMsg}</div>
           <div className="admin-msg">{linkMsg}</div>
+          {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
         </div>
 
         ) : null}
@@ -3788,11 +4060,8 @@ export default function AdminPage() {
               <thead>
                 <tr>
                   <th>Created</th>
-                  <th>Type</th>
                   <th>Problem Set ID</th>
                   <th>Category</th>
-                  <th>Pass Rate</th>
-                  <th>Public</th>
                   <th>Questions</th>
                   <th>Preview</th>
                   <th>Edit</th>
@@ -3806,7 +4075,6 @@ export default function AdminPage() {
                     onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                   >
                     <td>{formatDateTime(t.created_at)}</td>
-                    <td>{t.type ?? ""}</td>
                     <td>
                       {editingTestId === t.id ? (
                         <input
@@ -3846,29 +4114,6 @@ export default function AdminPage() {
                         </>
                       ) : (
                         t.title ?? ""
-                      )}
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <input
-                          value={editingTestForm.pass_rate}
-                          onChange={(e) => setEditingTestForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                        />
-                      ) : (
-                        t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""
-                      )}
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <select
-                          value={editingTestForm.is_public ? "yes" : "no"}
-                          onChange={(e) => setEditingTestForm((s) => ({ ...s, is_public: e.target.value === "yes" }))}
-                        >
-                          <option value="yes">Yes</option>
-                          <option value="no">No</option>
-                        </select>
-                      ) : (
-                        t.is_public ? "Yes" : "No"
                       )}
                     </td>
                     <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
@@ -3980,14 +4225,6 @@ export default function AdminPage() {
                   style={{ marginTop: 6 }}
                 />
               ) : null}
-            </div>
-            <div className="field small">
-              <label>Pass Rate</label>
-              <input
-                value={assetForm.pass_rate}
-                onChange={(e) => setAssetForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                placeholder="0.8"
-              />
             </div>
             <div className="field">
               <label>CSV File (required)</label>
@@ -4108,13 +4345,30 @@ export default function AdminPage() {
 
           <div className="admin-form" style={{ marginTop: 10 }}>
             <div className="field">
+              <label>Category</label>
+              <select
+                value={dailyConductCategory}
+                onChange={(e) => setDailyConductCategory(e.target.value)}
+              >
+                {dailyCategories.length ? (
+                  dailyCategories.map((c) => (
+                    <option key={`daily-cat-${c.name}`} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No categories</option>
+                )}
+              </select>
+            </div>
+            <div className="field">
               <label>Problem Set</label>
               <select
                 value={dailySessionForm.problem_set_id}
                 onChange={(e) => setDailySessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
               >
-                {dailyTests.length ? (
-                  dailyTests.map((t) => (
+                {dailyConductTests.length ? (
+                  dailyConductTests.map((t) => (
                     <option key={`daily-ps-${t.version}`} value={t.version}>
                       {(t.title ? `${t.title} (${t.version})` : t.version)}
                     </option>
@@ -4157,16 +4411,6 @@ export default function AdminPage() {
               />
             </div>
             <div className="field small">
-              <label>Published</label>
-              <select
-                value={dailySessionForm.is_published ? "yes" : "no"}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, is_published: e.target.value === "yes" }))}
-              >
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </div>
-            <div className="field small">
               <label>Show Answers</label>
               <select
                 value={dailySessionForm.show_answers ? "yes" : "no"}
@@ -4175,6 +4419,14 @@ export default function AdminPage() {
                 <option value="yes">Yes</option>
                 <option value="no">No</option>
               </select>
+            </div>
+            <div className="field small">
+              <label>Pass Rate</label>
+              <input
+                value={dailySessionForm.pass_rate}
+                onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                placeholder="0.8"
+              />
             </div>
             <div className="field small">
               <label>&nbsp;</label>
@@ -4195,12 +4447,13 @@ export default function AdminPage() {
                   <th>Created</th>
                   <th>Title</th>
                   <th>Problem Set</th>
-                  <th>Published</th>
                   <th>Show Answers</th>
                   <th>Start</th>
                   <th>End</th>
                   <th>Time (min)</th>
+                  <th>Pass Rate</th>
                   <th>Action</th>
+                  <th>Edit</th>
                   <th>Delete</th>
                 </tr>
               </thead>
@@ -4208,18 +4461,95 @@ export default function AdminPage() {
                 {dailySessions.map((t) => (
                   <tr key={t.id}>
                     <td>{formatDateTime(t.created_at)}</td>
-                    <td>{t.title ?? ""}</td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          value={editingSessionForm.title}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
+                        />
+                      ) : (
+                        t.title ?? ""
+                      )}
+                    </td>
                     <td>{t.problem_set_id ?? ""}</td>
-                    <td>{t.is_published ? "Yes" : "No"}</td>
-                    <td>{t.show_answers ? "Yes" : "No"}</td>
-                    <td>{formatDateTime(t.starts_at)}</td>
-                    <td>{formatDateTime(t.ends_at)}</td>
-                    <td>{t.time_limit_min ?? ""}</td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <select
+                          value={editingSessionForm.show_answers ? "yes" : "no"}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                        >
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      ) : (
+                        t.show_answers ? "Yes" : "No"
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          type="datetime-local"
+                          value={editingSessionForm.starts_at}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                        />
+                      ) : (
+                        formatDateTime(t.starts_at)
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          type="datetime-local"
+                          value={editingSessionForm.ends_at}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                        />
+                      ) : (
+                        formatDateTime(t.ends_at)
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          value={editingSessionForm.time_limit_min}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                        />
+                      ) : (
+                        t.time_limit_min ?? ""
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <input
+                          value={editingSessionForm.pass_rate}
+                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                        />
+                      ) : (
+                        testPassRateByVersion[t.problem_set_id] != null
+                          ? `${Number(testPassRateByVersion[t.problem_set_id]) * 100}%`
+                          : ""
+                      )}
+                    </td>
                     <td>
                       {linkBySession[t.id]?.id ? (
                         <button className="btn" onClick={() => copyLink(linkBySession[t.id].id)}>Copy URL</button>
                       ) : (
                         ""
+                      )}
+                    </td>
+                    <td>
+                      {editingSessionId === t.id ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button className="btn btn-primary" onClick={saveSessionEdits}>
+                            Save
+                          </button>
+                          <button className="btn" onClick={cancelEditSession}>
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button className="btn" onClick={() => startEditSession(t)}>
+                          Edit
+                        </button>
                       )}
                     </td>
                     <td>
@@ -4234,6 +4564,7 @@ export default function AdminPage() {
           </div>
           <div className="admin-msg">{dailySessionsMsg}</div>
           <div className="admin-msg">{linkMsg}</div>
+          {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
         </div>
 
         ) : null}
@@ -4256,8 +4587,6 @@ export default function AdminPage() {
                   <th>Created</th>
                   <th>Category</th>
                   <th>Test ID</th>
-                  <th>Pass Rate</th>
-                  <th>Public</th>
                   <th>Questions</th>
                   <th>Preview</th>
                   <th>Edit</th>
@@ -4310,29 +4639,6 @@ export default function AdminPage() {
                         />
                       ) : (
                         t.version ?? ""
-                      )}
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <input
-                          value={editingTestForm.pass_rate}
-                          onChange={(e) => setEditingTestForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                        />
-                      ) : (
-                        t.pass_rate != null ? `${Number(t.pass_rate) * 100}%` : ""
-                      )}
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <select
-                          value={editingTestForm.is_public ? "yes" : "no"}
-                          onChange={(e) => setEditingTestForm((s) => ({ ...s, is_public: e.target.value === "yes" }))}
-                        >
-                          <option value="yes">Yes</option>
-                          <option value="no">No</option>
-                        </select>
-                      ) : (
-                        t.is_public ? "Yes" : "No"
                       )}
                     </td>
                     <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
@@ -4454,14 +4760,6 @@ export default function AdminPage() {
                   placeholder="Vocabulary Test"
                 />
               )}
-            </div>
-            <div className="field small">
-              <label>Pass Rate</label>
-              <input
-                value={dailyForm.pass_rate}
-                onChange={(e) => setDailyForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                placeholder="0.8"
-              />
             </div>
             <div className="field">
               <label>CSV File (required)</label>
@@ -4792,7 +5090,7 @@ export default function AdminPage() {
               >
                 <thead>
                   <tr>
-                    <th className="daily-sticky-1 daily-col-no">No.</th>
+                    <th className="daily-sticky-1 daily-col-no">Student ID</th>
                     <th className="daily-sticky-2 daily-col-name">Student Name</th>
                     {(resultContext.type === "daily" ? dailyResultsMatrix.tests : modelResultsMatrix.tests).map((t) => (
                       <th key={`daily-col-${t.version}`}>
@@ -4803,12 +5101,11 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(resultContext.type === "daily" ? dailyResultsMatrix.rows : modelResultsMatrix.rows).map((row) => (
-                    <tr
-                      key={`daily-row-${row.student.id}`}
-                      className={row.student.is_withdrawn ? "row-withdrawn" : ""}
-                    >
-                      <td className="daily-sticky-1 daily-col-no">{row.index}</td>
+                  {(resultContext.type === "daily" ? dailyResultsMatrix.rows : modelResultsMatrix.rows)
+                    .filter((row) => !row.student.is_withdrawn)
+                    .map((row) => (
+                    <tr key={`daily-row-${row.student.id}`}>
+                      <td className="daily-sticky-1 daily-col-no">{row.student.student_code ?? ""}</td>
                       <td className="daily-sticky-2 daily-col-name">
                         <div className="daily-name">{row.student.display_name ?? ""}</div>
                         <div className="daily-code">{row.student.student_code ?? ""}</div>
