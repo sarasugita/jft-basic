@@ -88,7 +88,7 @@ const defaultState = {
   requireLogin: true,
   selectedTestVersion: "",
   selectedTestSessionId: "",
-  studentTab: "take",
+  studentTab: "home",
   focusWarnings: 0,
   focusWarningAt: 0,
 };
@@ -479,7 +479,25 @@ function formatDateTime(value) {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleString();
+  return d.toLocaleString("en-GB", { timeZone: "Asia/Dhaka" });
+}
+
+function formatTimeBdt(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit" });
+}
+
+function getBdtDateKey(dateInput) {
+  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(d);
 }
 
 function formatDateShort(value) {
@@ -490,7 +508,7 @@ function formatDateShort(value) {
   }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
+  return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "2-digit", day: "2-digit" });
 }
 
 function formatWeekday(value) {
@@ -499,12 +517,12 @@ function formatWeekday(value) {
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) {
       const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-      return d.toLocaleDateString(undefined, { weekday: "short" });
+      return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
     }
   }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { weekday: "short" });
+  return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
 }
 
 function buildAttendanceSummary(list) {
@@ -1684,7 +1702,6 @@ function renderIntro(app) {
 
         <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
           <button class="nav-btn" id="nextBtn">Next</button>
-          ${authState.session ? `<button class="nav-btn ghost" id="signOutBtn">Sign out</button>` : ``}
           ${!authState.session && !state.linkId ? `<button class="nav-btn ghost" id="loginNavBtn">Log in</button>` : ``}
           <button class="nav-btn ghost" id="resetBtn">Reset</button>
         </div>
@@ -1743,19 +1760,33 @@ function renderTestSelect(app) {
   const isGuest = !authState.session;
   const showTabs = Boolean(authState.session);
   const activeTab = showTabs ? state.studentTab : "take";
+  const showHome = showTabs && activeTab === "home";
   const showResults = showTabs && activeTab === "results";
   const showAttendance = showTabs && activeTab === "attendance";
-  const showTakeTest = !showResults && !showAttendance;
+  const showTakeTest = !showResults && !showAttendance && !showHome;
   const canStart = activeSections.length > 0;
 
   if (showAttendance && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
     fetchStudentAttendance().finally(render);
   }
 
+  const welcomeName =
+    (state.user?.name || authState.profile?.display_name || authState.session?.user?.email || "Student")
+      .trim();
+
   const studentInfoHtml = showTabs
     ? `
         <header class="student-topbar">
-          <div class="student-topbar-title">JFT Navi</div>
+          <div class="student-topbar-title">
+            <svg viewBox="0 0 24 24" class="student-topbar-icon" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
+              <path
+                d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
+                fill="currentColor"
+              ></path>
+            </svg>
+            <span>JFT Navi</span>
+          </div>
           <div class="student-topbar-spacer"></div>
           <button class="menu-btn student-menu-btn" id="studentMenuBtn" aria-expanded="false" aria-controls="studentMenu" aria-label="Open menu">☰</button>
         </header>
@@ -1764,9 +1795,12 @@ function renderTestSelect(app) {
             <div class="student-menu-header">
               <button class="student-menu-close" type="button" data-student-menu-close aria-label="Close menu">×</button>
             </div>
+            <button class="student-menu-item" data-student-tab="home">Home</button>
             <button class="student-menu-item" data-student-tab="take">Take Test</button>
             <button class="student-menu-item" data-student-tab="results">Test Results</button>
             <button class="student-menu-item" data-student-tab="attendance">Attendance</button>
+            <div class="student-menu-spacer"></div>
+            <button class="student-menu-item student-menu-logout" id="signOutBtn">Sign out</button>
           </nav>
         </div>
       `
@@ -1814,6 +1848,54 @@ function renderTestSelect(app) {
                 `;
               })
               .join("")}
+          </div>
+        `;
+      })()
+    : "";
+
+  const homeHtml = showHome
+    ? (() => {
+        const todayKey = getBdtDateKey(new Date());
+        const sessions = (testSessionsState.list ?? [])
+          .filter((s) => s?.starts_at && s.is_published)
+          .filter((s) => getBdtDateKey(s.starts_at) === todayKey);
+        if (!testSessionsState.loaded) {
+          return `<div class="text-muted">Loading today's tests...</div>`;
+        }
+        const noTestsHtml = !sessions.length
+          ? `<div class="text-muted">No tests scheduled for today.</div>`
+          : "";
+        const nowMs = Date.now();
+        return `
+          <div class="student-home-welcome">Welcome ${escapeHtml(welcomeName)}</div>
+          <div class="student-home-section">
+            <div class="student-home-title">Today's Tests</div>
+            <div class="student-home-list">
+              ${sessions
+                .map((session) => {
+                  const startLabel = formatTimeBdt(session.starts_at);
+                  const name = session.title || session.problem_set_id || "Test";
+                  const startMs = new Date(session.starts_at).getTime();
+                  const canStart = Number.isFinite(startMs) && nowMs >= startMs;
+                  return `
+                    <div class="student-home-card">
+                      <div>
+                        <div class="student-home-time">${escapeHtml(startLabel)}</div>
+                        <div class="student-home-name">${escapeHtml(name)}</div>
+                      </div>
+                      <button
+                        class="student-home-start ${canStart ? "" : "disabled"}"
+                        data-session-id="${escapeHtml(session.id)}"
+                        ${canStart ? "" : "disabled"}
+                      >
+                        Start
+                      </button>
+                    </div>
+                  `;
+                })
+                .join("")}
+            </div>
+            ${noTestsHtml}
           </div>
         `;
       })()
@@ -2090,15 +2172,11 @@ function renderTestSelect(app) {
 
               <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
                 <button class="nav-btn" id="startBtn" ${canStart ? "" : "disabled"}>Start</button>
-                <button class="nav-btn ghost" id="signOutBtn">Sign out</button>
               </div>
             `
             : `
               <div class="intro-form" style="margin-top:16px; max-width:900px;">
-                ${showResults ? resultsHtml : attendanceHtml}
-              </div>
-              <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
-                <button class="nav-btn ghost" id="signOutBtn">Sign out</button>
+                ${showHome ? homeHtml : showResults ? resultsHtml : attendanceHtml}
               </div>
             `
         }
@@ -2131,6 +2209,25 @@ function renderTestSelect(app) {
       saveState();
       render();
     });
+  }
+
+  if (showHome) {
+    document.querySelectorAll(".student-home-start").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.disabled) return;
+        const sessionId = btn.dataset.sessionId;
+        if (!sessionId) return;
+        const session = testSessionsState.list.find((s) => s.id === sessionId);
+        if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
+        state.selectedTestSessionId = sessionId;
+        state.studentTab = "take";
+        saveState();
+        render();
+      });
+    });
+    setTimeout(() => {
+      if (state.studentTab === "home") render();
+    }, 30000);
   }
 
   if (showResults) {

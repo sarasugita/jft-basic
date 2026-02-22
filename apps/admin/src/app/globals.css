@@ -88,6 +88,18 @@ body { padding: 0; }
   font-weight: 900;
   letter-spacing: 0.3px;
   text-transform: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-brand-icon {
+  width: 22px;
+  height: 22px;
+  color: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .admin-brand-sub {
   font-size: 13px;

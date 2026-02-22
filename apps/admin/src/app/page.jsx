@@ -196,19 +196,36 @@ function buildSectionSummary(rows) {
   }));
 }
 
+const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
+
 function formatDateTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleString();
+  return d.toLocaleString("en-GB", { timeZone: "Asia/Dhaka" });
 }
 
-function formatDateTimeInput(iso) {
+function toBangladeshInput(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+  const bd = new Date(d.getTime() + BD_OFFSET_MS);
+  return bd.toISOString().slice(0, 16);
+}
+
+function fromBangladeshInput(value) {
+  if (!value) return null;
+  const parts = value.split("T");
+  if (parts.length !== 2) return null;
+  const [year, month, day] = parts[0].split("-").map((v) => Number(v));
+  const [hour, minute] = parts[1].split(":").map((v) => Number(v));
+  if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return null;
+  const utc = new Date(Date.UTC(year, month - 1, day, hour - 6, minute));
+  return utc.toISOString();
+}
+
+function formatDateTimeInput(iso) {
+  return toBangladeshInput(iso);
 }
 
 function formatDateShort(value) {
@@ -219,7 +236,7 @@ function formatDateShort(value) {
   }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit" });
+  return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "2-digit", day: "2-digit" });
 }
 
 function formatWeekday(value) {
@@ -1959,8 +1976,8 @@ export default function AdminPage() {
     const payload = {
       problem_set_id: problemSetId,
       title,
-      starts_at: testSessionForm.starts_at ? new Date(testSessionForm.starts_at).toISOString() : null,
-      ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+      starts_at: testSessionForm.starts_at ? fromBangladeshInput(testSessionForm.starts_at) : null,
+      ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
       is_published: true,
       show_answers: Boolean(testSessionForm.show_answers)
@@ -1982,7 +1999,7 @@ export default function AdminPage() {
     const { error: linkError } = await supabase.from("exam_links").insert({
       test_session_id: created.id,
       test_version: problemSetId,
-      expires_at: new Date(endsAt).toISOString()
+      expires_at: fromBangladeshInput(endsAt)
     });
     if (linkError) {
       console.error("exam_links insert error:", linkError);
@@ -2021,8 +2038,8 @@ export default function AdminPage() {
     const payload = {
       problem_set_id: problemSetId,
       title,
-      starts_at: dailySessionForm.starts_at ? new Date(dailySessionForm.starts_at).toISOString() : null,
-      ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+      starts_at: dailySessionForm.starts_at ? fromBangladeshInput(dailySessionForm.starts_at) : null,
+      ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
       is_published: true,
       show_answers: Boolean(dailySessionForm.show_answers)
@@ -2044,7 +2061,7 @@ export default function AdminPage() {
     const { error: linkError } = await supabase.from("exam_links").insert({
       test_session_id: created.id,
       test_version: problemSetId,
-      expires_at: new Date(endsAt).toISOString()
+      expires_at: fromBangladeshInput(endsAt)
     });
     if (linkError) {
       console.error("daily exam_links insert error:", linkError);
@@ -2109,8 +2126,8 @@ export default function AdminPage() {
     setEditingSessionMsg("Saving...");
     const payload = {
       title: title.trim(),
-      starts_at: starts_at ? new Date(starts_at).toISOString() : null,
-      ends_at: ends_at ? new Date(ends_at).toISOString() : null,
+      starts_at: starts_at ? fromBangladeshInput(starts_at) : null,
+      ends_at: ends_at ? fromBangladeshInput(ends_at) : null,
       time_limit_min: time_limit_min ? Number(time_limit_min) : null,
       show_answers: Boolean(show_answers)
     };
@@ -2122,7 +2139,7 @@ export default function AdminPage() {
     }
     const { error: linkError } = await supabase
       .from("exam_links")
-      .update({ expires_at: new Date(ends_at).toISOString() })
+      .update({ expires_at: fromBangladeshInput(ends_at) })
       .eq("test_session_id", editingSessionId);
     if (linkError) {
       console.error("session link update error:", linkError);
@@ -3192,7 +3209,16 @@ export default function AdminPage() {
       <aside className="admin-sidebar">
         <div className="admin-brand">
           <div className="admin-brand-text">
-            <div className="admin-brand-title">JFT Navi</div>
+            <div className="admin-brand-title">
+              <svg viewBox="0 0 24 24" className="admin-brand-icon" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
+                <path
+                  d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
+                  fill="currentColor"
+                ></path>
+              </svg>
+              <span>JFT Navi</span>
+            </div>
             <div className="admin-brand-sub">Admin Console</div>
           </div>
         </div>
@@ -3877,6 +3903,7 @@ export default function AdminPage() {
               <label>Starts At</label>
               <input
                 type="datetime-local"
+                step="300"
                 value={testSessionForm.starts_at}
                 onChange={(e) => setTestSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
               />
@@ -3885,6 +3912,7 @@ export default function AdminPage() {
               <label>Ends At</label>
               <input
                 type="datetime-local"
+                step="300"
                 value={testSessionForm.ends_at}
                 onChange={(e) => setTestSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
               />
@@ -3976,6 +4004,7 @@ export default function AdminPage() {
                       {editingSessionId === t.id ? (
                         <input
                           type="datetime-local"
+                          step="300"
                           value={editingSessionForm.starts_at}
                           onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
                         />
@@ -3987,6 +4016,7 @@ export default function AdminPage() {
                       {editingSessionId === t.id ? (
                         <input
                           type="datetime-local"
+                          step="300"
                           value={editingSessionForm.ends_at}
                           onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
                         />
@@ -4415,6 +4445,7 @@ export default function AdminPage() {
               <label>Starts At</label>
               <input
                 type="datetime-local"
+                step="300"
                 value={dailySessionForm.starts_at}
                 onChange={(e) => setDailySessionForm((s) => ({ ...s, starts_at: e.target.value }))}
               />
@@ -4423,6 +4454,7 @@ export default function AdminPage() {
               <label>Ends At</label>
               <input
                 type="datetime-local"
+                step="300"
                 value={dailySessionForm.ends_at}
                 onChange={(e) => setDailySessionForm((s) => ({ ...s, ends_at: e.target.value }))}
               />
@@ -4514,6 +4546,7 @@ export default function AdminPage() {
                       {editingSessionId === t.id ? (
                         <input
                           type="datetime-local"
+                          step="300"
                           value={editingSessionForm.starts_at}
                           onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
                         />
@@ -4525,6 +4558,7 @@ export default function AdminPage() {
                       {editingSessionId === t.id ? (
                         <input
                           type="datetime-local"
+                          step="300"
                           value={editingSessionForm.ends_at}
                           onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
                         />
