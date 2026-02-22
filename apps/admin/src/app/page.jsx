@@ -3001,15 +3001,24 @@ export default function AdminPage() {
     <div className="admin-shell">
       <aside className="admin-sidebar">
         <div className="admin-brand">
-          <div className="admin-brand-title">Admin</div>
-          <div className="admin-brand-sub">JFT Mock</div>
+          <div className="admin-brand-text">
+            <div className="admin-brand-title">JFT Navi</div>
+            <div className="admin-brand-sub">Admin Console</div>
+          </div>
         </div>
         <div className="admin-nav">
           <button
             className={`admin-nav-item ${activeTab === "students" ? "active" : ""}`}
             onClick={() => setActiveTab("students")}
           >
-            <span className="admin-nav-dot" />
+            <span className="admin-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                <circle cx="8" cy="8" r="3" />
+                <circle cx="16" cy="9" r="3" />
+                <path d="M3 20c0-3 3-5 6-5s6 2 6 5" />
+                <path d="M12 19c1-2 3-3 5-3 2.5 0 4 1.4 4 4" />
+              </svg>
+            </span>
             Student List
           </button>
 
@@ -3017,7 +3026,12 @@ export default function AdminPage() {
             className={`admin-nav-item ${activeTab === "attendance" ? "active" : ""}`}
             onClick={() => setActiveTab("attendance")}
           >
-            <span className="admin-nav-dot" />
+            <span className="admin-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                <rect x="4" y="5" width="16" height="15" rx="2" />
+                <path d="M8 3v4M16 3v4M4 9h16" />
+              </svg>
+            </span>
             Attendance
           </button>
 
@@ -3029,7 +3043,12 @@ export default function AdminPage() {
                 setModelSubTab("create");
               }}
             >
-              <span className="admin-nav-dot" />
+              <span className="admin-nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                  <path d="M5 5h11a3 3 0 0 1 3 3v11H8a3 3 0 0 0-3 3V5z" />
+                  <path d="M8 5v14" />
+                </svg>
+              </span>
               Model Test
               <span className={`admin-nav-arrow ${activeTab === "model" ? "open" : ""}`}>▾</span>
             </button>
@@ -3065,7 +3084,13 @@ export default function AdminPage() {
                 setDailySubTab("create");
               }}
             >
-              <span className="admin-nav-dot" />
+              <span className="admin-nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                  <path d="M7 4h7l4 4v12H7z" />
+                  <path d="M14 4v4h4" />
+                  <path d="M9 12h6M9 16h6" />
+                </svg>
+              </span>
               Daily Test
               <span className={`admin-nav-arrow ${activeTab === "daily" ? "open" : ""}`}>▾</span>
             </button>
