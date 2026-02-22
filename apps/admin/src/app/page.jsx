@@ -903,6 +903,8 @@ export default function AdminPage() {
 
   const [modelConductCategory, setModelConductCategory] = useState("");
   const [dailyConductCategory, setDailyConductCategory] = useState("");
+  const [modelUploadCategory, setModelUploadCategory] = useState("");
+  const [dailyUploadCategory, setDailyUploadCategory] = useState("");
 
   const selectedModelConductCategory = useMemo(() => {
     if (!modelCategories.length) return null;
@@ -916,6 +918,16 @@ export default function AdminPage() {
 
   const modelConductTests = selectedModelConductCategory?.tests ?? [];
   const dailyConductTests = selectedDailyConductCategory?.tests ?? [];
+
+  const filteredModelUploadTests = useMemo(() => {
+    if (!modelUploadCategory) return modelTests;
+    return modelTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
+  }, [modelTests, modelUploadCategory]);
+
+  const filteredDailyUploadTests = useMemo(() => {
+    if (!dailyUploadCategory) return dailyTests;
+    return dailyTests.filter((t) => String(t.title ?? "").trim() === dailyUploadCategory);
+  }, [dailyTests, dailyUploadCategory]);
 
   const selectedDailyCategory = useMemo(() => {
     if (!dailyCategories.length) return null;
@@ -4049,142 +4061,6 @@ export default function AdminPage() {
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
-              <div className="admin-title">Problem Sets</div>
-              <div className="admin-subtitle">問題セット（CSV/Assets）の一覧です。</div>
-            </div>
-            <button className="btn" onClick={() => fetchTests()}>Refresh Problem Sets</button>
-          </div>
-
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Problem Set ID</th>
-                  <th>Category</th>
-                  <th>Questions</th>
-                  <th>Preview</th>
-                  <th>Edit</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {modelTests.map((t) => (
-                  <tr
-                    key={t.id}
-                    onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
-                  >
-                    <td>{formatDateTime(t.created_at)}</td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <input
-                          value={editingTestForm.version}
-                          onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
-                        />
-                      ) : (
-                        t.version ?? ""
-                      )}
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <>
-                          <select
-                            value={editingCategorySelect}
-                            onChange={(e) => {
-                              const next = e.target.value;
-                              setEditingCategorySelect(next);
-                              if (next !== "__custom__") {
-                                setEditingTestForm((s) => ({ ...s, title: next }));
-                              }
-                            }}
-                          >
-                            {modelCategories.map((c) => (
-                              <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
-                            ))}
-                            <option value="__custom__">Custom...</option>
-                          </select>
-                          {editingCategorySelect === "__custom__" ? (
-                            <input
-                              value={editingTestForm.title}
-                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
-                              placeholder="Grammar Review"
-                              style={{ marginTop: 6 }}
-                            />
-                          ) : null}
-                        </>
-                      ) : (
-                        t.title ?? ""
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
-                    <td>
-                      <button
-                        className="btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openPreview(t.version);
-                        }}
-                      >
-                        Preview
-                      </button>
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button
-                            className="btn btn-primary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              saveTestEdits(modelCategories);
-                            }}
-                          >
-                            Save
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              cancelEditTest();
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditTest(t, modelCategories);
-                          }}
-                        >
-                          Edit
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteTest(t.version);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
-          <div className="admin-msg">{testsMsg}</div>
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
               <div className="admin-title">Problem Set Upload (CSV)</div>
               <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します（タイトルはTest Sessionで設定）。</div>
             </div>
@@ -4317,6 +4193,155 @@ export default function AdminPage() {
             </pre>
           ) : null}
           <div className="admin-msg">{assetsMsg}</div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Problem Sets</div>
+              <div className="admin-subtitle">問題セット（CSV/Assets）の一覧です。</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <select
+                value={modelUploadCategory}
+                onChange={(e) => setModelUploadCategory(e.target.value)}
+              >
+                <option value="">All Categories</option>
+                {modelCategories.map((c) => (
+                  <option key={`model-upload-cat-${c.name}`} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button className="btn" onClick={() => fetchTests()}>Refresh Problem Sets</button>
+            </div>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Problem Set ID</th>
+                  <th>Category</th>
+                  <th>Questions</th>
+                  <th>Preview</th>
+                  <th>Edit</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredModelUploadTests.map((t) => (
+                  <tr
+                    key={t.id}
+                    onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
+                  >
+                    <td>{formatDateTime(t.created_at)}</td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <input
+                          value={editingTestForm.version}
+                          onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                        />
+                      ) : (
+                        t.version ?? ""
+                      )}
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <>
+                          <select
+                            value={editingCategorySelect}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setEditingCategorySelect(next);
+                              if (next !== "__custom__") {
+                                setEditingTestForm((s) => ({ ...s, title: next }));
+                              }
+                            }}
+                          >
+                            {modelCategories.map((c) => (
+                              <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
+                            ))}
+                            <option value="__custom__">Custom...</option>
+                          </select>
+                          {editingCategorySelect === "__custom__" ? (
+                            <input
+                              value={editingTestForm.title}
+                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
+                              placeholder="Grammar Review"
+                              style={{ marginTop: 6 }}
+                            />
+                          ) : null}
+                        </>
+                      ) : (
+                        t.title ?? ""
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPreview(t.version);
+                        }}
+                      >
+                        Preview
+                      </button>
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveTestEdits(modelCategories);
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cancelEditTest();
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditTest(t, modelCategories);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-danger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteTest(t.version);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
+          <div className="admin-msg">{testsMsg}</div>
         </div>
         </>
         ) : null}
@@ -4574,142 +4599,6 @@ export default function AdminPage() {
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
-              <div className="admin-title">Daily Tests</div>
-              <div className="admin-subtitle">Daily Test（CSV/Assets）の一覧です。</div>
-            </div>
-            <button className="btn" onClick={() => fetchTests()}>Refresh Daily Tests</button>
-          </div>
-
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Category</th>
-                  <th>Test ID</th>
-                  <th>Questions</th>
-                  <th>Preview</th>
-                  <th>Edit</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dailyTests.map((t) => (
-                  <tr
-                    key={t.id}
-                    onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
-                  >
-                    <td>{formatDateTime(t.created_at)}</td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <>
-                          <select
-                            value={editingCategorySelect}
-                            onChange={(e) => {
-                              const next = e.target.value;
-                              setEditingCategorySelect(next);
-                              if (next !== "__custom__") {
-                                setEditingTestForm((s) => ({ ...s, title: next }));
-                              }
-                            }}
-                          >
-                            {dailyCategories.map((c) => (
-                              <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
-                            ))}
-                            <option value="__custom__">Custom...</option>
-                          </select>
-                          {editingCategorySelect === "__custom__" ? (
-                            <input
-                              value={editingTestForm.title}
-                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
-                              placeholder="Vocabulary Test"
-                              style={{ marginTop: 6 }}
-                            />
-                          ) : null}
-                        </>
-                      ) : (
-                        t.title ?? ""
-                      )}
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <input
-                          value={editingTestForm.version}
-                          onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
-                        />
-                      ) : (
-                        t.version ?? ""
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
-                    <td>
-                      <button
-                        className="btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openPreview(t.version);
-                        }}
-                      >
-                        Preview
-                      </button>
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button
-                            className="btn btn-primary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              saveTestEdits(dailyCategories);
-                            }}
-                          >
-                            Save
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              cancelEditTest();
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditTest(t, dailyCategories);
-                          }}
-                        >
-                          Edit
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteTest(t.version);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
-          <div className="admin-msg">{testsMsg}</div>
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
               <div className="admin-title">Daily Test Upload (CSV)</div>
               <div className="admin-subtitle">Daily Test用CSVとIllustrationをアップロードします。</div>
             </div>
@@ -4839,6 +4728,155 @@ export default function AdminPage() {
               {dailyImportMsg}
             </pre>
           ) : null}
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Daily Tests</div>
+              <div className="admin-subtitle">Daily Test（CSV/Assets）の一覧です。</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <select
+                value={dailyUploadCategory}
+                onChange={(e) => setDailyUploadCategory(e.target.value)}
+              >
+                <option value="">All Categories</option>
+                {dailyCategories.map((c) => (
+                  <option key={`daily-upload-cat-${c.name}`} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button className="btn" onClick={() => fetchTests()}>Refresh Daily Tests</button>
+            </div>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 860 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Category</th>
+                  <th>Test ID</th>
+                  <th>Questions</th>
+                  <th>Preview</th>
+                  <th>Edit</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDailyUploadTests.map((t) => (
+                  <tr
+                    key={t.id}
+                    onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
+                  >
+                    <td>{formatDateTime(t.created_at)}</td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <>
+                          <select
+                            value={editingCategorySelect}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setEditingCategorySelect(next);
+                              if (next !== "__custom__") {
+                                setEditingTestForm((s) => ({ ...s, title: next }));
+                              }
+                            }}
+                          >
+                            {dailyCategories.map((c) => (
+                              <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
+                            ))}
+                            <option value="__custom__">Custom...</option>
+                          </select>
+                          {editingCategorySelect === "__custom__" ? (
+                            <input
+                              value={editingTestForm.title}
+                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
+                              placeholder="Vocabulary Test"
+                              style={{ marginTop: 6 }}
+                            />
+                          ) : null}
+                        </>
+                      ) : (
+                        t.title ?? ""
+                      )}
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <input
+                          value={editingTestForm.version}
+                          onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                        />
+                      ) : (
+                        t.version ?? ""
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPreview(t.version);
+                        }}
+                      >
+                        Preview
+                      </button>
+                    </td>
+                    <td>
+                      {editingTestId === t.id ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveTestEdits(dailyCategories);
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cancelEditTest();
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditTest(t, dailyCategories);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-danger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteTest(t.version);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
+          <div className="admin-msg">{testsMsg}</div>
         </div>
         </>
         ) : null}
