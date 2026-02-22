@@ -90,17 +90,19 @@ body { padding: 0; }
   text-transform: none;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .admin-brand-icon {
   width: 22px;
   height: 22px;
-  color: currentColor;
+  color: #2f6b2f;
   stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
+  display: inline-block;
 }
+
 .admin-brand-sub {
   font-size: 13px;
   color: #8a94a6;

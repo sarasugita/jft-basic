@@ -1777,15 +1777,18 @@ function renderTestSelect(app) {
   const studentInfoHtml = showTabs
     ? `
         <header class="student-topbar">
-          <div class="student-topbar-title">
-            <svg viewBox="0 0 24 24" class="student-topbar-icon" aria-hidden="true">
-              <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
-              <path
-                d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
-                fill="currentColor"
-              ></path>
-            </svg>
-            <span>JFT Navi</span>
+          <div class="student-topbar-brand">
+            <div class="student-topbar-title">
+              <svg viewBox="0 0 24 24" class="student-topbar-icon" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
+                <path
+                  d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
+                  fill="currentColor"
+                ></path>
+              </svg>
+              <span>JFT Navi</span>
+            </div>
+            <span class="student-topbar-name">${escapeHtml(welcomeName)}</span>
           </div>
           <div class="student-topbar-spacer"></div>
           <button class="menu-btn student-menu-btn" id="studentMenuBtn" aria-expanded="false" aria-controls="studentMenu" aria-label="Open menu">☰</button>
@@ -1867,7 +1870,6 @@ function renderTestSelect(app) {
           : "";
         const nowMs = Date.now();
         return `
-          <div class="student-home-welcome">Welcome ${escapeHtml(welcomeName)}</div>
           <div class="student-home-section">
             <div class="student-home-title">Today's Tests</div>
             <div class="student-home-list">

@@ -760,6 +760,12 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   font-weight: 700;
 }
 
+.student-topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .student-topbar-title {
   font-size: 18px;
   font-weight: 900;
@@ -771,6 +777,13 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.student-topbar-name {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.9;
+  margin-left: 2px;
 }
 
 .student-topbar-icon {
@@ -870,14 +883,6 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   gap: 12px;
 }
 
-.student-home-welcome {
-  background: #f3f4f6;
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-weight: 800;
-  color: #111827;
-  margin-bottom: 12px;
-}
 
 .student-home-title {
   font-size: 16px;
