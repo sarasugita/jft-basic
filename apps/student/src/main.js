@@ -1769,6 +1769,9 @@ function renderTestSelect(app) {
   if (showAttendance && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
     fetchStudentAttendance().finally(render);
   }
+  if (showHome && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
+    fetchStudentAttendance().finally(render);
+  }
 
   const welcomeName =
     (state.user?.name || authState.profile?.display_name || authState.session?.user?.email || "Student")
@@ -1851,6 +1854,28 @@ function renderTestSelect(app) {
                 `;
               })
               .join("")}
+          </div>
+        `;
+      })()
+    : "";
+
+  const homeWarningHtml = showHome
+    ? (() => {
+        if (!studentAttendanceState.loaded || !studentAttendanceState.list.length) return "";
+        const total = studentAttendanceState.list.length;
+        const present = studentAttendanceState.list.filter((r) => r.status === "P" || r.status === "L").length;
+        const unexcused = studentAttendanceState.list.filter((r) => r.status === "A").length;
+        const rate = total ? (present / total) * 100 : 0;
+        const warnings = [];
+        if (rate < 80) warnings.push(`Attendance below 80% (${rate.toFixed(1)}%).`);
+        if (unexcused >= 3) warnings.push(`Unexcused absences: ${unexcused}.`);
+        if (!warnings.length) return "";
+        return `
+          <div class="student-warning">
+            <div class="student-warning-title">Warning</div>
+            <ul class="student-warning-list">
+              ${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}
+            </ul>
           </div>
         `;
       })()
@@ -2103,6 +2128,7 @@ function renderTestSelect(app) {
   app.innerHTML = `
     <div class="app ${showTabs ? "has-student-topbar" : ""}">
       ${studentInfoHtml}
+      ${showHome && homeWarningHtml ? `<div class="student-home-warning-block">${homeWarningHtml}</div>` : ""}
       <main class="content" style="margin:12px;">
         ${
           showTakeTest
@@ -2176,11 +2202,17 @@ function renderTestSelect(app) {
                 <button class="nav-btn" id="startBtn" ${canStart ? "" : "disabled"}>Start</button>
               </div>
             `
-            : `
-              <div class="intro-form" style="margin-top:16px; max-width:900px;">
-                ${showHome ? homeHtml : showResults ? resultsHtml : attendanceHtml}
-              </div>
-            `
+            : showHome
+              ? `
+                <div class="intro-form" style="margin-top:16px; max-width:900px;">
+                  ${homeHtml}
+                </div>
+              `
+              : `
+                <div class="intro-form" style="margin-top:16px; max-width:900px;">
+                  ${showResults ? resultsHtml : attendanceHtml}
+                </div>
+              `
         }
       </main>
       ${resultDetailHtml}

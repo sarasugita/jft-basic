@@ -934,6 +934,31 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   cursor: not-allowed;
 }
 
+.student-warning {
+  margin-top: 0;
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.student-home-warning-block {
+  margin: 12px;
+}
+
+.student-warning-title {
+  font-weight: 800;
+  color: #b91c1c;
+  margin-bottom: 6px;
+}
+
+.student-warning-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
 .result-card {
   border: 1px solid var(--border);
   border-radius: 12px;
