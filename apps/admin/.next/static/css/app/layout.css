@@ -510,6 +510,60 @@ body { padding: 0; }
 .att-status-btn.att-E.active { background: #ffd1a6; color: #92400e; }
 .att-status-btn.att-A.active { background: #ffc1c1; color: #9b1c1c; }
 
+.daily-results-table th,
+.daily-results-table td {
+  text-align: center;
+}
+
+.daily-col-no {
+  width: 60px;
+  white-space: nowrap;
+}
+
+.daily-col-name {
+  width: 220px;
+  text-align: left;
+}
+
+.daily-sticky-1,
+.daily-sticky-2 {
+  position: -webkit-sticky;
+  position: sticky;
+  background: #fff;
+  z-index: 2;
+}
+
+.daily-results-table th.daily-sticky-1,
+.daily-results-table th.daily-sticky-2 {
+  background: #f7f7f7;
+  z-index: 3;
+}
+
+.daily-sticky-1 { left: 0; }
+.daily-sticky-2 { left: 60px; }
+
+.daily-col-title { font-weight: 900; }
+.daily-col-date { font-size: 12px; color: #6b7280; }
+
+.daily-name { font-weight: 800; }
+.daily-code { font-size: 12px; color: #6b7280; }
+
+.daily-score-btn {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.daily-score-btn.low {
+  color: #b91c1c;
+}
+
+.daily-results-table tbody tr:hover {
+  cursor: default;
+}
+
 .attendance-modal-table td input {
   width: 100%;
   border: 1px solid rgba(0,0,0,0.2);
