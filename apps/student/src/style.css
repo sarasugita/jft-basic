@@ -1228,14 +1228,176 @@ body { overflow-x: hidden; }
 
 .student-application-actions {
   display: flex;
-  gap: 10px;
   flex-wrap: wrap;
+  gap: 12px;
 }
 
 .student-application-actions .app-btn {
-  font-size: 11px;
-  padding: 6px 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 10px;
+  padding: 8px 2px;
   border-radius: 10px;
+  white-space: normal;
+  line-height: 1.1;
+}
+
+@media (max-width: 300px) {
+  .student-application-actions .app-btn {
+    flex-basis: 100%;
+  }
+}
+
+.attendance-record-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.attendance-month-bar {
+  display: grid;
+  grid-template-columns: 32px 1fr 32px;
+  align-items: center;
+  gap: 8px;
+}
+
+.attendance-month-label {
+  text-align: center;
+  font-weight: 800;
+  font-size: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.attendance-month-nav {
+  border: 0;
+  background: #f3f4f6;
+  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.attendance-month-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.attendance-month-select {
+  font-size: 16px;
+  font-weight: 800;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  cursor: pointer;
+  appearance: none;
+  text-align: center;
+  text-align-last: center;
+}
+
+.attendance-month-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.attendance-month-label::after { content: ""; }
+
+.attendance-pie-wrap {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+
+.attendance-pie {
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: var(--pie-bg);
+  position: relative;
+}
+
+.attendance-pie-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.attendance-pie-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y)));
+  font-size: 14px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  z-index: 2;
+}
+
+.attendance-pie-center {
+  position: absolute;
+  inset: 20%;
+  background: #fff;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+  padding: 6px;
+}
+
+.attendance-rate {
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.attendance-rate-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 700;
+}
+
+.attendance-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  width: 100%;
+}
+
+.attendance-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.attendance-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.attendance-status {
+  font-weight: 900;
+}
+
+.attendance-status.status-p { color: #15803d; }
+.attendance-status.status-l { color: #1e40af; }
+.attendance-status.status-e { color: #b45309; }
+.attendance-status.status-a { color: #b91c1c; }
+
+@media (max-width: 520px) {
+  .attendance-pie {
+    width: 200px;
+    height: 200px;
+  }
 }
 
 .student-application-actions .app-btn-excused {
@@ -1245,8 +1407,8 @@ body { overflow-x: hidden; }
 }
 
 .student-application-actions .app-btn-late {
-  background: #7c3aed;
-  border-color: #6d28d9;
+  background: #2563eb;
+  border-color: #1d4ed8;
   color: #fff;
 }
 
@@ -1835,4 +1997,15 @@ button.student-application-view {
   line-height: 1.5;
   padding: 6px 4px;
   text-align: center;
+}
+.attendance-record-card .detail-table th:nth-child(2),
+.attendance-record-card .detail-table td:nth-child(2) {
+  width: 56px;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.attendance-record-card .detail-table th:nth-child(3),
+.attendance-record-card .detail-table td:nth-child(3) {
+  width: auto;
 }

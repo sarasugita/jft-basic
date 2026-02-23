@@ -551,7 +551,7 @@ body { padding: 0; }
 
 .att-cell { font-weight: 800; text-align: center; }
 .att-P { background: #d8f5c2; color: #1f6f2a; }
-.att-L { background: #e9ddff; color: #6d28d9; }
+.att-L { background: #dbeafe; color: #1d4ed8; }
 .att-E { background: #ffd1a6; color: #92400e; }
 .att-A { background: #ffc1c1; color: #9b1c1c; }
 
@@ -608,12 +608,12 @@ body { padding: 0; }
 }
 
 .att-legend-present { color: #1b5e20; }
-.att-legend-late { color: #6d28d9; }
+.att-legend-late { color: #1d4ed8; }
 .att-legend-excused { color: #d97706; }
 .att-legend-absent { color: #b91c1c; }
 
 .att-approved-note.excused { color: #d97706; }
-.att-approved-note.late { color: #6d28d9; }
+.att-approved-note.late { color: #1d4ed8; }
 .att-status-btn.att-P.active { background: #d8f5c2; color: #1f6f2a; }
 .att-status-btn.att-L.active { background: #ffe7a3; color: #8a5b00; }
 .att-status-btn.att-E.active { background: #ffd1a6; color: #92400e; }
