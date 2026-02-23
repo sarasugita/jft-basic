@@ -863,6 +863,21 @@ export default function AdminPage() {
     startDate: "",
     endDate: ""
   });
+  const [announcements, setAnnouncements] = useState([]);
+  const [announcementForm, setAnnouncementForm] = useState({
+    title: "",
+    body: "",
+    publish_at: formatDateTimeInput(new Date()),
+    end_at: ""
+  });
+  const [announcementMsg, setAnnouncementMsg] = useState("");
+  const [editingAnnouncementId, setEditingAnnouncementId] = useState("");
+  const [editingAnnouncementForm, setEditingAnnouncementForm] = useState({
+    title: "",
+    body: "",
+    publish_at: "",
+    end_at: ""
+  });
   function generateTempPassword(length = 10) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
     const bytes = new Uint8Array(length);
@@ -1632,6 +1647,117 @@ export default function AdminPage() {
       fetchAttendanceDays();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "announcements") {
+      fetchAnnouncements();
+    }
+  }, [activeTab]);
+
+  async function fetchAnnouncements() {
+    setAnnouncementMsg("Loading...");
+    const { data, error } = await supabase
+      .from("announcements")
+      .select("id, title, body, publish_at, end_at, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      console.error("announcements fetch error:", error);
+      setAnnouncements([]);
+      setAnnouncementMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    setAnnouncements(data ?? []);
+    setAnnouncementMsg(data?.length ? "" : "No announcements.");
+  }
+
+  async function createAnnouncement() {
+    setAnnouncementMsg("");
+    const title = announcementForm.title.trim();
+    const body = announcementForm.body.trim();
+    if (!title || !body) {
+      setAnnouncementMsg("Title and message are required.");
+      return;
+    }
+    const publishAt = announcementForm.publish_at
+      ? fromBangladeshInput(announcementForm.publish_at)
+      : new Date().toISOString();
+    const endAt = announcementForm.end_at ? fromBangladeshInput(announcementForm.end_at) : null;
+    const payload = {
+      title,
+      body,
+      publish_at: publishAt,
+      end_at: endAt,
+      created_by: session?.user?.id ?? null
+    };
+    const { error } = await supabase.from("announcements").insert(payload);
+    if (error) {
+      console.error("announcement create error:", error);
+      setAnnouncementMsg(`Create failed: ${error.message}`);
+      return;
+    }
+    setAnnouncementForm({ title: "", body: "", publish_at: formatDateTimeInput(new Date()), end_at: "" });
+    setAnnouncementMsg("Announcement created.");
+    fetchAnnouncements();
+  }
+
+  async function deleteAnnouncement(id) {
+    if (!id) return;
+    const ok = window.confirm("Delete this announcement?");
+    if (!ok) return;
+    const { error } = await supabase.from("announcements").delete().eq("id", id);
+    if (error) {
+      console.error("announcement delete error:", error);
+      setAnnouncementMsg(`Delete failed: ${error.message}`);
+      return;
+    }
+    fetchAnnouncements();
+  }
+
+  function startEditAnnouncement(announcement) {
+    if (!announcement?.id) return;
+    setEditingAnnouncementId(announcement.id);
+    setEditingAnnouncementForm({
+      title: announcement.title ?? "",
+      body: announcement.body ?? "",
+      publish_at: formatDateTimeInput(announcement.publish_at),
+      end_at: announcement.end_at ? formatDateTimeInput(announcement.end_at) : ""
+    });
+  }
+
+  function cancelEditAnnouncement() {
+    setEditingAnnouncementId("");
+    setEditingAnnouncementForm({ title: "", body: "", publish_at: "", end_at: "" });
+  }
+
+  async function saveAnnouncementEdits() {
+    if (!editingAnnouncementId) return;
+    const title = editingAnnouncementForm.title.trim();
+    const body = editingAnnouncementForm.body.trim();
+    if (!title || !body) {
+      setAnnouncementMsg("Title and message are required.");
+      return;
+    }
+    const payload = {
+      title,
+      body,
+      publish_at: editingAnnouncementForm.publish_at
+        ? fromBangladeshInput(editingAnnouncementForm.publish_at)
+        : new Date().toISOString(),
+      end_at: editingAnnouncementForm.end_at ? fromBangladeshInput(editingAnnouncementForm.end_at) : null
+    };
+    const { error } = await supabase
+      .from("announcements")
+      .update(payload)
+      .eq("id", editingAnnouncementId);
+    if (error) {
+      console.error("announcement update error:", error);
+      setAnnouncementMsg(`Update failed: ${error.message}`);
+      return;
+    }
+    cancelEditAnnouncement();
+    fetchAnnouncements();
+  }
 
   async function fetchStudentAttempts(studentId) {
     if (!studentId) return;
@@ -3368,6 +3494,19 @@ export default function AdminPage() {
               </div>
             ) : null}
           </div>
+
+          <button
+            className={`admin-nav-item ${activeTab === "announcements" ? "active" : ""}`}
+            onClick={() => setActiveTab("announcements")}
+          >
+            <span className="admin-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                <path d="M4 4h16v12H7l-3 3z" />
+                <path d="M7 8h10M7 12h6" />
+              </svg>
+            </span>
+            Announcements
+          </button>
         </div>
         <div className="admin-sidebar-footer">
           <div className="admin-email">{session.user.email}</div>
@@ -3850,6 +3989,152 @@ export default function AdminPage() {
             </table>
           </div>
           <div className="admin-msg">{attendanceMsg}</div>
+        </div>
+        ) : null}
+
+        {activeTab === "announcements" ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Announcements</div>
+              <div className="admin-subtitle">Create announcements and send them to students.</div>
+            </div>
+            <button className="btn" onClick={() => fetchAnnouncements()}>Refresh</button>
+          </div>
+
+          <div className="admin-form" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label>Title</label>
+              <input
+                value={announcementForm.title}
+                onChange={(e) => setAnnouncementForm((s) => ({ ...s, title: e.target.value }))}
+                placeholder="Announcement title"
+              />
+            </div>
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label>Message</label>
+              <textarea
+                value={announcementForm.body}
+                onChange={(e) => setAnnouncementForm((s) => ({ ...s, body: e.target.value }))}
+                placeholder="Write your message here..."
+                rows={4}
+              />
+            </div>
+            <div className="field small">
+              <label>Publish At</label>
+              <input
+                type="datetime-local"
+                step="300"
+                value={announcementForm.publish_at}
+                onChange={(e) => setAnnouncementForm((s) => ({ ...s, publish_at: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>End At</label>
+              <input
+                type="datetime-local"
+                step="300"
+                value={announcementForm.end_at}
+                onChange={(e) => setAnnouncementForm((s) => ({ ...s, end_at: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button className="btn btn-primary" type="button" onClick={createAnnouncement}>
+                Create Announcement
+              </button>
+            </div>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+            <table className="admin-table" style={{ minWidth: 720 }}>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Title</th>
+                  <th>Message</th>
+                  <th>Publish At</th>
+                  <th>End At</th>
+                  <th>Edit</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {announcements.map((a) => (
+                  <tr key={a.id}>
+                    <td>{formatDateTime(a.created_at)}</td>
+                    <td>
+                      {editingAnnouncementId === a.id ? (
+                        <input
+                          value={editingAnnouncementForm.title}
+                          onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, title: e.target.value }))}
+                        />
+                      ) : (
+                        a.title
+                      )}
+                    </td>
+                    <td>
+                      {editingAnnouncementId === a.id ? (
+                        <textarea
+                          value={editingAnnouncementForm.body}
+                          onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, body: e.target.value }))}
+                          rows={3}
+                        />
+                      ) : (
+                        a.body
+                      )}
+                    </td>
+                    <td>
+                      {editingAnnouncementId === a.id ? (
+                        <input
+                          type="datetime-local"
+                          step="300"
+                          value={editingAnnouncementForm.publish_at}
+                          onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, publish_at: e.target.value }))}
+                        />
+                      ) : (
+                        formatDateTime(a.publish_at)
+                      )}
+                    </td>
+                    <td>
+                      {editingAnnouncementId === a.id ? (
+                        <input
+                          type="datetime-local"
+                          step="300"
+                          value={editingAnnouncementForm.end_at}
+                          onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, end_at: e.target.value }))}
+                        />
+                      ) : (
+                        a.end_at ? formatDateTime(a.end_at) : ""
+                      )}
+                    </td>
+                    <td>
+                      {editingAnnouncementId === a.id ? (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button className="btn btn-primary" onClick={saveAnnouncementEdits}>
+                            Save
+                          </button>
+                          <button className="btn" onClick={cancelEditAnnouncement}>
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button className="btn" onClick={() => startEditAnnouncement(a)}>
+                          Edit
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      <button className="btn btn-danger" onClick={() => deleteAnnouncement(a.id)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{announcementMsg}</div>
         </div>
         ) : null}
 

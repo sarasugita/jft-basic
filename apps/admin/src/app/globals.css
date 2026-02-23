@@ -372,12 +372,18 @@ body { padding: 0; }
 }
 
 .admin-form label { display: block; font-weight: 800; margin-bottom: 6px; }
-.admin-form input, .admin-form select {
+.admin-form input, .admin-form select, .admin-form textarea {
   width: 100%;
   border: 1px solid rgba(0, 0, 0, 0.25);
   border-radius: 10px;
   padding: 10px 10px;
   font-size: 14px;
+  font-family: inherit;
+}
+
+.admin-form textarea, .admin-table textarea {
+  font-size: 14px;
+  font-family: inherit;
 }
 
 .admin-table-wrap {

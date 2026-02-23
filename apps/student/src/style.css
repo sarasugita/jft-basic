@@ -189,6 +189,15 @@ body { overflow-x: hidden; }
   padding: 18px 18px 100px;
 }
 
+.content.home-content {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 0 100px;
+  display: grid;
+  gap: 14px;
+}
+
 .prompt {
   margin: 0 0 8px;
   font-size: 24px;
@@ -1167,6 +1176,48 @@ body { overflow-x: hidden; }
   gap: 12px;
 }
 
+.student-home-panel {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.student-announcement-section {
+  display: grid;
+  gap: 12px;
+}
+
+.student-announcement-list {
+  display: grid;
+  gap: 10px;
+}
+
+.student-announcement-card {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.student-announcement-title {
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.student-announcement-date {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.student-announcement-body {
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
 
 .student-home-title {
   font-size: 16px;

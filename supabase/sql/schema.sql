@@ -97,6 +97,21 @@ create table if not exists public.test_sessions (
 create index if not exists test_sessions_problem_set_idx on public.test_sessions (problem_set_id);
 create index if not exists test_sessions_published_idx on public.test_sessions (is_published);
 
+-- announcements
+create table if not exists public.announcements (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  body text not null,
+  publish_at timestamptz not null default now(),
+  end_at timestamptz,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.announcements
+  add column if not exists publish_at timestamptz not null default now(),
+  add column if not exists end_at timestamptz;
+
 -- attempts relation (optional)
 create index if not exists attempts_test_version_idx on public.attempts (test_version);
 alter table public.attempts

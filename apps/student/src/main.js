@@ -42,6 +42,13 @@ let studentAttendanceState = {
   userId: "",
 };
 
+let announcementsState = {
+  loaded: false,
+  loading: false,
+  list: [],
+  error: "",
+};
+
 let resultDetailState = {
   open: false,
   mode: "",
@@ -732,6 +739,28 @@ async function fetchStudentAttendance() {
   }
   studentAttendanceState.loaded = true;
   studentAttendanceState.loading = false;
+}
+
+async function fetchAnnouncements() {
+  if (announcementsState.loading) return;
+  announcementsState.loading = true;
+  announcementsState.error = "";
+  const nowIso = new Date().toISOString();
+  const { data, error } = await publicSupabase
+    .from("announcements")
+    .select("id, title, body, publish_at, end_at, created_at")
+    .lte("publish_at", nowIso)
+    .or(`end_at.is.null,end_at.gte.${nowIso}`)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) {
+    announcementsState.list = [];
+    announcementsState.error = error.message || "Failed to load announcements.";
+  } else {
+    announcementsState.list = data ?? [];
+  }
+  announcementsState.loaded = true;
+  announcementsState.loading = false;
 }
 
 async function fetchQuestionsForDetail(version) {
@@ -1879,6 +1908,9 @@ function renderTestSelect(app) {
   if (showHome && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
     fetchStudentAttendance().finally(render);
   }
+  if (showHome && !announcementsState.loaded && !announcementsState.loading) {
+    fetchAnnouncements().finally(render);
+  }
   if ((showDailyResults || showModelResults) && authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
   }
@@ -2263,38 +2295,74 @@ function renderTestSelect(app) {
           : "";
         const nowMs = Date.now();
         return `
-          <div class="student-home-section">
-            <div class="student-home-title">Today's Tests</div>
-            <div class="student-home-list">
-              ${sessions
-                .map((session) => {
-                  const startLabel = formatTimeBdt(session.starts_at);
-                  const name = session.title || session.problem_set_id || "Test";
-                  const startMs = new Date(session.starts_at).getTime();
-                  const alreadyTaken =
-                    studentResultsState.loaded &&
-                    !allowMultipleAttempts(session) &&
-                    hasAttemptForSession(session.id);
-                  const canStart = Number.isFinite(startMs) && nowMs >= startMs && !alreadyTaken;
-                  return `
-                    <div class="student-home-card">
-                      <div>
-                        <div class="student-home-time">${escapeHtml(startLabel)}</div>
-                        <div class="student-home-name">${escapeHtml(name)}</div>
+          <div class="student-home-panel">
+            <div class="student-home-section">
+              <div class="student-home-title">Today's Tests</div>
+              <div class="student-home-list">
+                ${sessions
+                  .map((session) => {
+                    const startLabel = formatTimeBdt(session.starts_at);
+                    const name = session.title || session.problem_set_id || "Test";
+                    const startMs = new Date(session.starts_at).getTime();
+                    const alreadyTaken =
+                      studentResultsState.loaded &&
+                      !allowMultipleAttempts(session) &&
+                      hasAttemptForSession(session.id);
+                    const canStart = Number.isFinite(startMs) && nowMs >= startMs && !alreadyTaken;
+                    return `
+                      <div class="student-home-card">
+                        <div>
+                          <div class="student-home-time">${escapeHtml(startLabel)}</div>
+                          <div class="student-home-name">${escapeHtml(name)}</div>
+                        </div>
+                        <button
+                          class="student-home-start ${canStart ? "" : "disabled"}"
+                          data-session-id="${escapeHtml(session.id)}"
+                          ${canStart ? "" : "disabled"}
+                        >
+                          ${alreadyTaken ? "Completed" : "Start"}
+                        </button>
                       </div>
-                      <button
-                        class="student-home-start ${canStart ? "" : "disabled"}"
-                        data-session-id="${escapeHtml(session.id)}"
-                        ${canStart ? "" : "disabled"}
-                      >
-                        ${alreadyTaken ? "Completed" : "Start"}
-                      </button>
-                    </div>
-                  `;
-                })
-                .join("")}
+                    `;
+                  })
+                  .join("")}
+              </div>
+              ${noTestsHtml}
             </div>
-            ${noTestsHtml}
+          </div>
+        `;
+      })()
+    : "";
+
+  const announcementHtml = showHome
+    ? (() => {
+        if (!announcementsState.loaded) {
+          return `<div class="text-muted">Loading announcements...</div>`;
+        }
+        if (announcementsState.error) {
+          return `<div class="text-error">${escapeHtml(announcementsState.error)}</div>`;
+        }
+        if (!announcementsState.list.length) {
+          return `<div class="text-muted">No announcements.</div>`;
+        }
+        return `
+          <div class="student-home-panel">
+            <div class="student-announcement-section">
+              <div class="student-home-title">Announcements</div>
+              <div class="student-announcement-list">
+                ${announcementsState.list
+                  .map(
+                    (a) => `
+                      <div class="student-announcement-card">
+                        <div class="student-announcement-title">${escapeHtml(a.title)}</div>
+                        <div class="student-announcement-date">${escapeHtml(formatDateShort(a.publish_at || a.created_at))}</div>
+                        <div class="student-announcement-body">${escapeHtml(a.body)}</div>
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </div>
           </div>
         `;
       })()
@@ -2485,6 +2553,9 @@ function renderTestSelect(app) {
               ? `
                 <div class="intro-form" style="margin-top:16px; max-width:900px;">
                   ${homeHtml}
+                </div>
+                <div class="intro-form" style="margin-top:16px; max-width:900px;">
+                  ${announcementHtml}
                 </div>
               `
               : `
