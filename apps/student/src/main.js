@@ -49,6 +49,13 @@ let announcementsState = {
   error: "",
 };
 
+let absenceApplicationsState = {
+  loaded: false,
+  loading: false,
+  list: [],
+  error: "",
+};
+
 let resultDetailState = {
   open: false,
   mode: "",
@@ -739,6 +746,26 @@ async function fetchStudentAttendance() {
   }
   studentAttendanceState.loaded = true;
   studentAttendanceState.loading = false;
+}
+
+async function fetchAbsenceApplications() {
+  if (!authState.session || absenceApplicationsState.loading) return;
+  absenceApplicationsState.loading = true;
+  absenceApplicationsState.error = "";
+  const { data, error } = await supabase
+    .from("absence_applications")
+    .select("id, type, day_date, status, reason, catch_up, late_type, time_value, created_at")
+    .eq("student_id", authState.session.user.id)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) {
+    absenceApplicationsState.list = [];
+    absenceApplicationsState.error = error.message || "Failed to load applications.";
+  } else {
+    absenceApplicationsState.list = data ?? [];
+  }
+  absenceApplicationsState.loaded = true;
+  absenceApplicationsState.loading = false;
 }
 
 async function fetchAnnouncements() {
@@ -1905,6 +1932,9 @@ function renderTestSelect(app) {
   if (showAttendance && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
     fetchStudentAttendance().finally(render);
   }
+  if (showAttendance && !absenceApplicationsState.loaded && !absenceApplicationsState.loading) {
+    fetchAbsenceApplications().finally(render);
+  }
   if (showHome && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
     fetchStudentAttendance().finally(render);
   }
@@ -2386,6 +2416,16 @@ function renderTestSelect(app) {
         }
         const summary = buildAttendanceSummary(studentAttendanceState.list);
         return `
+          <section class="home-card">
+            <div class="student-application-header">
+              <div class="student-home-title">Submit Application</div>
+              <a class="student-application-view" href="#applicationHistory">View All →</a>
+            </div>
+            <div class="student-application-actions">
+              <button class="btn" id="openExcusedApp">Excused Absence</button>
+              <button class="btn" id="openLateApp">Late / Leave Early</button>
+            </div>
+          </section>
           <div class="detail-section">
             <div class="detail-title">Summary</div>
             <div class="detail-table-wrap">
@@ -2457,6 +2497,98 @@ function renderTestSelect(app) {
                     .join("")}
                 </tbody>
               </table>
+            </div>
+          </div>
+          <section class="home-card" id="applicationHistory" style="margin-top:12px;">
+            <div class="student-home-title">Application History</div>
+            ${
+              absenceApplicationsState.loading
+                ? `<div class="text-muted">Loading applications...</div>`
+                : absenceApplicationsState.error
+                  ? `<div class="text-error">${escapeHtml(absenceApplicationsState.error)}</div>`
+                  : absenceApplicationsState.list.length
+                    ? `
+                      <div class="detail-table-wrap">
+                        <table class="detail-table">
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Type</th>
+                              <th>Status</th>
+                              <th>Submitted</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${absenceApplicationsState.list
+                              .map((a) => {
+                                const typeLabel =
+                                  a.type === "excused"
+                                    ? "Excused Absence"
+                                    : a.late_type === "leave_early"
+                                      ? "Leave Early"
+                                      : "Late";
+                                return `
+                                  <tr>
+                                    <td>${escapeHtml(a.day_date)}</td>
+                                    <td>${escapeHtml(typeLabel)}</td>
+                                    <td>${escapeHtml(a.status)}</td>
+                                    <td>${escapeHtml(formatDateShort(a.created_at))}</td>
+                                  </tr>
+                                `;
+                              })
+                              .join("")}
+                          </tbody>
+                        </table>
+                      </div>
+                    `
+                    : `<div class="text-muted">No applications yet.</div>`
+            }
+          </section>
+          <div class="student-modal-overlay" id="excusedAppModal" hidden>
+            <div class="student-modal" role="dialog" aria-modal="true" aria-labelledby="excusedTitle">
+              <div class="student-modal-header">
+                <div class="student-modal-title" id="excusedTitle">Excused Absence</div>
+                <button class="btn" type="button" id="excusedClose">Close</button>
+              </div>
+              <div class="student-modal-body">
+                <label class="form-label">Date</label>
+                <input class="form-input" type="date" id="excusedDate" />
+                <label class="form-label" style="margin-top:10px;">Reason</label>
+                <textarea class="form-input" id="excusedReason" rows="3"></textarea>
+                <label class="form-label" style="margin-top:10px;">What will you do to catch up?</label>
+                <textarea class="form-input" id="excusedCatchUp" rows="3"></textarea>
+                <div class="admin-msg" id="excusedMsg" style="margin-top:8px;"></div>
+              </div>
+              <div class="student-modal-actions">
+                <button class="btn btn-primary" id="excusedSubmit">Submit</button>
+              </div>
+            </div>
+          </div>
+          <div class="student-modal-overlay" id="lateAppModal" hidden>
+            <div class="student-modal" role="dialog" aria-modal="true" aria-labelledby="lateTitle">
+              <div class="student-modal-header">
+                <div class="student-modal-title" id="lateTitle">Late / Leave Early</div>
+                <button class="btn" type="button" id="lateClose">Close</button>
+              </div>
+              <div class="student-modal-body">
+                <label class="form-label">Date</label>
+                <input class="form-input" type="date" id="lateDate" />
+                <label class="form-label" style="margin-top:10px;">Type</label>
+                <select class="form-input" id="lateType">
+                  <option value="late">Late</option>
+                  <option value="leave_early">Leave Early</option>
+                </select>
+                <label class="form-label" style="margin-top:10px;" id="lateTimeLabel">Arrival Time</label>
+                <input class="form-input" type="time" id="lateTime" />
+                <label class="form-label" style="margin-top:10px;">Reason</label>
+                <textarea class="form-input" id="lateReason" rows="3"></textarea>
+                <label class="form-label" style="margin-top:10px;">What will you do to catch up?</label>
+                <textarea class="form-input" id="lateCatchUp" rows="3"></textarea>
+                <div class="admin-msg" id="lateMsg" style="margin-top:8px;"></div>
+              </div>
+              <div class="student-modal-actions">
+                <button class="btn btn-primary" id="lateSubmit">Submit</button>
+              </div>
             </div>
           </div>
         `;
@@ -2627,6 +2759,92 @@ function renderTestSelect(app) {
     setTimeout(() => {
       if (state.studentTab === "home") render();
     }, 30000);
+  }
+
+  if (showAttendance) {
+    const excusedModal = app.querySelector("#excusedAppModal");
+    const lateModal = app.querySelector("#lateAppModal");
+    app.querySelector("#openExcusedApp")?.addEventListener("click", () => {
+      if (excusedModal) excusedModal.hidden = false;
+    });
+    app.querySelector("#openLateApp")?.addEventListener("click", () => {
+      if (lateModal) lateModal.hidden = false;
+    });
+    app.querySelector("#excusedClose")?.addEventListener("click", () => {
+      if (excusedModal) excusedModal.hidden = true;
+    });
+    app.querySelector("#lateClose")?.addEventListener("click", () => {
+      if (lateModal) lateModal.hidden = true;
+    });
+
+    app.querySelector("#lateType")?.addEventListener("change", (e) => {
+      const val = e.target.value;
+      const label = app.querySelector("#lateTimeLabel");
+      if (label) label.textContent = val === "leave_early" ? "Leave Time" : "Arrival Time";
+    });
+
+    app.querySelector("#excusedSubmit")?.addEventListener("click", async () => {
+      const date = app.querySelector("#excusedDate")?.value;
+      const reason = app.querySelector("#excusedReason")?.value?.trim();
+      const catchUp = app.querySelector("#excusedCatchUp")?.value?.trim();
+      const msg = app.querySelector("#excusedMsg");
+      if (msg) msg.textContent = "";
+      if (!date || !reason) {
+        if (msg) msg.textContent = "Date and reason are required.";
+        return;
+      }
+      const { error } = await supabase.from("absence_applications").insert({
+        student_id: authState.session?.user?.id ?? null,
+        type: "excused",
+        day_date: date,
+        reason,
+        catch_up: catchUp || null,
+        status: "pending"
+      });
+      if (error) {
+        if (msg) msg.textContent = `Submit failed: ${error.message}`;
+        return;
+      }
+      if (msg) msg.textContent = "Submitted.";
+      if (excusedModal) excusedModal.hidden = true;
+    });
+
+    app.querySelector("#lateSubmit")?.addEventListener("click", async () => {
+      const date = app.querySelector("#lateDate")?.value;
+      const type = app.querySelector("#lateType")?.value || "late";
+      const timeValue = app.querySelector("#lateTime")?.value;
+      const reason = app.querySelector("#lateReason")?.value?.trim();
+      const catchUp = app.querySelector("#lateCatchUp")?.value?.trim();
+      const msg = app.querySelector("#lateMsg");
+      if (msg) msg.textContent = "";
+      if (!date || !timeValue || !reason) {
+        if (msg) msg.textContent = "Date, time, and reason are required.";
+        return;
+      }
+      const { error } = await supabase.from("absence_applications").insert({
+        student_id: authState.session?.user?.id ?? null,
+        type: "late",
+        late_type: type,
+        time_value: timeValue,
+        day_date: date,
+        reason,
+        catch_up: catchUp || null,
+        status: "pending"
+      });
+      if (error) {
+        if (msg) msg.textContent = `Submit failed: ${error.message}`;
+        return;
+      }
+      if (msg) msg.textContent = "Submitted.";
+      if (lateModal) lateModal.hidden = true;
+    });
+
+    excusedModal?.addEventListener("click", (e) => {
+      if (e.target === excusedModal) excusedModal.hidden = true;
+    });
+    lateModal?.addEventListener("click", (e) => {
+      if (e.target === lateModal) lateModal.hidden = true;
+    });
   }
 
   if (showDailyResults) {

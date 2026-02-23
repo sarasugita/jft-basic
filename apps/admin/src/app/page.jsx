@@ -2052,6 +2052,7 @@ export default function AdminPage() {
     setAttendanceMsg("");
     setAttendanceModalOpen(true);
     setAttendanceSaving(false);
+    setApprovedAbsenceByStudent({});
     const { data, error } = await supabase
       .from("attendance_days")
       .upsert({ day_date: dayDate }, { onConflict: "day_date" })
@@ -2064,6 +2065,21 @@ export default function AdminPage() {
       return;
     }
     const day = data;
+    const { data: approvedApps, error: appsError } = await supabase
+      .from("absence_applications")
+      .select("id, student_id, type, late_type, time_value, reason, catch_up")
+      .eq("day_date", day.day_date)
+      .eq("status", "approved");
+    if (appsError) {
+      console.error("approved applications fetch error:", appsError);
+      setApprovedAbsenceByStudent({});
+    } else {
+      const map = {};
+      (approvedApps ?? []).forEach((a) => {
+        map[a.student_id] = a;
+      });
+      setApprovedAbsenceByStudent(map);
+    }
     setAttendanceModalDay(day);
     const existing = attendanceEntriesByDay[day.id] ?? {};
     const draft = {};
@@ -3438,6 +3454,19 @@ export default function AdminPage() {
             Attendance
           </button>
 
+          <button
+            className={`admin-nav-item ${activeTab === "absence" ? "active" : ""}`}
+            onClick={() => setActiveTab("absence")}
+          >
+            <span className="admin-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                <path d="M6 4h12v16H6z" />
+                <path d="M9 8h6M9 12h6M9 16h4" />
+              </svg>
+            </span>
+            Absence Applications
+          </button>
+
           <div className={`admin-nav-group ${activeTab === "model" ? "active" : ""}`}>
             <button
               className={`admin-nav-item admin-group-toggle ${activeTab === "model" ? "active" : ""}`}
@@ -3988,6 +4017,15 @@ export default function AdminPage() {
             </div>
           </div>
 
+          <div className="attendance-table-header">
+            <div className="admin-help">
+              <span className="att-legend-item att-legend-present">P: Present</span>
+              <span className="att-legend-item att-legend-late">L: Late/Leave Early</span>
+              <span className="att-legend-item att-legend-excused">E: Excused Absence</span>
+              <span className="att-legend-item att-legend-absent">A: Unexcused Absence</span>
+            </div>
+          </div>
+
           <div className="admin-table-wrap" style={{ marginTop: 10 }}>
             <table className="admin-table attendance-table">
               <thead>
@@ -4179,6 +4217,75 @@ export default function AdminPage() {
             </table>
           </div>
           <div className="admin-msg">{announcementMsg}</div>
+        </div>
+        ) : null}
+
+        {activeTab === "absence" ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div className="admin-title">Absence Applications</div>
+              <div className="admin-subtitle">Review and approve/deny student applications.</div>
+            </div>
+            <button className="btn" onClick={() => fetchAbsenceApplications()}>Refresh</button>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+            <table className="admin-table" style={{ minWidth: 900 }}>
+              <thead>
+                <tr>
+                  <th>Submitted</th>
+                  <th>Student</th>
+                  <th>Type</th>
+                  <th>Date</th>
+                  <th>Time</th>
+                  <th>Reason</th>
+                  <th>Catch Up</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {absenceApplications.map((a) => {
+                  const student = a.profiles || {};
+                  const name = student.display_name || student.email || a.student_id;
+                  const code = student.student_code ? ` (${student.student_code})` : "";
+                  const typeLabel = a.type === "excused" ? "Excused Absence" : "Late/Leave Early";
+                  const timeLabel =
+                    a.type === "late"
+                      ? `${a.late_type === "leave_early" ? "Leave" : "Arrive"}: ${a.time_value || "-"}`
+                      : "";
+                  return (
+                    <tr key={a.id}>
+                      <td>{formatDateTime(a.created_at)}</td>
+                      <td>{name}{code}</td>
+                      <td>{typeLabel}</td>
+                      <td>{a.day_date}</td>
+                      <td>{timeLabel}</td>
+                      <td>{a.reason || ""}</td>
+                      <td>{a.catch_up || ""}</td>
+                      <td>{a.status}</td>
+                      <td>
+                        {a.status === "pending" ? (
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <button className="btn btn-primary" onClick={() => decideAbsenceApplication(a.id, "approved")}>
+                              Approve
+                            </button>
+                            <button className="btn btn-danger" onClick={() => decideAbsenceApplication(a.id, "denied")}>
+                              Deny
+                            </button>
+                          </div>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{absenceApplicationsMsg}</div>
         </div>
         ) : null}
 
@@ -5405,7 +5512,9 @@ export default function AdminPage() {
           >
             <div className="admin-modal attendance-modal" onClick={(e) => e.stopPropagation()}>
               <div className="admin-modal-header">
-                <div className="admin-title">Attendance — {attendanceModalDay.day_date}</div>
+                <div>
+                  <div className="admin-title">Attendance — {attendanceModalDay.day_date}</div>
+                </div>
                 <button
                   className="btn"
                   onClick={() => {
@@ -5425,20 +5534,29 @@ export default function AdminPage() {
                     <tr>
                       <th>Code</th>
                       <th>Student</th>
-                      <th>P</th>
-                      <th>L</th>
-                      <th>E</th>
-                      <th>A</th>
+                      <th>Present</th>
+                      <th>Late/Leave Early</th>
+                      <th>Excused Absence</th>
+                      <th>Unexcused Absence</th>
                       <th>Comment</th>
                     </tr>
                   </thead>
                   <tbody>
                     {activeStudents.map((s) => {
                       const entry = attendanceDraft?.[s.id] || { status: "", comment: "" };
+                      const approved = approvedAbsenceByStudent?.[s.id];
                       return (
                         <tr key={`att-${s.id}`}>
                           <td>{s.student_code ?? ""}</td>
-                          <td>{s.display_name ?? s.email ?? s.id}</td>
+                          <td>
+                            {s.display_name ?? s.email ?? s.id}
+                            {approved ? (
+                              <div className={`admin-help att-approved-note ${approved.type === "excused" ? "excused" : "late"}`} style={{ marginTop: 4 }}>
+                                Approved {approved.type === "excused" ? "Excused Absence" : "Late/Leave Early"}
+                                {approved.time_value ? ` (${approved.time_value})` : ""}
+                              </div>
+                            ) : null}
+                          </td>
                           {["P", "L", "E", "A"].map((code) => (
                             <td key={`${s.id}-${code}`}>
                               <button

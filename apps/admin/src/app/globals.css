@@ -515,10 +515,17 @@ body { padding: 0; }
   text-align: left;
 }
 
-.att-col-code { width: 70px; white-space: nowrap; }
-.att-col-name { width: 160px; white-space: nowrap; }
-.att-col-rate { width: 90px; }
-.att-col-absent { width: 110px; }
+.attendance-table {
+  --att-code-w: 70px;
+  --att-name-w: 160px;
+  --att-rate-w: 90px;
+  --att-abs-w: 110px;
+}
+
+.att-col-code { width: var(--att-code-w); white-space: nowrap; }
+.att-col-name { width: var(--att-name-w); white-space: nowrap; }
+.att-col-rate { width: var(--att-rate-w); }
+.att-col-absent { width: var(--att-abs-w); }
 
 .attendance-table .att-sticky-1,
 .attendance-table .att-sticky-2,
@@ -538,13 +545,13 @@ body { padding: 0; }
 }
 
 .attendance-table .att-sticky-1 { left: 0; }
-.attendance-table .att-sticky-2 { left: 70px; }
-.attendance-table .att-sticky-3 { left: 230px; }
-.attendance-table .att-sticky-4 { left: 320px; }
+.attendance-table .att-sticky-2 { left: var(--att-code-w); }
+.attendance-table .att-sticky-3 { left: calc(var(--att-code-w) + var(--att-name-w)); }
+.attendance-table .att-sticky-4 { left: calc(var(--att-code-w) + var(--att-name-w) + var(--att-rate-w)); }
 
 .att-cell { font-weight: 800; text-align: center; }
 .att-P { background: #d8f5c2; color: #1f6f2a; }
-.att-L { background: #ffe7a3; color: #8a5b00; }
+.att-L { background: #e9ddff; color: #6d28d9; }
 .att-E { background: #ffd1a6; color: #92400e; }
 .att-A { background: #ffc1c1; color: #9b1c1c; }
 
@@ -558,6 +565,55 @@ body { padding: 0; }
   width: 38px;
 }
 .att-status-btn.active { outline: 2px solid rgba(0,0,0,0.2); }
+
+.attendance-table-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.attendance-table-header .admin-help {
+  margin-top: 0;
+}
+
+@media (max-width: 960px) {
+  .admin-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-form .field,
+  .admin-form .field.small { grid-column: span 1; }
+  .attendance-control-row { flex-direction: column; align-items: stretch; }
+  .attendance-filter-box { width: 100%; }
+  .attendance-table { min-width: 760px; }
+  .attendance-table { --att-name-w: 140px; --att-rate-w: 80px; --att-abs-w: 90px; }
+}
+
+@media (max-width: 640px) {
+  .admin-form { grid-template-columns: 1fr; }
+  .attendance-table { min-width: 680px; }
+  .attendance-table { --att-code-w: 56px; --att-name-w: 130px; --att-rate-w: 78px; --att-abs-w: 88px; }
+  .attendance-table th,
+  .attendance-table td { font-size: 12px; padding: 8px 8px; }
+  .attendance-table-header { justify-content: flex-start; }
+}
+
+.att-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 6px;
+  background: #f3f4f6;
+}
+
+.att-legend-present { color: #1b5e20; }
+.att-legend-late { color: #6d28d9; }
+.att-legend-excused { color: #d97706; }
+.att-legend-absent { color: #b91c1c; }
+
+.att-approved-note.excused { color: #d97706; }
+.att-approved-note.late { color: #6d28d9; }
 .att-status-btn.att-P.active { background: #d8f5c2; color: #1f6f2a; }
 .att-status-btn.att-L.active { background: #ffe7a3; color: #8a5b00; }
 .att-status-btn.att-E.active { background: #ffd1a6; color: #92400e; }
