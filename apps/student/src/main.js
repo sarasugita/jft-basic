@@ -44,10 +44,18 @@ let studentAttendanceState = {
 
 let resultDetailState = {
   open: false,
+  mode: "",
+  subTab: "score",
   attempt: null,
   loading: false,
   error: "",
   questionsByVersion: {},
+};
+
+let modelRankState = {
+  loading: false,
+  loaded: false,
+  map: {},
 };
 
 let testSessionsState = {
@@ -89,6 +97,7 @@ const defaultState = {
   selectedTestVersion: "",
   selectedTestSessionId: "",
   studentTab: "home",
+  dailyResultsCategory: "",
   focusWarnings: 0,
   focusWarningAt: 0,
 };
@@ -112,6 +121,11 @@ function loadState() {
     const loaded = { ...defaultState, ...JSON.parse(raw) };
     if (!["quiz", "sectionIntro", "result"].includes(loaded.phase)) {
       loaded.phase = "intro";
+    }
+    if (loaded.studentTab === "results") loaded.studentTab = "dailyResults";
+    if (loaded.studentTab === "take") loaded.studentTab = "home";
+    if (!["home", "dailyResults", "modelResults", "attendance"].includes(loaded.studentTab)) {
+      loaded.studentTab = "home";
     }
     return loaded;
   } catch {
@@ -477,6 +491,27 @@ function getPassRateForVersion(version) {
   return Number.isFinite(passRate) ? passRate : PASS_RATE_DEFAULT;
 }
 
+function getAttemptTest(attempt) {
+  if (!attempt?.test_version) return null;
+  return testsState.list.find((t) => t.version === attempt.test_version) || null;
+}
+
+function getAttemptTestType(attempt) {
+  const test = getAttemptTest(attempt);
+  return test?.type || "";
+}
+
+function getAttemptCategory(attempt) {
+  const test = getAttemptTest(attempt);
+  const name = String(test?.title ?? "").trim();
+  return name || "Uncategorized";
+}
+
+function getAttemptDateLabel(attempt) {
+  const date = attempt?.ended_at || attempt?.created_at;
+  return date ? formatDateShort(date) : "—";
+}
+
 function getScoreRateFromAttempt(attempt) {
   const rate = Number(attempt?.score_rate);
   if (Number.isFinite(rate)) return rate;
@@ -597,6 +632,9 @@ async function fetchStudentResults() {
   if (studentResultsState.loading) return;
   studentResultsState.loading = true;
   studentResultsState.error = "";
+  modelRankState.loaded = false;
+  modelRankState.loading = false;
+  modelRankState.map = {};
   const { data, error } = await supabase
     .from("attempts")
     .select("id, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
@@ -611,6 +649,40 @@ async function fetchStudentResults() {
   }
   studentResultsState.loaded = true;
   studentResultsState.loading = false;
+}
+
+async function fetchModelRanks(attempts) {
+  if (modelRankState.loading || modelRankState.loaded) return;
+  const sessionIds = Array.from(
+    new Set((attempts ?? []).map((a) => a.test_session_id).filter(Boolean))
+  );
+  if (!sessionIds.length) {
+    modelRankState.loaded = true;
+    return;
+  }
+  modelRankState.loading = true;
+  const map = { ...modelRankState.map };
+  for (const sessionId of sessionIds) {
+    try {
+      const { data, error } = await supabase
+        .from("attempts")
+        .select("id, score_rate")
+        .eq("test_session_id", sessionId);
+      if (error) {
+        console.warn("model rank fetch error:", error);
+        continue;
+      }
+      const list = (data ?? []).slice().sort((a, b) => (b.score_rate ?? 0) - (a.score_rate ?? 0));
+      list.forEach((row, idx) => {
+        if (row?.id) map[row.id] = idx + 1;
+      });
+    } catch (e) {
+      console.warn("model rank fetch failed:", e);
+    }
+  }
+  modelRankState.map = map;
+  modelRankState.loading = false;
+  modelRankState.loaded = true;
 }
 
 async function fetchStudentAttendance() {
@@ -1277,11 +1349,15 @@ function registerStudentMenu() {
     }
 
     if (clickedTab) {
-      const nextTab = clickedTab.dataset.studentTab || "take";
+      const nextTab = clickedTab.dataset.studentTab || "home";
       state.studentTab = nextTab;
+      resultDetailState.open = false;
+      resultDetailState.mode = "";
+      resultDetailState.subTab = "score";
+      resultDetailState.attempt = null;
       saveState();
       closeStudentMenu();
-      if (nextTab === "results" && !studentResultsState.loaded) {
+      if ((nextTab === "dailyResults" || nextTab === "modelResults") && !studentResultsState.loaded) {
         fetchStudentResults().finally(render);
         return;
       }
@@ -1791,9 +1867,10 @@ function renderTestSelect(app) {
   const showTabs = Boolean(authState.session);
   const activeTab = showTabs ? state.studentTab : "take";
   const showHome = showTabs && activeTab === "home";
-  const showResults = showTabs && activeTab === "results";
+  const showDailyResults = showTabs && activeTab === "dailyResults";
+  const showModelResults = showTabs && activeTab === "modelResults";
   const showAttendance = showTabs && activeTab === "attendance";
-  const showTakeTest = !showResults && !showAttendance && !showHome;
+  const showTakeTest = !showTabs;
   const canStart = activeSections.length > 0;
 
   if (showAttendance && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
@@ -1802,27 +1879,47 @@ function renderTestSelect(app) {
   if (showHome && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
     fetchStudentAttendance().finally(render);
   }
+  if ((showDailyResults || showModelResults) && authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
+    fetchStudentResults().finally(render);
+  }
+  if (showModelResults && studentResultsState.loaded && !modelRankState.loaded && !modelRankState.loading) {
+    const modelAttempts = (studentResultsState.list ?? []).filter((a) => getAttemptTestType(a) === "mock");
+    fetchModelRanks(modelAttempts).finally(render);
+  }
 
   const welcomeName =
     (state.user?.name || authState.profile?.display_name || authState.session?.user?.email || "Student")
       .trim();
 
+  const simpleTopbarLabelMap = {
+    dailyResults: "Daily Test Results",
+    modelResults: "Model Test Results",
+    attendance: "Attendance",
+  };
+  const useSimpleTopbar = showTabs && Boolean(simpleTopbarLabelMap[activeTab]);
+
   const studentInfoHtml = showTabs
     ? `
         <header class="student-topbar">
-          <div class="student-topbar-brand">
-            <div class="student-topbar-title">
-              <svg viewBox="0 0 24 24" class="student-topbar-icon" aria-hidden="true">
-                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
-                <path
-                  d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
-                  fill="currentColor"
-                ></path>
-              </svg>
-              <span>JFT Navi</span>
-            </div>
-            <span class="student-topbar-name">${escapeHtml(welcomeName)}</span>
-          </div>
+          ${
+            useSimpleTopbar
+              ? `<div class="student-topbar-title-simple">${escapeHtml(simpleTopbarLabelMap[activeTab])}</div>`
+              : `
+                <div class="student-topbar-brand">
+                  <div class="student-topbar-title">
+                    <svg viewBox="0 0 24 24" class="student-topbar-icon" aria-hidden="true">
+                      <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
+                      <path
+                        d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
+                        fill="currentColor"
+                      ></path>
+                    </svg>
+                    <span>JFT Navi</span>
+                  </div>
+                  <span class="student-topbar-name">${escapeHtml(welcomeName)}</span>
+                </div>
+              `
+          }
           <div class="student-topbar-spacer"></div>
           <button class="menu-btn student-menu-btn" id="studentMenuBtn" aria-expanded="false" aria-controls="studentMenu" aria-label="Open menu">☰</button>
         </header>
@@ -1832,8 +1929,8 @@ function renderTestSelect(app) {
               <button class="student-menu-close" type="button" data-student-menu-close aria-label="Close menu">×</button>
             </div>
             <button class="student-menu-item" data-student-tab="home">Home</button>
-            <button class="student-menu-item" data-student-tab="take">Take Test</button>
-            <button class="student-menu-item" data-student-tab="results">Test Results</button>
+            <button class="student-menu-item" data-student-tab="dailyResults">Daily Test Results</button>
+            <button class="student-menu-item" data-student-tab="modelResults">Model Test Results</button>
             <button class="student-menu-item" data-student-tab="attendance">Attendance</button>
             <div class="student-menu-spacer"></div>
             <button class="student-menu-item student-menu-logout" id="signOutBtn">Sign out</button>
@@ -1842,7 +1939,45 @@ function renderTestSelect(app) {
       `
     : "";
 
-  const resultsHtml = showResults
+  const renderDetailTable = (rows, showAnswers) => {
+    if (!rows?.length) {
+      return `<div class="text-muted">No details available.</div>`;
+    }
+    return `
+      <div class="detail-table-wrap">
+        <table class="detail-table wide">
+          <thead>
+            <tr>
+              <th>QID</th>
+              <th>Section</th>
+              <th>Prompt</th>
+              <th>Chosen</th>
+              ${showAnswers ? "<th>Correct</th>" : ""}
+              <th>OK</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows
+              .map(
+                (r) => `
+                  <tr>
+                    <td>${escapeHtml(r.qid)}</td>
+                    <td>${escapeHtml(r.section)}</td>
+                    <td>${escapeHtml(r.prompt)}</td>
+                    <td>${escapeHtml(r.chosen || "—")}</td>
+                    ${showAnswers ? `<td>${escapeHtml(r.correct || "—")}</td>` : ""}
+                    <td style="text-align:center;">${r.isCorrect ? "○" : "×"}</td>
+                  </tr>
+                `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  };
+
+  const dailyResultsHtml = showDailyResults
     ? (() => {
         if (!authState.session) {
           return `<div class="text-muted">Log in to see results.</div>`;
@@ -1853,37 +1988,223 @@ function renderTestSelect(app) {
         if (studentResultsState.error) {
           return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
         }
-        if (!studentResultsState.list.length) {
-          return `<div class="text-muted">No results yet.</div>`;
+
+        const dailyAttempts = (studentResultsState.list ?? []).filter(
+          (attempt) => getAttemptTestType(attempt) === "daily"
+        );
+        const dailyCategories = Array.from(
+          new Set(
+            (testsState.list ?? [])
+              .filter((t) => t.type === "daily")
+              .map((t) => getAttemptCategory({ test_version: t.version }))
+          )
+        ).filter(Boolean);
+        const categoryFilter = state.dailyResultsCategory || "";
+        const filteredAttempts = categoryFilter
+          ? dailyAttempts.filter((a) => getAttemptCategory(a) === categoryFilter)
+          : dailyAttempts;
+
+        if (resultDetailState.open && resultDetailState.mode === "daily" && resultDetailState.attempt) {
+          const attempt = resultDetailState.attempt;
+          const title = getAttemptTitle(attempt);
+          const showAnswers = shouldShowAnswers(attempt);
+          const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
+          const detailRows = buildAttemptDetailRows(attempt, questionsList);
+          const detailBody = resultDetailState.loading
+            ? `<div class="text-muted">Loading details...</div>`
+            : resultDetailState.error
+              ? `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`
+              : renderDetailTable(detailRows, showAnswers);
+          return `
+            <div class="student-detail-topbar">
+              <button class="student-detail-back" id="dailyResultBack" aria-label="Back">←</button>
+              <div class="student-detail-title">${escapeHtml(title)}</div>
+            </div>
+            <div class="student-detail-body">
+              ${detailBody}
+            </div>
+          `;
         }
+
+        if (!filteredAttempts.length) {
+          return `<div class="text-muted">No daily test results yet.</div>`;
+        }
+
         return `
-          <div class="student-results">
-            ${studentResultsState.list
-              .map((attempt) => {
-                const rate = getScoreRateFromAttempt(attempt);
-                const passRate = getPassRateForVersion(attempt.test_version);
-                const isPass = rate >= passRate;
-                const title = getAttemptTitle(attempt);
-                const dateLabel = formatDateTime(attempt.ended_at || attempt.created_at);
-                return `
-                  <div class="result-card" data-attempt-id="${attempt.id}">
-                    <div class="result-title">${escapeHtml(title)}</div>
-                    <div class="result-meta">
-                      <span>${escapeHtml(attempt.test_version || "")}</span>
-                      <span>${escapeHtml(dateLabel)}</span>
-                    </div>
-                    <div class="result-score">
-                      ${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}
-                      <span class="result-rate">(${(rate * 100).toFixed(1)}%)</span>
-                    </div>
-                    <div>
-                      <span class="result-badge ${isPass ? "pass" : "fail"}">${isPass ? "Pass" : "Fail"}</span>
-                      <span class="result-pass">Pass threshold: ${(passRate * 100).toFixed(0)}%</span>
-                    </div>
-                  </div>
-                `;
-              })
-              .join("")}
+          <div class="student-results-header">
+            <div class="student-results-title">Daily Test Results</div>
+            <div class="student-results-filter">
+              <label for="dailyCategorySelect">Category</label>
+              <select id="dailyCategorySelect">
+                <option value="" ${categoryFilter ? "" : "selected"}>All Categories</option>
+                ${dailyCategories
+                  .map(
+                    (c) =>
+                      `<option value="${escapeHtml(c)}" ${categoryFilter === c ? "selected" : ""}>${escapeHtml(c)}</option>`
+                  )
+                  .join("")}
+              </select>
+            </div>
+          </div>
+          <div class="detail-table-wrap">
+            <table class="detail-table student-results-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Test Name</th>
+                  <th>Score</th>
+                  <th>%</th>
+                  <th>Pass/Fail</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredAttempts
+                  .map((attempt) => {
+                    const rate = getScoreRateFromAttempt(attempt);
+                    const passRate = getPassRateForVersion(attempt.test_version);
+                    const isPass = rate >= passRate;
+                    return `
+                      <tr class="student-results-row" data-daily-attempt-id="${attempt.id}">
+                        <td>${escapeHtml(getAttemptDateLabel(attempt))}</td>
+                        <td>${escapeHtml(getAttemptTitle(attempt))}</td>
+                        <td>${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
+                        <td>${(rate * 100).toFixed(1)}%</td>
+                        <td class="${isPass ? "result-pass-cell" : "result-fail-cell"}">${isPass ? "Pass" : "Fail"}</td>
+                      </tr>
+                    `;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+      })()
+    : "";
+
+  const modelResultsHtml = showModelResults
+    ? (() => {
+        if (!authState.session) {
+          return `<div class="text-muted">Log in to see results.</div>`;
+        }
+        if (studentResultsState.loading) {
+          return `<div class="text-muted">Loading results...</div>`;
+        }
+        if (studentResultsState.error) {
+          return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
+        }
+        const modelAttempts = (studentResultsState.list ?? []).filter(
+          (attempt) => getAttemptTestType(attempt) === "mock"
+        );
+
+        if (resultDetailState.open && resultDetailState.mode === "model" && resultDetailState.attempt) {
+          const attempt = resultDetailState.attempt;
+          const title = getAttemptTitle(attempt);
+          const showAnswers = shouldShowAnswers(attempt);
+          const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
+          const detailRows = buildAttemptDetailRows(attempt, questionsList);
+          const summary = buildSectionSummary(detailRows);
+          const subTab = resultDetailState.subTab || "score";
+          let detailBody = "";
+          if (resultDetailState.loading) {
+            detailBody = `<div class="text-muted">Loading details...</div>`;
+          } else if (resultDetailState.error) {
+            detailBody = `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`;
+          } else if (subTab === "score") {
+            detailBody = summary.length
+              ? `
+                <div class="detail-table-wrap">
+                  <table class="detail-table">
+                    <thead>
+                      <tr>
+                        <th>Section</th>
+                        <th>Correct</th>
+                        <th>Total</th>
+                        <th>%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${summary
+                        .map(
+                          (s) => `
+                            <tr>
+                              <td>${escapeHtml(s.section)}</td>
+                              <td>${s.correct}</td>
+                              <td>${s.total}</td>
+                              <td>${(s.rate * 100).toFixed(1)}%</td>
+                            </tr>
+                          `
+                        )
+                        .join("")}
+                    </tbody>
+                  </table>
+                </div>
+              `
+              : `<div class="text-muted">No score data.</div>`;
+          } else if (subTab === "wrong") {
+            const wrongRows = detailRows.filter((r) => !r.isCorrect);
+            detailBody = wrongRows.length
+              ? renderDetailTable(wrongRows, showAnswers)
+              : `<div class="text-muted">No wrong questions.</div>`;
+          } else {
+            detailBody = renderDetailTable(detailRows, showAnswers);
+          }
+          return `
+            <div class="student-detail-topbar">
+              <button class="student-detail-back" id="modelResultBack" aria-label="Back">←</button>
+              <div class="student-detail-title">${escapeHtml(title)}</div>
+            </div>
+            <div class="student-detail-tabs">
+              <button class="student-detail-tab ${subTab === "score" ? "active" : ""}" data-model-detail-tab="score">Score Details</button>
+              <button class="student-detail-tab ${subTab === "all" ? "active" : ""}" data-model-detail-tab="all">All Questions</button>
+              <button class="student-detail-tab ${subTab === "wrong" ? "active" : ""}" data-model-detail-tab="wrong">Wrong Questions</button>
+            </div>
+            <div class="student-detail-body">
+              ${detailBody}
+            </div>
+          `;
+        }
+
+        if (!modelAttempts.length) {
+          return `<div class="text-muted">No model test results yet.</div>`;
+        }
+
+        return `
+          <div class="student-results-header">
+            <div class="student-results-title">Model Test Results</div>
+          </div>
+          <div class="detail-table-wrap">
+            <table class="detail-table student-results-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Model Test Name</th>
+                  <th>Total Score</th>
+                  <th>Total %</th>
+                  <th>Pass/Fail</th>
+                  <th>Class Rank</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${modelAttempts
+                  .map((attempt) => {
+                    const rate = getScoreRateFromAttempt(attempt);
+                    const passRate = getPassRateForVersion(attempt.test_version);
+                    const isPass = rate >= passRate;
+                    const rank = modelRankState.map[attempt.id] || "—";
+                    return `
+                      <tr class="student-results-row" data-model-attempt-id="${attempt.id}">
+                        <td>${escapeHtml(getAttemptDateLabel(attempt))}</td>
+                        <td>${escapeHtml(getAttemptTitle(attempt))}</td>
+                        <td>${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
+                        <td>${(rate * 100).toFixed(1)}%</td>
+                        <td class="${isPass ? "result-pass-cell" : "result-fail-cell"}">${isPass ? "Pass" : "Fail"}</td>
+                        <td>${escapeHtml(String(rank))}</td>
+                      </tr>
+                    `;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
           </div>
         `;
       })()
@@ -2055,109 +2376,7 @@ function renderTestSelect(app) {
       })()
     : "";
 
-  let resultDetailHtml = "";
-  if (resultDetailState.open && resultDetailState.attempt) {
-    const attempt = resultDetailState.attempt;
-    const title = getAttemptTitle(attempt);
-    const showAnswers = shouldShowAnswers(attempt);
-    const rate = getScoreRateFromAttempt(attempt);
-    const passRate = getPassRateForVersion(attempt.test_version);
-    const isPass = rate >= passRate;
-    const dateLabel = formatDateTime(attempt.ended_at || attempt.created_at);
-    const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
-    const detailRows = buildAttemptDetailRows(attempt, questionsList);
-    const summaryRows = buildSectionSummary(detailRows);
-    const detailBody = resultDetailState.loading
-      ? `<div class="text-muted">Loading details...</div>`
-      : resultDetailState.error
-        ? `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`
-        : detailRows.length
-          ? `
-            <div class="detail-section">
-              <div class="detail-title">Overview</div>
-              <div class="detail-table-wrap">
-                <table class="detail-table">
-                  <thead>
-                    <tr>
-                      <th>Section</th>
-                      <th>Correct</th>
-                      <th>Total</th>
-                      <th>Rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${summaryRows
-                      .map(
-                        (s) => `
-                          <tr>
-                            <td>${escapeHtml(s.section)}</td>
-                            <td>${s.correct}</td>
-                            <td>${s.total}</td>
-                            <td>${(s.rate * 100).toFixed(1)}%</td>
-                          </tr>
-                        `
-                      )
-                      .join("")}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div class="detail-section">
-              <div class="detail-title">Questions</div>
-              <div class="detail-table-wrap">
-                <table class="detail-table wide">
-                  <thead>
-                    <tr>
-                      <th>QID</th>
-                      <th>Section</th>
-                      <th>Prompt</th>
-                      <th>Chosen</th>
-                      ${showAnswers ? "<th>Correct</th>" : ""}
-                      <th>OK</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${detailRows
-                      .map(
-                        (r) => `
-                          <tr>
-                            <td>${escapeHtml(r.qid)}</td>
-                            <td>${escapeHtml(r.section)}</td>
-                            <td>${escapeHtml(r.prompt)}</td>
-                            <td>${escapeHtml(r.chosen || "—")}</td>
-                            ${showAnswers ? `<td>${escapeHtml(r.correct || "—")}</td>` : ""}
-                            <td style="text-align:center;">${r.isCorrect ? "○" : "×"}</td>
-                          </tr>
-                        `
-                      )
-                      .join("")}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          `
-          : `<div class="text-muted">No details available.</div>`;
-
-    resultDetailHtml = `
-      <div class="result-modal-overlay" id="resultDetailOverlay">
-        <div class="result-modal">
-          <div class="result-modal-header">
-            <div>
-              <div class="result-modal-title">${escapeHtml(title)}</div>
-              <div class="result-modal-meta">${escapeHtml(dateLabel)}</div>
-              <div class="result-modal-score">
-                ${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}
-                <span class="result-rate">(${(rate * 100).toFixed(1)}%)</span>
-                <span class="result-badge ${isPass ? "pass" : "fail"}">${isPass ? "Pass" : "Fail"}</span>
-              </div>
-            </div>
-            <button class="btn" id="resultDetailClose">Close</button>
-          </div>
-          ${detailBody}
-        </div>
-      </div>
-    `;
-  }
+  const resultDetailHtml = "";
 
   app.innerHTML = `
     <div class="app ${showTabs ? "has-student-topbar" : ""}">
@@ -2253,7 +2472,7 @@ function renderTestSelect(app) {
               `
               : `
                 <div class="intro-form" style="margin-top:16px; max-width:900px;">
-                  ${showResults ? resultsHtml : attendanceHtml}
+                  ${showDailyResults ? dailyResultsHtml : showModelResults ? modelResultsHtml : attendanceHtml}
                 </div>
               `
         }
@@ -2322,14 +2541,24 @@ function renderTestSelect(app) {
     }, 30000);
   }
 
-  if (showResults) {
-    app.querySelectorAll("[data-attempt-id]").forEach((card) => {
-      card.addEventListener("click", async () => {
-        const attemptId = card.dataset.attemptId;
+  if (showDailyResults) {
+    app.querySelector("#dailyCategorySelect")?.addEventListener("change", (event) => {
+      if (!(event.target instanceof HTMLSelectElement)) return;
+      state.dailyResultsCategory = event.target.value;
+      saveState();
+      render();
+    });
+
+    app.querySelectorAll("[data-daily-attempt-id]").forEach((row) => {
+      row.addEventListener("click", async () => {
+        const attemptId = row.dataset.dailyAttemptId;
         const attempt = studentResultsState.list.find((a) => a.id === attemptId);
         if (!attempt) return;
         resultDetailState.open = true;
+        resultDetailState.mode = "daily";
+        resultDetailState.subTab = "score";
         resultDetailState.attempt = attempt;
+        resultDetailState.error = "";
         if (attempt.test_version) {
           await fetchQuestionsForDetail(attempt.test_version);
         }
@@ -2338,14 +2567,51 @@ function renderTestSelect(app) {
     });
   }
 
-  app.querySelector("#resultDetailClose")?.addEventListener("click", () => {
+  if (showModelResults) {
+    app.querySelectorAll("[data-model-attempt-id]").forEach((row) => {
+      row.addEventListener("click", async () => {
+        const attemptId = row.dataset.modelAttemptId;
+        const attempt = studentResultsState.list.find((a) => a.id === attemptId);
+        if (!attempt) return;
+        resultDetailState.open = true;
+        resultDetailState.mode = "model";
+        resultDetailState.subTab = "score";
+        resultDetailState.attempt = attempt;
+        resultDetailState.error = "";
+        if (attempt.test_version) {
+          await fetchQuestionsForDetail(attempt.test_version);
+        }
+        render();
+      });
+    });
+
+    app.querySelectorAll("[data-model-detail-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const next = btn.dataset.modelDetailTab || "score";
+        resultDetailState.subTab = next;
+        render();
+      });
+    });
+  }
+
+  app.querySelector("#dailyResultBack")?.addEventListener("click", () => {
     resultDetailState.open = false;
+    resultDetailState.mode = "";
+    resultDetailState.attempt = null;
+    render();
+  });
+
+  app.querySelector("#modelResultBack")?.addEventListener("click", () => {
+    resultDetailState.open = false;
+    resultDetailState.mode = "";
     resultDetailState.attempt = null;
     render();
   });
 
   document.querySelector("#signOutBtn")?.addEventListener("click", () => {
     resultDetailState.open = false;
+    resultDetailState.mode = "";
+    resultDetailState.subTab = "score";
     resultDetailState.attempt = null;
     supabase.auth.signOut();
     state.requireLogin = true;

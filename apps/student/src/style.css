@@ -667,6 +667,16 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
     min-width: 100%;
   }
 
+  .student-results-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .student-detail-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .result {
     padding: 12px;
   }
@@ -801,6 +811,106 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   margin-top: 10px;
 }
 
+.student-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.student-results-title {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.student-results-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.student-results-filter select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.student-results-table .student-results-row {
+  cursor: pointer;
+}
+
+.student-results-table .student-results-row:hover {
+  background: #f5f7fb;
+}
+
+.result-pass-cell {
+  color: #1a7f37;
+  font-weight: 700;
+}
+
+.result-fail-cell {
+  color: #b00020;
+  font-weight: 700;
+}
+
+.student-detail-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.student-detail-back {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.student-detail-title {
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.student-detail-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.student-detail-tab {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.student-detail-tab.active {
+  background: var(--green2);
+  border-color: var(--green2);
+  color: #fff;
+}
+
+.student-detail-body {
+  display: grid;
+  gap: 12px;
+}
+
 .student-topbar {
   position: fixed;
   top: 0;
@@ -838,6 +948,12 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.student-topbar-title-simple {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
 }
 
 .student-topbar-name {
