@@ -13,11 +13,12 @@
 
   --border: #d1d5db;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --student-topbar-height: 56px;
+  --student-topbar-height: 48px;
 }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color: var(--text); background: var(--bg); }
+body { overflow-x: hidden; }
 #app { height: 100%; }
 
 .app {
@@ -32,6 +33,10 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 
 .app.has-student-topbar {
   padding-top: var(--student-topbar-height);
+}
+
+.app.has-student-topbar .content {
+  overflow-x: auto;
 }
 
 .app.has-bottombar .body {
@@ -607,11 +612,34 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
     width: 160px;
     height: 90px;
   }
+
+  .detail-table {
+    min-width: 560px;
+    font-size: 12px;
+  }
+
+  .detail-table.wide {
+    min-width: 640px;
+  }
+
+  .detail-table th,
+  .detail-table td {
+    padding: 8px 10px;
+  }
+
+  .student-results-filter {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .student-results-filter select {
+    flex: 1;
+  }
 }
 
 @media (max-width: 520px) {
   :root {
-    --student-topbar-height: 52px;
+    --student-topbar-height: 46px;
     --topbar-height: 110px;
   }
 
@@ -687,6 +715,23 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 
   .result-table{
     min-width: 560px;
+  }
+
+  .detail-table {
+    min-width: 520px;
+    font-size: 11px;
+  }
+
+  .detail-table.wide {
+    min-width: 600px;
+  }
+
+  .student-home-name {
+    font-size: 14px;
+  }
+
+  .student-home-time {
+    font-size: 12px;
   }
 }
 
@@ -823,6 +868,7 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
 .student-results-title {
   font-size: 18px;
   font-weight: 800;
+  text-align: left;
 }
 
 .student-results-filter {
@@ -921,27 +967,30 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 12px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 4px 10px;
   background: var(--green2);
   border-bottom: 1px solid rgba(0,0,0,0.08);
   box-shadow: 0 2px 6px rgba(0,0,0,0.12);
   color: #fff;
   font-size: 14px;
   font-weight: 700;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .student-topbar-brand {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  cursor: pointer;
 }
 
 .student-topbar-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 900;
   letter-spacing: 0.6px;
-  padding: 6px 12px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.45);
@@ -954,18 +1003,33 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   font-size: 16px;
   font-weight: 800;
   letter-spacing: 0.4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.student-topbar.simple {
+  gap: 8px;
+}
+
+.student-topbar.simple .student-topbar-spacer {
+  display: none;
 }
 
 .student-topbar-name {
   font-size: 12px;
   font-weight: 700;
   opacity: 0.9;
-  margin-left: 2px;
+  margin-left: 0;
+  margin-right: 6px;
+  white-space: nowrap;
 }
 
 .student-topbar-icon {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   color: #ffffff;
   stroke-width: 2.4;
   stroke-linecap: round;
@@ -1101,6 +1165,7 @@ html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Seg
   padding: 6px 12px;
   border-radius: 10px;
   cursor: pointer;
+  min-width: 96px;
 }
 
 .student-home-start.disabled,

@@ -1891,36 +1891,23 @@ function renderTestSelect(app) {
     (state.user?.name || authState.profile?.display_name || authState.session?.user?.email || "Student")
       .trim();
 
-  const simpleTopbarLabelMap = {
-    dailyResults: "Daily Test Results",
-    modelResults: "Model Test Results",
-    attendance: "Attendance",
-  };
-  const useSimpleTopbar = showTabs && Boolean(simpleTopbarLabelMap[activeTab]);
-
   const studentInfoHtml = showTabs
     ? `
         <header class="student-topbar">
-          ${
-            useSimpleTopbar
-              ? `<div class="student-topbar-title-simple">${escapeHtml(simpleTopbarLabelMap[activeTab])}</div>`
-              : `
-                <div class="student-topbar-brand">
-                  <div class="student-topbar-title">
-                    <svg viewBox="0 0 24 24" class="student-topbar-icon" aria-hidden="true">
-                      <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
-                      <path
-                        d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
-                        fill="currentColor"
-                      ></path>
-                    </svg>
-                    <span>JFT Navi</span>
-                  </div>
-                  <span class="student-topbar-name">${escapeHtml(welcomeName)}</span>
-                </div>
-              `
-          }
+          <div class="student-topbar-brand" id="studentLogoHome">
+            <div class="student-topbar-title">
+              <svg viewBox="0 0 24 24" class="student-topbar-icon" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
+                <path
+                  d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
+                  fill="currentColor"
+                ></path>
+              </svg>
+              <span>JFT Navi</span>
+            </div>
+          </div>
           <div class="student-topbar-spacer"></div>
+          <span class="student-topbar-name">${escapeHtml(welcomeName)}</span>
           <button class="menu-btn student-menu-btn" id="studentMenuBtn" aria-expanded="false" aria-controls="studentMenu" aria-label="Open menu">☰</button>
         </header>
         <div class="student-menu-overlay" id="studentMenuOverlay" hidden>
@@ -2605,6 +2592,16 @@ function renderTestSelect(app) {
     resultDetailState.open = false;
     resultDetailState.mode = "";
     resultDetailState.attempt = null;
+    render();
+  });
+
+  app.querySelector("#studentLogoHome")?.addEventListener("click", () => {
+    state.studentTab = "home";
+    resultDetailState.open = false;
+    resultDetailState.mode = "";
+    resultDetailState.subTab = "score";
+    resultDetailState.attempt = null;
+    saveState();
     render();
   });
 
