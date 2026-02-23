@@ -194,8 +194,20 @@ body { overflow-x: hidden; }
   border: none;
   box-shadow: none;
   padding: 0 0 100px;
-  display: grid;
+}
+
+.home-stack {
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+}
+
+.home-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: var(--shadow);
 }
 
 .prompt {
@@ -1176,13 +1188,7 @@ body { overflow-x: hidden; }
   gap: 12px;
 }
 
-.student-home-panel {
-  border: 1px solid var(--border);
-  background: #fff;
-  border-radius: 14px;
-  padding: 14px;
-  margin-bottom: 14px;
-}
+/* home cards now use .home-card */
 
 .student-announcement-section {
   display: grid;
@@ -1222,6 +1228,26 @@ body { overflow-x: hidden; }
 .student-home-title {
   font-size: 16px;
   font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.student-home-title-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.student-home-title-icon-svg {
+  width: 18px;
+  height: 18px;
+  color: #374151;
+  display: inline-flex;
+}
+
+.student-home-title-icon-svg svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .student-home-list {
@@ -1271,15 +1297,8 @@ body { overflow-x: hidden; }
 }
 
 .student-warning {
-  margin-top: 0;
   border: 1px solid #fecaca;
   background: #fff1f2;
-  border-radius: 12px;
-  padding: 12px 14px;
-}
-
-.student-home-warning-block {
-  margin: 12px;
 }
 
 .student-warning-title {

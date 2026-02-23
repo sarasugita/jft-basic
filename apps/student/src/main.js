@@ -2271,12 +2271,10 @@ function renderTestSelect(app) {
         if (unexcused >= 3) warnings.push(`Unexcused absences: ${unexcused}.`);
         if (!warnings.length) return "";
         return `
-          <div class="student-warning">
-            <div class="student-warning-title">Warning</div>
-            <ul class="student-warning-list">
-              ${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}
-            </ul>
-          </div>
+          <div class="student-warning-title">Warning</div>
+          <ul class="student-warning-list">
+            ${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}
+          </ul>
         `;
       })()
     : "";
@@ -2295,41 +2293,39 @@ function renderTestSelect(app) {
           : "";
         const nowMs = Date.now();
         return `
-          <div class="student-home-panel">
-            <div class="student-home-section">
-              <div class="student-home-title">Today's Tests</div>
-              <div class="student-home-list">
-                ${sessions
-                  .map((session) => {
-                    const startLabel = formatTimeBdt(session.starts_at);
-                    const name = session.title || session.problem_set_id || "Test";
-                    const startMs = new Date(session.starts_at).getTime();
-                    const alreadyTaken =
-                      studentResultsState.loaded &&
-                      !allowMultipleAttempts(session) &&
-                      hasAttemptForSession(session.id);
-                    const canStart = Number.isFinite(startMs) && nowMs >= startMs && !alreadyTaken;
-                    return `
-                      <div class="student-home-card">
-                        <div>
-                          <div class="student-home-time">${escapeHtml(startLabel)}</div>
-                          <div class="student-home-name">${escapeHtml(name)}</div>
-                        </div>
-                        <button
-                          class="student-home-start ${canStart ? "" : "disabled"}"
-                          data-session-id="${escapeHtml(session.id)}"
-                          ${canStart ? "" : "disabled"}
-                        >
-                          ${alreadyTaken ? "Completed" : "Start"}
-                        </button>
+          <section class="home-card">
+            <div class="student-home-title">Today's Tests</div>
+            <div class="student-home-list">
+              ${sessions
+                .map((session) => {
+                  const startLabel = formatTimeBdt(session.starts_at);
+                  const name = session.title || session.problem_set_id || "Test";
+                  const startMs = new Date(session.starts_at).getTime();
+                  const alreadyTaken =
+                    studentResultsState.loaded &&
+                    !allowMultipleAttempts(session) &&
+                    hasAttemptForSession(session.id);
+                  const canStart = Number.isFinite(startMs) && nowMs >= startMs && !alreadyTaken;
+                  return `
+                    <div class="student-home-card">
+                      <div>
+                        <div class="student-home-time">${escapeHtml(startLabel)}</div>
+                        <div class="student-home-name">${escapeHtml(name)}</div>
                       </div>
-                    `;
-                  })
-                  .join("")}
-              </div>
-              ${noTestsHtml}
+                      <button
+                        class="student-home-start ${canStart ? "" : "disabled"}"
+                        data-session-id="${escapeHtml(session.id)}"
+                        ${canStart ? "" : "disabled"}
+                      >
+                        ${alreadyTaken ? "Completed" : "Start"}
+                      </button>
+                    </div>
+                  `;
+                })
+                .join("")}
             </div>
-          </div>
+            ${noTestsHtml}
+          </section>
         `;
       })()
     : "";
@@ -2346,24 +2342,30 @@ function renderTestSelect(app) {
           return `<div class="text-muted">No announcements.</div>`;
         }
         return `
-          <div class="student-home-panel">
-            <div class="student-announcement-section">
-              <div class="student-home-title">Announcements</div>
-              <div class="student-announcement-list">
-                ${announcementsState.list
-                  .map(
-                    (a) => `
-                      <div class="student-announcement-card">
-                        <div class="student-announcement-title">${escapeHtml(a.title)}</div>
-                        <div class="student-announcement-date">${escapeHtml(formatDateShort(a.publish_at || a.created_at))}</div>
-                        <div class="student-announcement-body">${escapeHtml(a.body)}</div>
-                      </div>
-                    `
-                  )
-                  .join("")}
-              </div>
+          <section class="home-card">
+            <div class="student-home-title student-home-title-icon">
+              <span class="student-home-title-icon-svg" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M6 8a6 6 0 1 1 12 0c0 4 2 5 2 7H4c0-2 2-3 2-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M9.5 19a2.5 2.5 0 0 0 5 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              Announcements
             </div>
-          </div>
+            <div class="student-announcement-list">
+              ${announcementsState.list
+                .map(
+                  (a) => `
+                    <div class="student-announcement-card">
+                      <div class="student-announcement-title">${escapeHtml(a.title)}</div>
+                      <div class="student-announcement-date">${escapeHtml(formatDateShort(a.publish_at || a.created_at))}</div>
+                      <div class="student-announcement-body">${escapeHtml(a.body)}</div>
+                    </div>
+                  `
+                )
+                .join("")}
+            </div>
+          </section>
         `;
       })()
     : "";
@@ -2466,8 +2468,7 @@ function renderTestSelect(app) {
   app.innerHTML = `
     <div class="app ${showTabs ? "has-student-topbar" : ""}">
       ${studentInfoHtml}
-      ${showHome && homeWarningHtml ? `<div class="student-home-warning-block">${homeWarningHtml}</div>` : ""}
-      <main class="content" style="margin:12px;">
+      <main class="content ${showHome ? "home-content" : ""}" style="margin:12px;">
         ${
           showTakeTest
             ? `
@@ -2551,10 +2552,9 @@ function renderTestSelect(app) {
             `
             : showHome
               ? `
-                <div class="intro-form" style="margin-top:16px; max-width:900px;">
+                <div class="home-stack" style="max-width:900px;">
+                  ${homeWarningHtml ? `<section class="home-card student-warning">${homeWarningHtml}</section>` : ""}
                   ${homeHtml}
-                </div>
-                <div class="intro-form" style="margin-top:16px; max-width:900px;">
                   ${announcementHtml}
                 </div>
               `

@@ -857,12 +857,15 @@ export default function AdminPage() {
   const [attendanceModalDay, setAttendanceModalDay] = useState(null);
   const [attendanceDraft, setAttendanceDraft] = useState({});
   const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [approvedAbsenceByStudent, setApprovedAbsenceByStudent] = useState({});
   const [attendanceFilter, setAttendanceFilter] = useState({
     minRate: "",
     minAbsences: "",
     startDate: "",
     endDate: ""
   });
+  const [absenceApplications, setAbsenceApplications] = useState([]);
+  const [absenceApplicationsMsg, setAbsenceApplicationsMsg] = useState("");
   const [announcements, setAnnouncements] = useState([]);
   const [announcementForm, setAnnouncementForm] = useState({
     title: "",
@@ -1647,6 +1650,47 @@ export default function AdminPage() {
       fetchAttendanceDays();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "absence") {
+      fetchAbsenceApplications();
+    }
+  }, [activeTab]);
+
+  async function fetchAbsenceApplications() {
+    setAbsenceApplicationsMsg("Loading...");
+    const { data, error } = await supabase
+      .from("absence_applications")
+      .select("id, student_id, type, day_date, status, reason, catch_up, late_type, time_value, created_at, decided_at, profiles:student_id (display_name, student_code, email)")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      console.error("absence applications fetch error:", error);
+      setAbsenceApplications([]);
+      setAbsenceApplicationsMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    setAbsenceApplications(data ?? []);
+    setAbsenceApplicationsMsg(data?.length ? "" : "No applications.");
+  }
+
+  async function decideAbsenceApplication(id, nextStatus) {
+    if (!id) return;
+    const { error } = await supabase
+      .from("absence_applications")
+      .update({
+        status: nextStatus,
+        decided_at: new Date().toISOString(),
+        decided_by: session?.user?.id ?? null
+      })
+      .eq("id", id);
+    if (error) {
+      console.error("absence application update error:", error);
+      setAbsenceApplicationsMsg(`Update failed: ${error.message}`);
+      return;
+    }
+    fetchAbsenceApplications();
+  }
 
   useEffect(() => {
     if (activeTab === "announcements") {
