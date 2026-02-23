@@ -1915,12 +1915,39 @@ function renderTestSelect(app) {
             <div class="student-menu-header">
               <button class="student-menu-close" type="button" data-student-menu-close aria-label="Close menu">×</button>
             </div>
-            <button class="student-menu-item" data-student-tab="home">Home</button>
-            <button class="student-menu-item" data-student-tab="dailyResults">Daily Test Results</button>
-            <button class="student-menu-item" data-student-tab="modelResults">Model Test Results</button>
-            <button class="student-menu-item" data-student-tab="attendance">Attendance</button>
+            <button class="student-menu-item" data-student-tab="home">
+              <span class="student-menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5M6 10.5V20h12v-9.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              Home
+            </button>
+            <button class="student-menu-item" data-student-tab="dailyResults">
+              <span class="student-menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M7 4v3M17 4v3M4 9h16M5 12h6M5 16h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              Daily Test Results
+            </button>
+            <button class="student-menu-item" data-student-tab="modelResults">
+              <span class="student-menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              Model Test Results
+            </button>
+            <button class="student-menu-item" data-student-tab="attendance">
+              <span class="student-menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              Attendance
+            </button>
             <div class="student-menu-spacer"></div>
-            <button class="student-menu-item student-menu-logout" id="signOutBtn">Sign out</button>
+            <button class="student-menu-item student-menu-logout" id="signOutBtn">
+              <span class="student-menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M9 6h6M9 18h6M14 6v12M5 12h10M5 12l3-3M5 12l3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              Sign out
+            </button>
           </nav>
         </div>
       `
@@ -1935,22 +1962,25 @@ function renderTestSelect(app) {
         <table class="detail-table wide">
           <thead>
             <tr>
-              <th>QID</th>
-              <th>Section</th>
-              <th>Prompt</th>
+              <th>No.</th>
+              <th class="col-question">Question</th>
               <th>Chosen</th>
               ${showAnswers ? "<th>Correct</th>" : ""}
-              <th>OK</th>
+              <th>Correct?</th>
             </tr>
           </thead>
           <tbody>
             ${rows
               .map(
-                (r) => `
+                (r, idx) => `
                   <tr>
-                    <td>${escapeHtml(r.qid)}</td>
-                    <td>${escapeHtml(r.section)}</td>
-                    <td>${escapeHtml(r.prompt)}</td>
+                    <td>${idx + 1}</td>
+                    <td class="cell-question">
+                      <div class="detail-question">
+                        <div class="detail-question-text">${escapeHtml(r.prompt)}</div>
+                        ${r.thumb ? `<img class="detail-question-thumb" src="${r.thumb}" alt="q" />` : ""}
+                      </div>
+                    </td>
                     <td>${escapeHtml(r.chosen || "—")}</td>
                     ${showAnswers ? `<td>${escapeHtml(r.correct || "—")}</td>` : ""}
                     <td style="text-align:center;">${r.isCorrect ? "○" : "×"}</td>
@@ -2897,6 +2927,7 @@ function buildAttemptDetailRows(attempt, questionsList) {
       qid: String(q.id),
       section: getSectionTitle(q.sectionKey),
       prompt: getQuestionPrompt(q),
+      thumb: q.stemKind && q.stemKind !== "audio" ? (q.stemAsset || "") : "",
       chosen: getChoiceText(q, chosenIdx),
       correct: getChoiceText(q, correctIdx),
       isCorrect: chosenIdx === correctIdx,
