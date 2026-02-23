@@ -735,6 +735,7 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState("students");
   const [modelSubTab, setModelSubTab] = useState("conduct");
   const [dailySubTab, setDailySubTab] = useState("create");
+  const [attendanceSubTab, setAttendanceSubTab] = useState("sheet");
   const [dailyResultsCategory, setDailyResultsCategory] = useState("");
   const [modelResultsCategory, setModelResultsCategory] = useState("");
   const [dailyCategorySelect, setDailyCategorySelect] = useState("__custom__");
@@ -1645,17 +1646,15 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
-    if (activeTab === "attendance") {
+    if (activeTab !== "attendance") return;
+    if (attendanceSubTab === "sheet") {
       if (!students.length) fetchStudents();
       fetchAttendanceDays();
     }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "absence") {
+    if (attendanceSubTab === "absence") {
       fetchAbsenceApplications();
     }
-  }, [activeTab]);
+  }, [activeTab, attendanceSubTab]);
 
   async function fetchAbsenceApplications() {
     setAbsenceApplicationsMsg("Loading...");
@@ -3441,31 +3440,46 @@ export default function AdminPage() {
             Student List
           </button>
 
-          <button
-            className={`admin-nav-item ${activeTab === "attendance" ? "active" : ""}`}
-            onClick={() => setActiveTab("attendance")}
-          >
-            <span className="admin-nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" className="admin-nav-svg">
-                <rect x="4" y="5" width="16" height="15" rx="2" />
-                <path d="M8 3v4M16 3v4M4 9h16" />
-              </svg>
-            </span>
-            Attendance
-          </button>
-
-          <button
-            className={`admin-nav-item ${activeTab === "absence" ? "active" : ""}`}
-            onClick={() => setActiveTab("absence")}
-          >
-            <span className="admin-nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" className="admin-nav-svg">
-                <path d="M6 4h12v16H6z" />
-                <path d="M9 8h6M9 12h6M9 16h4" />
-              </svg>
-            </span>
-            Absence Applications
-          </button>
+          <div className={`admin-nav-group ${activeTab === "attendance" ? "active" : ""}`}>
+            <button
+              className={`admin-nav-item admin-group-toggle ${activeTab === "attendance" ? "active" : ""}`}
+              onClick={() => {
+                setActiveTab("attendance");
+                setAttendanceSubTab("sheet");
+              }}
+            >
+              <span className="admin-nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                  <rect x="4" y="5" width="16" height="15" rx="2" />
+                  <path d="M8 3v4M16 3v4M4 9h16" />
+                </svg>
+              </span>
+              Attendance
+              <span className={`admin-nav-arrow ${activeTab === "attendance" ? "open" : ""}`}>▾</span>
+            </button>
+            {activeTab === "attendance" ? (
+              <div className="admin-subnav">
+                <button
+                  className={`admin-subnav-item ${attendanceSubTab === "sheet" ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveTab("attendance");
+                    setAttendanceSubTab("sheet");
+                  }}
+                >
+                  Attendance Sheet
+                </button>
+                <button
+                  className={`admin-subnav-item ${attendanceSubTab === "absence" ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveTab("attendance");
+                    setAttendanceSubTab("absence");
+                  }}
+                >
+                  Absence Applications
+                </button>
+              </div>
+            ) : null}
+          </div>
 
           <div className={`admin-nav-group ${activeTab === "model" ? "active" : ""}`}>
             <button
@@ -3939,11 +3953,11 @@ export default function AdminPage() {
         </div>
         ) : null}
 
-        {activeTab === "attendance" ? (
+        {activeTab === "attendance" && attendanceSubTab === "sheet" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div>
-              <div className="admin-title">Attendance</div>
+              <div className="admin-title">Attendance Sheet</div>
               <div className="admin-subtitle">P / L / E / A を日別で管理します。</div>
             </div>
           </div>
@@ -4220,7 +4234,7 @@ export default function AdminPage() {
         </div>
         ) : null}
 
-        {activeTab === "absence" ? (
+        {activeTab === "attendance" && attendanceSubTab === "absence" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>

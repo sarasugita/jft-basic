@@ -202,7 +202,8 @@ body { overflow-x: hidden; }
   gap: 14px;
 }
 
-.home-card {
+.home-card,
+.card {
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -1231,6 +1232,102 @@ body { overflow-x: hidden; }
   flex-wrap: wrap;
 }
 
+.student-application-actions .app-btn {
+  font-size: 11px;
+  padding: 6px 4px;
+  border-radius: 10px;
+}
+
+.student-application-actions .app-btn-excused {
+  background: #c2410c;
+  border-color: #9a3412;
+  color: #fff;
+}
+
+.student-application-actions .app-btn-late {
+  background: #7c3aed;
+  border-color: #6d28d9;
+  color: #fff;
+}
+
+.application-history-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.application-history-back {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  cursor: pointer;
+  color: #111827;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.application-history-back svg {
+  width: 18px;
+  height: 18px;
+}
+
+.application-history-table tbody tr {
+  cursor: pointer;
+}
+
+.application-history-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.application-status-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  margin-left: 0.6em;
+}
+
+.application-status-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.application-status-approved .application-status-icon { background: #16a34a; }
+.application-status-denied .application-status-icon { background: #dc2626; }
+.application-status-pending .application-status-icon { background: #64748b; }
+
+.application-detail-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px;
+  font-size: 14px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+.application-detail-row:last-child {
+  border-bottom: 0;
+}
+
+.application-detail-label {
+  font-weight: 800;
+  color: #374151;
+}
+
+.application-detail-value {
+  white-space: pre-wrap;
+}
+
 .student-application-header {
   display: flex;
   align-items: center;
@@ -1248,6 +1345,13 @@ body { overflow-x: hidden; }
 
 .student-application-view:hover {
   text-decoration: underline;
+}
+
+button.student-application-view {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
 }
 
 .student-modal-overlay {
@@ -1506,15 +1610,18 @@ body { overflow-x: hidden; }
 
 .detail-table-wrap {
   overflow: auto;
-  border: 1px solid rgba(0,0,0,0.12);
-  border-radius: 10px;
-  background: #fff;
 }
 
 .detail-table {
   width: 100%;
   border-collapse: collapse;
   min-width: 520px;
+}
+
+.application-history-table th:nth-child(2),
+.application-history-table td:nth-child(2) {
+  width: 76px;
+  white-space: nowrap;
 }
 
 .detail-table.wide {
@@ -1553,9 +1660,30 @@ body { overflow-x: hidden; }
 .detail-table th,
 .detail-table td {
   border-bottom: 1px solid rgba(0,0,0,0.08);
-  padding: 8px 10px;
+  padding: 8px 8px;
   font-size: 13px;
   text-align: left;
+}
+
+.application-history-table th,
+.application-history-table td {
+  font-size: 12px;
+  padding: 8px 6px;
+}
+
+.application-history-table th:nth-child(1),
+.application-history-table td:nth-child(1) {
+  width: 98px;
+}
+
+.application-history-table th:nth-child(2),
+.application-history-table td:nth-child(2) {
+  width: 72px;
+}
+
+.application-history-table th:nth-child(3),
+.application-history-table td:nth-child(3) {
+  width: 96px;
 }
 
 /* 左サイドバー：共通 */
