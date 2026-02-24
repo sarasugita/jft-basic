@@ -476,6 +476,60 @@ body { padding: 0; }
   color: #0369a1;
 }
 
+.student-detail-tab-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-top-tabs {
+  display: flex;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.admin-top-tab {
+  border: 0;
+  background: #fff;
+  padding: 8px 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admin-top-tab + .admin-top-tab {
+  border-left: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.admin-top-tab.active {
+  background: #e5e7eb;
+  color: #0f172a;
+}
+
+.admin-icon-btn {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.admin-table-compact {
+  white-space: normal;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.pf-pass { color: #0f7b3a; font-weight: 800; }
+.pf-fail { color: #b00020; font-weight: 800; }
+
 .admin-modal-overlay {
   position: fixed;
   inset: 0;

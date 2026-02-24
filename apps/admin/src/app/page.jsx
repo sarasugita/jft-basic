@@ -42,6 +42,19 @@ function getProblemSetTitle(problemSetId, testsList) {
   return item?.title || problemSetId || "";
 }
 
+function renderTwoLineHeader(title) {
+  const text = String(title ?? "");
+  const idx = text.lastIndexOf(" ");
+  if (idx <= 0) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <br />
+      {text.slice(idx + 1)}
+    </>
+  );
+}
+
 function getChoiceText(q, idx) {
   if (idx == null) return "";
   if (Array.isArray(q.choices) && q.choices[idx] != null) return q.choices[idx];
@@ -95,6 +108,21 @@ function isAudioAsset(value) {
   return /\.(mp3|wav|m4a|ogg)$/i.test(String(value ?? "").trim());
 }
 
+function getQuestionIllustration(question) {
+  if (!question) return null;
+  const stemAsset =
+    question.stemAsset ||
+    question.image ||
+    question.stemImage ||
+    question.passageImage ||
+    question.tableImage ||
+    question.stem_image ||
+    question.stem_image_url ||
+    null;
+  if (stemAsset && isImageAsset(stemAsset)) return stemAsset;
+  return null;
+}
+
 function mapDbQuestion(row) {
   const data = row.data ?? {};
   return {
@@ -123,6 +151,7 @@ function buildAttemptDetailRows(answersJson) {
           qid: `${q.id}-${i + 1}`,
           section: getSectionTitle(q.sectionKey),
           prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
+          image: getQuestionIllustration(q),
           chosen: getPartChoiceText(part, chosenIdx),
           correct: getPartChoiceText(part, correctIdx),
           isCorrect: chosenIdx === correctIdx
@@ -137,6 +166,7 @@ function buildAttemptDetailRows(answersJson) {
       qid: String(q.id),
       section: getSectionTitle(q.sectionKey),
       prompt: getPromptText(q),
+      image: getQuestionIllustration(q),
       chosen: getChoiceText(q, chosenIdx),
       correct: getChoiceText(q, correctIdx),
       isCorrect: chosenIdx === correctIdx
@@ -155,14 +185,15 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
       q.parts.forEach((part, i) => {
         const chosenIdx = ans?.partAnswers?.[i];
         const correctIdx = part.answerIndex;
-        rows.push({
-          qid: `${q.id}-${i + 1}`,
-          section: getSectionTitle(q.sectionKey),
-          prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
-          chosen: getPartChoiceText(part, chosenIdx),
-          correct: getPartChoiceText(part, correctIdx),
-          isCorrect: chosenIdx === correctIdx
-        });
+      rows.push({
+        qid: `${q.id}-${i + 1}`,
+        section: getSectionTitle(q.sectionKey),
+        prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
+        image: getQuestionIllustration(q),
+        chosen: getPartChoiceText(part, chosenIdx),
+        correct: getPartChoiceText(part, correctIdx),
+        isCorrect: chosenIdx === correctIdx
+      });
       });
       continue;
     }
@@ -173,6 +204,7 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
       qid: String(q.id),
       section: getSectionTitle(q.sectionKey),
       prompt: getPromptText(q),
+      image: getQuestionIllustration(q),
       chosen: getChoiceText(q, chosenIdx),
       correct: getChoiceText(q, correctIdx),
       isCorrect: chosenIdx === correctIdx
@@ -237,6 +269,22 @@ function formatDateShort(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "2-digit", day: "2-digit" });
+}
+
+function formatDateFull(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
 }
 
 function formatWeekday(value) {
@@ -763,11 +811,13 @@ export default function AdminPage() {
   const [reissueLoading, setReissueLoading] = useState(false);
   const [reissueMsg, setReissueMsg] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [selectedStudentTab, setSelectedStudentTab] = useState("attempts");
+  const [selectedStudentTab, setSelectedStudentTab] = useState("model");
   const [studentAttempts, setStudentAttempts] = useState([]);
   const [studentAttemptsMsg, setStudentAttemptsMsg] = useState("");
+  const [studentAttemptRanks, setStudentAttemptRanks] = useState({});
   const [studentAttendance, setStudentAttendance] = useState([]);
   const [studentAttendanceMsg, setStudentAttendanceMsg] = useState("");
+  const [studentAttendanceRange, setStudentAttendanceRange] = useState({ from: "", to: "" });
   const [studentListFilters, setStudentListFilters] = useState({
     from: "",
     to: "",
@@ -965,6 +1015,61 @@ export default function AdminPage() {
     });
     return map;
   }, [tests]);
+
+  const studentModelAttempts = useMemo(() => {
+    return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
+  }, [studentAttempts, testMetaByVersion]);
+
+  const studentDailyAttempts = useMemo(() => {
+    return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type !== "mock");
+  }, [studentAttempts, testMetaByVersion]);
+
+  const studentDailyAttemptsByCategory = useMemo(() => {
+    const grouped = new Map();
+    (studentDailyAttempts ?? []).forEach((a) => {
+      const category = testMetaByVersion[a.test_version]?.category || "Uncategorized";
+      if (!grouped.has(category)) grouped.set(category, []);
+      grouped.get(category).push(a);
+    });
+    const ordered = [];
+    dailyCategories.forEach((c) => {
+      if (grouped.has(c.name)) ordered.push([c.name, grouped.get(c.name)]);
+    });
+    for (const entry of grouped.entries()) {
+      if (!ordered.some((o) => o[0] === entry[0])) ordered.push(entry);
+    }
+    return ordered;
+  }, [studentDailyAttempts, testMetaByVersion, dailyCategories]);
+
+  const studentAttemptSummaryById = useMemo(() => {
+    const summaryMap = {};
+    (studentModelAttempts ?? []).forEach((a) => {
+      const list = attemptQuestionsByVersion[a.test_version];
+      if (!list) return;
+      const rows = buildAttemptDetailRowsFromList(a.answers_json, list);
+      const summary = buildSectionSummary(rows);
+      const bySection = {};
+      summary.forEach((s) => {
+        bySection[s.section] = s;
+      });
+      summaryMap[a.id] = bySection;
+    });
+    return summaryMap;
+  }, [studentModelAttempts, attemptQuestionsByVersion]);
+
+  const sectionTitles = useMemo(
+    () => sections.filter((s) => s.key !== "DAILY").map((s) => s.title),
+    []
+  );
+
+  const filteredStudentAttendance = useMemo(() => {
+    if (!studentAttendanceRange.from && !studentAttendanceRange.to) return studentAttendance;
+    return (studentAttendance ?? []).filter((row) => {
+      if (studentAttendanceRange.from && row.day_date < studentAttendanceRange.from) return false;
+      if (studentAttendanceRange.to && row.day_date > studentAttendanceRange.to) return false;
+      return true;
+    });
+  }, [studentAttendance, studentAttendanceRange]);
 
   const [modelConductCategory, setModelConductCategory] = useState("");
   const [dailyConductCategory, setDailyConductCategory] = useState("");
@@ -1739,7 +1844,8 @@ export default function AdminPage() {
     if (!exists) {
       const first = list[0];
       setSelectedStudentId(first.id);
-      setSelectedStudentTab("attempts");
+      setSelectedStudentTab("model");
+      setStudentAttendanceRange({ from: "", to: "" });
       fetchStudentAttempts(first.id);
     }
   }
@@ -1989,8 +2095,77 @@ export default function AdminPage() {
       setStudentAttemptsMsg(`Load failed: ${error.message}`);
       return;
     }
-    setStudentAttempts(data ?? []);
-    setStudentAttemptsMsg(data?.length ? "" : "No attempts.");
+    const list = data ?? [];
+    setStudentAttempts(list);
+    setStudentAttemptsMsg(list.length ? "" : "No attempts.");
+    hydrateAttemptQuestions(list.map((a) => a.test_version));
+    fetchAttemptRanksForSessions(list);
+  }
+
+  async function fetchAttemptRanksForSessions(attemptsList) {
+    const sessionIds = Array.from(new Set((attemptsList ?? []).map((a) => a.test_session_id).filter(Boolean)));
+    if (!sessionIds.length) {
+      setStudentAttemptRanks({});
+      return;
+    }
+    const { data, error } = await supabase
+      .from("attempts")
+      .select("id, student_id, test_session_id, correct, total, score_rate")
+      .in("test_session_id", sessionIds);
+    if (error) {
+      console.error("attempt rank fetch error:", error);
+      setStudentAttemptRanks({});
+      return;
+    }
+    const bySession = new Map();
+    (data ?? []).forEach((a) => {
+      if (!a.test_session_id) return;
+      if (!bySession.has(a.test_session_id)) bySession.set(a.test_session_id, []);
+      bySession.get(a.test_session_id).push(a);
+    });
+    const rankMap = {};
+    bySession.forEach((rows, sessionId) => {
+      const bestByStudent = new Map();
+      rows.forEach((row) => {
+        const rate = Number(row.score_rate ?? (row.total ? row.correct / row.total : 0));
+        const prev = bestByStudent.get(row.student_id);
+        if (prev == null || rate > prev) bestByStudent.set(row.student_id, rate);
+      });
+      const sorted = Array.from(bestByStudent.values()).sort((a, b) => b - a);
+      rows.forEach((row) => {
+        const attemptRate = Number(row.score_rate ?? (row.total ? row.correct / row.total : 0));
+        let rank = sorted.findIndex((v) => v === attemptRate);
+        if (rank === -1) {
+          rank = sorted.findIndex((v) => v < attemptRate);
+          if (rank === -1) rank = sorted.length;
+        }
+        rankMap[row.id] = { rank: rank + 1, total: sorted.length };
+      });
+    });
+    setStudentAttemptRanks(rankMap);
+  }
+
+  async function hydrateAttemptQuestions(versions) {
+    const unique = Array.from(new Set((versions ?? []).filter(Boolean)));
+    const missing = unique.filter((v) => !attemptQuestionsByVersion[v]);
+    if (!missing.length) return;
+    const { data, error } = await supabase
+      .from("questions")
+      .select("test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .in("test_version", missing)
+      .order("order_index", { ascending: true });
+    if (error) {
+      console.error("attempt questions preload error:", error);
+      return;
+    }
+    const grouped = {};
+    (data ?? []).forEach((row) => {
+      const version = row.test_version;
+      if (!version) return;
+      if (!grouped[version]) grouped[version] = [];
+      grouped[version].push(mapDbQuestion(row));
+    });
+    setAttemptQuestionsByVersion((prev) => ({ ...prev, ...grouped }));
   }
 
   async function fetchStudentAttendance(studentId) {
@@ -3895,9 +4070,10 @@ export default function AdminPage() {
                           key={s.id}
                           onClick={() => {
                             setSelectedStudentId(s.id);
-                            setSelectedStudentTab("attempts");
+                            setSelectedStudentTab("model");
                             setStudentAttendance([]);
                             setStudentAttendanceMsg("");
+                            setStudentAttendanceRange({ from: "", to: "" });
                             setStudentDetailOpen(true);
                             fetchStudentAttempts(s.id);
                           }}
@@ -3939,13 +4115,14 @@ export default function AdminPage() {
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <button
-                      className="btn"
+                      className="admin-icon-btn"
                       onClick={() => {
                         setStudentDetailOpen(false);
                         setSelectedStudentId("");
                       }}
+                      aria-label="Back"
                     >
-                      ← Back
+                      ←
                     </button>
                     <div className="admin-title">
                       {selectedStudent?.display_name ?? ""} {selectedStudent?.student_code ? `(${selectedStudent.student_code})` : ""}
@@ -3988,70 +4165,98 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <div>
-                  <div className="admin-title">Student Attempts</div>
+              <div className="student-detail-tab-row">
+                <div className="admin-top-tabs">
+                  <button
+                    className={`admin-top-tab ${selectedStudentTab === "attendance" ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedStudentTab("attendance");
+                      fetchStudentAttendance(selectedStudentId);
+                    }}
+                  >
+                    Attendance
+                  </button>
+                  <button
+                    className={`admin-top-tab ${selectedStudentTab === "daily" ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedStudentTab("daily");
+                      fetchStudentAttempts(selectedStudentId);
+                    }}
+                  >
+                    Daily Test
+                  </button>
+                  <button
+                    className={`admin-top-tab ${selectedStudentTab === "model" ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedStudentTab("model");
+                      fetchStudentAttempts(selectedStudentId);
+                    }}
+                  >
+                    Model Test
+                  </button>
                 </div>
-                <button className="btn" onClick={() => {
-                  if (selectedStudentTab === "attendance") {
-                    fetchStudentAttendance(selectedStudentId);
-                  } else {
-                    fetchStudentAttempts(selectedStudentId);
-                  }
-                }}>Refresh</button>
-              </div>
-
-              <div className="admin-mini-tabs">
                 <button
-                  className={`admin-mini-tab ${selectedStudentTab === "attempts" ? "active" : ""}`}
+                  className="btn"
                   onClick={() => {
-                    setSelectedStudentTab("attempts");
-                    fetchStudentAttempts(selectedStudentId);
+                    if (selectedStudentTab === "attendance") {
+                      fetchStudentAttendance(selectedStudentId);
+                    } else {
+                      fetchStudentAttempts(selectedStudentId);
+                    }
                   }}
                 >
-                  Attempts
-                </button>
-                <button
-                  className={`admin-mini-tab ${selectedStudentTab === "attendance" ? "active" : ""}`}
-                  onClick={() => {
-                    setSelectedStudentTab("attendance");
-                    fetchStudentAttendance(selectedStudentId);
-                  }}
-                >
-                  Attendance
+                  Refresh
                 </button>
               </div>
 
-              {selectedStudentTab === "attempts" ? (
+              {selectedStudentTab === "model" ? (
                 <>
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                    <table className="admin-table" style={{ minWidth: 860 }}>
+                    <table className="admin-table" style={{ minWidth: 980 }}>
                       <thead>
                         <tr>
-                          <th>Created</th>
                           <th>Test</th>
-                          <th>Score</th>
+                          <th>Date</th>
+                          <th>Total Score</th>
                           <th>Rate</th>
-                          <th>Attempt ID</th>
+                          <th>P/F</th>
+                          <th>Class Rank</th>
+                          {sectionTitles.map((title) => (
+                            <th key={`sec-${title}`} className="admin-table-compact">
+                              {renderTwoLineHeader(title)}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {studentAttempts.map((a) => {
+                        {studentModelAttempts.map((a) => {
                           const score = `${a.correct}/${a.total}`;
                           const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                          const passRate = Number(testPassRateByVersion[a.test_version] ?? 0.8);
+                          const passed = getScoreRate(a) >= passRate;
+                          const rankInfo = studentAttemptRanks[a.id];
+                          const summary = studentAttemptSummaryById[a.id] || {};
                           return (
                             <tr
-                              key={`student-attempt-${a.id}`}
-                              onClick={() => {
-                                setSelectedAttemptObj(a);
-                                setAttemptDetailOpen(true);
-                              }}
+                              key={`student-model-${a.id}`}
+                              onClick={() => openAttemptDetail(a)}
                             >
-                              <td>{formatDateTime(a.created_at)}</td>
                               <td>{getAttemptTitle(a)}</td>
+                              <td>{formatDateFull(a.created_at)}</td>
                               <td>{score}</td>
                               <td>{rate}</td>
-                              <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
+                              <td>
+                                <span className={passed ? "pf-pass" : "pf-fail"}>{passed ? "Pass" : "Fail"}</span>
+                              </td>
+                              <td>{rankInfo ? `${rankInfo.rank}/${rankInfo.total}` : "-"}</td>
+                              {sectionTitles.map((title) => {
+                                const s = summary[title];
+                                return (
+                                  <td key={`${a.id}-${title}`} className="admin-table-compact">
+                                    {s ? `${s.correct}/${s.total}` : "-"}
+                                  </td>
+                                );
+                              })}
                             </tr>
                           );
                         })}
@@ -4060,8 +4265,82 @@ export default function AdminPage() {
                   </div>
                   <div className="admin-msg">{studentAttemptsMsg}</div>
                 </>
-              ) : (
+              ) : null}
+
+              {selectedStudentTab === "daily" ? (
                 <>
+                  {studentDailyAttemptsByCategory.map(([category, items]) => (
+                    <div key={`daily-${category}`} style={{ marginTop: 12 }}>
+                      <div className="admin-subtitle" style={{ fontWeight: 900 }}>{category}</div>
+                      <div className="admin-table-wrap" style={{ marginTop: 8 }}>
+                        <table className="admin-table" style={{ minWidth: 820 }}>
+                          <thead>
+                            <tr>
+                              <th>Test</th>
+                              <th>Date</th>
+                              <th>Score</th>
+                              <th>Rate</th>
+                              <th>P/F</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {items.map((a) => {
+                              const score = `${a.correct}/${a.total}`;
+                              const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                              const passRate = Number(testPassRateByVersion[a.test_version] ?? 0.8);
+                              const passed = getScoreRate(a) >= passRate;
+                              return (
+                                <tr key={`student-daily-${a.id}`} onClick={() => openAttemptDetail(a)}>
+                                  <td>{getAttemptTitle(a)}</td>
+                                  <td>{formatDateFull(a.created_at)}</td>
+                                  <td>{score}</td>
+                                  <td>{rate}</td>
+                                  <td>
+                                    <span className={passed ? "pf-pass" : "pf-fail"}>{passed ? "Pass" : "Fail"}</span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="admin-msg">{studentAttemptsMsg}</div>
+                </>
+              ) : null}
+
+              {selectedStudentTab === "attendance" ? (
+                <>
+                  <div className="admin-form" style={{ marginTop: 10 }}>
+                    <div className="field small">
+                      <label>From</label>
+                      <input
+                        type="date"
+                        value={studentAttendanceRange.from}
+                        onChange={(e) => setStudentAttendanceRange((s) => ({ ...s, from: e.target.value }))}
+                      />
+                    </div>
+                    <div className="field small">
+                      <label>To</label>
+                      <input
+                        type="date"
+                        value={studentAttendanceRange.to}
+                        onChange={(e) => setStudentAttendanceRange((s) => ({ ...s, to: e.target.value }))}
+                      />
+                    </div>
+                    <div className="field small">
+                      <label>&nbsp;</label>
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => setStudentAttendanceRange({ from: "", to: "" })}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                     <table className="admin-table" style={{ minWidth: 760 }}>
                       <thead>
@@ -4130,7 +4409,7 @@ export default function AdminPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {studentAttendance.map((r, idx) => (
+                        {filteredStudentAttendance.map((r, idx) => (
                           <tr key={`att-row-${idx}`}>
                             <td>{`${formatDateShort(r.day_date)} (${formatWeekday(r.day_date)})`}</td>
                             <td>{r.status}</td>
@@ -4142,7 +4421,7 @@ export default function AdminPage() {
                   </div>
                   <div className="admin-msg">{studentAttendanceMsg}</div>
                 </>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -6430,7 +6709,16 @@ export default function AdminPage() {
                         <tr key={r.qid}>
                           <td style={{ whiteSpace: "nowrap" }}>{r.qid}</td>
                           <td style={{ whiteSpace: "nowrap" }}>{r.section}</td>
-                          <td>{r.prompt}</td>
+                          <td>
+                            <div>{r.prompt}</div>
+                            {r.image ? (
+                              <img
+                                src={r.image}
+                                alt="illustration"
+                                style={{ marginTop: 6, maxWidth: 220, width: "100%", height: "auto", display: "block" }}
+                              />
+                            ) : null}
+                          </td>
                           <td>{r.chosen}</td>
                           <td>{r.correct}</td>
                           <td style={{ textAlign: "center" }}>{r.isCorrect ? "○" : "×"}</td>
