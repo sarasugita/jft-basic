@@ -70,6 +70,7 @@ let modelRankState = {
   loading: false,
   loaded: false,
   map: {},
+  totalMap: {},
 };
 
 let testSessionsState = {
@@ -615,6 +616,18 @@ function getContrastText(hex) {
   return luminance > 0.6 ? "#111" : "#fff";
 }
 
+function formatOrdinal(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value ?? "");
+  const mod10 = num % 10;
+  const mod100 = num % 100;
+  let suffix = "th";
+  if (mod10 === 1 && mod100 !== 11) suffix = "st";
+  else if (mod10 === 2 && mod100 !== 12) suffix = "nd";
+  else if (mod10 === 3 && mod100 !== 13) suffix = "rd";
+  return `${num}${suffix}`;
+}
+
 function buildAttendanceSummary(list) {
   const monthKeys = Array.from(
     new Set(
@@ -661,6 +674,7 @@ async function fetchStudentResults() {
   modelRankState.loaded = false;
   modelRankState.loading = false;
   modelRankState.map = {};
+  modelRankState.totalMap = {};
   const { data, error } = await supabase
     .from("attempts")
     .select("id, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
@@ -688,6 +702,7 @@ async function fetchModelRanks(attempts) {
   }
   modelRankState.loading = true;
   const map = { ...modelRankState.map };
+  const totalMap = { ...modelRankState.totalMap };
   for (const sessionId of sessionIds) {
     try {
       const { data, error } = await supabase
@@ -700,13 +715,17 @@ async function fetchModelRanks(attempts) {
       }
       const list = (data ?? []).slice().sort((a, b) => (b.score_rate ?? 0) - (a.score_rate ?? 0));
       list.forEach((row, idx) => {
-        if (row?.id) map[row.id] = idx + 1;
+        if (row?.id) {
+          map[row.id] = idx + 1;
+          totalMap[row.id] = list.length;
+        }
       });
     } catch (e) {
       console.warn("model rank fetch failed:", e);
     }
   }
   modelRankState.map = map;
+  modelRankState.totalMap = totalMap;
   modelRankState.loading = false;
   modelRankState.loaded = true;
 }
@@ -2161,7 +2180,7 @@ function renderTestSelect(app) {
                         <td>${escapeHtml(getAttemptTitle(attempt))}</td>
                         <td>${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
                         <td>${(rate * 100).toFixed(1)}%</td>
-                        <td class="${isPass ? "result-pass-cell" : "result-fail-cell"}">${isPass ? "Pass" : "Fail"}</td>
+                        <td class="col-pf ${isPass ? "result-pass-cell" : "result-fail-cell"}">${isPass ? "Pass" : "Fail"}</td>
                       </tr>
                     `;
                   })
@@ -2195,6 +2214,15 @@ function renderTestSelect(app) {
           const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
           const detailRows = buildAttemptDetailRows(attempt, questionsList);
           const summary = buildSectionSummary(detailRows);
+          const detailRate = getScoreRateFromAttempt(attempt);
+          const detailPassRate = getPassRateForVersion(attempt.test_version);
+          const detailIsPass = detailRate >= detailPassRate;
+          const detailRank = modelRankState.map[attempt.id] || "";
+          const detailTotalRank = modelRankState.totalMap[attempt.id] || "";
+          const detailRankLabel =
+            detailRank && detailTotalRank
+              ? `${formatOrdinal(detailRank)} of ${detailTotalRank} students`
+              : "—";
           const subTab = resultDetailState.subTab || "score";
           let detailBody = "";
           if (resultDetailState.loading) {
@@ -2202,8 +2230,36 @@ function renderTestSelect(app) {
           } else if (resultDetailState.error) {
             detailBody = `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`;
           } else if (subTab === "score") {
+            const totalCorrect = attempt.correct ?? summary.reduce((acc, s) => acc + (s.correct || 0), 0);
+            const totalQuestions = attempt.total ?? summary.reduce((acc, s) => acc + (s.total || 0), 0);
+            const totalRate = totalQuestions ? ((totalCorrect / totalQuestions) * 100).toFixed(1) : "0.0";
+            const sectionOrder = (sections ?? []).map((s) => s.title).filter(Boolean);
+            const radarSections = sectionOrder.length ? sectionOrder : summary.map((s) => s.section);
+            const radarData = radarSections.slice(0, 4).map((label) => {
+              const row = summary.find((s) => s.section === label);
+              const rate = row?.total ? row.correct / row.total : 0;
+              return { label, value: rate };
+            });
             detailBody = summary.length
               ? `
+                <div class="student-score-summary">
+                  <div class="student-score-line">
+                    <span class="student-score-label">Total Score</span>
+                    <span class="student-score-right">
+                      <span class="student-score-value">${totalCorrect} / ${totalQuestions} (${totalRate}%)</span>
+                      <span class="student-score-pass ${detailIsPass ? "result-pass-cell" : "result-fail-cell"}">
+                        ${detailIsPass ? "Pass" : "Fail"}
+                      </span>
+                    </span>
+                  </div>
+                  <div class="student-score-rank">
+                    <span class="student-score-rank-label">Class Ranking</span>
+                    <span class="student-score-rank-value">${escapeHtml(detailRankLabel)}</span>
+                  </div>
+                </div>
+                <div class="student-radar-wrap">
+                  ${buildRadarSvg(radarData)}
+                </div>
                 <div class="detail-table-wrap">
                   <table class="detail-table">
                     <thead>
@@ -2244,6 +2300,7 @@ function renderTestSelect(app) {
             <div class="student-detail-topbar">
               <button class="student-detail-back" id="modelResultBack" aria-label="Back">←</button>
               <div class="student-detail-title">${escapeHtml(title)}</div>
+              <span class="student-detail-spacer" aria-hidden="true"></span>
             </div>
             <div class="student-detail-tabs">
               <button class="student-detail-tab ${subTab === "score" ? "active" : ""}" data-model-detail-tab="score">Score Details</button>
@@ -2269,10 +2326,10 @@ function renderTestSelect(app) {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Model Test Name</th>
-                  <th>Total Score</th>
+                  <th>Test Name</th>
+                  <th class="col-pf">P/F</th>
                   <th>Total %</th>
-                  <th>Pass/Fail</th>
+                  <th class="col-total-score">Total<br />Score</th>
                   <th>Class Rank</th>
                 </tr>
               </thead>
@@ -2282,15 +2339,17 @@ function renderTestSelect(app) {
                     const rate = getScoreRateFromAttempt(attempt);
                     const passRate = getPassRateForVersion(attempt.test_version);
                     const isPass = rate >= passRate;
-                    const rank = modelRankState.map[attempt.id] || "—";
+                    const rank = modelRankState.map[attempt.id] || "";
+                    const totalRank = modelRankState.totalMap[attempt.id] || "";
+                    const rankLabel = rank && totalRank ? `${rank}/${totalRank}` : "—";
                     return `
                       <tr class="student-results-row" data-model-attempt-id="${attempt.id}">
                         <td>${escapeHtml(getAttemptDateLabel(attempt))}</td>
                         <td>${escapeHtml(getAttemptTitle(attempt))}</td>
-                        <td>${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
+                        <td class="col-pf ${isPass ? "result-pass-cell" : "result-fail-cell"}">${isPass ? "Pass" : "Fail"}</td>
                         <td>${(rate * 100).toFixed(1)}%</td>
-                        <td class="${isPass ? "result-pass-cell" : "result-fail-cell"}">${isPass ? "Pass" : "Fail"}</td>
-                        <td>${escapeHtml(String(rank))}</td>
+                        <td class="col-total-score">${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
+                        <td>${escapeHtml(rankLabel)}</td>
                       </tr>
                     `;
                   })
@@ -3472,6 +3531,51 @@ function buildSectionSummary(rows) {
     ...s,
     rate: s.total ? s.correct / s.total : 0,
   }));
+}
+
+function buildRadarSvg(data) {
+  if (!data.length) return "";
+  const size = 220;
+  const center = size / 2;
+  const maxR = 80;
+  const steps = 4;
+  const points = data
+    .map((d, i) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / data.length;
+      const r = maxR * (d.value ?? 0);
+      const x = center + Math.cos(angle) * r;
+      const y = center + Math.sin(angle) * r;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const grid = Array.from({ length: steps }, (_, idx) => {
+    const r = (maxR * (idx + 1)) / steps;
+    return `<circle cx="${center}" cy="${center}" r="${r.toFixed(1)}" class="radar-grid" />`;
+  }).join("");
+  const axes = data
+    .map((_, i) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / data.length;
+      const x = center + Math.cos(angle) * maxR;
+      const y = center + Math.sin(angle) * maxR;
+      return `<line x1="${center}" y1="${center}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="radar-axis" />`;
+    })
+    .join("");
+  const labels = data
+    .map((d, i) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * i) / data.length;
+      const x = center + Math.cos(angle) * (maxR + 18);
+      const y = center + Math.sin(angle) * (maxR + 18);
+      return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="radar-label">${escapeHtml(d.label)}</text>`;
+    })
+    .join("");
+  return `
+    <svg viewBox="0 0 ${size} ${size}" class="attendance-radar" role="img" aria-label="Section score radar chart">
+      ${grid}
+      ${axes}
+      <polygon points="${points}" class="radar-shape"></polygon>
+      ${labels}
+    </svg>
+  `;
 }
 
 
