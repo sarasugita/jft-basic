@@ -3783,171 +3783,176 @@ export default function AdminPage() {
 
         {activeTab === "students" ? (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div>
-              <div className="admin-title">Students</div>
-              <div className="admin-subtitle">Student list and performance overview.</div>
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={() => setInviteOpen(true)}>Add New Student</button>
-              <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
-              <button className="btn" onClick={() => fetchStudentListMetrics()}>Refresh Metrics</button>
-            </div>
-          </div>
+          {!studentDetailOpen ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div>
+                  <div className="admin-title">Students</div>
+                  <div className="admin-subtitle">Student list and performance overview.</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn-primary" onClick={() => setInviteOpen(true)}>Add New Student</button>
+                  <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
+                  <button className="btn" onClick={() => fetchStudentListMetrics()}>Refresh Metrics</button>
+                </div>
+              </div>
 
-          <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field small">
-              <label>Date From</label>
-              <input
-                type="date"
-                value={studentListFilters.from}
-                onChange={(e) => setStudentListFilters((s) => ({ ...s, from: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Date To</label>
-              <input
-                type="date"
-                value={studentListFilters.to}
-                onChange={(e) => setStudentListFilters((s) => ({ ...s, to: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Attendance % (≤)</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                placeholder="e.g. 80"
-                value={studentListFilters.maxAttendance}
-                onChange={(e) => setStudentListFilters((s) => ({ ...s, maxAttendance: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Unexcused (≥)</label>
-              <input
-                type="number"
-                min="0"
-                placeholder="e.g. 3"
-                value={studentListFilters.minUnexcused}
-                onChange={(e) => setStudentListFilters((s) => ({ ...s, minUnexcused: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Model Avg % (≥)</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                placeholder="e.g. 60"
-                value={studentListFilters.minModelAvg}
-                onChange={(e) => setStudentListFilters((s) => ({ ...s, minModelAvg: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Daily Avg % (≥)</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                placeholder="e.g. 60"
-                value={studentListFilters.minDailyAvg}
-                onChange={(e) => setStudentListFilters((s) => ({ ...s, minDailyAvg: e.target.value }))}
-              />
-            </div>
-            <div className="field">
-              <label>Daily Category</label>
-              <select
-                value={studentListDailyCategory}
-                onChange={(e) => setStudentListDailyCategory(e.target.value)}
-              >
-                <option value="__all__">All Categories</option>
-                {dailyCategories.map((c) => (
-                  <option key={c.name} value={c.name}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+              <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className="field small">
+                  <label>Date From</label>
+                  <input
+                    type="date"
+                    value={studentListFilters.from}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, from: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label>Date To</label>
+                  <input
+                    type="date"
+                    value={studentListFilters.to}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, to: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label>Attendance % (≤)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="e.g. 80"
+                    value={studentListFilters.maxAttendance}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, maxAttendance: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label>Unexcused (≥)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="e.g. 3"
+                    value={studentListFilters.minUnexcused}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minUnexcused: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label>Model Avg % (≥)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="e.g. 60"
+                    value={studentListFilters.minModelAvg}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minModelAvg: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label>Daily Avg % (≥)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="e.g. 60"
+                    value={studentListFilters.minDailyAvg}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minDailyAvg: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>Daily Category</label>
+                  <select
+                    value={studentListDailyCategory}
+                    onChange={(e) => setStudentListDailyCategory(e.target.value)}
+                  >
+                    <option value="__all__">All Categories</option>
+                    {dailyCategories.map((c) => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 960 }}>
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Attendance %</th>
-                  <th>Unexcused</th>
-                  <th>Model Avg %</th>
-                  <th>Daily Avg %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {studentListRows.map((row) => {
-                  const s = row.student;
-                  const rateLabel = row.attendanceRate == null ? "-" : `${row.attendanceRate.toFixed(1)}%`;
-                  const modelLabel = row.modelAvg == null ? "-" : `${row.modelAvg.toFixed(1)}%`;
-                  const dailyLabel = row.dailyAvg == null ? "-" : `${row.dailyAvg.toFixed(1)}%`;
-                  return (
-                    <tr
-                      key={s.id}
-                      onClick={() => {
-                        setSelectedStudentId(s.id);
-                        setSelectedStudentTab("attempts");
-                        setStudentAttendance([]);
-                        setStudentAttendanceMsg("");
-                        setStudentDetailOpen(true);
-                        fetchStudentAttempts(s.id);
-                      }}
-                      className={s.is_withdrawn ? "row-withdrawn" : ""}
-                    >
-                      <td>{s.student_code ?? ""}</td>
-                      <td>{s.display_name ?? ""}</td>
-                      <td>{s.email ?? ""}</td>
-                      <td>{rateLabel}</td>
-                      <td>{row.unexcused ?? 0}</td>
-                      <td>{modelLabel}</td>
-                      <td>{dailyLabel}</td>
+              <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                <table className="admin-table" style={{ minWidth: 960 }}>
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Attendance %</th>
+                      <th>Unexcused</th>
+                      <th>Model Avg %</th>
+                      <th>Daily Avg %</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {studentListLoading ? <div className="admin-help" style={{ marginTop: 6 }}>Loading metrics...</div> : null}
-          <div className="admin-msg">{studentMsg}</div>
+                  </thead>
+                  <tbody>
+                    {studentListRows.map((row) => {
+                      const s = row.student;
+                      const rateLabel = row.attendanceRate == null ? "-" : `${row.attendanceRate.toFixed(1)}%`;
+                      const modelLabel = row.modelAvg == null ? "-" : `${row.modelAvg.toFixed(1)}%`;
+                      const dailyLabel = row.dailyAvg == null ? "-" : `${row.dailyAvg.toFixed(1)}%`;
+                      return (
+                        <tr
+                          key={s.id}
+                          onClick={() => {
+                            setSelectedStudentId(s.id);
+                            setSelectedStudentTab("attempts");
+                            setStudentAttendance([]);
+                            setStudentAttendanceMsg("");
+                            setStudentDetailOpen(true);
+                            fetchStudentAttempts(s.id);
+                          }}
+                          className={s.is_withdrawn ? "row-withdrawn" : ""}
+                        >
+                          <td>{s.student_code ?? ""}</td>
+                          <td>{s.display_name ?? ""}</td>
+                          <td>{s.email ?? ""}</td>
+                          <td>{rateLabel}</td>
+                          <td>{row.unexcused ?? 0}</td>
+                          <td>{modelLabel}</td>
+                          <td>{dailyLabel}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {studentListLoading ? <div className="admin-help" style={{ marginTop: 6 }}>Loading metrics...</div> : null}
+              <div className="admin-msg">{studentMsg}</div>
 
-          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <div className="admin-help">
-              CSV: <b>email,display_name,student_code,temp_password</b>
-            </div>
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(e) => handleCsvFile(e.target.files?.[0])}
-            />
-            <div className="admin-help">{csvMsg}</div>
-          </div>
+              <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <div className="admin-help">
+                  CSV: <b>email,display_name,student_code,temp_password</b>
+                </div>
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(e) => handleCsvFile(e.target.files?.[0])}
+                />
+                <div className="admin-help">{csvMsg}</div>
+              </div>
+            </>
+          ) : null}
 
           {selectedStudentId && studentDetailOpen ? (
             <div style={{ marginTop: 16 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <div>
-                  <div className="admin-title">Student Sheet</div>
-                  <div className="admin-subtitle">
-                    {selectedStudent?.display_name ?? ""} {selectedStudent?.student_code ? `(${selectedStudent.student_code})` : ""}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setStudentDetailOpen(false);
+                        setSelectedStudentId("");
+                      }}
+                    >
+                      ← Back
+                    </button>
+                    <div className="admin-title">
+                      {selectedStudent?.display_name ?? ""} {selectedStudent?.student_code ? `(${selectedStudent.student_code})` : ""}
+                    </div>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      setStudentDetailOpen(false);
-                      setSelectedStudentId("");
-                    }}
-                  >
-                    Back to List
-                  </button>
                   <button
                     className="btn"
                     onClick={() => {
@@ -5709,10 +5714,12 @@ export default function AdminPage() {
             className="admin-modal-overlay"
             onClick={() => setInviteOpen(false)}
           >
-            <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
               <div className="admin-modal-header">
                 <div className="admin-title">Add New Student</div>
-                <button className="btn" onClick={() => setInviteOpen(false)}>Close</button>
+                <button className="admin-modal-close" onClick={() => setInviteOpen(false)} aria-label="Close">
+                  &times;
+                </button>
               </div>
               <div className="admin-form" style={{ marginTop: 10 }}>
                 <div className="field">
