@@ -1367,9 +1367,7 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
   const testType = getActiveTestType();
   const testTitle = getActiveTestTitle();
   const testLabel =
-    testType === "daily"
-      ? (testTitle?.trim() || "Daily Test")
-      : "Test: Japan Foundation Test for Basic Japanese";
+    testTitle?.trim() || (testType === "daily" ? "Daily Test" : "Model Test");
   const metaHtml = hideQA
     ? `<div><span class="muted">Question:</span> <b>—</b></div>
        <div><span class="muted">Section:</span> <b>—</b></div>`
@@ -2261,7 +2259,7 @@ function renderTestSelect(app) {
                   ${buildRadarSvg(radarData)}
                 </div>
                 <div class="detail-table-wrap">
-                  <table class="detail-table">
+                  <table class="detail-table score-detail-table">
                     <thead>
                       <tr>
                         <th>Section</th>
@@ -3283,6 +3281,7 @@ function renderSectionIntro(app) {
         </div>
 
         <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
+          ${isFirstSection ? `<button class="nav-btn ghost" id="backHomeBtn">Back</button>` : ""}
           <button class="nav-btn" id="goBtn">${btnLabel}</button>
         </div>
       </main>
@@ -3290,6 +3289,13 @@ function renderSectionIntro(app) {
   `;
 
   document.querySelector("#disabledBtn").disabled = true;
+
+  if (isFirstSection) {
+    document.querySelector("#backHomeBtn")?.addEventListener("click", () => {
+      state.studentTab = "home";
+      exitToHome();
+    });
+  }
 
   document.querySelector("#goBtn").addEventListener("click", async () => {
     if (isFirstSection) {
@@ -3560,12 +3566,27 @@ function buildRadarSvg(data) {
       return `<line x1="${center}" y1="${center}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="radar-axis" />`;
     })
     .join("");
+  const formatRadarLabel = (label) => {
+    if (label === "Reading Comprehension") return ["Reading", "Comprehension"];
+    if (label === "Conversation and Expression") return ["Conversation and", "Expression"];
+    return [label];
+  };
   const labels = data
     .map((d, i) => {
       const angle = -Math.PI / 2 + (2 * Math.PI * i) / data.length;
       const x = center + Math.cos(angle) * (maxR + 18);
       const y = center + Math.sin(angle) * (maxR + 18);
-      return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="radar-label">${escapeHtml(d.label)}</text>`;
+      const lines = formatRadarLabel(d.label);
+      return `
+        <text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="radar-label">
+          ${lines
+            .map(
+              (line, idx) =>
+                `<tspan x="${x.toFixed(1)}" dy="${idx === 0 ? "0" : "1.1em"}">${escapeHtml(line)}</tspan>`
+            )
+            .join("")}
+        </text>
+      `;
     })
     .join("");
   return `
