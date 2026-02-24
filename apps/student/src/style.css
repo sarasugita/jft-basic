@@ -725,6 +725,7 @@ body { overflow-x: hidden; }
 
   .result-table-wrap {
     margin-top: 12px;
+    overflow-x: auto;
   }
 
   .question-area {
@@ -736,6 +737,11 @@ body { overflow-x: hidden; }
   .illustration-small,
   .illustration-daily {
     max-width: 100%;
+    width: 100%;
+    height: auto;
+  }
+
+  .question-area img {
     width: 100%;
     height: auto;
   }
@@ -768,6 +774,10 @@ body { overflow-x: hidden; }
   .result {
     padding: 12px;
     align-items: stretch;
+    justify-content: flex-start;
+    max-width: 100%;
+    width: 100%;
+    min-height: auto;
   }
 
   .score-correct{ font-size: 40px; }
@@ -775,7 +785,7 @@ body { overflow-x: hidden; }
   .score-total{ font-size: 28px; }
 
   .result-table{
-    min-width: 0;
+    min-width: 600px;
     table-layout: fixed;
   }
 

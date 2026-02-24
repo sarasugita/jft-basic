@@ -768,6 +768,20 @@ export default function AdminPage() {
   const [studentAttemptsMsg, setStudentAttemptsMsg] = useState("");
   const [studentAttendance, setStudentAttendance] = useState([]);
   const [studentAttendanceMsg, setStudentAttendanceMsg] = useState("");
+  const [studentListFilters, setStudentListFilters] = useState({
+    from: "",
+    to: "",
+    maxAttendance: "",
+    minUnexcused: "",
+    minModelAvg: "",
+    minDailyAvg: ""
+  });
+  const [studentListDailyCategory, setStudentListDailyCategory] = useState("");
+  const [studentListAttendanceMap, setStudentListAttendanceMap] = useState({});
+  const [studentListAttempts, setStudentListAttempts] = useState([]);
+  const [studentListLoading, setStudentListLoading] = useState(false);
+  const [studentDetailOpen, setStudentDetailOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteForm, setInviteForm] = useState({
     email: "",
     display_name: "",
@@ -939,6 +953,18 @@ export default function AdminPage() {
 
   const dailyCategories = useMemo(() => buildCategories(dailyTests), [dailyTests]);
   const modelCategories = useMemo(() => buildCategories(modelTests, DEFAULT_MODEL_CATEGORY), [modelTests]);
+
+  const testMetaByVersion = useMemo(() => {
+    const map = {};
+    (tests ?? []).forEach((t) => {
+      if (!t?.version) return;
+      map[t.version] = {
+        type: t.type,
+        category: String(t.title ?? "").trim()
+      };
+    });
+    return map;
+  }, [tests]);
 
   const [modelConductCategory, setModelConductCategory] = useState("");
   const [dailyConductCategory, setDailyConductCategory] = useState("");
@@ -1260,6 +1286,82 @@ export default function AdminPage() {
     });
   }, [activeStudents, attendanceFilter, attendanceRangeColumns, attendanceEntriesByDay]);
 
+  const studentListRows = useMemo(() => {
+    const byStudent = new Map();
+    (studentListAttempts ?? []).forEach((a) => {
+      if (!a?.student_id) return;
+      const list = byStudent.get(a.student_id) || [];
+      list.push(a);
+      byStudent.set(a.student_id, list);
+    });
+
+    const dailyCategory = studentListDailyCategory || "__all__";
+    const rows = (sortedStudents ?? []).map((s) => {
+      const att = studentListAttendanceMap[s.id] || { total: 0, present: 0, unexcused: 0, rate: null };
+      const attemptsList = byStudent.get(s.id) || [];
+      const modelScores = [];
+      const dailyScores = [];
+      attemptsList.forEach((a) => {
+        const meta = testMetaByVersion[a.test_version];
+        if (!meta?.type) return;
+        const rate = getScoreRate(a) * 100;
+        if (meta.type === "mock") {
+          modelScores.push(rate);
+        } else if (meta.type === "daily") {
+          if (dailyCategory === "__all__" || meta.category === dailyCategory) {
+            dailyScores.push(rate);
+          }
+        }
+      });
+      const modelAvg = modelScores.length
+        ? modelScores.reduce((acc, r) => acc + r, 0) / modelScores.length
+        : null;
+      const dailyAvg = dailyScores.length
+        ? dailyScores.reduce((acc, r) => acc + r, 0) / dailyScores.length
+        : null;
+      return {
+        student: s,
+        attendanceRate: att.rate,
+        unexcused: att.unexcused ?? 0,
+        modelAvg,
+        dailyAvg
+      };
+    });
+
+    const maxAttendance =
+      studentListFilters.maxAttendance === "" ? null : Number(studentListFilters.maxAttendance);
+    const minUnexcused =
+      studentListFilters.minUnexcused === "" ? null : Number(studentListFilters.minUnexcused);
+    const minModelAvg =
+      studentListFilters.minModelAvg === "" ? null : Number(studentListFilters.minModelAvg);
+    const minDailyAvg =
+      studentListFilters.minDailyAvg === "" ? null : Number(studentListFilters.minDailyAvg);
+
+    return rows.filter((row) => {
+      if (maxAttendance != null) {
+        const rate = row.attendanceRate ?? 0;
+        if (rate > maxAttendance) return false;
+      }
+      if (minUnexcused != null && row.unexcused < minUnexcused) return false;
+      if (minModelAvg != null) {
+        const value = row.modelAvg ?? 0;
+        if (value < minModelAvg) return false;
+      }
+      if (minDailyAvg != null) {
+        const value = row.dailyAvg ?? 0;
+        if (value < minDailyAvg) return false;
+      }
+      return true;
+    });
+  }, [
+    sortedStudents,
+    studentListAttendanceMap,
+    studentListAttempts,
+    studentListDailyCategory,
+    studentListFilters,
+    testMetaByVersion
+  ]);
+
   const linkBySession = useMemo(() => {
     const map = {};
     for (const link of examLinks) {
@@ -1322,6 +1424,18 @@ export default function AdminPage() {
     fetchTestSessions();
     fetchAssets();
   }, [session, profile]);
+
+  useEffect(() => {
+    if (activeTab !== "students") return;
+    fetchStudentListMetrics();
+  }, [activeTab, studentListFilters.from, studentListFilters.to]);
+
+  useEffect(() => {
+    if (!dailyCategories.length) return;
+    if (!studentListDailyCategory) {
+      setStudentListDailyCategory("__all__");
+    }
+  }, [dailyCategories, studentListDailyCategory]);
 
   useEffect(() => {
     if (!session || profile?.role !== "admin") return;
@@ -1628,6 +1742,64 @@ export default function AdminPage() {
       setSelectedStudentTab("attempts");
       fetchStudentAttempts(first.id);
     }
+  }
+
+  async function fetchStudentListMetrics() {
+    setStudentListLoading(true);
+    const { from, to } = studentListFilters;
+    let daysQuery = supabase.from("attendance_days").select("id, day_date");
+    if (from) daysQuery = daysQuery.gte("day_date", from);
+    if (to) daysQuery = daysQuery.lte("day_date", to);
+    const { data: daysData, error: daysError } = await daysQuery;
+    if (daysError) {
+      console.error("student list attendance days error:", daysError);
+      setStudentListAttendanceMap({});
+    } else {
+      const dayIds = (daysData ?? []).map((d) => d.id);
+      if (!dayIds.length) {
+        setStudentListAttendanceMap({});
+      } else {
+        const { data: entriesData, error: entriesError } = await supabase
+          .from("attendance_entries")
+          .select("day_id, student_id, status")
+          .in("day_id", dayIds);
+        if (entriesError) {
+          console.error("student list attendance entries error:", entriesError);
+          setStudentListAttendanceMap({});
+        } else {
+          const map = {};
+          (entriesData ?? []).forEach((row) => {
+            if (!row?.student_id) return;
+            const stats = map[row.student_id] || { total: 0, present: 0, unexcused: 0 };
+            if (row.status) stats.total += 1;
+            if (row.status === "P" || row.status === "L") stats.present += 1;
+            if (row.status === "A") stats.unexcused += 1;
+            map[row.student_id] = stats;
+          });
+          Object.keys(map).forEach((id) => {
+            const stats = map[id];
+            stats.rate = stats.total ? (stats.present / stats.total) * 100 : null;
+          });
+          setStudentListAttendanceMap(map);
+        }
+      }
+    }
+
+    let attemptsQuery = supabase
+      .from("attempts")
+      .select("id, student_id, test_version, correct, total, score_rate, created_at, ended_at")
+      .order("created_at", { ascending: false })
+      .limit(2000);
+    if (from) attemptsQuery = attemptsQuery.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
+    if (to) attemptsQuery = attemptsQuery.lte("created_at", new Date(`${to}T23:59:59`).toISOString());
+    const { data: attemptsData, error: attemptsError } = await attemptsQuery;
+    if (attemptsError) {
+      console.error("student list attempts error:", attemptsError);
+      setStudentListAttempts([]);
+    } else {
+      setStudentListAttempts(attemptsData ?? []);
+    }
+    setStudentListLoading(false);
   }
 
   async function toggleWithdrawn(student, nextValue) {
@@ -2539,7 +2711,7 @@ export default function AdminPage() {
     const accessToken = await getAccessToken();
     if (!accessToken) {
       setStudentMsg("Session expired. Please log in again.");
-      return;
+      return false;
     }
     const { data, error } = await supabase.functions.invoke("invite-students", {
       body: payload,
@@ -2548,7 +2720,7 @@ export default function AdminPage() {
     if (error) {
       console.error("invite-students error:", error);
       setStudentMsg(`Create failed: ${error.message}`);
-      return;
+      return false;
     }
     const results = data?.results ?? [];
     setInviteResults(results);
@@ -2565,6 +2737,7 @@ export default function AdminPage() {
     });
     setStudentMsg(`Created: ${okCount} ok / ${ngCount} failed`);
     fetchStudents();
+    return okCount > 0;
   }
 
   async function reissueTempPassword(student, tempPasswordInput) {
@@ -3610,68 +3783,139 @@ export default function AdminPage() {
 
         {activeTab === "students" ? (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div>
               <div className="admin-title">Students</div>
-              <div className="admin-subtitle">一時パスワードで生徒アカウントを作成できます。</div>
+              <div className="admin-subtitle">Student list and performance overview.</div>
             </div>
-            <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={() => setInviteOpen(true)}>Add New Student</button>
+              <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
+              <button className="btn" onClick={() => fetchStudentListMetrics()}>Refresh Metrics</button>
+            </div>
           </div>
 
           <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field">
-              <label>Email</label>
+            <div className="field small">
+              <label>Date From</label>
               <input
-                value={inviteForm.email}
-                onChange={(e) => setInviteForm((s) => ({ ...s, email: e.target.value }))}
-                placeholder="student@example.com"
+                type="date"
+                value={studentListFilters.from}
+                onChange={(e) => setStudentListFilters((s) => ({ ...s, from: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Date To</label>
+              <input
+                type="date"
+                value={studentListFilters.to}
+                onChange={(e) => setStudentListFilters((s) => ({ ...s, to: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Attendance % (≤)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="e.g. 80"
+                value={studentListFilters.maxAttendance}
+                onChange={(e) => setStudentListFilters((s) => ({ ...s, maxAttendance: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Unexcused (≥)</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="e.g. 3"
+                value={studentListFilters.minUnexcused}
+                onChange={(e) => setStudentListFilters((s) => ({ ...s, minUnexcused: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Model Avg % (≥)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="e.g. 60"
+                value={studentListFilters.minModelAvg}
+                onChange={(e) => setStudentListFilters((s) => ({ ...s, minModelAvg: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>Daily Avg % (≥)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="e.g. 60"
+                value={studentListFilters.minDailyAvg}
+                onChange={(e) => setStudentListFilters((s) => ({ ...s, minDailyAvg: e.target.value }))}
               />
             </div>
             <div className="field">
-              <label>Display Name</label>
-              <input
-                value={inviteForm.display_name}
-                onChange={(e) => setInviteForm((s) => ({ ...s, display_name: e.target.value }))}
-                placeholder="Taro"
-              />
-            </div>
-            <div className="field small">
-              <label>Student Code</label>
-              <input
-                value={inviteForm.student_code}
-                onChange={(e) => setInviteForm((s) => ({ ...s, student_code: e.target.value }))}
-                placeholder="ID001"
-              />
-            </div>
-            <div className="field small">
-              <label>Temp Password</label>
-              <input
-                value={inviteForm.temp_password}
-                onChange={(e) => setInviteForm((s) => ({ ...s, temp_password: e.target.value }))}
-                placeholder="(optional)"
-              />
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => setInviteForm((s) => ({ ...s, temp_password: generateTempPassword() }))}
+              <label>Daily Category</label>
+              <select
+                value={studentListDailyCategory}
+                onChange={(e) => setStudentListDailyCategory(e.target.value)}
               >
-                Generate
-              </button>
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button
-                className="btn btn-primary"
-                type="button"
-                onClick={() => inviteStudents(inviteForm)}
-              >
-                Create
-              </button>
+                <option value="__all__">All Categories</option>
+                {dailyCategories.map((c) => (
+                  <option key={c.name} value={c.name}>{c.name}</option>
+                ))}
+              </select>
             </div>
           </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+            <table className="admin-table" style={{ minWidth: 960 }}>
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Attendance %</th>
+                  <th>Unexcused</th>
+                  <th>Model Avg %</th>
+                  <th>Daily Avg %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {studentListRows.map((row) => {
+                  const s = row.student;
+                  const rateLabel = row.attendanceRate == null ? "-" : `${row.attendanceRate.toFixed(1)}%`;
+                  const modelLabel = row.modelAvg == null ? "-" : `${row.modelAvg.toFixed(1)}%`;
+                  const dailyLabel = row.dailyAvg == null ? "-" : `${row.dailyAvg.toFixed(1)}%`;
+                  return (
+                    <tr
+                      key={s.id}
+                      onClick={() => {
+                        setSelectedStudentId(s.id);
+                        setSelectedStudentTab("attempts");
+                        setStudentAttendance([]);
+                        setStudentAttendanceMsg("");
+                        setStudentDetailOpen(true);
+                        fetchStudentAttempts(s.id);
+                      }}
+                      className={s.is_withdrawn ? "row-withdrawn" : ""}
+                    >
+                      <td>{s.student_code ?? ""}</td>
+                      <td>{s.display_name ?? ""}</td>
+                      <td>{s.email ?? ""}</td>
+                      <td>{rateLabel}</td>
+                      <td>{row.unexcused ?? 0}</td>
+                      <td>{modelLabel}</td>
+                      <td>{dailyLabel}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {studentListLoading ? <div className="admin-help" style={{ marginTop: 6 }}>Loading metrics...</div> : null}
+          <div className="admin-msg">{studentMsg}</div>
 
           <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div className="admin-help">
@@ -3685,88 +3929,63 @@ export default function AdminPage() {
             <div className="admin-help">{csvMsg}</div>
           </div>
 
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Temp Password</th>
-                  <th>Reissue Password</th>
-                  <th>Withdraw</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedStudents.map((s) => (
-                  <tr
-                    key={s.id}
-                    onClick={() => {
-                      setSelectedStudentId(s.id);
-                      setSelectedStudentTab("attempts");
-                      setStudentAttendance([]);
-                      setStudentAttendanceMsg("");
-                      fetchStudentAttempts(s.id);
-                    }}
-                    className={s.is_withdrawn ? "row-withdrawn" : ""}
-                  >
-                    <td>{s.student_code ?? ""}</td>
-                    <td>{s.display_name ?? ""}</td>
-                    <td>{s.email ?? ""}</td>
-                    <td>{studentTempMap[s.id] ?? ""}</td>
-                    <td>
-                      <button
-                        className="btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setReissueStudent(s);
-                          setReissuePassword("");
-                          setReissueIssuedPassword("");
-                          setReissueLoading(false);
-                          setReissueMsg("");
-                          setReissueOpen(true);
-                        }}
-                      >
-                        Reissue Password
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        className={`btn ${s.is_withdrawn ? "btn-withdrawn" : ""}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleWithdrawn(s, !s.is_withdrawn);
-                        }}
-                      >
-                        {s.is_withdrawn ? "Withdrawn" : "Withdraw"}
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteStudent(s.id, s.email);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {selectedStudentId ? (
+          {selectedStudentId && studentDetailOpen ? (
             <div style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <div>
-                  <div className="admin-title">Student Attempts</div>
+                  <div className="admin-title">Student Sheet</div>
                   <div className="admin-subtitle">
                     {selectedStudent?.display_name ?? ""} {selectedStudent?.student_code ? `(${selectedStudent.student_code})` : ""}
                   </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setStudentDetailOpen(false);
+                      setSelectedStudentId("");
+                    }}
+                  >
+                    Back to List
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      if (!selectedStudent) return;
+                      setReissueStudent(selectedStudent);
+                      setReissuePassword("");
+                      setReissueIssuedPassword("");
+                      setReissueLoading(false);
+                      setReissueMsg("");
+                      setReissueOpen(true);
+                    }}
+                  >
+                    Reissue Temp Pass
+                  </button>
+                  <button
+                    className={`btn ${selectedStudent?.is_withdrawn ? "btn-withdrawn" : ""}`}
+                    onClick={() => {
+                      if (!selectedStudent) return;
+                      toggleWithdrawn(selectedStudent, !selectedStudent.is_withdrawn);
+                    }}
+                  >
+                    {selectedStudent?.is_withdrawn ? "Withdrawn" : "Withdraw"}
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => {
+                      if (!selectedStudent) return;
+                      deleteStudent(selectedStudent.id, selectedStudent.email);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div className="admin-title">Student Attempts</div>
                 </div>
                 <button className="btn" onClick={() => {
                   if (selectedStudentTab === "attendance") {
@@ -3921,35 +4140,6 @@ export default function AdminPage() {
               )}
             </div>
           ) : null}
-
-          {inviteResults.length ? (
-            <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-              <table className="admin-table" style={{ minWidth: 860 }}>
-                <thead>
-                  <tr>
-                    <th>Email</th>
-                    <th>OK</th>
-                    <th>User ID</th>
-                    <th>Error/Warning</th>
-                    <th>Temp Password</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {inviteResults.map((r, idx) => (
-                    <tr key={`${r.email}-${idx}`}>
-                      <td>{r.email}</td>
-                      <td style={{ textAlign: "center" }}>{r.ok ? "OK" : "NG"}</td>
-                      <td style={{ whiteSpace: "nowrap" }}>{r.user_id ?? ""}</td>
-                      <td>{r.error ?? r.warning ?? ""}</td>
-                      <td>{r.temp_password ?? ""}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-
-          <div className="admin-msg">{studentMsg}</div>
         </div>
         ) : null}
 
@@ -5510,6 +5700,104 @@ export default function AdminPage() {
                   {reissueLoading ? "Generating..." : "Reissue Temp Password"}
                 </button>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {inviteOpen ? (
+          <div
+            className="admin-modal-overlay"
+            onClick={() => setInviteOpen(false)}
+          >
+            <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">Add New Student</div>
+                <button className="btn" onClick={() => setInviteOpen(false)}>Close</button>
+              </div>
+              <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className="field">
+                  <label>Email</label>
+                  <input
+                    value={inviteForm.email}
+                    onChange={(e) => setInviteForm((s) => ({ ...s, email: e.target.value }))}
+                    placeholder="student@example.com"
+                  />
+                </div>
+                <div className="field">
+                  <label>Name</label>
+                  <input
+                    value={inviteForm.display_name}
+                    onChange={(e) => setInviteForm((s) => ({ ...s, display_name: e.target.value }))}
+                    placeholder="Taro"
+                  />
+                </div>
+                <div className="field small">
+                  <label>Code</label>
+                  <input
+                    value={inviteForm.student_code}
+                    onChange={(e) => setInviteForm((s) => ({ ...s, student_code: e.target.value }))}
+                    placeholder="ID001"
+                  />
+                </div>
+                <div className="field small">
+                  <label>Temp Password</label>
+                  <input
+                    value={inviteForm.temp_password}
+                    onChange={(e) => setInviteForm((s) => ({ ...s, temp_password: e.target.value }))}
+                    placeholder="(optional)"
+                  />
+                </div>
+                <div className="field small">
+                  <label>&nbsp;</label>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => setInviteForm((s) => ({ ...s, temp_password: generateTempPassword() }))}
+                  >
+                    Generate
+                  </button>
+                </div>
+                <div className="field small">
+                  <label>&nbsp;</label>
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={async () => {
+                      const ok = await inviteStudents(inviteForm);
+                      if (ok) setInviteOpen(false);
+                    }}
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+              {studentMsg ? <div className="admin-msg">{studentMsg}</div> : null}
+              {inviteResults.length ? (
+                <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                  <table className="admin-table" style={{ minWidth: 520 }}>
+                    <thead>
+                      <tr>
+                        <th>Email</th>
+                        <th>OK</th>
+                        <th>User ID</th>
+                        <th>Error/Warning</th>
+                        <th>Temp Password</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inviteResults.map((r, idx) => (
+                        <tr key={`${r.email}-${idx}`}>
+                          <td>{r.email}</td>
+                          <td style={{ textAlign: "center" }}>{r.ok ? "OK" : "NG"}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{r.user_id ?? ""}</td>
+                          <td>{r.error ?? r.warning ?? ""}</td>
+                          <td>{r.temp_password ?? ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
