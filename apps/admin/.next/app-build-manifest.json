@@ -21,16 +21,6 @@
       "static/chunks/main-app.js",
       "static/chunks/app/super/layout.js"
     ],
-    "/super/dashboard/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/super/dashboard/page.js"
-    ],
-    "/super/audit/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/super/audit/page.js"
-    ],
     "/super/tests/import/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -41,10 +31,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/super/tests/analytics/page.js"
     ],
-    "/_not-found/page": [
+    "/super/audit/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/_not-found/page.js"
+      "static/chunks/app/super/audit/page.js"
     ]
   }
 }
