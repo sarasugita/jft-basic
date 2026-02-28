@@ -194,21 +194,38 @@ export default function SuperAdminShell({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  async function invokeWithAuth(functionName, body) {
-    const {
-      data: { session: currentSession },
-    } = await supabase.auth.getSession();
+  async function getAccessToken() {
+    const { data: sessionData } = await supabase.auth.getSession();
+    let accessToken = sessionData?.session?.access_token ?? null;
+    const expiresAt = sessionData?.session?.expires_at ?? 0;
 
-    if (!currentSession) {
-      throw new Error("No active session found");
+    if (!accessToken || expiresAt * 1000 < Date.now() + 60_000) {
+      const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) {
+        throw new Error(refreshError.message || "Failed to refresh session");
+      }
+      accessToken = refreshed?.session?.access_token ?? null;
     }
 
-    return supabase.functions.invoke(functionName, {
-      body,
+    if (!accessToken) {
+      throw new Error("Please log in again.");
+    }
+
+    return accessToken;
+  }
+
+  async function invokeWithAuth(functionName, body) {
+    const accessToken = await getAccessToken();
+
+    console.log("[EdgeInvoke]", functionName, "token?", !!accessToken);
+
+    const { data, error } = await supabase.functions.invoke(functionName, {
+      body: body ?? {},
       headers: {
-        Authorization: `Bearer ${currentSession.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
     });
+    return { data, error };
   }
 
   useEffect(() => {
@@ -217,6 +234,7 @@ export default function SuperAdminShell({ children }) {
     async function loadProfile(nextSession) {
       if (!nextSession) {
         if (mounted) {
+          setSession(null);
           setProfile(null);
           setLoading(false);
         }
@@ -233,7 +251,9 @@ export default function SuperAdminShell({ children }) {
       if (!mounted) return;
 
       if (error || !nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
+        setSession(null);
         setProfile(null);
+        syncAdminAuthCookie(null);
         setLoading(false);
         router.replace("/");
         return;
@@ -273,12 +293,16 @@ export default function SuperAdminShell({ children }) {
     return children;
   }
 
-  if (loading || !session || !profile) {
+  if (loading) {
     return (
       <div className="admin-login">
         <h2>Loading...</h2>
       </div>
     );
+  }
+
+  if (!session || !profile) {
+    return null;
   }
 
   const pageMeta = getPageMeta(pathname);
