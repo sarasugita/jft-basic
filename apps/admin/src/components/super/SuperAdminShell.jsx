@@ -126,32 +126,62 @@ function Brand() {
   );
 }
 
-function SuperSidebar({ pathname, email, onSignOut }) {
+function buildOpenGroups(pathname) {
+  const groups = {};
+  for (const item of superNav) {
+    if (item.children?.length) {
+      groups[item.label] = item.children.some((child) => isActivePath(pathname, child.href));
+    }
+  }
+  return groups;
+}
+
+function SuperSidebar({ pathname, email, onNavigate, onSignOut }) {
+  const [openGroups, setOpenGroups] = useState(() => buildOpenGroups(pathname));
+
+  useEffect(() => {
+    setOpenGroups(buildOpenGroups(pathname));
+  }, [pathname]);
+
   return (
     <aside className="admin-sidebar">
       <Brand />
       <div className="admin-nav">
         {superNav.map((item) => {
           if (item.children?.length) {
-            const open = item.children.some((child) => isActivePath(pathname, child.href));
+            const open = Boolean(openGroups[item.label]);
             return (
               <div key={item.label} className={`admin-nav-group ${open ? "active" : ""}`}>
-                <div className={`admin-nav-item admin-group-toggle ${open ? "active" : ""}`}>
+                <button
+                  type="button"
+                  className={`admin-nav-item admin-group-toggle ${open ? "active" : ""}`}
+                  onClick={() => {
+                    const next = buildOpenGroups("");
+                    next[item.label] = true;
+                    setOpenGroups(next);
+                    const firstChildHref = item.children[0]?.href;
+                    if (firstChildHref && !isActivePath(pathname, firstChildHref)) {
+                      onNavigate(firstChildHref);
+                    }
+                  }}
+                >
                   <span className="admin-nav-icon" aria-hidden="true">{item.icon}</span>
                   {item.label}
                   <span className={`admin-nav-arrow ${open ? "open" : ""}`}>▾</span>
-                </div>
-                <div className="admin-subnav">
-                  {item.children.map((child) => (
-                    <Link
-                      key={child.href}
-                      href={child.href}
-                      className={`admin-subnav-item ${isActivePath(pathname, child.href) ? "active" : ""}`}
-                    >
-                      {child.label}
-                    </Link>
-                  ))}
-                </div>
+                </button>
+                {open ? (
+                  <div className="admin-subnav">
+                    {item.children.map((child) => (
+                      <Link
+                        key={child.href}
+                        href={child.href}
+                        className={`admin-subnav-item ${isActivePath(pathname, child.href) ? "active" : ""}`}
+                      >
+                        {child.label}
+                      </Link>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             );
           }
@@ -161,6 +191,7 @@ function SuperSidebar({ pathname, email, onSignOut }) {
               key={item.href}
               href={item.href}
               className={`admin-nav-item ${isActivePath(pathname, item.href) ? "active" : ""}`}
+              onClick={() => setOpenGroups(buildOpenGroups(item.href))}
             >
               <span className="admin-nav-icon" aria-hidden="true">{item.icon}</span>
               {item.label}
@@ -313,6 +344,7 @@ export default function SuperAdminShell({ children }) {
         <SuperSidebar
           pathname={pathname}
           email={session.user.email}
+          onNavigate={router.push}
           onSignOut={() => supabase.auth.signOut()}
         />
         <div className="admin-main">

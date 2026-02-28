@@ -10,6 +10,7 @@ function emptyUploadForm() {
     title: "",
     description: "",
     test_type: "daily",
+    category: "Vocabulary",
     version_label: "v1",
     status: "draft",
     visibility_scope: "global",
@@ -22,6 +23,7 @@ function emptyMetaForm() {
     question_set_id: "",
     title: "",
     description: "",
+    category: "Vocabulary",
     version_label: "",
     status: "draft",
     visibility_scope: "global",
@@ -39,6 +41,28 @@ function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "N/A";
   return date.toLocaleString();
+}
+
+function CsvGuideline({ testType }) {
+  if (testType === "daily") {
+    return (
+      <div className="admin-help" style={{ marginTop: 12 }}>
+        Daily test CSV:
+        Required columns: <code>qid</code>, <code>question_text</code>, <code>question_type</code>, <code>correct_answer</code>.
+        Optional columns: <code>options</code>, <code>media_file</code>, <code>media_type</code>, <code>order_index</code>, <code>metadata</code>.
+        Use this for a single daily-test category such as <code>Vocabulary</code>.
+      </div>
+    );
+  }
+
+  return (
+    <div className="admin-help" style={{ marginTop: 12 }}>
+      Model test CSV:
+      Required columns: <code>qid</code>, <code>question_text</code>, <code>question_type</code>, <code>correct_answer</code>.
+      Optional columns: <code>options</code>, <code>media_file</code>, <code>media_type</code>, <code>order_index</code>, <code>metadata</code>.
+      Use this for full model-test uploads, including mixed question types and any referenced assets.
+    </div>
+  );
 }
 
 function ValidationReport({ validation }) {
@@ -104,7 +128,6 @@ export default function SuperTestsImportPage() {
   const [msg, setMsg] = useState("");
   const [testType, setTestType] = useState("all");
   const [visibility, setVisibility] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
   const [questionSets, setQuestionSets] = useState([]);
   const [schools, setSchools] = useState([]);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -167,10 +190,9 @@ export default function SuperTestsImportPage() {
     return questionSets.filter((item) => {
       const matchesType = testType === "all" || item.test_type === testType;
       const matchesVisibility = visibility === "all" || item.visibility_scope === visibility;
-      const matchesStatus = statusFilter === "all" || item.status === statusFilter;
-      return matchesType && matchesVisibility && matchesStatus;
+      return matchesType && matchesVisibility;
     });
-  }, [questionSets, testType, visibility, statusFilter]);
+  }, [questionSets, testType, visibility]);
 
   async function invokeJsonFunction(name, payload) {
     const { data, error } = await invokeWithAuth(name, payload);
@@ -211,6 +233,7 @@ export default function SuperTestsImportPage() {
       title: questionSet.title ?? "",
       description: questionSet.description ?? "",
       test_type: questionSet.test_type ?? "daily",
+      category: "Vocabulary",
       version_label: `v${Number(questionSet.version ?? 0) + 1}`,
       status: "draft",
       visibility_scope: questionSet.visibility_scope ?? "global",
@@ -228,6 +251,7 @@ export default function SuperTestsImportPage() {
       question_set_id: questionSet.id,
       title: questionSet.title ?? "",
       description: questionSet.description ?? "",
+      category: "Vocabulary",
       version_label: questionSet.version_label ?? "",
       status: questionSet.status ?? "draft",
       visibility_scope: questionSet.visibility_scope ?? "global",
@@ -332,17 +356,8 @@ export default function SuperTestsImportPage() {
             <label>Visibility</label>
             <select value={visibility} onChange={(event) => setVisibility(event.target.value)}>
               <option value="all">All</option>
-              <option value="global">Global</option>
+              <option value="global">All schools</option>
               <option value="restricted">Restricted</option>
-            </select>
-          </div>
-          <div className="field small">
-            <label>Status</label>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">All</option>
-              <option value="draft">Draft</option>
-              <option value="published">Published</option>
-              <option value="archived">Archived</option>
             </select>
           </div>
         </div>
@@ -372,7 +387,9 @@ export default function SuperTestsImportPage() {
                   <td style={{ textTransform: "capitalize" }}>{item.test_type}</td>
                   <td>{item.version_label || `v${item.version}`}</td>
                   <td>
-                    <div style={{ textTransform: "capitalize", fontWeight: 700 }}>{item.visibility_scope}</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {item.visibility_scope === "global" ? "All schools" : "Restricted"}
+                    </div>
                     {item.visibility_scope === "restricted" ? (
                       <div className="daily-code">
                         {(item.visible_schools ?? []).map((school) => school.name).join(", ") || "No schools"}
@@ -439,12 +456,29 @@ export default function SuperTestsImportPage() {
                 <label>Test Type</label>
                 <select
                   value={uploadForm.test_type}
-                  onChange={(event) => setUploadForm((prev) => ({ ...prev, test_type: event.target.value }))}
+                  onChange={(event) =>
+                    setUploadForm((prev) => ({
+                      ...prev,
+                      test_type: event.target.value,
+                      category: event.target.value === "daily" ? prev.category || "Vocabulary" : "",
+                    }))
+                  }
                 >
                   <option value="daily">Daily</option>
                   <option value="model">Model</option>
                 </select>
               </div>
+              {uploadForm.test_type === "daily" ? (
+                <div className="field small">
+                  <label>Category</label>
+                  <select
+                    value={uploadForm.category}
+                    onChange={(event) => setUploadForm((prev) => ({ ...prev, category: event.target.value }))}
+                  >
+                    <option value="Vocabulary">Vocabulary</option>
+                  </select>
+                </div>
+              ) : null}
               <div className="field small">
                 <label>Version Label</label>
                 <input
@@ -453,23 +487,12 @@ export default function SuperTestsImportPage() {
                 />
               </div>
               <div className="field small">
-                <label>Status</label>
-                <select
-                  value={uploadForm.status}
-                  onChange={(event) => setUploadForm((prev) => ({ ...prev, status: event.target.value }))}
-                >
-                  <option value="draft">Draft</option>
-                  <option value="published">Published</option>
-                  <option value="archived">Archived</option>
-                </select>
-              </div>
-              <div className="field small">
                 <label>Visibility</label>
                 <select
                   value={uploadForm.visibility_scope}
                   onChange={(event) => setUploadForm((prev) => ({ ...prev, visibility_scope: event.target.value }))}
                 >
-                  <option value="global">Global</option>
+                  <option value="global">All schools</option>
                   <option value="restricted">Restricted</option>
                 </select>
               </div>
@@ -500,10 +523,7 @@ export default function SuperTestsImportPage() {
               </div>
             ) : null}
 
-            <div className="admin-help" style={{ marginTop: 12 }}>
-              Required CSV columns: <code>qid</code>, <code>question_text</code>, <code>question_type</code>, <code>correct_answer</code>.
-              Optional columns: <code>options</code>, <code>media_file</code>, <code>media_type</code>, <code>order_index</code>, <code>metadata</code>.
-            </div>
+            <CsvGuideline testType={uploadForm.test_type} />
             {validationMsg ? <div className="admin-msg">{validationMsg}</div> : null}
             <ValidationReport validation={validation} />
 
@@ -550,23 +570,12 @@ export default function SuperTestsImportPage() {
                 />
               </div>
               <div className="field small">
-                <label>Status</label>
-                <select
-                  value={metaForm.status}
-                  onChange={(event) => setMetaForm((prev) => ({ ...prev, status: event.target.value }))}
-                >
-                  <option value="draft">Draft</option>
-                  <option value="published">Published</option>
-                  <option value="archived">Archived</option>
-                </select>
-              </div>
-              <div className="field small">
                 <label>Visibility</label>
                 <select
                   value={metaForm.visibility_scope}
                   onChange={(event) => setMetaForm((prev) => ({ ...prev, visibility_scope: event.target.value }))}
                 >
-                  <option value="global">Global</option>
+                  <option value="global">All schools</option>
                   <option value="restricted">Restricted</option>
                 </select>
               </div>
