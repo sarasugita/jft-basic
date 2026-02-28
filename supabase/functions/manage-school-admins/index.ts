@@ -35,6 +35,11 @@ function unauthorized(message = "Unauthorized") {
   return json({ error: message }, { status: 401 });
 }
 
+async function logAuditEvent(adminClient: ReturnType<typeof createClient>, payload: Record<string, unknown>) {
+  const { error } = await adminClient.from("audit_logs").insert(payload);
+  if (error) console.error("audit log insert failed:", error.message);
+}
+
 function generateTempPassword(length = 12) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
   const bytes = crypto.getRandomValues(new Uint8Array(length));
@@ -77,7 +82,7 @@ serve(async (req) => {
 
   const { data: callerProfile, error: profileError } = await adminClient
     .from("profiles")
-    .select("id, role, account_status")
+    .select("id, role, account_status, email")
     .eq("id", callerUserData.user.id)
     .single();
   if (profileError || !callerProfile) return unauthorized("Profile not found");
@@ -145,6 +150,20 @@ serve(async (req) => {
       return bad("Failed to create admin profile", { detail: upsertError.message });
     }
 
+    await logAuditEvent(adminClient, {
+      actor_user_id: callerUserData.user.id,
+      actor_role: callerProfile.role,
+      actor_email: callerProfile.email ?? null,
+      action_type: "create",
+      entity_type: "admin",
+      entity_id: createData.user.id,
+      school_id: schoolId,
+      metadata: {
+        email,
+        display_name: displayName,
+      },
+    });
+
     return ok({
       ok: true,
       action,
@@ -196,6 +215,20 @@ serve(async (req) => {
       return bad("Failed to update admin profile", { detail: updateError.message });
     }
 
+    await logAuditEvent(adminClient, {
+      actor_user_id: callerUserData.user.id,
+      actor_role: callerProfile.role,
+      actor_email: callerProfile.email ?? null,
+      action_type: "update",
+      entity_type: "admin",
+      entity_id: userId,
+      school_id: schoolId,
+      metadata: {
+        email,
+        display_name: displayName,
+      },
+    });
+
     return ok({ ok: true, action, user_id: userId });
   }
 
@@ -214,6 +247,20 @@ serve(async (req) => {
   if (statusError) {
     return bad("Failed to update admin status", { detail: statusError.message });
   }
+
+  await logAuditEvent(adminClient, {
+    actor_user_id: callerUserData.user.id,
+    actor_role: callerProfile.role,
+    actor_email: callerProfile.email ?? null,
+    action_type: accountStatus === "active" ? "enable" : "disable",
+    entity_type: "admin",
+    entity_id: userId,
+    school_id: schoolId,
+    metadata: {
+      account_status: accountStatus,
+      email: targetProfile.email ?? null,
+    },
+  });
 
   return ok({ ok: true, action, user_id: userId, account_status: accountStatus });
 });

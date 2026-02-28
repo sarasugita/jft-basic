@@ -1,7 +1,14 @@
 {
+  "/_not-found/page": "app/_not-found/page.js",
   "/page": "app/page.js",
-  "/super/tests/import/page": "app/super/tests/import/page.js",
-  "/super/schools/page": "app/super/schools/page.js",
+  "/super/dashboard/page": "app/super/dashboard/page.js",
+  "/super/page": "app/super/page.js",
   "/super/tests/analytics/page": "app/super/tests/analytics/page.js",
-  "/super/audit/page": "app/super/audit/page.js"
+  "/super/schools/[schoolId]/page": "app/super/schools/[schoolId]/page.js",
+  "/super/schools/page": "app/super/schools/page.js",
+  "/super/tests/import/page": "app/super/tests/import/page.js",
+  "/super/tests/page": "app/super/tests/page.js",
+  "/super/schools/[schoolId]/admins/page": "app/super/schools/[schoolId]/admins/page.js",
+  "/super/audit/page": "app/super/audit/page.js",
+  "/super/schools/[schoolId]/admin/[[...slug]]/page": "app/super/schools/[schoolId]/admin/[[...slug]]/page.js"
 }

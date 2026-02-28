@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { bad, ensureVisibleSchools, normalizeText, ok, replaceVisibility, requireSuperAdmin } from "../_shared/questionSet.ts";
+import { bad, ensureVisibleSchools, logAuditEvent, normalizeText, ok, replaceVisibility, requireSuperAdmin } from "../_shared/questionSet.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return ok({ ok: true });
@@ -43,6 +43,16 @@ serve(async (req) => {
     questionSetId,
     visibilityScope === "restricted" ? schoolIds : [],
   );
+
+  await logAuditEvent(context.adminClient, context, {
+    actionType: "update",
+    entityType: "question_set_visibility",
+    entityId: questionSetId,
+    metadata: {
+      visibility_scope: visibilityScope,
+      school_ids: schoolIds,
+    },
+  });
 
   return ok({ ok: true, question_set_id: questionSetId });
 });

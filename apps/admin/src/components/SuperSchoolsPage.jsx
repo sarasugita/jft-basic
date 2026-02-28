@@ -23,24 +23,7 @@ function formatPercent(value) {
 
 function formatDate(value) {
   if (!value) return "N/A";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return "N/A";
-  return date.toLocaleDateString();
-}
-
-function getWindowEnd(school) {
-  if (!school?.end_date) return new Date();
-  const end = new Date(`${school.end_date}T23:59:59`);
-  return Number.isNaN(end.getTime()) ? new Date() : end;
-}
-
-function isWithinSchoolWindow(isoValue, school) {
-  if (!school?.start_date) return true;
-  const valueDate = new Date(isoValue);
-  const start = new Date(`${school.start_date}T00:00:00`);
-  const end = getWindowEnd(school);
-  if (Number.isNaN(valueDate.getTime()) || Number.isNaN(start.getTime())) return false;
-  return valueDate >= start && valueDate <= end;
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? String(value) : "N/A";
 }
 
 function computeSummary(schoolId, metrics) {
@@ -76,34 +59,16 @@ export default function SuperSchoolsPage() {
     async function load() {
       setLoading(true);
       setMsg("");
-      const [
-        schoolsRes,
-        studentsRes,
-        attemptsRes,
-        testsRes,
-        attendanceEntriesRes,
-        attendanceDaysRes,
-      ] = await Promise.all([
+      const [schoolsRes, metricsRes] = await Promise.all([
         supabase
           .from("schools")
           .select("id, name, status, academic_year, term, start_date, end_date, created_at, updated_at")
           .order("created_at", { ascending: true }),
-        supabase
-          .from("profiles")
-          .select("school_id")
-          .eq("role", "student"),
-        supabase
-          .from("attempts")
-          .select("school_id, test_version, score_rate, correct, total, created_at"),
-        supabase
-          .from("tests")
-          .select("school_id, version, type"),
-        supabase
-          .from("attendance_entries")
-          .select("school_id, status, day_id"),
-        supabase
-          .from("attendance_days")
-          .select("id, school_id, day_date"),
+        supabase.rpc("super_school_metrics_summary", {
+          p_date_from: null,
+          p_date_to: null,
+          p_test_type: "all",
+        }),
       ]);
 
       if (cancelled) return;
@@ -115,72 +80,19 @@ export default function SuperSchoolsPage() {
         return;
       }
 
+      if (metricsRes.error) {
+        setMsg(metricsRes.error.message || "Failed to load school metrics.");
+      }
+
       const studentsBySchool = {};
-      for (const row of studentsRes.data ?? []) {
-        if (!row.school_id) continue;
-        studentsBySchool[row.school_id] = (studentsBySchool[row.school_id] ?? 0) + 1;
-      }
-
-      const schoolsById = Object.fromEntries((schoolsRes.data ?? []).map((school) => [school.id, school]));
-      const testsByVersion = Object.fromEntries(
-        (testsRes.data ?? []).map((test) => [test.version, { type: test.type, school_id: test.school_id }])
-      );
-
-      const dailyAccumulator = {};
-      const modelAccumulator = {};
-      for (const row of attemptsRes.data ?? []) {
-        if (!row.school_id) continue;
-        const school = schoolsById[row.school_id];
-        if (!school || !isWithinSchoolWindow(row.created_at ?? new Date().toISOString(), school)) continue;
-        const testMeta = testsByVersion[row.test_version];
-        if (!testMeta) continue;
-        const score =
-          typeof row.score_rate === "number"
-            ? row.score_rate
-            : (row.total ? Number(row.correct ?? 0) / Number(row.total) : null);
-        if (score == null || Number.isNaN(score)) continue;
-        const target =
-          testMeta.type === "daily"
-            ? dailyAccumulator
-            : testMeta.type === "mock"
-              ? modelAccumulator
-              : null;
-        if (!target) continue;
-        const prev = target[row.school_id] ?? { sum: 0, count: 0 };
-        prev.sum += score;
-        prev.count += 1;
-        target[row.school_id] = prev;
-      }
-
-      const dailyAverageBySchool = {};
-      for (const [schoolId, value] of Object.entries(dailyAccumulator)) {
-        dailyAverageBySchool[schoolId] = value.count ? value.sum / value.count : null;
-      }
-
-      const modelAverageBySchool = {};
-      for (const [schoolId, value] of Object.entries(modelAccumulator)) {
-        modelAverageBySchool[schoolId] = value.count ? value.sum / value.count : null;
-      }
-
-      const attendanceDayMap = Object.fromEntries(
-        (attendanceDaysRes.data ?? []).map((day) => [day.id, day])
-      );
-      const attendanceAccumulator = {};
-      for (const row of attendanceEntriesRes.data ?? []) {
-        if (!row.school_id) continue;
-        const school = schoolsById[row.school_id];
-        const day = attendanceDayMap[row.day_id];
-        if (!school || !day) continue;
-        if (!isWithinSchoolWindow(`${day.day_date}T12:00:00`, school)) continue;
-        const prev = attendanceAccumulator[row.school_id] ?? { present: 0, total: 0 };
-        prev.total += 1;
-        if (row.status === "P") prev.present += 1;
-        attendanceAccumulator[row.school_id] = prev;
-      }
-
       const attendanceRateBySchool = {};
-      for (const [schoolId, value] of Object.entries(attendanceAccumulator)) {
-        attendanceRateBySchool[schoolId] = value.total ? value.present / value.total : null;
+      const dailyAverageBySchool = {};
+      const modelAverageBySchool = {};
+      for (const row of metricsRes.data ?? []) {
+        studentsBySchool[row.school_id] = Number(row.student_count ?? 0);
+        attendanceRateBySchool[row.school_id] = row.attendance_avg ?? null;
+        dailyAverageBySchool[row.school_id] = row.daily_avg ?? null;
+        modelAverageBySchool[row.school_id] = row.model_avg ?? null;
       }
 
       setSchools(schoolsRes.data ?? []);
@@ -229,6 +141,8 @@ export default function SuperSchoolsPage() {
 
   async function saveSchool() {
     const payload = {
+      action: form.id ? "update" : "create",
+      school_id: form.id || undefined,
       name: form.name.trim(),
       status: form.status,
       academic_year: form.academic_year.trim() || null,
@@ -244,13 +158,10 @@ export default function SuperSchoolsPage() {
 
     setSaving(true);
     setMsg("");
-    const query = form.id
-      ? supabase.from("schools").update(payload).eq("id", form.id)
-      : supabase.from("schools").insert(payload);
-    const { error } = await query;
+    const { data, error } = await supabase.functions.invoke("manage-schools", { body: payload });
     setSaving(false);
-    if (error) {
-      setMsg(`Save failed: ${error.message}`);
+    if (error || data?.error) {
+      setMsg(`Save failed: ${error?.message || data?.error}`);
       return;
     }
     setModalOpen(false);
@@ -261,12 +172,15 @@ export default function SuperSchoolsPage() {
   async function toggleSchoolStatus(school) {
     setMsg("");
     const nextStatus = school.status === "active" ? "inactive" : "active";
-    const { error } = await supabase
-      .from("schools")
-      .update({ status: nextStatus, updated_at: new Date().toISOString() })
-      .eq("id", school.id);
-    if (error) {
-      setMsg(`Status update failed: ${error.message}`);
+    const { data, error } = await supabase.functions.invoke("manage-schools", {
+      body: {
+        action: "set_status",
+        school_id: school.id,
+        status: nextStatus,
+      },
+    });
+    if (error || data?.error) {
+      setMsg(`Status update failed: ${error?.message || data?.error}`);
       return;
     }
     setRefreshNonce((value) => value + 1);

@@ -46,6 +46,7 @@ export type CallerContext = {
     role: string | null;
     account_status?: string | null;
     display_name?: string | null;
+    email?: string | null;
     school_id?: string | null;
   };
 };
@@ -70,7 +71,7 @@ export async function requireSuperAdmin(req: Request): Promise<CallerContext | R
   });
   const { data: callerProfile, error: profileError } = await adminClient
     .from("profiles")
-    .select("id, role, account_status, display_name, school_id")
+    .select("id, role, account_status, display_name, email, school_id")
     .eq("id", callerUserData.user.id)
     .single();
 
@@ -84,6 +85,39 @@ export async function requireSuperAdmin(req: Request): Promise<CallerContext | R
     callerUserId: callerUserData.user.id,
     callerProfile,
   };
+}
+
+export async function logAuditEvent(
+  adminClient: ReturnType<typeof createClient>,
+  context: CallerContext,
+  {
+    actionType,
+    entityType,
+    entityId,
+    schoolId = null,
+    metadata = {},
+  }: {
+    actionType: string;
+    entityType: string;
+    entityId: string;
+    schoolId?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const { error } = await adminClient.from("audit_logs").insert({
+    actor_user_id: context.callerUserId,
+    actor_role: context.callerProfile.role,
+    actor_email: context.callerProfile.email ?? null,
+    action_type: actionType,
+    entity_type: entityType,
+    entity_id: entityId,
+    school_id: schoolId,
+    metadata,
+  });
+
+  if (error) {
+    console.error("audit log insert failed:", error.message);
+  }
 }
 
 export type UploadMetadata = {

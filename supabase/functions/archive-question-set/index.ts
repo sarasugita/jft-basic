@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { bad, normalizeText, ok, requireSuperAdmin } from "../_shared/questionSet.ts";
+import { bad, logAuditEvent, normalizeText, ok, requireSuperAdmin } from "../_shared/questionSet.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return ok({ ok: true });
@@ -23,6 +23,13 @@ serve(async (req) => {
     .update({ status: "archived" })
     .eq("id", questionSetId);
   if (error) return bad(error.message);
+
+  await logAuditEvent(context.adminClient, context, {
+    actionType: "archive",
+    entityType: "question_set",
+    entityId: questionSetId,
+    metadata: { status: "archived" },
+  });
 
   return ok({ ok: true, question_set_id: questionSetId, status: "archived" });
 });

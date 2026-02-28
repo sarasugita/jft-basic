@@ -1018,6 +1018,15 @@ body { padding: 0; }
   gap: 4px;
 }
 
+.super-audit-meta {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #374151;
+  max-width: 340px;
+}
+
 @media (min-width: 980px) {
   .super-metrics-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -4,11 +4,14 @@
 
 - `/super` redirects to `/super/dashboard`
 - `/super/dashboard` is the Super Admin landing page
+- `/super/dashboard` shows real aggregate totals with a date range filter
 - `/super/schools` is the school management hub
 - `/super/tests/import` is the global question-set management shell
 - `/super/tests/import` supports CSV validation, asset upload, versioning, metadata edits, and visibility management
 - `/super/tests/analytics` is the cross-school analytics shell
+- `/super/tests/analytics` shows real school comparison and question-set performance aggregates
 - `/super/audit` is the audit/logs placeholder
+- `/super/audit` shows basic audit events for school, admin, and question-set mutations
 - `/super/schools/:schoolId` redirects to `/super/schools/:schoolId/admin`
 - `/super/schools/:schoolId/admin/*` reuses the existing admin console in a forced school scope
 
@@ -67,7 +70,9 @@ Required existing vars:
 - SQL migration: `supabase/sql/phase3_initial_school_and_admins.sql`
 - SQL migration: `supabase/sql/phase4_tests_management_architecture.sql`
 - SQL migration: `supabase/sql/phase5_question_set_upload_support.sql`
+- SQL migration: `supabase/sql/phase6_super_admin_completion_pack.sql`
 - Edge Function: `supabase/functions/manage-school-admins`
+- Edge Function: `supabase/functions/manage-schools`
 - Edge Functions:
   `supabase/functions/validate-question-set-upload`
   `supabase/functions/create-question-set`
@@ -83,6 +88,18 @@ Required existing vars:
 - Model Test: average attempt score for tests where `tests.type = 'mock'`.
 - Aggregation window: `school.start_date -> school.end_date`, or `school.start_date -> today` when `end_date` is empty.
 - If data is missing for a metric, the UI shows `N/A`.
+
+## Implemented Now
+
+- Global dashboard cards use backend aggregate RPCs with a date range filter.
+- Tests analytics uses backend aggregate RPCs for school comparison and question-set performance.
+- Audit logs are written server-side from school, school-admin, and question-set mutation endpoints.
+- Schools create/update/status changes now go through a server endpoint instead of direct client mutations.
+
+## Remaining TODO
+
+- Question-level accuracy for the new question-set runtime still needs dedicated result-fact storage.
+- Analytics charting is intentionally kept table-first for now.
 
 ## School Admin Onboarding
 

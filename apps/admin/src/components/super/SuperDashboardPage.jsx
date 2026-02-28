@@ -13,14 +13,36 @@ function MetricCard({ label, value, help }) {
   );
 }
 
+function toDateInput(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function defaultRange() {
+  const now = new Date();
+  const from = new Date(now);
+  from.setDate(now.getDate() - 29);
+  return {
+    from: toDateInput(from),
+    to: toDateInput(now),
+  };
+}
+
+function formatPercent(value) {
+  if (value == null || Number.isNaN(Number(value))) return "N/A";
+  return `${Math.round(Number(value) * 100)}%`;
+}
+
 export default function SuperDashboardPage() {
   const { supabase } = useSuperAdmin();
+  const [filters, setFilters] = useState(defaultRange);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [stats, setStats] = useState({
-    schools: null,
-    students: null,
-    attempts: null,
+    total_schools: null,
+    total_students: null,
+    total_tests_taken: null,
+    avg_score: null,
+    attendance_avg: null,
   });
 
   useEffect(() => {
@@ -29,24 +51,32 @@ export default function SuperDashboardPage() {
     async function load() {
       setLoading(true);
       setMsg("");
-
-      const [schoolsRes, studentsRes, attemptsRes] = await Promise.all([
-        supabase.from("schools").select("id", { count: "exact", head: true }),
-        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "student"),
-        supabase.from("attempts").select("id", { count: "exact", head: true }),
-      ]);
+      const { data, error } = await supabase.rpc("super_dashboard_metrics", {
+        p_date_from: filters.from || null,
+        p_date_to: filters.to || null,
+      });
 
       if (cancelled) return;
 
-      const errors = [schoolsRes.error, studentsRes.error, attemptsRes.error].filter(Boolean);
-      if (errors.length) {
-        setMsg(errors[0].message || "Failed to load dashboard metrics.");
+      if (error) {
+        setMsg(error.message || "Failed to load dashboard metrics.");
+        setStats({
+          total_schools: null,
+          total_students: null,
+          total_tests_taken: null,
+          avg_score: null,
+          attendance_avg: null,
+        });
+        setLoading(false);
+        return;
       }
 
-      setStats({
-        schools: schoolsRes.count ?? null,
-        students: studentsRes.count ?? null,
-        attempts: attemptsRes.count ?? null,
+      setStats(data?.[0] ?? {
+        total_schools: null,
+        total_students: null,
+        total_tests_taken: null,
+        avg_score: null,
+        attendance_avg: null,
       });
       setLoading(false);
     }
@@ -55,38 +85,70 @@ export default function SuperDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [supabase]);
+  }, [filters, supabase]);
 
   return (
     <div className="super-page-content">
+      <div className="admin-panel">
+        <div className="super-toolbar">
+          <div>
+            <div className="admin-title">Date Range</div>
+            <div className="admin-help">Default range is the last 30 days.</div>
+          </div>
+        </div>
+        <div className="admin-form" style={{ marginTop: 12 }}>
+          <div className="field small">
+            <label>From</label>
+            <input
+              type="date"
+              value={filters.from}
+              onChange={(event) => setFilters((prev) => ({ ...prev, from: event.target.value }))}
+            />
+          </div>
+          <div className="field small">
+            <label>To</label>
+            <input
+              type="date"
+              value={filters.to}
+              onChange={(event) => setFilters((prev) => ({ ...prev, to: event.target.value }))}
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="admin-grid super-metrics-grid">
         <MetricCard
           label="Total schools"
-          value={loading ? "..." : stats.schools ?? "N/A"}
-          help="All schools currently registered in the platform."
+          value={loading ? "..." : stats.total_schools ?? "N/A"}
+          help="All registered schools."
         />
         <MetricCard
           label="Total students"
-          value={loading ? "..." : stats.students ?? "N/A"}
-          help="Student profiles across all schools."
+          value={loading ? "..." : stats.total_students ?? "N/A"}
+          help="Student profiles across every school."
         />
         <MetricCard
           label="Total tests taken"
-          value={loading ? "..." : stats.attempts ?? "N/A"}
-          help="Attempt records captured across the system."
+          value={loading ? "..." : stats.total_tests_taken ?? "N/A"}
+          help="Attempts recorded inside the selected range."
         />
         <MetricCard
           label="Avg score"
-          value="Coming soon"
-          help="Global scoring summary will be wired after the new test flows settle."
+          value={loading ? "..." : formatPercent(stats.avg_score)}
+          help="Overall average score across recorded attempts."
         />
       </div>
 
       <div className="admin-panel" style={{ marginTop: 12 }}>
         <div className="admin-title">Global Summary</div>
         <div className="admin-help" style={{ marginTop: 6 }}>
-          This dashboard is the global entry point for cross-school operations. More metrics will be added once the
-          question-set and test-instance runtime is fully connected.
+          Attendance average is calculated from attendance entries where `P` counts as present.
+        </div>
+        <div className="admin-kpi" style={{ marginTop: 12 }}>
+          <div className="box">
+            <div className="label">Attendance Avg</div>
+            <div className="value">{loading ? "..." : formatPercent(stats.attendance_avg)}</div>
+          </div>
         </div>
         {msg ? <div className="admin-msg">{msg}</div> : null}
       </div>

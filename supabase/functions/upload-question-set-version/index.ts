@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import {
   bad,
   ensureVisibleSchools,
+  logAuditEvent,
   ok,
   parseUploadForm,
   replaceVisibility,
@@ -103,6 +104,20 @@ serve(async (req) => {
       inserted.id,
       parsed.metadata.visibility_scope === "restricted" ? parsed.metadata.school_ids : [],
     );
+
+    await logAuditEvent(context.adminClient, context, {
+      actionType: "upload",
+      entityType: "question_set_version",
+      entityId: inserted.id,
+      metadata: {
+        source_question_set_id: sourceSet.id,
+        library_key: sourceSet.library_key,
+        version_label: parsed.metadata.version_label,
+        status: parsed.metadata.status,
+        visibility_scope: parsed.metadata.visibility_scope,
+        school_ids: parsed.metadata.school_ids,
+      },
+    });
 
     return ok({
       ok: true,
