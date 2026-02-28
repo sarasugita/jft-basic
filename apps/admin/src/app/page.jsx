@@ -1508,7 +1508,7 @@ export default function AdminPage() {
     }
     supabase
       .from("profiles")
-      .select("id, role, display_name")
+      .select("id, role, display_name, school_id")
       .eq("id", session.user.id)
       .single()
       .then(({ data, error }) => {
@@ -2395,13 +2395,17 @@ export default function AdminPage() {
 
   async function openAttendanceDay(dayDate) {
     if (!dayDate) return;
+    if (!profile?.school_id) {
+      setAttendanceMsg("School context is missing for this admin.");
+      return;
+    }
     setAttendanceMsg("");
     setAttendanceModalOpen(true);
     setAttendanceSaving(false);
     setApprovedAbsenceByStudent({});
     const { data, error } = await supabase
       .from("attendance_days")
-      .upsert({ day_date: dayDate }, { onConflict: "day_date" })
+      .upsert({ school_id: profile.school_id, day_date: dayDate }, { onConflict: "school_id,day_date" })
       .select()
       .single();
     if (error || !data?.id) {

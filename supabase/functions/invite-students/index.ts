@@ -1,6 +1,7 @@
 // Supabase Edge Function: invite-students
-// - Requires an authenticated admin user (checked via public.profiles.role)
-// - Creates users with temporary passwords and upserts public.profiles
+// - Requires an authenticated super_admin or school admin.
+// - School admins are restricted to their own school.
+// - Creates student users with a temporary password and upserts public.profiles.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.94.1";
@@ -43,11 +44,13 @@ function normalizeStudent(input: any) {
   const displayName = String(input?.display_name ?? input?.displayName ?? "").trim();
   const studentCode = String(input?.student_code ?? input?.studentCode ?? "").trim();
   const tempPassword = String(input?.temp_password ?? input?.tempPassword ?? "").trim();
+  const schoolId = String(input?.school_id ?? input?.schoolId ?? "").trim();
   return {
     email,
     display_name: displayName || null,
     student_code: studentCode || null,
     temp_password: tempPassword || null,
+    school_id: schoolId || null,
   };
 }
 
@@ -80,11 +83,16 @@ serve(async (req) => {
 
   const { data: callerProfile, error: profileError } = await adminClient
     .from("profiles")
-    .select("id, role")
+    .select("id, role, school_id")
     .eq("id", callerUserData.user.id)
     .single();
   if (profileError || !callerProfile) return unauthorized("Profile not found");
-  if (callerProfile.role !== "admin") return unauthorized("Admin only");
+  if (!["super_admin", "admin"].includes(callerProfile.role)) {
+    return unauthorized("Super admin or school admin only");
+  }
+  if (callerProfile.role === "admin" && !callerProfile.school_id) {
+    return unauthorized("Admin is missing school assignment");
+  }
 
   let body: any;
   try {
@@ -93,6 +101,7 @@ serve(async (req) => {
     return bad("Invalid JSON body");
   }
 
+  const requestedSchoolId = String(body?.school_id ?? body?.schoolId ?? "").trim() || null;
   const list = Array.isArray(body?.students) ? body.students : [body];
   const students = list.map(normalizeStudent).filter((s) => s.email);
   if (students.length == 0) return bad("No students provided");
@@ -101,6 +110,29 @@ serve(async (req) => {
 
   for (const s of students) {
     try {
+      const targetSchoolId =
+        callerProfile.role === "super_admin"
+          ? (s.school_id ?? requestedSchoolId)
+          : callerProfile.school_id;
+      if (!targetSchoolId) {
+        results.push({ email: s.email, ok: false, error: "school_id is required for student creation" });
+        continue;
+      }
+
+      const { data: school, error: schoolError } = await adminClient
+        .from("schools")
+        .select("id, status")
+        .eq("id", targetSchoolId)
+        .single();
+      if (schoolError || !school) {
+        results.push({ email: s.email, ok: false, error: "School not found" });
+        continue;
+      }
+      if (school.status !== "active") {
+        results.push({ email: s.email, ok: false, error: "School is inactive" });
+        continue;
+      }
+
       const tempPassword = s.temp_password || generateTempPassword();
       const { data: createData, error: createError } = await adminClient.auth.admin.createUser({
         email: s.email,
@@ -125,6 +157,7 @@ serve(async (req) => {
           {
             id: userId,
             role: "student",
+            school_id: targetSchoolId,
             email: s.email,
             display_name: s.display_name,
             student_code: s.student_code,

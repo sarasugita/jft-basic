@@ -37,6 +37,10 @@ See `supabase/sql/schema.sql` for required tables/columns:
 - `profiles` additions (`email`, `force_password_change`)
 - `tests` / `questions` / `choices`
 - `test_assets`
+- `supabase/sql/phase1_multi_school_rbac.sql` for schools, RBAC, school scoping, and RLS
+
+Multi-school setup and promotion steps:
+- `docs/multi-school-rbac.md`
 
 Question CSV format: `docs/question_csv.md`
 

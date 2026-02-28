@@ -1,6 +1,7 @@
 // Supabase Edge Function: delete-student
-// - Requires an authenticated admin user (checked via public.profiles.role)
-// - Deletes auth user + profile (attempts are not deleted)
+// - Requires an authenticated super_admin or school admin.
+// - School admins are restricted to students in their own school.
+// - Deletes auth user + profile (attempts are not deleted).
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.94.1";
@@ -61,11 +62,16 @@ serve(async (req) => {
 
   const { data: callerProfile, error: profileError } = await adminClient
     .from("profiles")
-    .select("id, role")
+    .select("id, role, school_id")
     .eq("id", callerUserData.user.id)
     .single();
   if (profileError || !callerProfile) return unauthorized("Profile not found");
-  if (callerProfile.role !== "admin") return unauthorized("Admin only");
+  if (!["super_admin", "admin"].includes(callerProfile.role)) {
+    return unauthorized("Super admin or school admin only");
+  }
+  if (callerProfile.role === "admin" && !callerProfile.school_id) {
+    return unauthorized("Admin is missing school assignment");
+  }
 
   let body: any;
   try {
@@ -76,6 +82,17 @@ serve(async (req) => {
 
   const userId = String(body?.user_id ?? "").trim();
   if (!userId) return bad("Missing user_id");
+
+  const { data: targetProfile, error: targetProfileError } = await adminClient
+    .from("profiles")
+    .select("id, role, school_id")
+    .eq("id", userId)
+    .single();
+  if (targetProfileError || !targetProfile) return bad("Target profile not found");
+  if (targetProfile.role !== "student") return unauthorized("Only student accounts can be deleted here");
+  if (callerProfile.role === "admin" && targetProfile.school_id !== callerProfile.school_id) {
+    return unauthorized("Cannot delete a student from another school");
+  }
 
   const { error: delError } = await adminClient.auth.admin.deleteUser(userId);
   if (delError) return bad(delError.message);

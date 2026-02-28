@@ -1,6 +1,7 @@
 // Supabase Edge Function: reissue-temp-password
-// - Requires an authenticated admin user (checked via public.profiles.role)
-// - Resets a user's password to a temporary password and forces password change
+// - Requires an authenticated super_admin or school admin.
+// - School admins are restricted to students in their own school.
+// - Resets a student's password to a temporary password and forces password change.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.94.1";
@@ -65,11 +66,16 @@ serve(async (req) => {
 
   const { data: callerProfile, error: profileError } = await adminClient
     .from("profiles")
-    .select("id, role")
+    .select("id, role, school_id")
     .eq("id", callerUserData.user.id)
     .single();
   if (profileError || !callerProfile) return unauthorized("Profile not found");
-  if (callerProfile.role !== "admin") return unauthorized("Admin only");
+  if (!["super_admin", "admin"].includes(callerProfile.role)) {
+    return unauthorized("Super admin or school admin only");
+  }
+  if (callerProfile.role === "admin" && !callerProfile.school_id) {
+    return unauthorized("Admin is missing school assignment");
+  }
 
   let body: any;
   try {
@@ -82,6 +88,17 @@ serve(async (req) => {
   const email = String(body?.email ?? "").trim().toLowerCase();
   const tempPassword = String(body?.temp_password ?? "").trim() || generateTempPassword();
   if (!userId) return bad("user_id is required");
+
+  const { data: targetProfile, error: targetProfileError } = await adminClient
+    .from("profiles")
+    .select("id, role, school_id")
+    .eq("id", userId)
+    .single();
+  if (targetProfileError || !targetProfile) return bad("Target profile not found");
+  if (targetProfile.role !== "student") return unauthorized("Only student accounts can be updated here");
+  if (callerProfile.role === "admin" && targetProfile.school_id !== callerProfile.school_id) {
+    return unauthorized("Cannot reset a student from another school");
+  }
 
   const { data: updateData, error: updateError } = await adminClient.auth.admin.updateUserById(
     userId,
