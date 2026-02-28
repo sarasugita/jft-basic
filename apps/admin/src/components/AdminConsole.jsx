@@ -770,7 +770,6 @@ export default function AdminConsole({
   const router = useRouter();
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
   const forcedSchoolName = forcedSchoolScope?.name ?? forcedSchoolId ?? "";
-  const rootSupabase = useMemo(() => createAdminSupabaseClient(), []);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [schoolAssignments, setSchoolAssignments] = useState([]);
@@ -1587,17 +1586,26 @@ export default function AdminConsole({
       const schoolIds = Array.from(
         new Set([profile.school_id, ...(assignments ?? []).map((row) => row.school_id)].filter(Boolean))
       );
-      const { data: schoolsData, error: schoolsError } = await rootSupabase
-        .from("schools")
-        .select("id, name, status")
-        .in("id", schoolIds);
+      if (!mounted) return;
+      const schoolRows = await Promise.all(
+        schoolIds.map(async (id) => {
+          const schoolClient = createAdminSupabaseClient({ schoolScopeId: id });
+          const { data: schoolData, error: schoolError } = await schoolClient
+            .from("schools")
+            .select("id, name, status")
+            .eq("id", id)
+            .maybeSingle();
+          if (schoolError) {
+            console.error("admin school lookup error:", id, schoolError);
+          }
+          return schoolData ?? null;
+        })
+      );
 
       if (!mounted) return;
-      if (schoolsError) {
-        console.error("admin schools lookup error:", schoolsError);
-      }
-
-      const schoolMap = Object.fromEntries((schoolsData ?? []).map((row) => [row.id, row]));
+      const schoolMap = Object.fromEntries(
+        schoolRows.filter(Boolean).map((row) => [row.id, row])
+      );
       const normalizedAssignments = schoolIds.map((id) => ({
         school_id: id,
         school_name: schoolMap[id]?.name ?? id,
@@ -1621,7 +1629,7 @@ export default function AdminConsole({
     return () => {
       mounted = false;
     };
-  }, [forcedSchoolId, profile, rootSupabase, session, supabase]);
+  }, [forcedSchoolId, profile, session, supabase]);
 
   useEffect(() => {
     if (forcedSchoolId || !profile || profile.role !== "admin" || !schoolScopeId || typeof window === "undefined") {
@@ -1955,18 +1963,21 @@ export default function AdminConsole({
 
   async function fetchStudents() {
     setStudentMsg("Loading...");
-    const { data, error } = await supabase
+    let query = supabase
       .from("profiles")
       .select("id, email, role, display_name, student_code, created_at, is_withdrawn")
+      .eq("role", "student")
+      .eq("school_id", activeSchoolId)
       .order("created_at", { ascending: false })
       .limit(500);
+    const { data, error } = await query;
     if (error) {
       console.error("profiles fetch error:", error);
       setStudents([]);
       setStudentMsg(`Load failed: ${error.message}`);
       return;
     }
-    const list = (data ?? []).filter((p) => p.role === "student");
+    const list = data ?? [];
     setStudents(list);
     setStudentMsg(list.length ? "" : "No students.");
     if (!list.length) {
@@ -1990,7 +2001,10 @@ export default function AdminConsole({
   async function fetchStudentListMetrics() {
     setStudentListLoading(true);
     const { from, to } = studentListFilters;
-    let daysQuery = supabase.from("attendance_days").select("id, day_date");
+    let daysQuery = supabase
+      .from("attendance_days")
+      .select("id, day_date")
+      .eq("school_id", activeSchoolId);
     if (from) daysQuery = daysQuery.gte("day_date", from);
     if (to) daysQuery = daysQuery.lte("day_date", to);
     const { data: daysData, error: daysError } = await daysQuery;
@@ -2031,6 +2045,7 @@ export default function AdminConsole({
     let attemptsQuery = supabase
       .from("attempts")
       .select("id, student_id, test_version, correct, total, score_rate, created_at, ended_at")
+      .eq("school_id", activeSchoolId)
       .order("created_at", { ascending: false })
       .limit(2000);
     if (from) attemptsQuery = attemptsQuery.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
