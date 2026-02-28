@@ -14,6 +14,7 @@
 - `/super/audit` shows basic audit events for school, admin, and question-set mutations
 - `/super/schools/:schoolId` redirects to `/super/schools/:schoolId/admin`
 - `/super/schools/:schoolId/admin/*` reuses the existing admin console in a forced school scope
+- `/super/schools/:schoolId/admin/*` continues to bypass the admin school switcher because the school is forced from the Super Admin context
 
 ## How To Use
 
@@ -110,5 +111,8 @@ Implemented option: temporary password + forced password change on first login.
   `school_id = :schoolId`
   `account_status = active`
   `force_password_change = true`
+- The Super Admin admin-list page now pre-fills a temporary password on create and returns it once more after save; the admin must change it at first login before entering the console.
+- `Add Existing Admin` creates an `admin_school_assignments` row so an existing school admin can work in another school without becoming `super_admin`.
+- Shared admins get a school dropdown at the top of the normal admin console; switching schools changes the active backend scope for both reads and write actions.
 - `Disable` sets `profiles.account_status = disabled`.
 - Disabled admins are blocked from backend access because RLS helpers stop treating them as active admins.

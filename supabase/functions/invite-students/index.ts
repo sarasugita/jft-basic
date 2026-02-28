@@ -39,6 +39,20 @@ function generateTempPassword() {
   return Math.random().toString(36).slice(2, 10) + "A1!";
 }
 
+async function adminHasSchoolAccess(adminClient: ReturnType<typeof createClient>, userId: string, schoolId: string) {
+  const { data, error } = await adminClient
+    .from("admin_school_assignments")
+    .select("admin_user_id")
+    .eq("admin_user_id", userId)
+    .eq("school_id", schoolId)
+    .maybeSingle();
+  if (error) {
+    console.error("admin school access lookup failed:", error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
 function normalizeStudent(input: any) {
   const email = String(input?.email ?? "").trim().toLowerCase();
   const displayName = String(input?.display_name ?? input?.displayName ?? "").trim();
@@ -113,9 +127,18 @@ serve(async (req) => {
       const targetSchoolId =
         callerProfile.role === "super_admin"
           ? (s.school_id ?? requestedSchoolId)
-          : callerProfile.school_id;
+          : (s.school_id ?? requestedSchoolId ?? callerProfile.school_id);
       if (!targetSchoolId) {
         results.push({ email: s.email, ok: false, error: "school_id is required for student creation" });
+        continue;
+      }
+
+      if (
+        callerProfile.role === "admin"
+        && targetSchoolId !== callerProfile.school_id
+        && !(await adminHasSchoolAccess(adminClient, callerProfile.id, targetSchoolId))
+      ) {
+        results.push({ email: s.email, ok: false, error: "Admin cannot create students for this school" });
         continue;
       }
 

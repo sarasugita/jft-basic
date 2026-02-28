@@ -6,7 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { createAdminSupabaseClient } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
+
 const DEFAULT_MODEL_CATEGORY = "Book Review";
+const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
 
 function downloadText(filename, text, mime = "text/plain") {
   const blob = new Blob([text], { type: mime });
@@ -766,12 +768,10 @@ export default function AdminConsole({
   const router = useRouter();
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
   const forcedSchoolName = forcedSchoolScope?.name ?? forcedSchoolId ?? "";
-  const supabase = useMemo(
-    () => createAdminSupabaseClient({ schoolScopeId: forcedSchoolId }),
-    [forcedSchoolId]
-  );
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [schoolAssignments, setSchoolAssignments] = useState([]);
+  const [schoolScopeId, setSchoolScopeId] = useState(null);
   const [attempts, setAttempts] = useState([]);
   const [examLinks, setExamLinks] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -808,6 +808,12 @@ export default function AdminConsole({
   });
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
+  const [passwordChangeForm, setPasswordChangeForm] = useState({
+    password: "",
+    confirmPassword: "",
+  });
+  const [passwordChangeMsg, setPasswordChangeMsg] = useState("");
+  const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
   const [students, setStudents] = useState([]);
   const [studentMsg, setStudentMsg] = useState("");
   const [studentTempMap, setStudentTempMap] = useState({});
@@ -956,7 +962,17 @@ export default function AdminConsole({
   const canUseAdminConsole = Boolean(
     profile &&
       profile.account_status === "active" &&
-      (profile.role === "admin" || (profile.role === "super_admin" && forcedSchoolId))
+      ((profile.role === "admin" && (forcedSchoolId || schoolScopeId || profile.school_id))
+        || (profile.role === "super_admin" && forcedSchoolId))
+  );
+  const activeSchoolId = forcedSchoolId ?? schoolScopeId ?? profile?.school_id ?? null;
+  const activeSchoolName = forcedSchoolName
+    || schoolAssignments.find((assignment) => assignment.school_id === activeSchoolId)?.school_name
+    || activeSchoolId
+    || "";
+  const supabase = useMemo(
+    () => createAdminSupabaseClient({ schoolScopeId: activeSchoolId }),
+    [activeSchoolId]
   );
 
   function generateTempPassword(length = 10) {
@@ -1523,7 +1539,7 @@ export default function AdminConsole({
     }
     supabase
       .from("profiles")
-      .select("id, role, display_name, school_id, account_status")
+      .select("id, role, display_name, school_id, account_status, force_password_change")
       .eq("id", session.user.id)
       .single()
       .then(({ data, error }) => {
@@ -1534,7 +1550,82 @@ export default function AdminConsole({
         }
         setProfile(data);
       });
-  }, [session]);
+  }, [session, supabase]);
+
+  useEffect(() => {
+    if (!session || !profile || profile.role !== "admin") {
+      setSchoolAssignments([]);
+      if (!forcedSchoolId) setSchoolScopeId(null);
+      return;
+    }
+
+    let mounted = true;
+
+    async function loadSchoolAssignments() {
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from("admin_school_assignments")
+        .select("school_id, is_primary")
+        .eq("admin_user_id", session.user.id)
+        .order("is_primary", { ascending: false });
+
+      if (assignmentsError) {
+        console.error("admin school assignments error:", assignmentsError);
+        if (mounted) {
+          setSchoolAssignments(
+            profile.school_id
+              ? [{ school_id: profile.school_id, school_name: "Current School", is_primary: true }]
+              : []
+          );
+          if (!forcedSchoolId) setSchoolScopeId(profile.school_id ?? null);
+        }
+        return;
+      }
+
+      const schoolIds = Array.from(
+        new Set([profile.school_id, ...(assignments ?? []).map((row) => row.school_id)].filter(Boolean))
+      );
+      const { data: schoolsData, error: schoolsError } = await supabase
+        .from("schools")
+        .select("id, name, status")
+        .in("id", schoolIds);
+
+      if (!mounted) return;
+      if (schoolsError) {
+        console.error("admin schools lookup error:", schoolsError);
+      }
+
+      const schoolMap = Object.fromEntries((schoolsData ?? []).map((row) => [row.id, row]));
+      const normalizedAssignments = schoolIds.map((id) => ({
+        school_id: id,
+        school_name: schoolMap[id]?.name ?? id,
+        school_status: schoolMap[id]?.status ?? null,
+        is_primary: id === profile.school_id || (assignments ?? []).some((row) => row.school_id === id && row.is_primary),
+      }));
+      setSchoolAssignments(normalizedAssignments);
+
+      if (forcedSchoolId) return;
+
+      const storedScope =
+        typeof window !== "undefined" ? window.localStorage.getItem(ADMIN_SCHOOL_SCOPE_STORAGE_KEY) : null;
+      const validStoredScope = normalizedAssignments.some((assignment) => assignment.school_id === storedScope);
+      const nextScopeId = validStoredScope
+        ? storedScope
+        : profile.school_id ?? normalizedAssignments[0]?.school_id ?? null;
+      setSchoolScopeId(nextScopeId);
+    }
+
+    loadSchoolAssignments();
+    return () => {
+      mounted = false;
+    };
+  }, [forcedSchoolId, profile, session, supabase]);
+
+  useEffect(() => {
+    if (forcedSchoolId || !profile || profile.role !== "admin" || !schoolScopeId || typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(ADMIN_SCHOOL_SCOPE_STORAGE_KEY, schoolScopeId);
+  }, [forcedSchoolId, profile, schoolScopeId]);
 
   useEffect(() => {
     if (!session || !canUseAdminConsole) return;
@@ -1543,12 +1634,12 @@ export default function AdminConsole({
     fetchTests();
     fetchTestSessions();
     fetchAssets();
-  }, [session, canUseAdminConsole]);
+  }, [activeSchoolId, session, canUseAdminConsole]);
 
   useEffect(() => {
     if (activeTab !== "students") return;
     fetchStudentListMetrics();
-  }, [activeTab, studentListFilters.from, studentListFilters.to]);
+  }, [activeSchoolId, activeTab, studentListFilters.from, studentListFilters.to]);
 
   useEffect(() => {
     if (!dailyCategories.length) return;
@@ -1570,7 +1661,7 @@ export default function AdminConsole({
       if (!students.length) fetchStudents();
       runSearch("mock");
     }
-  }, [session, canUseAdminConsole, activeTab, modelSubTab, dailySubTab, tests]);
+  }, [activeSchoolId, session, canUseAdminConsole, activeTab, modelSubTab, dailySubTab, tests]);
 
   useEffect(() => {
     if (
@@ -1604,6 +1695,23 @@ export default function AdminConsole({
       router.replace("/super/schools");
     }
   }, [forcedSchoolId, profile, router, session]);
+
+  useEffect(() => {
+    if (!activeSchoolId) return;
+    setAttempts([]);
+    setExamLinks([]);
+    setStudents([]);
+    setTests([]);
+    setTestSessions([]);
+    setAssets([]);
+    setSelectedId(null);
+    setSelectedAttemptObj(null);
+    setSelectedStudentId("");
+    setStudentAttempts([]);
+    setStudentAttendance([]);
+    setAbsenceApplications([]);
+    setAnnouncements([]);
+  }, [activeSchoolId]);
 
   useEffect(() => {
     const version = selectedAttempt?.test_version;
@@ -1958,7 +2066,7 @@ export default function AdminConsole({
     if (attendanceSubTab === "absence") {
       fetchAbsenceApplications();
     }
-  }, [activeTab, attendanceSubTab]);
+  }, [activeSchoolId, activeTab, attendanceSubTab]);
 
   async function fetchAbsenceApplications() {
     setAbsenceApplicationsMsg("Loading...");
@@ -1999,7 +2107,7 @@ export default function AdminConsole({
     if (activeTab === "announcements") {
       fetchAnnouncements();
     }
-  }, [activeTab]);
+  }, [activeSchoolId, activeTab]);
 
   async function fetchAnnouncements() {
     setAnnouncementMsg("Loading...");
@@ -2919,7 +3027,7 @@ export default function AdminConsole({
       return false;
     }
     const { data, error } = await supabase.functions.invoke("invite-students", {
-      body: forcedSchoolId ? { ...payload, school_id: forcedSchoolId } : payload,
+      body: activeSchoolId ? { ...payload, school_id: activeSchoolId } : payload,
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (error) {
@@ -2956,7 +3064,7 @@ export default function AdminConsole({
       setReissueLoading(false);
       return;
     }
-    const body = { user_id: student.id, email: student.email };
+    const body = { user_id: student.id, email: student.email, school_id: activeSchoolId };
     if (tempPasswordInput) body.temp_password = tempPasswordInput;
     const { data, error } = await supabase.functions.invoke("reissue-temp-password", {
       body,
@@ -2993,7 +3101,7 @@ export default function AdminConsole({
       return;
     }
     const { data, error } = await supabase.functions.invoke("delete-student", {
-      body: { user_id: userId },
+      body: { user_id: userId, school_id: activeSchoolId },
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (error) {
@@ -3719,6 +3827,50 @@ export default function AdminConsole({
     return { correct, total };
   }, [previewQuestions, previewAnswers]);
 
+  async function handlePasswordChange() {
+    setPasswordChangeMsg("");
+    const nextPassword = passwordChangeForm.password;
+    const confirmPassword = passwordChangeForm.confirmPassword;
+    if (!nextPassword || !confirmPassword) {
+      setPasswordChangeMsg("Enter and confirm the new password.");
+      return;
+    }
+    if (nextPassword !== confirmPassword) {
+      setPasswordChangeMsg("Passwords do not match.");
+      return;
+    }
+    if (nextPassword.length < 8) {
+      setPasswordChangeMsg("Password must be at least 8 characters.");
+      return;
+    }
+
+    setPasswordChangeLoading(true);
+    const { error: authError } = await supabase.auth.updateUser({
+      password: nextPassword,
+      data: { force_password_change: false },
+    });
+    if (authError) {
+      setPasswordChangeMsg(authError.message);
+      setPasswordChangeLoading(false);
+      return;
+    }
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ force_password_change: false })
+      .eq("id", session?.user?.id ?? "");
+    if (profileError) {
+      setPasswordChangeMsg(profileError.message);
+      setPasswordChangeLoading(false);
+      return;
+    }
+
+    setProfile((prev) => (prev ? { ...prev, force_password_change: false } : prev));
+    setPasswordChangeForm({ password: "", confirmPassword: "" });
+    setPasswordChangeMsg("");
+    setPasswordChangeLoading(false);
+  }
+
   async function handleLogin() {
     setLoginMsg("");
     const { email, password } = loginForm;
@@ -3731,6 +3883,10 @@ export default function AdminConsole({
       setLoginMsg(error.message);
       return;
     }
+  }
+
+  function handleAdminSchoolScopeChange(nextSchoolId) {
+    setSchoolScopeId(nextSchoolId || null);
   }
 
   if (!session) {
@@ -3768,6 +3924,40 @@ export default function AdminConsole({
     return (
       <div className="admin-login">
         <h2>Loading...</h2>
+      </div>
+    );
+  }
+
+  if (profile.account_status === "active" && profile.force_password_change) {
+    return (
+      <div className="admin-login">
+        <h2>Change Temporary Password</h2>
+        <div className="admin-help">
+          This account must change its temporary password before continuing.
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <label>New Password</label>
+          <input
+            type="password"
+            value={passwordChangeForm.password}
+            onChange={(e) => setPasswordChangeForm((s) => ({ ...s, password: e.target.value }))}
+          />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <label>Confirm Password</label>
+          <input
+            type="password"
+            value={passwordChangeForm.confirmPassword}
+            onChange={(e) => setPasswordChangeForm((s) => ({ ...s, confirmPassword: e.target.value }))}
+          />
+        </div>
+        <div className="admin-actions" style={{ marginTop: 14 }}>
+          <button className="btn btn-primary" disabled={passwordChangeLoading} onClick={handlePasswordChange}>
+            {passwordChangeLoading ? "Saving..." : "Update Password"}
+          </button>
+          <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
+        </div>
+        <div className="admin-msg">{passwordChangeMsg}</div>
       </div>
     );
   }
@@ -4004,11 +4194,28 @@ export default function AdminConsole({
 
       <div className="admin-main">
         <div className="admin-wrap">
-          {forcedSchoolId ? (
+          {forcedSchoolId || (profile?.role === "admin" && schoolAssignments.length > 0) ? (
             <div className="admin-scope-banner">
               <div className="admin-chip">
-                Viewing: <strong>{forcedSchoolName}</strong>
+                Viewing: <strong>{activeSchoolName}</strong>
               </div>
+              {!forcedSchoolId && profile?.role === "admin" ? (
+                <div className="admin-school-switcher">
+                  <label htmlFor="admin-school-switcher">School</label>
+                  <select
+                    id="admin-school-switcher"
+                    value={activeSchoolId ?? ""}
+                    onChange={(event) => handleAdminSchoolScopeChange(event.target.value)}
+                  >
+                    {schoolAssignments.map((assignment) => (
+                      <option key={assignment.school_id} value={assignment.school_id}>
+                        {assignment.school_name}
+                        {assignment.is_primary ? " (Primary)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               {changeSchoolHref ? (
                 <Link className="btn" href={changeSchoolHref}>Change school</Link>
               ) : null}

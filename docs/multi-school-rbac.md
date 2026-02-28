@@ -3,7 +3,7 @@
 This project now has three application roles:
 
 - `super_admin`: global access across all schools
-- `admin`: restricted to one `school_id`
+- `admin`: has one primary `school_id` and may be assigned to additional schools
 - `student`: restricted to one `school_id`
 
 Phase 1 keeps the existing admin UI and moves access control into the database and backend functions.
@@ -19,13 +19,15 @@ Run these SQL files in order:
 5. `supabase/sql/phase4_tests_management_architecture.sql`
 6. `supabase/sql/phase5_question_set_upload_support.sql`
 7. `supabase/sql/phase6_super_admin_completion_pack.sql`
-8. `supabase/sql/storage.sql`
+8. `supabase/sql/phase7_admin_multi_school_access.sql`
+9. `supabase/sql/storage.sql`
 
 `phase1_multi_school_rbac.sql` creates the school-scoping/RBAC foundation.
 `phase3_initial_school_and_admins.sql` performs the named initial-school migration for the legacy single-school dataset and adds school-admin account status support.
 `phase4_tests_management_architecture.sql` adds the global question-set library and school-level test assignment architecture.
 `phase5_question_set_upload_support.sql` finalizes the question-set upload/versioning schema used by the Super Admin import flow.
 `phase6_super_admin_completion_pack.sql` adds audit logs and the aggregate RPCs used by the Super Admin dashboard and analytics pages.
+`phase7_admin_multi_school_access.sql` adds `admin_school_assignments`, selected-school scoping for admins, and the server-side hooks needed for shared admins across schools.
 
 ## One-Time Promotion to `super_admin`
 
@@ -97,7 +99,8 @@ Single-user payload:
 
 - RLS is enabled on `schools`, `profiles`, and the school-scoped runtime tables used by the admin/student apps.
 - `super_admin` has global access.
-- `admin` can only read and write rows for their own `school_id`.
+- `admin` can only read and write rows for their currently selected school scope.
+- Additional admin school access is stored in `public.admin_school_assignments`; `profiles.school_id` remains the primary/default school.
 - `student` can only read and write their own records where applicable.
 - Edge Functions for inviting students, deleting students, and resetting passwords now enforce role and school scope server-side.
 - Disabled school admins are blocked server-side because `current_user_role()` resolves to `null` when `profiles.account_status = 'disabled'`.

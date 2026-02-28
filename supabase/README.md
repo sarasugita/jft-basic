@@ -43,6 +43,7 @@ See `supabase/sql/schema.sql` for required tables/columns:
 - `supabase/sql/phase4_tests_management_architecture.sql` for the shared question-set library, school test instances, linked attempt analytics, and test metrics view
 - `supabase/sql/phase5_question_set_upload_support.sql` for question-set status/version labels, upload-ready question fields, and library version grouping
 - `supabase/sql/phase6_super_admin_completion_pack.sql` for audit logs plus dashboard/analytics aggregate RPCs
+- `supabase/sql/phase7_admin_multi_school_access.sql` for multi-school admin assignments, admin school switching, and scoped admin access helpers
 
 Multi-school setup and promotion steps:
 - `docs/multi-school-rbac.md`

@@ -1,15 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSuperAdmin } from "./super/SuperAdminShell";
+
+function generateTempPassword(length = 12) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (let i = 0; i < length; i += 1) {
+    out += chars[bytes[i] % chars.length];
+  }
+  return out;
+}
 
 function emptyForm() {
   return {
     id: "",
     email: "",
     display_name: "",
+    temp_password: generateTempPassword(),
+    existing_admin_id: "",
   };
 }
 
@@ -29,8 +42,13 @@ export default function SchoolAdminsPage({ schoolId }) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState("create");
   const [form, setForm] = useState(emptyForm());
   const [tempPassword, setTempPassword] = useState("");
+  const [existingAdmins, setExistingAdmins] = useState([]);
+  const [existingAdminsLoading, setExistingAdminsLoading] = useState(false);
+
+  const assignedAdminIds = useMemo(() => admins.map((admin) => admin.id), [admins]);
 
   useEffect(() => {
     let mounted = true;
@@ -57,18 +75,59 @@ export default function SchoolAdminsPage({ schoolId }) {
   }, [router, schoolId, supabase]);
 
   async function reloadAdmins() {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, display_name, email, role, account_status, created_at")
+    const { data: assignments, error: assignmentError } = await supabase
+      .from("admin_school_assignments")
+      .select("admin_user_id, school_id, is_primary, created_at")
       .eq("school_id", schoolId)
-      .eq("role", "admin")
       .order("created_at", { ascending: true });
-    if (error) {
+    if (assignmentError) {
       setAdmins([]);
-      setMsg(`Failed to load admins: ${error.message}`);
+      setMsg(`Failed to load admins: ${assignmentError.message}`);
       return;
     }
-    setAdmins(data ?? []);
+
+    const adminIds = Array.from(new Set((assignments ?? []).map((row) => row.admin_user_id).filter(Boolean)));
+    if (adminIds.length === 0) {
+      setAdmins([]);
+      return;
+    }
+
+    const { data: profiles, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, display_name, email, role, school_id, account_status, created_at")
+      .in("id", adminIds)
+      .eq("role", "admin")
+      .order("created_at", { ascending: true });
+    if (profileError) {
+      setAdmins([]);
+      setMsg(`Failed to load admins: ${profileError.message}`);
+      return;
+    }
+
+    const primarySchoolIds = Array.from(
+      new Set((profiles ?? []).map((profile) => profile.school_id).filter(Boolean)),
+    );
+    let schoolNameMap = {};
+    if (primarySchoolIds.length > 0) {
+      const { data: schoolsData } = await supabase
+        .from("schools")
+        .select("id, name")
+        .in("id", primarySchoolIds);
+      schoolNameMap = Object.fromEntries((schoolsData ?? []).map((row) => [row.id, row.name]));
+    }
+
+    const assignmentMap = new Map((assignments ?? []).map((row) => [row.admin_user_id, row]));
+    const list = (profiles ?? []).map((profile) => {
+      const assignment = assignmentMap.get(profile.id);
+      const isPrimaryForThisSchool = profile.school_id === schoolId;
+      return {
+        ...profile,
+        assignment_created_at: assignment?.created_at ?? null,
+        is_primary_for_school: isPrimaryForThisSchool,
+        primary_school_name: schoolNameMap[profile.school_id] ?? "N/A",
+      };
+    });
+    setAdmins(list);
   }
 
   useEffect(() => {
@@ -76,7 +135,43 @@ export default function SchoolAdminsPage({ schoolId }) {
     reloadAdmins();
   }, [school, schoolId, supabase]);
 
+  async function loadExistingAdmins() {
+    setExistingAdminsLoading(true);
+    const { data: profiles, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, display_name, email, role, school_id, account_status, created_at")
+      .eq("role", "admin")
+      .order("created_at", { ascending: true });
+
+    if (profileError) {
+      setExistingAdmins([]);
+      setMsg(`Failed to load existing admins: ${profileError.message}`);
+      setExistingAdminsLoading(false);
+      return;
+    }
+
+    const filtered = (profiles ?? []).filter((profile) => !assignedAdminIds.includes(profile.id));
+    const schoolIds = Array.from(new Set(filtered.map((profile) => profile.school_id).filter(Boolean)));
+    let schoolMap = {};
+    if (schoolIds.length > 0) {
+      const { data: schoolsData } = await supabase
+        .from("schools")
+        .select("id, name")
+        .in("id", schoolIds);
+      schoolMap = Object.fromEntries((schoolsData ?? []).map((row) => [row.id, row.name]));
+    }
+
+    setExistingAdmins(
+      filtered.map((profile) => ({
+        ...profile,
+        primary_school_name: schoolMap[profile.school_id] ?? "N/A",
+      })),
+    );
+    setExistingAdminsLoading(false);
+  }
+
   function openCreateModal() {
+    setModalMode("create");
     setForm(emptyForm());
     setTempPassword("");
     setModalOpen(true);
@@ -84,14 +179,32 @@ export default function SchoolAdminsPage({ schoolId }) {
   }
 
   function openEditModal(admin) {
+    setModalMode("edit");
     setForm({
       id: admin.id,
       email: admin.email ?? "",
       display_name: admin.display_name ?? "",
+      temp_password: "",
+      existing_admin_id: "",
     });
     setTempPassword("");
     setModalOpen(true);
     setMsg("");
+  }
+
+  async function openAssignModal() {
+    setModalMode("assign");
+    setForm({
+      id: "",
+      email: "",
+      display_name: "",
+      temp_password: "",
+      existing_admin_id: "",
+    });
+    setTempPassword("");
+    setModalOpen(true);
+    setMsg("");
+    await loadExistingAdmins();
   }
 
   async function invokeManage(payload) {
@@ -117,27 +230,41 @@ export default function SchoolAdminsPage({ schoolId }) {
   }
 
   async function saveAdmin() {
-    if (!form.email.trim()) {
+    if (modalMode === "assign") {
+      if (!form.existing_admin_id) {
+        setMsg("Select an existing admin.");
+        return;
+      }
+    } else if (!form.email.trim()) {
       setMsg("Email is required.");
       return;
     }
 
     setSaving(true);
     setMsg("");
-    const payload = form.id
-      ? {
-          action: "update",
-          school_id: schoolId,
-          user_id: form.id,
-          email: form.email.trim(),
-          display_name: form.display_name.trim() || null,
-        }
-      : {
-          action: "create",
-          school_id: schoolId,
-          email: form.email.trim(),
-          display_name: form.display_name.trim() || null,
-        };
+    const payload =
+      modalMode === "edit"
+        ? {
+            action: "update",
+            school_id: schoolId,
+            user_id: form.id,
+            email: form.email.trim(),
+            display_name: form.display_name.trim() || null,
+          }
+        : modalMode === "assign"
+        ? {
+            action: "attach_existing",
+            school_id: schoolId,
+            user_id: form.existing_admin_id,
+          }
+        : {
+            action: "create",
+            school_id: schoolId,
+            email: form.email.trim(),
+            display_name: form.display_name.trim() || null,
+            temp_password: form.temp_password.trim(),
+          };
+
     const result = await invokeManage(payload);
     setSaving(false);
     if (!result) return;
@@ -147,6 +274,8 @@ export default function SchoolAdminsPage({ schoolId }) {
     setMsg(
       result.temp_password
         ? `Admin created. Temporary password: ${result.temp_password}`
+        : modalMode === "assign"
+        ? "Existing admin added to this school."
         : "Admin updated."
     );
     await reloadAdmins();
@@ -174,6 +303,12 @@ export default function SchoolAdminsPage({ schoolId }) {
     );
   }
 
+  const selectedExistingAdmin = existingAdmins.find((admin) => admin.id === form.existing_admin_id) ?? null;
+  const modalTitle =
+    modalMode === "assign" ? "Add Existing Admin" : modalMode === "edit" ? "Edit Admin" : "Create Admin";
+  const modalActionLabel =
+    modalMode === "assign" ? "Add Admin to School" : modalMode === "edit" ? "Save Changes" : "Create Admin";
+
   return (
     <div className="super-page-content">
       <div className="admin-panel">
@@ -182,11 +317,12 @@ export default function SchoolAdminsPage({ schoolId }) {
             <div className="admin-chip">School Admin Management</div>
             <div className="super-inline-title">{school.name}</div>
             <div className="admin-help">
-              Onboarding method: temporary password with forced password change on first login.
+              New admins receive a temporary password and must change it on first login.
             </div>
           </div>
           <div className="admin-actions">
             <Link className="btn" href="/super/schools">Back to Schools</Link>
+            <button className="btn" onClick={openAssignModal}>Add Existing Admin</button>
             <button className="btn btn-primary" onClick={openCreateModal}>Create Admin</button>
           </div>
         </div>
@@ -198,14 +334,14 @@ export default function SchoolAdminsPage({ schoolId }) {
           </div>
         ) : null}
         <div className="admin-table-wrap" style={{ marginTop: 12 }}>
-          <table className="admin-table" style={{ minWidth: 960 }}>
+          <table className="admin-table" style={{ minWidth: 1080 }}>
             <thead>
               <tr>
                 <th>Name</th>
                 <th>Email</th>
                 <th>Status</th>
-                <th>Role</th>
-                <th>Last login</th>
+                <th>Access</th>
+                <th>Primary School</th>
                 <th>Created at</th>
                 <th>Actions</th>
               </tr>
@@ -220,8 +356,8 @@ export default function SchoolAdminsPage({ schoolId }) {
                       {admin.account_status}
                     </span>
                   </td>
-                  <td>{admin.role}</td>
-                  <td>N/A</td>
+                  <td>{admin.is_primary_for_school ? "Primary" : "Shared"}</td>
+                  <td>{admin.primary_school_name || "N/A"}</td>
                   <td>{formatDateTime(admin.created_at)}</td>
                   <td>
                     <div className="admin-actions">
@@ -247,31 +383,84 @@ export default function SchoolAdminsPage({ schoolId }) {
         <div className="admin-modal-overlay" onClick={() => setModalOpen(false)}>
           <div className="admin-modal" onClick={(event) => event.stopPropagation()}>
             <div className="admin-modal-header">
-              <div className="admin-title">{form.id ? "Edit Admin" : "Create Admin"}</div>
+              <div className="admin-title">{modalTitle}</div>
               <button className="admin-modal-close" onClick={() => setModalOpen(false)} aria-label="Close">
                 ×
               </button>
             </div>
-            <div className="admin-form" style={{ marginTop: 12 }}>
-              <div className="field">
-                <label>Name</label>
-                <input
-                  value={form.display_name}
-                  onChange={(event) => setForm((prev) => ({ ...prev, display_name: event.target.value }))}
-                />
-              </div>
-              <div className="field">
-                <label>Email</label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-                />
-              </div>
-            </div>
+
+            {modalMode === "assign" ? (
+              <>
+                <div className="admin-form" style={{ marginTop: 12 }}>
+                  <div className="field">
+                    <label>Existing Admin</label>
+                    <select
+                      value={form.existing_admin_id}
+                      onChange={(event) =>
+                        setForm((prev) => ({ ...prev, existing_admin_id: event.target.value }))
+                      }
+                    >
+                      <option value="">Select an admin</option>
+                      {existingAdmins.map((admin) => (
+                        <option key={admin.id} value={admin.id}>
+                          {admin.display_name || admin.email || admin.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="admin-help" style={{ marginTop: 10 }}>
+                  {existingAdminsLoading
+                    ? "Loading available admins..."
+                    : selectedExistingAdmin
+                    ? `Primary school: ${selectedExistingAdmin.primary_school_name} | Status: ${selectedExistingAdmin.account_status}`
+                    : "Select an existing admin from another school to add them here as a shared admin."}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="admin-form" style={{ marginTop: 12 }}>
+                  <div className="field">
+                    <label>Name</label>
+                    <input
+                      value={form.display_name}
+                      onChange={(event) => setForm((prev) => ({ ...prev, display_name: event.target.value }))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Email</label>
+                    <input
+                      type="email"
+                      value={form.email}
+                      onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
+                    />
+                  </div>
+                  {modalMode === "create" ? (
+                    <div className="field">
+                      <label>Temporary Password</label>
+                      <input
+                        value={form.temp_password}
+                        onChange={(event) => setForm((prev) => ({ ...prev, temp_password: event.target.value }))}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                {modalMode === "create" ? (
+                  <div className="admin-actions" style={{ marginTop: 10 }}>
+                    <button
+                      className="btn"
+                      onClick={() => setForm((prev) => ({ ...prev, temp_password: generateTempPassword() }))}
+                    >
+                      Regenerate Temp Password
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
+
             <div className="admin-actions" style={{ marginTop: 16 }}>
-              <button className="btn btn-primary" disabled={saving} onClick={saveAdmin}>
-                {saving ? "Saving..." : (form.id ? "Save Changes" : "Create Admin")}
+              <button className="btn btn-primary" disabled={saving || existingAdminsLoading} onClick={saveAdmin}>
+                {saving ? "Saving..." : modalActionLabel}
               </button>
               <button className="btn" onClick={() => setModalOpen(false)}>Cancel</button>
             </div>

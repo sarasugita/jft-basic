@@ -35,6 +35,20 @@ function unauthorized(message = "Unauthorized") {
   return json({ error: message }, { status: 401 });
 }
 
+async function adminHasSchoolAccess(adminClient: ReturnType<typeof createClient>, userId: string, schoolId: string) {
+  const { data, error } = await adminClient
+    .from("admin_school_assignments")
+    .select("admin_user_id")
+    .eq("admin_user_id", userId)
+    .eq("school_id", schoolId)
+    .maybeSingle();
+  if (error) {
+    console.error("admin school access lookup failed:", error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return ok({ ok: true });
   if (req.method !== "POST") return bad("Use POST");
@@ -81,6 +95,7 @@ serve(async (req) => {
   }
 
   const userId = String(body?.user_id ?? "").trim();
+  const requestedSchoolId = String(body?.school_id ?? body?.schoolId ?? "").trim() || null;
   if (!userId) return bad("Missing user_id");
 
   const { data: targetProfile, error: targetProfileError } = await adminClient
@@ -90,8 +105,18 @@ serve(async (req) => {
     .single();
   if (targetProfileError || !targetProfile) return bad("Target profile not found");
   if (targetProfile.role !== "student") return unauthorized("Only student accounts can be deleted here");
-  if (callerProfile.role === "admin" && targetProfile.school_id !== callerProfile.school_id) {
-    return unauthorized("Cannot delete a student from another school");
+  if (callerProfile.role === "admin") {
+    const effectiveSchoolId = requestedSchoolId ?? callerProfile.school_id;
+    if (!effectiveSchoolId) return unauthorized("Admin is missing school scope");
+    if (
+      effectiveSchoolId !== callerProfile.school_id
+      && !(await adminHasSchoolAccess(adminClient, callerProfile.id, effectiveSchoolId))
+    ) {
+      return unauthorized("Cannot delete a student from an unauthorized school");
+    }
+    if (targetProfile.school_id !== effectiveSchoolId) {
+      return unauthorized("Cannot delete a student from another school");
+    }
   }
 
   const { error: delError } = await adminClient.auth.admin.deleteUser(userId);

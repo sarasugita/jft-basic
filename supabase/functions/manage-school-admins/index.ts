@@ -55,6 +55,24 @@ function normalizeText(value: unknown) {
   return text || null;
 }
 
+async function adminAssignedToSchool(
+  adminClient: ReturnType<typeof createClient>,
+  userId: string,
+  schoolId: string,
+) {
+  const { data, error } = await adminClient
+    .from("admin_school_assignments")
+    .select("admin_user_id, school_id")
+    .eq("admin_user_id", userId)
+    .eq("school_id", schoolId)
+    .maybeSingle();
+  if (error) {
+    console.error("admin school assignment lookup failed:", error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return ok({ ok: true });
   if (req.method !== "POST") return bad("Use POST");
@@ -100,7 +118,7 @@ serve(async (req) => {
   const action = String(body?.action ?? "").trim();
   const schoolId = normalizeText(body?.school_id);
 
-  if (!["create", "update", "set_status"].includes(action)) {
+  if (!["create", "attach_existing", "update", "set_status"].includes(action)) {
     return bad("Unsupported action");
   }
   if (!schoolId) return bad("school_id is required");
@@ -117,6 +135,19 @@ serve(async (req) => {
     const displayName = normalizeText(body?.display_name ?? body?.displayName);
     const tempPassword = normalizeText(body?.temp_password ?? body?.tempPassword) ?? generateTempPassword();
     if (!email) return bad("email is required");
+
+    const { data: existingProfile } = await adminClient
+      .from("profiles")
+      .select("id, role")
+      .eq("email", email)
+      .maybeSingle();
+    if (existingProfile?.id) {
+      return bad(
+        existingProfile.role === "admin"
+          ? "Admin already exists. Use attach_existing instead."
+          : "A user with this email already exists.",
+      );
+    }
 
     const { data: createData, error: createError } = await adminClient.auth.admin.createUser({
       email,
@@ -148,6 +179,21 @@ serve(async (req) => {
       );
     if (upsertError) {
       return bad("Failed to create admin profile", { detail: upsertError.message });
+    }
+
+    const { error: assignmentError } = await adminClient
+      .from("admin_school_assignments")
+      .upsert(
+        {
+          admin_user_id: createData.user.id,
+          school_id: schoolId,
+          is_primary: true,
+          created_by: callerUserData.user.id,
+        },
+        { onConflict: "admin_user_id,school_id" },
+      );
+    if (assignmentError) {
+      return bad("Failed to create admin school assignment", { detail: assignmentError.message });
     }
 
     await logAuditEvent(adminClient, {
@@ -189,7 +235,56 @@ serve(async (req) => {
     .single();
   if (targetError || !targetProfile) return bad("Admin profile not found");
   if (targetProfile.role !== "admin") return bad("Target user is not a school admin");
-  if (targetProfile.school_id !== schoolId) return bad("Admin does not belong to this school");
+
+  const targetAssignedToSchool =
+    targetProfile.school_id === schoolId || await adminAssignedToSchool(adminClient, userId, schoolId);
+
+  if (action === "attach_existing") {
+    if (targetAssignedToSchool) {
+      return bad("Admin already has access to this school");
+    }
+
+    const { error: assignmentError } = await adminClient
+      .from("admin_school_assignments")
+      .insert({
+        admin_user_id: userId,
+        school_id: schoolId,
+        is_primary: false,
+        created_by: callerUserData.user.id,
+      });
+    if (assignmentError) {
+      return bad("Failed to attach admin to school", { detail: assignmentError.message });
+    }
+
+    await logAuditEvent(adminClient, {
+      actor_user_id: callerUserData.user.id,
+      actor_role: callerProfile.role,
+      actor_email: callerProfile.email ?? null,
+      action_type: "assign",
+      entity_type: "admin",
+      entity_id: userId,
+      school_id: schoolId,
+      metadata: {
+        email: targetProfile.email ?? null,
+        display_name: targetProfile.display_name ?? null,
+      },
+    });
+
+    return ok({
+      ok: true,
+      action,
+      user_id: userId,
+      admin: {
+        id: userId,
+        email: targetProfile.email ?? null,
+        display_name: targetProfile.display_name ?? null,
+        role: "admin",
+        account_status: targetProfile.account_status,
+      },
+    });
+  }
+
+  if (!targetAssignedToSchool) return bad("Admin does not belong to this school");
 
   if (action === "update") {
     const email = normalizeText(body?.email)?.toLowerCase() ?? targetProfile.email ?? null;

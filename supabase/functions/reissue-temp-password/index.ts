@@ -39,6 +39,20 @@ function generateTempPassword() {
   return Math.random().toString(36).slice(2, 10) + "A1!";
 }
 
+async function adminHasSchoolAccess(adminClient: ReturnType<typeof createClient>, userId: string, schoolId: string) {
+  const { data, error } = await adminClient
+    .from("admin_school_assignments")
+    .select("admin_user_id")
+    .eq("admin_user_id", userId)
+    .eq("school_id", schoolId)
+    .maybeSingle();
+  if (error) {
+    console.error("admin school access lookup failed:", error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return ok({ ok: true });
   if (req.method !== "POST") return bad("Use POST");
@@ -87,6 +101,7 @@ serve(async (req) => {
   const userId = String(body?.user_id ?? "").trim();
   const email = String(body?.email ?? "").trim().toLowerCase();
   const tempPassword = String(body?.temp_password ?? "").trim() || generateTempPassword();
+  const requestedSchoolId = String(body?.school_id ?? body?.schoolId ?? "").trim() || null;
   if (!userId) return bad("user_id is required");
 
   const { data: targetProfile, error: targetProfileError } = await adminClient
@@ -96,8 +111,18 @@ serve(async (req) => {
     .single();
   if (targetProfileError || !targetProfile) return bad("Target profile not found");
   if (targetProfile.role !== "student") return unauthorized("Only student accounts can be updated here");
-  if (callerProfile.role === "admin" && targetProfile.school_id !== callerProfile.school_id) {
-    return unauthorized("Cannot reset a student from another school");
+  if (callerProfile.role === "admin") {
+    const effectiveSchoolId = requestedSchoolId ?? callerProfile.school_id;
+    if (!effectiveSchoolId) return unauthorized("Admin is missing school scope");
+    if (
+      effectiveSchoolId !== callerProfile.school_id
+      && !(await adminHasSchoolAccess(adminClient, callerProfile.id, effectiveSchoolId))
+    ) {
+      return unauthorized("Cannot reset a student from an unauthorized school");
+    }
+    if (targetProfile.school_id !== effectiveSchoolId) {
+      return unauthorized("Cannot reset a student from another school");
+    }
   }
 
   const { data: updateData, error: updateError } = await adminClient.auth.admin.updateUserById(
