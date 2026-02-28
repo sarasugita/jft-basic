@@ -452,12 +452,16 @@ export default function SuperTestsImportPage() {
       <div className="admin-panel">
         <div className="super-toolbar">
           <div>
-            <div className="admin-title">Set Library</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div className="admin-title">Set Library</div>
+              <button className="btn btn-primary" onClick={openCreateModal}>
+                Upload Question Set
+              </button>
+            </div>
             <div className="admin-help">
               Upload shared sets, create new versions, and control school visibility.
             </div>
           </div>
-          <button className="btn btn-primary" onClick={openCreateModal} style={{ marginLeft: "auto" }}>Upload Set</button>
         </div>
 
         <div className="admin-form" style={{ marginTop: 12 }}>

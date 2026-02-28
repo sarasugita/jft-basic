@@ -4185,7 +4185,7 @@ export default function AdminConsole({
                     setModelSubTab("conduct");
                   }}
                 >
-                  Conduct Test
+                  Create Test Session
                 </button>
                 <button
                   className={`admin-subnav-item ${modelSubTab === "upload" ? "active" : ""}`}
@@ -4194,7 +4194,7 @@ export default function AdminConsole({
                     setModelSubTab("upload");
                   }}
                 >
-                  Upload Questions
+                  Upload Question Set
                 </button>
                 <button
                   className={`admin-subnav-item ${modelSubTab === "results" ? "active" : ""}`}
@@ -4236,7 +4236,7 @@ export default function AdminConsole({
                     setDailySubTab("conduct");
                   }}
                 >
-                  Conduct Test
+                  Create Test Session
                 </button>
                 <button
                   className={`admin-subnav-item ${dailySubTab === "upload" ? "active" : ""}`}
@@ -4245,7 +4245,7 @@ export default function AdminConsole({
                     setDailySubTab("upload");
                   }}
                 >
-                  Upload Questions
+                  Upload Question Set
                 </button>
                 <button
                   className={`admin-subnav-item ${dailySubTab === "results" ? "active" : ""}`}
@@ -5157,13 +5157,15 @@ export default function AdminConsole({
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <div>
-                <div className="admin-title">Test Sessions</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div className="admin-title">Test Sessions</div>
+                  <button className="btn btn-primary" onClick={() => setModelConductOpen(true)}>
+                    Create Test Session
+                  </button>
+                </div>
                 <div className="admin-subtitle">SetIDから実施テストを作成します。</div>
               </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={() => setModelConductOpen(true)}>
-                Conduct Test
-              </button>
               <button
                 className="btn"
                 onClick={() => {
@@ -5452,13 +5454,15 @@ export default function AdminConsole({
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <div>
-                <div className="admin-title">Set Upload (CSV)</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div className="admin-title">Set Upload (CSV)</div>
+                  <button className="btn btn-primary" onClick={() => setModelUploadOpen(true)}>
+                    Upload Question Set
+                  </button>
+                </div>
                 <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します（タイトルはTest Sessionで設定）。</div>
               </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={() => setModelUploadOpen(true)}>
-                Upload Questions
-              </button>
               <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
             </div>
           </div>
@@ -5763,13 +5767,15 @@ export default function AdminConsole({
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <div>
-                <div className="admin-title">Daily Test Sessions</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div className="admin-title">Daily Test Sessions</div>
+                  <button className="btn btn-primary" onClick={() => setDailyConductOpen(true)}>
+                    Create Test Session
+                  </button>
+                </div>
                 <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
               </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={() => setDailyConductOpen(true)}>
-                Conduct Test
-              </button>
               <button
                 className="btn"
                 onClick={() => {
@@ -6042,13 +6048,15 @@ export default function AdminConsole({
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
-              <div className="admin-title">Daily Test Upload (CSV)</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <div className="admin-title">Daily Test Upload (CSV)</div>
+                <button className="btn btn-primary" onClick={() => setDailyUploadOpen(true)}>
+                  Upload Question Set
+                </button>
+              </div>
               <div className="admin-subtitle">Daily Test用CSVとIllustrationをアップロードします。</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={() => setDailyUploadOpen(true)}>
-                Upload Questions
-              </button>
               <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
             </div>
           </div>
