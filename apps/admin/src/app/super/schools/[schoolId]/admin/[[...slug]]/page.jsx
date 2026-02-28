@@ -1,11 +1,5 @@
-import AdminConsole from "../../../../../../components/AdminConsole";
+import SchoolScopedAdminPage from "../../../../../../components/SchoolScopedAdminPage";
 
 export default function SuperSchoolAdminRoute({ params }) {
-  return (
-    <AdminConsole
-      forcedSchoolScope={{ id: params.schoolId, name: params.schoolId }}
-      changeSchoolHref="/super/schools"
-      homeHref={`/super/schools/${params.schoolId}/admin`}
-    />
-  );
+  return <SchoolScopedAdminPage schoolId={params.schoolId} />;
 }

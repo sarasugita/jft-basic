@@ -40,10 +40,12 @@ See `supabase/sql/schema.sql` for required tables/columns:
 - `supabase/sql/phase1_multi_school_rbac.sql` for schools, RBAC, school scoping, and RLS
 - `supabase/sql/phase2_super_admin_school_scope.sql` for scoped super-admin admin-console reuse
 - `supabase/sql/phase3_initial_school_and_admins.sql` for the named initial school, school dates, and school-admin account status
+- `supabase/sql/phase4_tests_management_architecture.sql` for the shared question-set library, school test instances, linked attempt analytics, and test metrics view
 
 Multi-school setup and promotion steps:
 - `docs/multi-school-rbac.md`
 - `docs/super-admin-ui.md`
+- `docs/tests-management-architecture.md`
 
 Question CSV format: `docs/question_csv.md`
 

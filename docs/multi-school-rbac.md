@@ -16,10 +16,12 @@ Run these SQL files in order:
 2. `supabase/sql/phase1_multi_school_rbac.sql`
 3. `supabase/sql/phase2_super_admin_school_scope.sql`
 4. `supabase/sql/phase3_initial_school_and_admins.sql`
-5. `supabase/sql/storage.sql`
+5. `supabase/sql/phase4_tests_management_architecture.sql`
+6. `supabase/sql/storage.sql`
 
 `phase1_multi_school_rbac.sql` creates the school-scoping/RBAC foundation.
 `phase3_initial_school_and_admins.sql` performs the named initial-school migration for the legacy single-school dataset and adds school-admin account status support.
+`phase4_tests_management_architecture.sql` adds the global question-set library and school-level test assignment architecture.
 
 ## One-Time Promotion to `super_admin`
 
