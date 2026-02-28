@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createAdminSupabaseClient } from "../lib/adminSupabase";
-import { syncAdminAuthCookie } from "../lib/authCookies";
+import { useSuperAdmin } from "./super/SuperAdminShell";
 
 function emptyForm() {
   return {
@@ -23,9 +22,7 @@ function formatDateTime(value) {
 
 export default function SchoolAdminsPage({ schoolId }) {
   const router = useRouter();
-  const supabase = useMemo(() => createAdminSupabaseClient(), []);
-  const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const { supabase } = useSuperAdmin();
   const [school, setSchool] = useState(null);
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,29 +36,6 @@ export default function SchoolAdminsPage({ schoolId }) {
     let mounted = true;
 
     async function loadContext() {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) console.error("school admins session error:", error);
-      syncAdminAuthCookie(data?.session ?? null);
-      const nextSession = data?.session ?? null;
-      if (!mounted) return;
-      setSession(nextSession);
-      if (!nextSession) {
-        router.replace("/");
-        return;
-      }
-
-      const { data: nextProfile } = await supabase
-        .from("profiles")
-        .select("id, role, account_status")
-        .eq("id", nextSession.user.id)
-        .single();
-      if (!mounted) return;
-      setProfile(nextProfile ?? null);
-      if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
-        router.replace("/");
-        return;
-      }
-
       const { data: schoolRow, error: schoolError } = await supabase
         .from("schools")
         .select("id, name, status")
@@ -98,9 +72,9 @@ export default function SchoolAdminsPage({ schoolId }) {
   }
 
   useEffect(() => {
-    if (!session || !school || profile?.role !== "super_admin" || profile?.account_status !== "active") return;
+    if (!school) return;
     reloadAdmins();
-  }, [profile, school, schoolId, session, supabase]);
+  }, [school, schoolId, supabase]);
 
   function openCreateModal() {
     setForm(emptyForm());
@@ -201,12 +175,12 @@ export default function SchoolAdminsPage({ schoolId }) {
   }
 
   return (
-    <div className="super-page">
-      <div className="super-shell">
-        <div className="super-hero admin-panel">
+    <div className="super-page-content">
+      <div className="admin-panel">
+        <div className="super-toolbar">
           <div>
             <div className="admin-chip">School Admin Management</div>
-            <h1 className="super-title">{school.name}</h1>
+            <div className="super-inline-title">{school.name}</div>
             <div className="admin-help">
               Onboarding method: temporary password with forced password change on first login.
             </div>
@@ -217,57 +191,55 @@ export default function SchoolAdminsPage({ schoolId }) {
           </div>
         </div>
 
-        <div className="admin-panel" style={{ marginTop: 12 }}>
-          {msg ? <div className="admin-msg">{msg}</div> : null}
-          {tempPassword ? (
-            <div className="admin-help" style={{ marginTop: 8 }}>
-              Last issued temporary password: <strong>{tempPassword}</strong>
-            </div>
-          ) : null}
-          <div className="admin-table-wrap" style={{ marginTop: 12 }}>
-            <table className="admin-table" style={{ minWidth: 960 }}>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Role</th>
-                  <th>Last login</th>
-                  <th>Created at</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {admins.map((admin) => (
-                  <tr key={admin.id}>
-                    <td>{admin.display_name || "N/A"}</td>
-                    <td>{admin.email || "N/A"}</td>
-                    <td>
-                      <span className={`super-status ${admin.account_status === "active" ? "active" : "inactive"}`}>
-                        {admin.account_status}
-                      </span>
-                    </td>
-                    <td>{admin.role}</td>
-                    <td>N/A</td>
-                    <td>{formatDateTime(admin.created_at)}</td>
-                    <td>
-                      <div className="admin-actions">
-                        <button className="btn" onClick={() => openEditModal(admin)}>Edit</button>
-                        <button className="btn" onClick={() => toggleAdminStatus(admin)}>
-                          {admin.account_status === "active" ? "Disable" : "Enable"}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {admins.length === 0 ? (
-                  <tr>
-                    <td colSpan={7}>No school admins yet.</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
+        {msg ? <div className="admin-msg">{msg}</div> : null}
+        {tempPassword ? (
+          <div className="admin-help" style={{ marginTop: 8 }}>
+            Last issued temporary password: <strong>{tempPassword}</strong>
           </div>
+        ) : null}
+        <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+          <table className="admin-table" style={{ minWidth: 960 }}>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Role</th>
+                <th>Last login</th>
+                <th>Created at</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {admins.map((admin) => (
+                <tr key={admin.id}>
+                  <td>{admin.display_name || "N/A"}</td>
+                  <td>{admin.email || "N/A"}</td>
+                  <td>
+                    <span className={`super-status ${admin.account_status === "active" ? "active" : "inactive"}`}>
+                      {admin.account_status}
+                    </span>
+                  </td>
+                  <td>{admin.role}</td>
+                  <td>N/A</td>
+                  <td>{formatDateTime(admin.created_at)}</td>
+                  <td>
+                    <div className="admin-actions">
+                      <button className="btn" onClick={() => openEditModal(admin)}>Edit</button>
+                      <button className="btn" onClick={() => toggleAdminStatus(admin)}>
+                        {admin.account_status === "active" ? "Disable" : "Enable"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {admins.length === 0 ? (
+                <tr>
+                  <td colSpan={7}>No school admins yet.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </div>
 

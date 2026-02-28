@@ -2,9 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { createAdminSupabaseClient } from "../lib/adminSupabase";
-import { syncAdminAuthCookie } from "../lib/authCookies";
+import { useSuperAdmin } from "./super/SuperAdminShell";
 
 function emptyForm() {
   return {
@@ -55,10 +53,7 @@ function computeSummary(schoolId, metrics) {
 }
 
 export default function SuperSchoolsPage() {
-  const router = useRouter();
-  const supabase = useMemo(() => createAdminSupabaseClient(), []);
-  const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const { supabase } = useSuperAdmin();
   const [schools, setSchools] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -76,56 +71,6 @@ export default function SuperSchoolsPage() {
   const [form, setForm] = useState(emptyForm());
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data, error }) => {
-      if (error) console.error("super getSession error:", error);
-      syncAdminAuthCookie(data?.session ?? null);
-      const nextSession = data?.session ?? null;
-      setSession(nextSession);
-      if (!nextSession) {
-        router.replace("/");
-        return;
-      }
-      const { data: nextProfile, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, role, display_name, account_status")
-        .eq("id", nextSession.user.id)
-        .single();
-      if (profileError || !nextProfile) {
-        console.error("super profile error:", profileError);
-        router.replace("/");
-        return;
-      }
-      setProfile(nextProfile);
-      if (nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
-        router.replace("/");
-        return;
-      }
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      syncAdminAuthCookie(nextSession ?? null);
-      setSession(nextSession ?? null);
-      if (!nextSession) {
-        setProfile(null);
-        router.replace("/");
-        return;
-      }
-      const { data: nextProfile } = await supabase
-        .from("profiles")
-        .select("id, role, display_name, account_status")
-        .eq("id", nextSession.user.id)
-        .single();
-      setProfile(nextProfile ?? null);
-      if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
-        router.replace("/");
-      }
-    });
-
-    return () => listener.subscription.unsubscribe();
-  }, [router, supabase]);
-
-  useEffect(() => {
-    if (!session || profile?.role !== "super_admin" || profile?.account_status !== "active") return;
     let cancelled = false;
 
     async function load() {
@@ -252,7 +197,7 @@ export default function SuperSchoolsPage() {
     return () => {
       cancelled = true;
     };
-  }, [profile, refreshNonce, session, supabase]);
+  }, [refreshNonce, supabase]);
 
   const filteredSchools = useMemo(() => {
     return schools.filter((school) => {
@@ -327,142 +272,127 @@ export default function SuperSchoolsPage() {
     setRefreshNonce((value) => value + 1);
   }
 
-  if (!session || !profile) {
-    return (
-      <div className="admin-login">
-        <h2>Loading...</h2>
-      </div>
-    );
-  }
-
   return (
-    <div className="super-page">
-      <div className="super-shell">
-        <div className="super-hero admin-panel">
+    <div className="super-page-content">
+      <div className="admin-panel">
+        <div className="super-toolbar">
           <div>
-            <div className="admin-chip">Super Admin</div>
-            <h1 className="super-title">Schools</h1>
+            <div className="admin-title">Schools Controls</div>
             <div className="admin-help">
               Search schools, update status, and enter a school-scoped admin context.
             </div>
           </div>
-          <div className="admin-actions">
-            <button className="btn btn-primary" onClick={openCreateModal}>Create School</button>
-            <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
+          <button className="btn btn-primary" onClick={openCreateModal}>Create School</button>
+        </div>
+        <div className="admin-form" style={{ marginTop: 12 }}>
+          <div className="field">
+            <label>Search</label>
+            <input
+              type="search"
+              placeholder="Search by school name"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="field small">
+            <label>Status</label>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">All</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
           </div>
         </div>
+        {msg ? <div className="admin-msg">{msg}</div> : null}
+      </div>
 
-        <div className="admin-panel" style={{ marginTop: 12 }}>
-          <div className="admin-form">
-            <div className="field">
-              <label>Search</label>
-              <input
-                type="search"
-                placeholder="Search by school name"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <div className="field small">
-              <label>Status</label>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                <option value="all">All</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
+      <div className="admin-panel" style={{ marginTop: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div className="admin-title">Schools List</div>
+            <div className="admin-help">
+              Aggregation window defaults to school `start_date` through `end_date`, or today if `end_date` is empty.
             </div>
           </div>
-          {msg ? <div className="admin-msg">{msg}</div> : null}
+          <div className="admin-chip">{filteredSchools.length} schools</div>
         </div>
 
-        <div className="admin-panel" style={{ marginTop: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div>
-              <div className="admin-title">Schools List</div>
-              <div className="admin-help">
-                Aggregation window defaults to school `start_date` through `end_date`, or today if `end_date` is empty.
-              </div>
-            </div>
-            <div className="admin-chip">{filteredSchools.length} schools</div>
-          </div>
-
-          <div className="admin-table-wrap" style={{ marginTop: 12 }}>
-            <table className="admin-table" style={{ minWidth: 1200 }}>
-              <thead>
-                <tr>
-                  <th>Enter</th>
-                  <th>School</th>
-                  <th>Attendance Rate</th>
-                  <th>Daily Test</th>
-                  <th>Model Test</th>
-                  <th>Student No.</th>
-                  <th>Start Date</th>
-                  <th>End Date</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSchools.map((school) => {
-                  const summary = computeSummary(school.id, metrics);
-                  return (
-                    <tr key={school.id}>
-                      <td>
-                        <Link
-                          className="super-enter-btn"
-                          href={`/super/schools/${school.id}/admin`}
-                          aria-label={`Enter ${school.name}`}
-                          title={`Enter ${school.name}`}
-                        >
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                              d="M9 6l6 6-6 6"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
+        <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+          <table className="admin-table" style={{ minWidth: 1200 }}>
+            <thead>
+              <tr>
+                <th>Enter</th>
+                <th>School</th>
+                <th>Attendance Rate</th>
+                <th>Daily Test</th>
+                <th>Model Test</th>
+                <th>Student No.</th>
+                <th>Start Date</th>
+                <th>End Date</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSchools.map((school) => {
+                const summary = computeSummary(school.id, metrics);
+                return (
+                  <tr key={school.id}>
+                    <td>
+                      <Link
+                        className="super-enter-btn"
+                        href={`/super/schools/${school.id}/admin`}
+                        aria-label={`Enter ${school.name}`}
+                        title={`Enter ${school.name}`}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            d="M9 6l6 6-6 6"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </Link>
+                    </td>
+                    <td>
+                      <div className="daily-name">{school.name}</div>
+                      <div className="daily-code">
+                        {[school.academic_year, school.term].filter(Boolean).join(" / ") || school.id}
+                      </div>
+                    </td>
+                    <td>{formatPercent(summary.attendanceRate)}</td>
+                    <td>{formatPercent(summary.dailyAverage)}</td>
+                    <td>{formatPercent(summary.modelAverage)}</td>
+                    <td>{summary.students}</td>
+                    <td>{formatDate(school.start_date)}</td>
+                    <td>{formatDate(school.end_date)}</td>
+                    <td>
+                      <span className={`super-status ${school.status}`}>{school.status}</span>
+                    </td>
+                    <td>
+                      <div className="admin-actions">
+                        <Link className="btn" href={`/super/schools/${school.id}/admins`}>
+                          Admin List
                         </Link>
-                      </td>
-                      <td>
-                        <div className="daily-name">{school.name}</div>
-                        <div className="daily-code">
-                          {[school.academic_year, school.term].filter(Boolean).join(" / ") || school.id}
-                        </div>
-                      </td>
-                      <td>{formatPercent(summary.attendanceRate)}</td>
-                      <td>{formatPercent(summary.dailyAverage)}</td>
-                      <td>{formatPercent(summary.modelAverage)}</td>
-                      <td>{summary.students}</td>
-                      <td>{formatDate(school.start_date)}</td>
-                      <td>{formatDate(school.end_date)}</td>
-                      <td>
-                        <span className={`super-status ${school.status}`}>{school.status}</span>
-                      </td>
-                      <td>
-                        <div className="admin-actions">
-                          <Link className="btn" href={`/super/schools/${school.id}/admins`}>
-                            Admin List
-                          </Link>
-                          <button className="btn" onClick={() => openEditModal(school)}>Edit</button>
-                          <button className="btn" onClick={() => toggleSchoolStatus(school)}>
-                            {school.status === "active" ? "Disable" : "Enable"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!loading && filteredSchools.length === 0 ? (
-                  <tr>
-                    <td colSpan={10}>No schools found.</td>
+                        <button className="btn" onClick={() => openEditModal(school)}>Edit</button>
+                        <button className="btn" onClick={() => toggleSchoolStatus(school)}>
+                          {school.status === "active" ? "Disable" : "Enable"}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+                );
+              })}
+              {!loading && filteredSchools.length === 0 ? (
+                <tr>
+                  <td colSpan={10}>No schools found.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </div>
 

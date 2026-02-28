@@ -2,30 +2,53 @@
 
 ## Route Flow
 
-- `/super` redirects to `/super/schools`
-- `/super/schools` is the Super Admin hub
+- `/super` redirects to `/super/dashboard`
+- `/super/dashboard` is the Super Admin landing page
+- `/super/schools` is the school management hub
+- `/super/tests/import` is the global question-set management shell
+- `/super/tests/analytics` is the cross-school analytics shell
+- `/super/audit` is the audit/logs placeholder
 - `/super/schools/:schoolId` redirects to `/super/schools/:schoolId/admin`
 - `/super/schools/:schoolId/admin/*` reuses the existing admin console in a forced school scope
 
 ## How To Use
 
 1. Sign in with a `super_admin` account.
-2. Open `/super/schools`.
-3. Search or filter the school list if needed.
-4. Review the Schools List columns:
+2. Open `/super/dashboard` or `/super`.
+3. Use the shared Super Admin sidebar to move between `Dashboard`, `Schools`, `Tests Management`, and `Audit / Logs`.
+4. Open `/super/schools` to search or filter the school list if needed.
+5. Review the Schools List columns:
    `School Name`, `Attendance`, `Daily Test`, `Model Test`, `Student No.`, `Start Date`, `End Date`, `Status`.
-5. Use `Create School`, `Edit`, or `Disable/Enable` for school management.
-6. Click `Enter` to open the existing admin UI for that school.
-7. Click `Admin List` to manage school-level admin accounts.
-8. Use `Change school` in the scoped admin banner to return to `/super/schools`.
+6. Use `Create School`, `Edit`, or `Disable/Enable` for school management.
+7. Click `Enter` to open the existing admin UI for that school.
+8. Click `Admin List` to manage school-level admin accounts.
+9. Use `Change school` in the scoped admin banner to return to `/super/schools`.
 
 ## Scope Enforcement
 
 - Middleware protects `/super/*` using the signed-in access token mirrored into a cookie.
+- The `/super` layout also validates the client session/profile and redirects inactive or non-super users back to `/`.
 - The scoped admin view sends `x-school-scope: <schoolId>` with Supabase requests.
 - `supabase/sql/phase2_super_admin_school_scope.sql` makes that header the effective school scope for `super_admin` on school-scoped tables.
 - `supabase/sql/phase3_initial_school_and_admins.sql` adds `start_date` / `end_date` and disables school admins server-side via `profiles.account_status`.
 - The existing admin console is reused as-is, but it now runs against a scoped Supabase client when opened through `/super/schools/:schoolId/admin`.
+
+## File Map
+
+- Super layout: `apps/admin/src/app/super/layout.jsx`
+- Shared shell and nav: `apps/admin/src/components/super/SuperAdminShell.jsx`
+- Dashboard page: `apps/admin/src/app/super/dashboard/page.jsx`
+- Schools page: `apps/admin/src/app/super/schools/page.jsx`
+- Tests import page: `apps/admin/src/app/super/tests/import/page.jsx`
+- Tests analytics page: `apps/admin/src/app/super/tests/analytics/page.jsx`
+- Audit page: `apps/admin/src/app/super/audit/page.jsx`
+
+## Adding A New Super Page
+
+1. Add a route under `apps/admin/src/app/super/.../page.jsx`.
+2. Add the nav entry in `apps/admin/src/components/super/SuperAdminShell.jsx`.
+3. If needed, extend the title/description mapping in the same shell file so the shared header stays accurate.
+4. Keep the page body focused on content panels only; the `/super` layout provides the shared frame and role guard behavior.
 
 ## Config
 
