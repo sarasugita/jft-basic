@@ -333,7 +333,7 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Vali
     }
     return -1;
   };
-  const idxNo = findIdx(["no", "no.", "number"]);
+  const idxNo = findIdx(["number", "no", "no."]);
   const idxQuestion = findIdx(["question"]);
   const idxCorrect = findIdx(["correct_answer", "correct answer", "correct"]);
   const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1", "wrong1", "wrong option1"]);

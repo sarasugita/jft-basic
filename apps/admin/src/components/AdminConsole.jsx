@@ -542,7 +542,7 @@ function parseDailyCsv(text, defaultTestVersion = "") {
     return -1;
   };
   const idxTest = findIdx(["testid", "test_id", "test id"]);
-  const idxNo = findIdx(["no.", "no", "number"]);
+  const idxNo = findIdx(["number", "no.", "no"]);
   const idxQuestion = findIdx(["question"]);
   const idxCorrect = findIdx(["correct_answer", "correct answer", "correct"]);
   const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1", "wrong1", "wrong option1"]);
@@ -860,6 +860,10 @@ export default function AdminConsole({
   const [testSessions, setTestSessions] = useState([]);
   const [testSessionsMsg, setTestSessionsMsg] = useState("");
   const [linkMsg, setLinkMsg] = useState("");
+  const [modelConductOpen, setModelConductOpen] = useState(false);
+  const [modelUploadOpen, setModelUploadOpen] = useState(false);
+  const [dailyConductOpen, setDailyConductOpen] = useState(false);
+  const [dailyUploadOpen, setDailyUploadOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingSessionMsg, setEditingSessionMsg] = useState("");
   const [editingSessionForm, setEditingSessionForm] = useState({
@@ -5156,126 +5160,20 @@ export default function AdminConsole({
                 <div className="admin-title">Test Sessions</div>
                 <div className="admin-subtitle">SetIDから実施テストを作成します。</div>
               </div>
-            <button
-              className="btn"
-              onClick={() => {
-                fetchTestSessions();
-                fetchExamLinks();
-              }}
-            >
-              Refresh Sessions
-            </button>
-          </div>
-
-          <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field">
-              <label>Category</label>
-              <select
-                value={modelConductCategory}
-                onChange={(e) => setModelConductCategory(e.target.value)}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={() => setModelConductOpen(true)}>
+                Conduct Test
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  fetchTestSessions();
+                  fetchExamLinks();
+                }}
               >
-                {modelCategories.length ? (
-                  modelCategories.map((c) => (
-                    <option key={`model-cat-${c.name}`} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">No categories</option>
-                )}
-              </select>
-            </div>
-            <div className="field">
-              <label>SetID</label>
-              <select
-                value={testSessionForm.problem_set_id}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
-              >
-                {modelConductTests.length ? (
-                  modelConductTests.map((t) => (
-                    <option key={`ps-${t.version}`} value={t.version}>
-                      {t.version}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">No problem sets</option>
-                )}
-              </select>
-            </div>
-            <div className="field">
-              <label>Test Title</label>
-              <input
-                value={testSessionForm.title}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
-                placeholder="Mock Test (Retake)"
-              />
-            </div>
-            <div className="field small">
-              <label>Starts At</label>
-              <input
-                type="datetime-local"
-                step="300"
-                value={testSessionForm.starts_at}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Ends At</label>
-              <input
-                type="datetime-local"
-                step="300"
-                value={testSessionForm.ends_at}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Time Limit (min)</label>
-              <input
-                value={testSessionForm.time_limit_min}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                placeholder="60"
-              />
-            </div>
-            <div className="field small">
-              <label>Show Answers</label>
-              <select
-                value={testSessionForm.show_answers ? "yes" : "no"}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-              >
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </div>
-            <div className="field small">
-              <label>Attempts</label>
-              <select
-                value={testSessionForm.allow_multiple_attempts ? "multiple" : "once"}
-                onChange={(e) =>
-                  setTestSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
-                }
-              >
-                <option value="once">Only once</option>
-                <option value="multiple">Allow multiple</option>
-              </select>
-            </div>
-            <div className="field small">
-              <label>Pass Rate</label>
-              <input
-                value={testSessionForm.pass_rate}
-                onChange={(e) => setTestSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                placeholder="0.8"
-              />
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button className="btn btn-primary" type="button" onClick={createTestSession}>
-                Create Session
+                Refresh Sessions
               </button>
             </div>
-          </div>
-
-          <div className="admin-help" style={{ marginTop: 6 }}>
-            Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
           </div>
 
           <div className="admin-table-wrap" style={{ marginTop: 10 }}>
@@ -5421,6 +5319,130 @@ export default function AdminConsole({
           <div className="admin-msg">{testSessionsMsg}</div>
           <div className="admin-msg">{linkMsg}</div>
           {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+
+          {modelConductOpen ? (
+            <div className="admin-modal-overlay" onClick={() => setModelConductOpen(false)}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Conduct Model Test</div>
+                  <button className="admin-modal-close" onClick={() => setModelConductOpen(false)} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+
+                <div className="admin-form" style={{ marginTop: 10 }}>
+                  <div className="field">
+                    <label>Category</label>
+                    <select
+                      value={modelConductCategory}
+                      onChange={(e) => setModelConductCategory(e.target.value)}
+                    >
+                      {modelCategories.length ? (
+                        modelCategories.map((c) => (
+                          <option key={`model-cat-${c.name}`} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">No categories</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>SetID</label>
+                    <select
+                      value={testSessionForm.problem_set_id}
+                      onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
+                    >
+                      {modelConductTests.length ? (
+                        modelConductTests.map((t) => (
+                          <option key={`ps-${t.version}`} value={t.version}>
+                            {t.version}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">No problem sets</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Test Title</label>
+                    <input
+                      value={testSessionForm.title}
+                      onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
+                      placeholder="Mock Test (Retake)"
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Starts At</label>
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={testSessionForm.starts_at}
+                      onChange={(e) => setTestSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Ends At</label>
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={testSessionForm.ends_at}
+                      onChange={(e) => setTestSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Time Limit (min)</label>
+                    <input
+                      value={testSessionForm.time_limit_min}
+                      onChange={(e) => setTestSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                      placeholder="60"
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Show Answers</label>
+                    <select
+                      value={testSessionForm.show_answers ? "yes" : "no"}
+                      onChange={(e) => setTestSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                    >
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+                  <div className="field small">
+                    <label>Attempts</label>
+                    <select
+                      value={testSessionForm.allow_multiple_attempts ? "multiple" : "once"}
+                      onChange={(e) =>
+                        setTestSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
+                      }
+                    >
+                      <option value="once">Only once</option>
+                      <option value="multiple">Allow multiple</option>
+                    </select>
+                  </div>
+                  <div className="field small">
+                    <label>Pass Rate</label>
+                    <input
+                      value={testSessionForm.pass_rate}
+                      onChange={(e) => setTestSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                      placeholder="0.8"
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>&nbsp;</label>
+                    <button className="btn btn-primary" type="button" onClick={createTestSession}>
+                      Create Session
+                    </button>
+                  </div>
+                </div>
+
+                <div className="admin-help" style={{ marginTop: 6 }}>
+                  Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         ) : null}
@@ -5433,127 +5455,12 @@ export default function AdminConsole({
                 <div className="admin-title">Set Upload (CSV)</div>
                 <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します（タイトルはTest Sessionで設定）。</div>
               </div>
-            <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
-          </div>
-
-          <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field">
-              <label>SetID</label>
-              <input
-                value={assetForm.test_version}
-                onChange={(e) => setAssetForm((s) => ({ ...s, test_version: e.target.value }))}
-                placeholder="problem_set_v1"
-              />
-            </div>
-            <div className="field">
-              <label>Category</label>
-              <select
-                value={assetCategorySelect}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setAssetCategorySelect(next);
-                  if (next !== "__custom__") {
-                    setAssetForm((s) => ({ ...s, category: next }));
-                  }
-                }}
-              >
-                {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((c) => (
-                  <option key={`asset-cat-${c.name}`} value={c.name}>{c.name}</option>
-                ))}
-                <option value="__custom__">Custom...</option>
-              </select>
-              {assetCategorySelect === "__custom__" ? (
-                <input
-                  value={assetForm.category}
-                  onChange={(e) => setAssetForm((s) => ({ ...s, category: e.target.value }))}
-                  placeholder="Book Review"
-                  style={{ marginTop: 6 }}
-                />
-              ) : null}
-            </div>
-            <div className="field">
-              <label>CSV File (required)</label>
-              <input
-                type="file"
-                accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  setAssetFile(file);
-                  if (file && file.name.toLowerCase().endsWith(".csv")) {
-                    setAssetCsvFile(file);
-                    if (!assetForm.test_version) {
-                      file.text().then((text) => {
-                        const detected = detectTestVersionFromCsvText(text);
-                        if (detected) {
-                          setAssetForm((s) => ({ ...s, test_version: detected }));
-                        }
-                      });
-                    }
-                  }
-                }}
-              />
-              {assetCsvFile ? (
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  CSV ready: {assetCsvFile.name}
-                </div>
-              ) : null}
-            </div>
-            <div className="field">
-              <label>Folder (PNG/MP3)</label>
-              <input
-                type="file"
-                multiple
-                webkitdirectory="true"
-                directory="true"
-                accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  setAssetFiles(files);
-                  const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv"));
-                  if (csvFile) {
-                    setAssetCsvFile(csvFile);
-                    if (!assetForm.test_version) {
-                      csvFile.text().then((text) => {
-                        const detected = detectTestVersionFromCsvText(text);
-                        if (detected) {
-                          setAssetForm((s) => ({ ...s, test_version: detected }));
-                        }
-                      });
-                    }
-                  }
-                }}
-              />
-              {assetFiles.length ? (
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  Selected: {assetFiles.length} files
-                </div>
-              ) : null}
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button className="btn btn-primary" type="button" onClick={uploadAssets}>
-                Upload & Register Set
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={() => setModelUploadOpen(true)}>
+                Upload Questions
               </button>
+              <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
             </div>
-          </div>
-
-          <div className="admin-help" style={{ marginTop: 6 }}>
-            Bucket: <b>test-assets</b> / CSV, PNG, MP3 (他拡張子もOK)
-          </div>
-          <div className="admin-help" style={{ marginTop: 4 }}>
-            Upload &amp; Register SetでCSV/PNG/MP3をアップロードします。
-          </div>
-          <div className="admin-help" style={{ marginTop: 4 }}>
-            CSVにはファイル名のみ記載してください。
-          </div>
-          <div className="admin-help" style={{ marginTop: 4 }}>
-            ※ `/images/...` や `/audio/...` などのパスは無効です。
-          </div>
-          <div className="admin-help" style={{ marginTop: 4 }}>
-            CSV format: <code>docs/question_csv.md</code>
-          </div>
-          <div className="admin-help" style={{ marginTop: 4 }}>
-            Template: <a href="/question_csv_template.csv" download>question_csv_template.csv</a>
           </div>
           <div className="admin-msg">{assetUploadMsg}</div>
           {assetImportMsg ? (
@@ -5711,6 +5618,139 @@ export default function AdminConsole({
           </div>
           {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
           <div className="admin-msg">{testsMsg}</div>
+
+          {modelUploadOpen ? (
+            <div className="admin-modal-overlay" onClick={() => setModelUploadOpen(false)}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Upload Model Questions</div>
+                  <button className="admin-modal-close" onClick={() => setModelUploadOpen(false)} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+
+                <div className="admin-form" style={{ marginTop: 10 }}>
+                  <div className="field">
+                    <label>SetID</label>
+                    <input
+                      value={assetForm.test_version}
+                      onChange={(e) => setAssetForm((s) => ({ ...s, test_version: e.target.value }))}
+                      placeholder="problem_set_v1"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Category</label>
+                    <select
+                      value={assetCategorySelect}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setAssetCategorySelect(next);
+                        if (next !== "__custom__") {
+                          setAssetForm((s) => ({ ...s, category: next }));
+                        }
+                      }}
+                    >
+                      {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((c) => (
+                        <option key={`asset-cat-${c.name}`} value={c.name}>{c.name}</option>
+                      ))}
+                      <option value="__custom__">Custom...</option>
+                    </select>
+                    {assetCategorySelect === "__custom__" ? (
+                      <input
+                        value={assetForm.category}
+                        onChange={(e) => setAssetForm((s) => ({ ...s, category: e.target.value }))}
+                        placeholder="Book Review"
+                        style={{ marginTop: 6 }}
+                      />
+                    ) : null}
+                  </div>
+                  <div className="field">
+                    <label>CSV File (required)</label>
+                    <input
+                      type="file"
+                      accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        setAssetFile(file);
+                        if (file && file.name.toLowerCase().endsWith(".csv")) {
+                          setAssetCsvFile(file);
+                          if (!assetForm.test_version) {
+                            file.text().then((text) => {
+                              const detected = detectTestVersionFromCsvText(text);
+                              if (detected) {
+                                setAssetForm((s) => ({ ...s, test_version: detected }));
+                              }
+                            });
+                          }
+                        }
+                      }}
+                    />
+                    {assetCsvFile ? (
+                      <div className="admin-help" style={{ marginTop: 4 }}>
+                        CSV ready: {assetCsvFile.name}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="field">
+                    <label>Folder (PNG/MP3)</label>
+                    <input
+                      type="file"
+                      multiple
+                      webkitdirectory="true"
+                      directory="true"
+                      accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files ?? []);
+                        setAssetFiles(files);
+                        const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv"));
+                        if (csvFile) {
+                          setAssetCsvFile(csvFile);
+                          if (!assetForm.test_version) {
+                            csvFile.text().then((text) => {
+                              const detected = detectTestVersionFromCsvText(text);
+                              if (detected) {
+                                setAssetForm((s) => ({ ...s, test_version: detected }));
+                              }
+                            });
+                          }
+                        }
+                      }}
+                    />
+                    {assetFiles.length ? (
+                      <div className="admin-help" style={{ marginTop: 4 }}>
+                        Selected: {assetFiles.length} files
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="field small">
+                    <label>&nbsp;</label>
+                    <button className="btn btn-primary" type="button" onClick={uploadAssets}>
+                      Upload & Register Set
+                    </button>
+                  </div>
+                </div>
+
+                <div className="admin-help" style={{ marginTop: 6 }}>
+                  Bucket: <b>test-assets</b> / CSV, PNG, MP3 (他拡張子もOK)
+                </div>
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  Upload &amp; Register SetでCSV/PNG/MP3をアップロードします。
+                </div>
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  CSVにはファイル名のみ記載してください。
+                </div>
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  ※ `/images/...` や `/audio/...` などのパスは無効です。
+                </div>
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  CSV format: <code>docs/question_csv.md</code>
+                </div>
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  Template: <a href="/question_csv_template.csv" download>question_csv_template.csv</a>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
         </>
         ) : null}
@@ -5726,126 +5766,20 @@ export default function AdminConsole({
                 <div className="admin-title">Daily Test Sessions</div>
                 <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
               </div>
-            <button
-              className="btn"
-              onClick={() => {
-                fetchTestSessions();
-                fetchExamLinks();
-              }}
-            >
-              Refresh Sessions
-            </button>
-          </div>
-
-          <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field">
-              <label>Category</label>
-              <select
-                value={dailyConductCategory}
-                onChange={(e) => setDailyConductCategory(e.target.value)}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={() => setDailyConductOpen(true)}>
+                Conduct Test
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  fetchTestSessions();
+                  fetchExamLinks();
+                }}
               >
-                {dailyCategories.length ? (
-                  dailyCategories.map((c) => (
-                    <option key={`daily-cat-${c.name}`} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">No categories</option>
-                )}
-              </select>
-            </div>
-            <div className="field">
-              <label>SetID</label>
-              <select
-                value={dailySessionForm.problem_set_id}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
-              >
-                {dailyConductTests.length ? (
-                  dailyConductTests.map((t) => (
-                    <option key={`daily-ps-${t.version}`} value={t.version}>
-                      {t.version}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">No daily tests</option>
-                )}
-              </select>
-            </div>
-            <div className="field">
-              <label>Test Title</label>
-              <input
-                value={dailySessionForm.title}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
-                placeholder="Daily Test"
-              />
-            </div>
-            <div className="field small">
-              <label>Starts At</label>
-              <input
-                type="datetime-local"
-                step="300"
-                value={dailySessionForm.starts_at}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Ends At</label>
-              <input
-                type="datetime-local"
-                step="300"
-                value={dailySessionForm.ends_at}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>Time Limit (min)</label>
-              <input
-                value={dailySessionForm.time_limit_min}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                placeholder="10"
-              />
-            </div>
-            <div className="field small">
-              <label>Show Answers</label>
-              <select
-                value={dailySessionForm.show_answers ? "yes" : "no"}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-              >
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </div>
-            <div className="field small">
-              <label>Attempts</label>
-              <select
-                value={dailySessionForm.allow_multiple_attempts ? "multiple" : "once"}
-                onChange={(e) =>
-                  setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
-                }
-              >
-                <option value="once">Only once</option>
-                <option value="multiple">Allow multiple</option>
-              </select>
-            </div>
-            <div className="field small">
-              <label>Pass Rate</label>
-              <input
-                value={dailySessionForm.pass_rate}
-                onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                placeholder="0.8"
-              />
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button className="btn btn-primary" type="button" onClick={createDailySession}>
-                Create Session
+                Refresh Sessions
               </button>
             </div>
-          </div>
-
-          <div className="admin-help" style={{ marginTop: 6 }}>
-            Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
           </div>
 
           <div className="admin-table-wrap" style={{ marginTop: 10 }}>
@@ -5975,6 +5909,130 @@ export default function AdminConsole({
           <div className="admin-msg">{dailySessionsMsg}</div>
           <div className="admin-msg">{linkMsg}</div>
           {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+
+          {dailyConductOpen ? (
+            <div className="admin-modal-overlay" onClick={() => setDailyConductOpen(false)}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Conduct Daily Test</div>
+                  <button className="admin-modal-close" onClick={() => setDailyConductOpen(false)} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+
+                <div className="admin-form" style={{ marginTop: 10 }}>
+                  <div className="field">
+                    <label>Category</label>
+                    <select
+                      value={dailyConductCategory}
+                      onChange={(e) => setDailyConductCategory(e.target.value)}
+                    >
+                      {dailyCategories.length ? (
+                        dailyCategories.map((c) => (
+                          <option key={`daily-cat-${c.name}`} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">No categories</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>SetID</label>
+                    <select
+                      value={dailySessionForm.problem_set_id}
+                      onChange={(e) => setDailySessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
+                    >
+                      {dailyConductTests.length ? (
+                        dailyConductTests.map((t) => (
+                          <option key={`daily-ps-${t.version}`} value={t.version}>
+                            {t.version}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">No daily tests</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Test Title</label>
+                    <input
+                      value={dailySessionForm.title}
+                      onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                      placeholder="Daily Test"
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Starts At</label>
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={dailySessionForm.starts_at}
+                      onChange={(e) => setDailySessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Ends At</label>
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={dailySessionForm.ends_at}
+                      onChange={(e) => setDailySessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Time Limit (min)</label>
+                    <input
+                      value={dailySessionForm.time_limit_min}
+                      onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                      placeholder="10"
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Show Answers</label>
+                    <select
+                      value={dailySessionForm.show_answers ? "yes" : "no"}
+                      onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                    >
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+                  <div className="field small">
+                    <label>Attempts</label>
+                    <select
+                      value={dailySessionForm.allow_multiple_attempts ? "multiple" : "once"}
+                      onChange={(e) =>
+                        setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
+                      }
+                    >
+                      <option value="once">Only once</option>
+                      <option value="multiple">Allow multiple</option>
+                    </select>
+                  </div>
+                  <div className="field small">
+                    <label>Pass Rate</label>
+                    <input
+                      value={dailySessionForm.pass_rate}
+                      onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                      placeholder="0.8"
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>&nbsp;</label>
+                    <button className="btn btn-primary" type="button" onClick={createDailySession}>
+                      Create Session
+                    </button>
+                  </div>
+                </div>
+
+                <div className="admin-help" style={{ marginTop: 6 }}>
+                  Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         ) : null}
@@ -5987,125 +6045,12 @@ export default function AdminConsole({
               <div className="admin-title">Daily Test Upload (CSV)</div>
               <div className="admin-subtitle">Daily Test用CSVとIllustrationをアップロードします。</div>
             </div>
-            <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
-          </div>
-
-          <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field">
-              <label>SetID</label>
-              <input
-                value={dailyForm.test_version}
-                onChange={(e) => setDailyForm((s) => ({ ...s, test_version: e.target.value }))}
-                placeholder="daily_vocab_01"
-              />
-            </div>
-            <div className="field">
-              <label>Category</label>
-              {dailyCategories.length ? (
-                <>
-                  <select
-                    value={dailyCategorySelect}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setDailyCategorySelect(next);
-                      if (next !== "__custom__") {
-                        setDailyForm((s) => ({ ...s, category: next }));
-                      }
-                    }}
-                  >
-                    {dailyCategories.map((c) => (
-                      <option key={`daily-cat-${c.name}`} value={c.name}>{c.name}</option>
-                    ))}
-                    <option value="__custom__">Custom...</option>
-                  </select>
-                  {dailyCategorySelect === "__custom__" ? (
-                    <input
-                      value={dailyForm.category}
-                      onChange={(e) => setDailyForm((s) => ({ ...s, category: e.target.value }))}
-                      placeholder="Vocabulary Test"
-                      style={{ marginTop: 6 }}
-                    />
-                  ) : null}
-                </>
-              ) : (
-                <input
-                  value={dailyForm.category}
-                  onChange={(e) => setDailyForm((s) => ({ ...s, category: e.target.value }))}
-                  placeholder="Vocabulary Test"
-                />
-              )}
-            </div>
-            <div className="field">
-              <label>CSV File (required)</label>
-              <input
-                type="file"
-                accept=".csv,.tsv"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  setDailyFile(file);
-                  if (file && (file.name.toLowerCase().endsWith(".csv") || file.name.toLowerCase().endsWith(".tsv"))) {
-                    setDailyCsvFile(file);
-                    if (!dailyForm.test_version) {
-                      file.text().then((text) => {
-                        const detected = detectDailyTestIdFromCsvText(text);
-                        if (detected) {
-                          setDailyForm((s) => ({ ...s, test_version: detected }));
-                        }
-                      });
-                    }
-                  }
-                }}
-              />
-              {dailyCsvFile ? (
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  CSV ready: {dailyCsvFile.name}
-                </div>
-              ) : null}
-            </div>
-            <div className="field">
-              <label>Folder (PNG)</label>
-              <input
-                type="file"
-                multiple
-                webkitdirectory="true"
-                directory="true"
-                accept=".csv,.tsv,.png,.jpg,.jpeg,.webp"
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  setDailyFiles(files);
-                  const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv") || f.name.toLowerCase().endsWith(".tsv"));
-                  if (csvFile) {
-                    setDailyCsvFile(csvFile);
-                    if (!dailyForm.test_version) {
-                      csvFile.text().then((text) => {
-                        const detected = detectDailyTestIdFromCsvText(text);
-                        if (detected) {
-                          setDailyForm((s) => ({ ...s, test_version: detected }));
-                        }
-                      });
-                    }
-                  }
-                }}
-              />
-              {dailyFiles.length ? (
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  Selected: {dailyFiles.length} files
-                </div>
-              ) : null}
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button className="btn btn-primary" type="button" onClick={uploadDailyAssets}>
-                Upload & Register Daily Test
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={() => setDailyUploadOpen(true)}>
+                Upload Questions
               </button>
+              <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
             </div>
-          </div>
-
-          <div className="admin-help" style={{ marginTop: 6 }}>
-            Bucket: <b>test-assets</b> / CSV, PNG
-          </div>
-          <div className="admin-help" style={{ marginTop: 4 }}>
-            Daily CSV headers used: <code>no</code>, <code>question</code>, <code>correct_answer</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>illustration</code>, <code>description</code>. Extra headers are ignored.
           </div>
           <div className="admin-msg">{dailyUploadMsg}</div>
           {dailyImportMsg ? (
@@ -6262,6 +6207,137 @@ export default function AdminConsole({
           </div>
           {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
           <div className="admin-msg">{testsMsg}</div>
+
+          {dailyUploadOpen ? (
+            <div className="admin-modal-overlay" onClick={() => setDailyUploadOpen(false)}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Upload Daily Questions</div>
+                  <button className="admin-modal-close" onClick={() => setDailyUploadOpen(false)} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+
+                <div className="admin-form" style={{ marginTop: 10 }}>
+                  <div className="field">
+                    <label>SetID</label>
+                    <input
+                      value={dailyForm.test_version}
+                      onChange={(e) => setDailyForm((s) => ({ ...s, test_version: e.target.value }))}
+                      placeholder="daily_vocab_01"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Category</label>
+                    {dailyCategories.length ? (
+                      <>
+                        <select
+                          value={dailyCategorySelect}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setDailyCategorySelect(next);
+                            if (next !== "__custom__") {
+                              setDailyForm((s) => ({ ...s, category: next }));
+                            }
+                          }}
+                        >
+                          {dailyCategories.map((c) => (
+                            <option key={`daily-cat-${c.name}`} value={c.name}>{c.name}</option>
+                          ))}
+                          <option value="__custom__">Custom...</option>
+                        </select>
+                        {dailyCategorySelect === "__custom__" ? (
+                          <input
+                            value={dailyForm.category}
+                            onChange={(e) => setDailyForm((s) => ({ ...s, category: e.target.value }))}
+                            placeholder="Vocabulary Test"
+                            style={{ marginTop: 6 }}
+                          />
+                        ) : null}
+                      </>
+                    ) : (
+                      <input
+                        value={dailyForm.category}
+                        onChange={(e) => setDailyForm((s) => ({ ...s, category: e.target.value }))}
+                        placeholder="Vocabulary Test"
+                      />
+                    )}
+                  </div>
+                  <div className="field">
+                    <label>CSV File (required)</label>
+                    <input
+                      type="file"
+                      accept=".csv,.tsv"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        setDailyFile(file);
+                        if (file && (file.name.toLowerCase().endsWith(".csv") || file.name.toLowerCase().endsWith(".tsv"))) {
+                          setDailyCsvFile(file);
+                          if (!dailyForm.test_version) {
+                            file.text().then((text) => {
+                              const detected = detectDailyTestIdFromCsvText(text);
+                              if (detected) {
+                                setDailyForm((s) => ({ ...s, test_version: detected }));
+                              }
+                            });
+                          }
+                        }
+                      }}
+                    />
+                    {dailyCsvFile ? (
+                      <div className="admin-help" style={{ marginTop: 4 }}>
+                        CSV ready: {dailyCsvFile.name}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="field">
+                    <label>Folder (PNG)</label>
+                    <input
+                      type="file"
+                      multiple
+                      webkitdirectory="true"
+                      directory="true"
+                      accept=".csv,.tsv,.png,.jpg,.jpeg,.webp"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files ?? []);
+                        setDailyFiles(files);
+                        const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv") || f.name.toLowerCase().endsWith(".tsv"));
+                        if (csvFile) {
+                          setDailyCsvFile(csvFile);
+                          if (!dailyForm.test_version) {
+                            csvFile.text().then((text) => {
+                              const detected = detectDailyTestIdFromCsvText(text);
+                              if (detected) {
+                                setDailyForm((s) => ({ ...s, test_version: detected }));
+                              }
+                            });
+                          }
+                        }
+                      }}
+                    />
+                    {dailyFiles.length ? (
+                      <div className="admin-help" style={{ marginTop: 4 }}>
+                        Selected: {dailyFiles.length} files
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="field small">
+                    <label>&nbsp;</label>
+                    <button className="btn btn-primary" type="button" onClick={uploadDailyAssets}>
+                      Upload & Register Daily Test
+                    </button>
+                  </div>
+                </div>
+
+                <div className="admin-help" style={{ marginTop: 6 }}>
+                  Bucket: <b>test-assets</b> / CSV, PNG
+                </div>
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  Daily CSV headers used: <code>number</code>, <code>question</code>, <code>correct_answer</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>illustration</code>, <code>description</code>. Extra headers are ignored.
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
         </>
         ) : null}

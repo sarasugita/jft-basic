@@ -104,7 +104,7 @@ function CsvGuideline({ testType }) {
     return (
       <div className="admin-help" style={{ marginTop: 12 }}>
         Daily test CSV headers used:
-        <code> no </code>, <code>question</code>, <code>correct_answer</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>illustration</code>, <code>description</code>.
+        <code> number </code>, <code>question</code>, <code>correct_answer</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>illustration</code>, <code>description</code>.
         Extra headers are ignored. If <code>description</code> is present, it will appear under the question in the daily preview.
       </div>
     );
@@ -457,7 +457,7 @@ export default function SuperTestsImportPage() {
               Upload shared sets, create new versions, and control school visibility.
             </div>
           </div>
-          <button className="btn btn-primary" onClick={openCreateModal}>Upload Set</button>
+          <button className="btn btn-primary" onClick={openCreateModal} style={{ marginLeft: "auto" }}>Upload Set</button>
         </div>
 
         <div className="admin-form" style={{ marginTop: 12 }}>
