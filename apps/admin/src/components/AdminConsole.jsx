@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { createAdminSupabaseClient } from "../lib/adminSupabase";
@@ -762,6 +763,7 @@ export default function AdminConsole({
   changeSchoolHref = null,
   homeHref = "/",
 }) {
+  const router = useRouter();
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
   const forcedSchoolName = forcedSchoolScope?.name ?? forcedSchoolId ?? "";
   const supabase = useMemo(
@@ -1591,6 +1593,17 @@ export default function AdminConsole({
       };
     });
   }, [activeTab, dailySubTab, modelSubTab]);
+
+  useEffect(() => {
+    if (!session || !profile) return;
+    if (
+      !forcedSchoolId &&
+      profile.role === "super_admin" &&
+      profile.account_status === "active"
+    ) {
+      router.replace("/super/schools");
+    }
+  }, [forcedSchoolId, profile, router, session]);
 
   useEffect(() => {
     const version = selectedAttempt?.test_version;
@@ -3755,6 +3768,18 @@ export default function AdminConsole({
     return (
       <div className="admin-login">
         <h2>Loading...</h2>
+      </div>
+    );
+  }
+
+  if (
+    !forcedSchoolId &&
+    profile.role === "super_admin" &&
+    profile.account_status === "active"
+  ) {
+    return (
+      <div className="admin-login">
+        <h2>Redirecting...</h2>
       </div>
     );
   }
