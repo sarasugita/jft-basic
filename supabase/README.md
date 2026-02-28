@@ -39,6 +39,7 @@ See `supabase/sql/schema.sql` for required tables/columns:
 - `test_assets`
 - `supabase/sql/phase1_multi_school_rbac.sql` for schools, RBAC, school scoping, and RLS
 - `supabase/sql/phase2_super_admin_school_scope.sql` for scoped super-admin admin-console reuse
+- `supabase/sql/phase3_initial_school_and_admins.sql` for the named initial school, school dates, and school-admin account status
 
 Multi-school setup and promotion steps:
 - `docs/multi-school-rbac.md`

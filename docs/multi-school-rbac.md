@@ -14,9 +14,12 @@ Run these SQL files in order:
 
 1. `supabase/sql/schema.sql`
 2. `supabase/sql/phase1_multi_school_rbac.sql`
-3. `supabase/sql/storage.sql`
+3. `supabase/sql/phase2_super_admin_school_scope.sql`
+4. `supabase/sql/phase3_initial_school_and_admins.sql`
+5. `supabase/sql/storage.sql`
 
-`phase1_multi_school_rbac.sql` is idempotent and backfills the current single-school data model into one school record named `Default School` when needed.
+`phase1_multi_school_rbac.sql` creates the school-scoping/RBAC foundation.
+`phase3_initial_school_and_admins.sql` performs the named initial-school migration for the legacy single-school dataset and adds school-admin account status support.
 
 ## One-Time Promotion to `super_admin`
 
@@ -29,7 +32,7 @@ set role = 'super_admin',
 where email = 'existing-admin@example.com';
 ```
 
-If you want the current school data to keep having a school-level admin after that promotion, assign another user to the backfilled school:
+If you want the current school data to keep having a school-level admin after that promotion, assign another user to the migrated school:
 
 ```sql
 update public.profiles
@@ -37,7 +40,7 @@ set role = 'admin',
     school_id = (
       select id
       from public.schools
-      where lower(name) = lower('Default School')
+      where lower(name) = lower('Grameen Caledonian College of Nursing')
       limit 1
     )
 where email = 'school-admin@example.com';
@@ -91,6 +94,23 @@ Single-user payload:
 - `admin` can only read and write rows for their own `school_id`.
 - `student` can only read and write their own records where applicable.
 - Edge Functions for inviting students, deleting students, and resetting passwords now enforce role and school scope server-side.
+- Disabled school admins are blocked server-side because `current_user_role()` resolves to `null` when `profiles.account_status = 'disabled'`.
+
+## Initial School Migration
+
+`phase3_initial_school_and_admins.sql` migrates the legacy single-school dataset into:
+
+- `name = 'Grameen Caledonian College of Nursing'`
+- `status = active`
+- `start_date = earliest attendance day, or current date if none exists`
+- `end_date = null`
+
+Backfill rules:
+
+- If the database has zero or one legacy school record, all school-scoped data is pointed to this initial school.
+- `super_admin` users are left with `school_id = null`.
+- Remaining `admin` and `student` users are assigned the initial school.
+- Existing tests, sessions, attempts, attendance rows, announcements, assets, and links are updated to the initial `school_id`.
 
 ## Known Phase 1 Boundary
 
