@@ -124,6 +124,7 @@ export type UploadMetadata = {
   title: string;
   description: string | null;
   test_type: "daily" | "model";
+  category: string | null;
   version_label: string;
   status: "draft" | "published" | "archived";
   visibility_scope: "global" | "restricted";
@@ -184,6 +185,7 @@ export async function parseUploadForm(req: Request): Promise<{ metadata: UploadM
       title,
       description: normalizeText(parsed.description),
       test_type: testType as "daily" | "model",
+      category: normalizeText(parsed.category),
       version_label: versionLabel,
       status: status as "draft" | "published" | "archived",
       visibility_scope: visibilityScope as "global" | "restricted",
@@ -265,11 +267,40 @@ function normalizeHeader(value: string) {
   return String(value ?? "").trim().toLowerCase().replace(/^\uFEFF/, "");
 }
 
+function hashSeed(str: string) {
+  let h = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    h = (h << 5) - h + str.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+function shuffleWithSeed<T>(items: T[], seedStr: string) {
+  const out = [...items];
+  let seed = hashSeed(seedStr);
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    seed = (seed * 9301 + 49297) % 233280;
+    const rand = seed / 233280;
+    const j = Math.floor(rand * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 function inferMediaType(fileName: string) {
   const lower = fileName.toLowerCase();
   if (/\.(png|jpe?g|webp|gif|svg)$/.test(lower)) return "image";
   if (/\.(mp3|wav|m4a|ogg)$/.test(lower)) return "audio";
   return null;
+}
+
+function normalizeAssetName(value: string | null | undefined) {
+  return String(value ?? "")
+    .trim()
+    .split(/[\\/]/)
+    .pop()
+    ?.toLowerCase() ?? "";
 }
 
 export type ValidationResult = {
@@ -293,21 +324,129 @@ export type ValidationResult = {
   }>;
 };
 
-export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[]): Promise<ValidationResult> {
-  const text = await csvFile.text();
-  const rows = parseCsvRows(text);
+function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): ValidationResult {
+  const header = rows[0].map(normalizeHeader);
+  const findIdx = (names: string[]) => {
+    for (const name of names) {
+      const idx = header.indexOf(normalizeHeader(name));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+  const idxNo = findIdx(["no", "no.", "number"]);
+  const idxQuestion = findIdx(["question"]);
+  const idxCorrect = findIdx(["correct_answer", "correct answer", "correct"]);
+  const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1", "wrong1", "wrong option1"]);
+  const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2", "wrong2", "wrong option2"]);
+  const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3", "wrong3", "wrong option3"]);
+  const idxIllustration = findIdx(["illustration"]);
+  const idxDescription = findIdx(["description"]);
+
   const errors: string[] = [];
   const warnings: string[] = [];
+  const assetNames = new Set(assetFiles.map((file) => normalizeAssetName(file.name)));
+  const questions: ValidationResult["questions"] = [];
+  let assetReferenceCount = 0;
+
+  if (idxQuestion === -1 || idxCorrect === -1) {
+    errors.push("Daily CSV must include question and correct_answer columns.");
+  }
+
+  for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    const cell = (idx: number) => (idx === -1 ? "" : String(row[idx] ?? "").trim());
+    const noValue = cell(idxNo);
+    const questionText = cell(idxQuestion);
+    const correct = cell(idxCorrect);
+    const wrongs = [cell(idxWrong1), cell(idxWrong2), cell(idxWrong3)].filter(Boolean);
+    const illustration = cell(idxIllustration) || null;
+    const description = cell(idxDescription) || null;
+
+    if (!noValue && !questionText && !correct && !illustration && !description) continue;
+    if (!questionText) {
+      errors.push(`Row ${rowIndex + 1}: question is required.`);
+      continue;
+    }
+    if (!correct) {
+      errors.push(`Row ${rowIndex + 1}: correct_answer is required.`);
+      continue;
+    }
+
+    const qid = noValue || `daily-${rowIndex}`;
+    const items = [
+      ...wrongs.map((text) => ({ text, correct: false })),
+      { text: correct, correct: true },
+    ].filter((item) => item.text);
+
+    if (!items.length) {
+      errors.push(`Row ${rowIndex + 1} (${qid}): choices are required.`);
+      continue;
+    }
+
+    const shuffled = shuffleWithSeed(items, `daily-${qid}`);
+    const options = shuffled.map((item) => item.text);
+    const answerIndex = shuffled.findIndex((item) => item.correct);
+    if (answerIndex < 0) {
+      errors.push(`Row ${rowIndex + 1} (${qid}): correct answer not found in choices.`);
+      continue;
+    }
+
+    const mediaType = illustration ? inferMediaType(illustration) : null;
+    if (illustration) {
+      assetReferenceCount += 1;
+      if (!assetNames.has(normalizeAssetName(illustration))) {
+        errors.push(`Row ${rowIndex + 1} (${qid}): referenced asset "${illustration}" was not uploaded.`);
+      }
+      if (!mediaType) {
+        warnings.push(`Row ${rowIndex + 1} (${qid}): could not infer media type from "${illustration}".`);
+      }
+    }
+
+    questions.push({
+      qid,
+      question_text: questionText,
+      question_type: "daily",
+      correct_answer: answerIndex,
+      options,
+      media_type: mediaType,
+      media_file: illustration,
+      order_index: Number.isFinite(Number(noValue)) ? Number(noValue) : questions.length + 1,
+      metadata: description ? { description } : {},
+    });
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    summary: {
+      question_count: questions.length,
+      asset_reference_count: assetReferenceCount,
+    },
+    questions,
+  };
+}
+
+export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[], testType?: string | null): Promise<ValidationResult> {
+  const text = await csvFile.text();
+  const rows = parseCsvRows(text);
 
   if (rows.length === 0) {
     return {
       valid: false,
       errors: ["CSV is empty."],
-      warnings,
+      warnings: [],
       summary: { question_count: 0, asset_reference_count: 0 },
       questions: [],
     };
   }
+
+  if (testType === "daily") {
+    return validateDailyQuestionSetCsv(rows, assetFiles);
+  }
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
 
   const header = rows[0].map(normalizeHeader);
   const indexOf = (name: string) => header.indexOf(name);
@@ -317,7 +456,7 @@ export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[]):
     errors.push(`Missing required columns: ${missingColumns.join(", ")}`);
   }
 
-  const assetNames = new Set(assetFiles.map((file) => file.name));
+  const assetNames = new Set(assetFiles.map((file) => normalizeAssetName(file.name)));
   const seenQids = new Set<string>();
   const questions: ValidationResult["questions"] = [];
   let assetReferenceCount = 0;
@@ -404,7 +543,7 @@ export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[]):
 
     if (mediaFile) {
       assetReferenceCount += 1;
-      if (!assetNames.has(mediaFile)) {
+      if (!assetNames.has(normalizeAssetName(mediaFile))) {
         errors.push(`Row ${rowIndex + 1} (${qid}): referenced asset "${mediaFile}" was not uploaded.`);
       }
       if (!mediaType) {
@@ -498,4 +637,186 @@ export async function replaceVisibility(
     .from("question_set_school_access")
     .insert(rows);
   if (insertError) throw new Error(insertError.message);
+}
+
+function buildPublicAssetUrl(objectPath: string) {
+  return `${SUPABASE_URL}/storage/v1/object/public/test-assets/${objectPath}`;
+}
+
+function normalizeLegacyOptionValue(
+  value: unknown,
+  uploadedAssets: Map<string, string>,
+) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const normalized = normalizeAssetName(text);
+  const matchedPath = normalized
+    ? Array.from(uploadedAssets.entries()).find(([fileName]) => normalizeAssetName(fileName) === normalized)?.[1]
+    : null;
+  return matchedPath ? buildPublicAssetUrl(matchedPath) : text;
+}
+
+function resolveLegacyAnswerIndex(options: unknown[], correctAnswer: unknown) {
+  if (typeof correctAnswer === "number" && Number.isFinite(correctAnswer)) {
+    return Number(correctAnswer);
+  }
+
+  const correctText = String(correctAnswer ?? "").trim();
+  if (!correctText) return null;
+
+  const exactIndex = options.findIndex((option) => String(option ?? "").trim() === correctText);
+  if (exactIndex !== -1) return exactIndex;
+
+  const normalizedIndex = options.findIndex(
+    (option) => String(option ?? "").trim().toLowerCase() === correctText.toLowerCase(),
+  );
+  return normalizedIndex !== -1 ? normalizedIndex : null;
+}
+
+export async function syncLegacyTestCatalog(
+  adminClient: ReturnType<typeof createClient>,
+  {
+    setId,
+    testType,
+    category,
+    questions,
+    uploadedAssets,
+  }: {
+    setId: string;
+    testType: "daily" | "model";
+    category: string | null;
+    questions: ValidationResult["questions"];
+    uploadedAssets: Map<string, string>;
+  },
+) {
+  const legacyType = testType === "model" ? "mock" : "daily";
+  const categoryLabel = (testType === "daily" ? category : null) || (testType === "model" ? "Book Review" : setId);
+  const now = new Date().toISOString();
+
+  const { data: existingTest, error: testLookupError } = await adminClient
+    .from("tests")
+    .select("id")
+    .eq("version", setId)
+    .maybeSingle();
+  if (testLookupError) throw new Error(`Legacy test lookup failed: ${testLookupError.message}`);
+
+  if (existingTest?.id) {
+    const { error } = await adminClient
+      .from("tests")
+      .update({
+        title: categoryLabel,
+        type: legacyType,
+        is_public: true,
+        updated_at: now,
+      })
+      .eq("id", existingTest.id);
+    if (error) throw new Error(`Legacy test update failed: ${error.message}`);
+  } else {
+    const { error } = await adminClient.from("tests").insert({
+      version: setId,
+      title: categoryLabel,
+      type: legacyType,
+      is_public: true,
+      updated_at: now,
+    });
+    if (error) throw new Error(`Legacy test create failed: ${error.message}`);
+  }
+
+  const legacyQuestions = questions.map((question, index) => {
+    const resolvedOptions = Array.isArray(question.options)
+      ? question.options.map((option) => normalizeLegacyOptionValue(option, uploadedAssets)).filter(Boolean)
+      : [];
+    const mediaUrl = question.media_file
+      ? normalizeLegacyOptionValue(question.media_file, uploadedAssets)
+      : null;
+    const answerIndex = resolveLegacyAnswerIndex(resolvedOptions, question.correct_answer);
+    if (answerIndex == null) {
+      throw new Error(`Legacy answer mapping failed for question "${question.qid}"`);
+    }
+
+    return {
+      test_version: setId,
+      question_id: question.qid,
+      section_key: testType === "daily"
+        ? "DAILY"
+        : String(question.metadata?.section_key ?? question.metadata?.section ?? "SUPER").trim() || "SUPER",
+      type: testType === "daily" ? "daily" : String(question.question_type ?? "super_question"),
+      prompt_en: question.question_text,
+      prompt_bn: null,
+      answer_index: answerIndex,
+      order_index: Number.isFinite(Number(question.order_index)) ? Number(question.order_index) : index + 1,
+      data: {
+        itemId: question.qid,
+        stemKind: question.media_type ?? null,
+        stemText: testType === "daily" ? null : question.question_text,
+        stemAsset: mediaUrl || null,
+        stemExtra: String(question.metadata?.description ?? "").trim() || null,
+        boxText: null,
+        choices: resolvedOptions,
+        target: String(question.metadata?.target ?? "").trim() || null,
+        canDo: String(question.metadata?.canDo ?? question.metadata?.can_do ?? "").trim() || null,
+      },
+    };
+  });
+
+  const keepIds = legacyQuestions.map((question) => question.question_id);
+  if (keepIds.length) {
+    const notIn = `(${keepIds.map((questionId) => `"${String(questionId).replaceAll("\"", "\\\"")}"`).join(",")})`;
+    const { error } = await adminClient
+      .from("questions")
+      .delete()
+      .eq("test_version", setId)
+      .not("question_id", "in", notIn);
+    if (error) throw new Error(`Legacy question cleanup failed: ${error.message}`);
+  } else {
+    const { error } = await adminClient.from("questions").delete().eq("test_version", setId);
+    if (error) throw new Error(`Legacy question cleanup failed: ${error.message}`);
+  }
+
+  if (legacyQuestions.length) {
+    const { error } = await adminClient.from("questions").upsert(legacyQuestions, {
+      onConflict: "test_version,question_id",
+    });
+    if (error) throw new Error(`Legacy question upsert failed: ${error.message}`);
+  }
+
+  const { data: questionRows, error: questionFetchError } = await adminClient
+    .from("questions")
+    .select("id, question_id")
+    .eq("test_version", setId)
+    .in("question_id", keepIds);
+  if (questionFetchError) throw new Error(`Legacy question fetch failed: ${questionFetchError.message}`);
+
+  const questionIdMap = new Map<string, string>();
+  (questionRows ?? []).forEach((row) => {
+    if (row?.question_id && row?.id) questionIdMap.set(row.question_id, row.id);
+  });
+
+  const questionUuidList = Array.from(questionIdMap.values());
+  if (questionUuidList.length) {
+    const { error } = await adminClient.from("choices").delete().in("question_id", questionUuidList);
+    if (error) throw new Error(`Legacy choice cleanup failed: ${error.message}`);
+  }
+
+  const choiceRows = legacyQuestions.flatMap((question) => {
+    const questionUuid = questionIdMap.get(question.question_id);
+    const choiceValues = Array.isArray(question.data?.choices) ? question.data.choices : [];
+    if (!questionUuid) return [];
+    return choiceValues.map((value, choiceIndex) => {
+      const textValue = String(value ?? "").trim();
+      const isImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(textValue) || textValue.includes("/storage/v1/object/public/");
+      return {
+        question_id: questionUuid,
+        part_index: null,
+        choice_index: choiceIndex,
+        label: isImage ? null : textValue,
+        choice_image: isImage ? textValue : null,
+      };
+    });
+  });
+
+  if (choiceRows.length) {
+    const { error } = await adminClient.from("choices").insert(choiceRows);
+    if (error) throw new Error(`Legacy choice insert failed: ${error.message}`);
+  }
 }

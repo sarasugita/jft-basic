@@ -47,10 +47,9 @@ function CsvGuideline({ testType }) {
   if (testType === "daily") {
     return (
       <div className="admin-help" style={{ marginTop: 12 }}>
-        Daily test CSV:
-        Required columns: <code>qid</code>, <code>question_text</code>, <code>question_type</code>, <code>correct_answer</code>.
-        Optional columns: <code>options</code>, <code>media_file</code>, <code>media_type</code>, <code>order_index</code>, <code>metadata</code>.
-        Use this for a single daily-test category such as <code>Vocabulary</code>.
+        Daily test CSV headers used:
+        <code> no </code>, <code>question</code>, <code>correct_answer</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>illustration</code>, <code>description</code>.
+        Extra headers are ignored. If <code>description</code> is present, it will appear under the question in the daily preview.
       </div>
     );
   }
@@ -143,10 +142,10 @@ export default function SuperTestsImportPage() {
     setLoading(true);
     setMsg("");
 
-    const [questionSetsRes, visibilityRes, schoolsRes] = await Promise.all([
+    const [questionSetsRes, visibilityRes, schoolsRes, questionsRes, legacyTestsRes] = await Promise.all([
       supabase
         .from("question_sets")
-        .select("id, library_key, source_question_set_id, title, description, test_type, version, version_label, status, visibility_scope, updated_at")
+        .select("id, library_key, source_question_set_id, title, description, test_type, version, version_label, status, visibility_scope, created_at, updated_at")
         .order("updated_at", { ascending: false }),
       supabase
         .from("question_set_school_access")
@@ -155,6 +154,12 @@ export default function SuperTestsImportPage() {
         .from("schools")
         .select("id, name")
         .order("name", { ascending: true }),
+      supabase
+        .from("question_set_questions")
+        .select("question_set_id"),
+      supabase
+        .from("tests")
+        .select("version, title, type"),
     ]);
 
     if (questionSetsRes.error) {
@@ -166,16 +171,28 @@ export default function SuperTestsImportPage() {
     }
 
     const schoolMap = Object.fromEntries((schoolsRes.data ?? []).map((school) => [school.id, school]));
+    const questionCountBySet = {};
+    for (const row of questionSetsRes.data ?? []) {
+      questionCountBySet[row.id] = 0;
+    }
     const visibilityBySet = {};
     for (const row of visibilityRes.data ?? []) {
       visibilityBySet[row.question_set_id] = visibilityBySet[row.question_set_id] ?? [];
       if (schoolMap[row.school_id]) visibilityBySet[row.question_set_id].push(schoolMap[row.school_id]);
     }
 
+    for (const row of (questionsRes.data ?? [])) {
+      if (!row?.question_set_id) continue;
+      questionCountBySet[row.question_set_id] = (questionCountBySet[row.question_set_id] ?? 0) + 1;
+    }
+    const legacyTestBySetId = Object.fromEntries((legacyTestsRes.data ?? []).map((row) => [row.version, row]));
+
     setSchools(schoolsRes.data ?? []);
     setQuestionSets(
       (questionSetsRes.data ?? []).map((item) => ({
         ...item,
+        category: legacyTestBySetId[item.title]?.title ?? (item.test_type === "daily" ? "Vocabulary" : "Book Review"),
+        question_count: questionCountBySet[item.id] ?? 0,
         visible_schools: visibilityBySet[item.id] ?? [],
       })),
     );
@@ -263,38 +280,40 @@ export default function SuperTestsImportPage() {
   async function validateUpload() {
     if (!csvFile) {
       setValidationMsg("CSV file is required.");
-      return;
+      return null;
     }
 
-    setSaving(true);
     setValidationMsg("");
     try {
       const result = await invokeUploadFunction("validate-question-set-upload");
       setValidation(result.validation ?? null);
       setValidationMsg(result.validation?.valid ? "Validation passed." : "Validation found errors.");
+      return result.validation ?? null;
     } catch (error) {
       setValidation(null);
       setValidationMsg(String(error.message ?? error));
-    } finally {
-      setSaving(false);
+      return null;
     }
   }
 
   async function saveUpload() {
-    if (!validation?.valid) {
-      setValidationMsg("Run validation and resolve all errors before saving.");
-      return;
-    }
-
     setSaving(true);
     setValidationMsg("");
     try {
+      const nextValidation = await validateUpload();
+      if (!nextValidation?.valid) {
+        if (!nextValidation) {
+          setValidationMsg((current) => current || "Validation failed.");
+        }
+        return;
+      }
+
       const functionName = uploadForm.mode === "version" ? "upload-question-set-version" : "create-question-set";
       await invokeUploadFunction(functionName);
       setUploadOpen(false);
       setValidation(null);
       setValidationMsg("");
-      setMsg(uploadForm.mode === "version" ? "Question-set version uploaded." : "Question set created.");
+      setMsg(uploadForm.mode === "version" ? "Set version uploaded." : "Set created.");
       await loadLibrary();
     } catch (error) {
       setValidationMsg(String(error.message ?? error));
@@ -308,7 +327,7 @@ export default function SuperTestsImportPage() {
     try {
       await invokeJsonFunction("update-question-set-metadata", metaForm);
       setMetaOpen(false);
-      setMsg("Question-set metadata updated.");
+      setMsg("Set metadata updated.");
       await loadLibrary();
     } catch (error) {
       setMsg(String(error.message ?? error));
@@ -321,7 +340,7 @@ export default function SuperTestsImportPage() {
     setSaving(true);
     try {
       await invokeJsonFunction("archive-question-set", { question_set_id: questionSetId });
-      setMsg("Question set archived.");
+      setMsg("Set archived.");
       await loadLibrary();
     } catch (error) {
       setMsg(String(error.message ?? error));
@@ -335,12 +354,12 @@ export default function SuperTestsImportPage() {
       <div className="admin-panel">
         <div className="super-toolbar">
           <div>
-            <div className="admin-title">Question Set Library</div>
+            <div className="admin-title">Set Library</div>
             <div className="admin-help">
-              Upload global question sets, create new versions, and control school visibility.
+              Upload shared sets, create new versions, and control school visibility.
             </div>
           </div>
-          <button className="btn btn-primary" onClick={openCreateModal}>Upload Question Set</button>
+          <button className="btn btn-primary" onClick={openCreateModal}>Upload Set</button>
         </div>
 
         <div className="admin-form" style={{ marginTop: 12 }}>
@@ -365,27 +384,31 @@ export default function SuperTestsImportPage() {
         {msg ? <div className="admin-msg">{msg}</div> : null}
 
         <div className="admin-table-wrap" style={{ marginTop: 12 }}>
-          <table className="admin-table" style={{ minWidth: 1180 }}>
+          <table className="admin-table" style={{ minWidth: 1320 }}>
             <thead>
               <tr>
-                <th>Title</th>
-                <th>Test Type</th>
-                <th>Version</th>
+                <th>Created</th>
+                <th>Category</th>
+                <th>SetID</th>
+                <th>Questions</th>
                 <th>Visibility</th>
-                <th>Status</th>
+                <th>Version</th>
                 <th>Updated At</th>
-                <th>Actions</th>
+                <th>Manage</th>
+                <th>New Version</th>
+                <th>Archive</th>
               </tr>
             </thead>
             <tbody>
               {filteredQuestionSets.map((item) => (
                 <tr key={item.id}>
+                  <td>{formatDateTime(item.created_at ?? item.updated_at)}</td>
+                  <td>{item.category || (item.test_type === "daily" ? "Vocabulary" : "Book Review")}</td>
                   <td>
                     <div className="daily-name">{item.title}</div>
-                    <div className="daily-code">{item.description || item.library_key}</div>
+                    <div className="daily-code">{item.test_type === "daily" ? "Daily" : "Model"}</div>
                   </td>
-                  <td style={{ textTransform: "capitalize" }}>{item.test_type}</td>
-                  <td>{item.version_label || `v${item.version}`}</td>
+                  <td style={{ textAlign: "right" }}>{item.question_count ?? 0}</td>
                   <td>
                     <div style={{ fontWeight: 700 }}>
                       {item.visibility_scope === "global" ? "All schools" : "Restricted"}
@@ -396,28 +419,29 @@ export default function SuperTestsImportPage() {
                       </div>
                     ) : null}
                   </td>
-                  <td>{statusBadge(item.status)}</td>
+                  <td>{item.version_label || `v${item.version}`}</td>
                   <td>{formatDateTime(item.updated_at)}</td>
                   <td>
-                    <div className="admin-actions">
-                      <button className="btn" onClick={() => openMetadataModal(item)}>View / Manage</button>
-                      <button className="btn" onClick={() => openVersionModal(item)}>Upload New Version</button>
-                      <button className="btn" onClick={() => openMetadataModal(item)}>Edit Metadata</button>
-                      {item.status !== "archived" ? (
-                        <button className="btn" onClick={() => archiveQuestionSet(item.id)}>Archive</button>
-                      ) : null}
-                    </div>
+                    <button className="btn" onClick={() => openMetadataModal(item)}>Edit</button>
+                  </td>
+                  <td>
+                    <button className="btn" onClick={() => openVersionModal(item)}>Upload</button>
+                  </td>
+                  <td>
+                    {item.status !== "archived" ? (
+                      <button className="btn btn-danger" onClick={() => archiveQuestionSet(item.id)}>Archive</button>
+                    ) : statusBadge(item.status)}
                   </td>
                 </tr>
               ))}
               {!loading && filteredQuestionSets.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>No question sets to show yet.</td>
+                  <td colSpan={10}>No sets to show yet.</td>
                 </tr>
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={7}>Loading question sets...</td>
+                  <td colSpan={10}>Loading sets...</td>
                 </tr>
               ) : null}
             </tbody>
@@ -430,7 +454,7 @@ export default function SuperTestsImportPage() {
           <div className="admin-modal super-upload-modal" onClick={(event) => event.stopPropagation()}>
             <div className="admin-modal-header">
               <div className="admin-title">
-                {uploadForm.mode === "version" ? "Upload Question Set Version" : "Create Question Set"}
+                {uploadForm.mode === "version" ? "Upload Set Version" : "Create Set"}
               </div>
               <button className="admin-modal-close" onClick={() => setUploadOpen(false)} aria-label="Close">
                 ×
@@ -439,7 +463,7 @@ export default function SuperTestsImportPage() {
 
             <div className="admin-form" style={{ marginTop: 12 }}>
               <div className="field">
-                <label>Title</label>
+                <label>SetID</label>
                 <input
                   value={uploadForm.title}
                   onChange={(event) => setUploadForm((prev) => ({ ...prev, title: event.target.value }))}
@@ -501,11 +525,13 @@ export default function SuperTestsImportPage() {
                 <input type="file" accept=".csv,text/csv" onChange={(event) => setCsvFile(event.target.files?.[0] ?? null)} />
               </div>
               <div className="field">
-                <label>Assets Upload</label>
+                <label>Image/audio upload</label>
                 <input
                   type="file"
                   multiple
                   accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.mp3,.wav,.m4a,.ogg"
+                  webkitdirectory=""
+                  directory=""
                   onChange={(event) => setAssetFiles(Array.from(event.target.files ?? []))}
                 />
               </div>
@@ -528,9 +554,8 @@ export default function SuperTestsImportPage() {
             <ValidationReport validation={validation} />
 
             <div className="admin-actions" style={{ marginTop: 14 }}>
-              <button className="btn" onClick={validateUpload} disabled={saving}>Validate</button>
-              <button className="btn btn-primary" onClick={saveUpload} disabled={saving || !validation?.valid}>
-                Upload / Save
+              <button className="btn btn-primary" onClick={saveUpload} disabled={saving}>
+                {saving ? "Uploading..." : "Upload / Save"}
               </button>
             </div>
           </div>
@@ -541,7 +566,7 @@ export default function SuperTestsImportPage() {
         <div className="admin-modal-overlay" onClick={() => setMetaOpen(false)}>
           <div className="admin-modal super-upload-modal" onClick={(event) => event.stopPropagation()}>
             <div className="admin-modal-header">
-              <div className="admin-title">Edit Question Set Metadata</div>
+              <div className="admin-title">Edit Set Metadata</div>
               <button className="admin-modal-close" onClick={() => setMetaOpen(false)} aria-label="Close">
                 ×
               </button>
@@ -549,7 +574,7 @@ export default function SuperTestsImportPage() {
 
             <div className="admin-form" style={{ marginTop: 12 }}>
               <div className="field">
-                <label>Title</label>
+                <label>SetID</label>
                 <input
                   value={metaForm.title}
                   onChange={(event) => setMetaForm((prev) => ({ ...prev, title: event.target.value }))}

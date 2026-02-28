@@ -11,7 +11,7 @@ serve(async (req) => {
   const parsed = await parseUploadForm(req);
   if (parsed instanceof Response) return parsed;
 
-  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles);
+  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, parsed.metadata.test_type);
 
   return ok({
     ok: true,

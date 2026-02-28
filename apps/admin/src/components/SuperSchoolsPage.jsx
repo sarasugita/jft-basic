@@ -263,12 +263,12 @@ export default function SuperSchoolsPage() {
               <tr>
                 <th>Enter</th>
                 <th>School</th>
-                <th>Attendance Rate</th>
-                <th>Daily Test</th>
-                <th>Model Test</th>
-                <th>Student No.</th>
                 <th>Start Date</th>
                 <th>End Date</th>
+                <th style={{ width: 92 }}>Student<br />No.</th>
+                <th>Attendance<br />Rate</th>
+                <th>Model<br />Test</th>
+                <th>Daily<br />Test</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -303,12 +303,12 @@ export default function SuperSchoolsPage() {
                         {[school.academic_year, school.term].filter(Boolean).join(" / ") || school.id}
                       </div>
                     </td>
-                    <td>{formatPercent(summary.attendanceRate)}</td>
-                    <td>{formatPercent(summary.dailyAverage)}</td>
-                    <td>{formatPercent(summary.modelAverage)}</td>
-                    <td>{summary.students}</td>
                     <td>{formatDate(school.start_date)}</td>
                     <td>{formatDate(school.end_date)}</td>
+                    <td>{summary.students}</td>
+                    <td>{formatPercent(summary.attendanceRate)}</td>
+                    <td>{formatPercent(summary.modelAverage)}</td>
+                    <td>{formatPercent(summary.dailyAverage)}</td>
                     <td>
                       <span className={`super-status ${school.status}`}>{school.status}</span>
                     </td>

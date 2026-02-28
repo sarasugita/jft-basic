@@ -263,45 +263,57 @@ export default function SuperAdminShell({ children }) {
     let mounted = true;
 
     async function loadProfile(nextSession) {
-      if (!nextSession) {
-        if (mounted) {
+      try {
+        if (!nextSession) {
+          if (mounted) {
+            setSession(null);
+            setProfile(null);
+            setLoading(false);
+          }
+          router.replace("/");
+          return;
+        }
+
+        const { data: nextProfile, error } = await supabase
+          .from("profiles")
+          .select("id, role, display_name, account_status")
+          .eq("id", nextSession.user.id)
+          .single();
+
+        if (!mounted) return;
+
+        if (error || !nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
           setSession(null);
           setProfile(null);
+          syncAdminAuthCookie(null);
           setLoading(false);
+          router.replace("/");
+          return;
         }
-        router.replace("/");
-        return;
-      }
 
-      const { data: nextProfile, error } = await supabase
-        .from("profiles")
-        .select("id, role, display_name, account_status")
-        .eq("id", nextSession.user.id)
-        .single();
-
-      if (!mounted) return;
-
-      if (error || !nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
-        setSession(null);
-        setProfile(null);
-        syncAdminAuthCookie(null);
+        setProfile(nextProfile);
         setLoading(false);
-        router.replace("/");
-        return;
+      } catch (error) {
+        if (!mounted) return;
+        console.error("super shell loadProfile error:", error);
+        setLoading(false);
       }
-
-      setProfile(nextProfile);
-      setLoading(false);
     }
 
     async function bootstrap() {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) console.error("super shell getSession error:", error);
-      syncAdminAuthCookie(data?.session ?? null);
-      if (!mounted) return;
-      const nextSession = data?.session ?? null;
-      setSession(nextSession);
-      await loadProfile(nextSession);
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) console.error("super shell getSession error:", error);
+        syncAdminAuthCookie(data?.session ?? null);
+        if (!mounted) return;
+        const nextSession = data?.session ?? null;
+        setSession(nextSession);
+        await loadProfile(nextSession);
+      } catch (error) {
+        if (!mounted) return;
+        console.error("super shell bootstrap error:", error);
+        setLoading(false);
+      }
     }
 
     bootstrap();
@@ -310,12 +322,24 @@ export default function SuperAdminShell({ children }) {
       syncAdminAuthCookie(nextSession ?? null);
       if (!mounted) return;
       setSession(nextSession ?? null);
-      setLoading(true);
       await loadProfile(nextSession ?? null);
     });
 
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        bootstrap();
+      }
+    }
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
     return () => {
       mounted = false;
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
       listener.subscription.unsubscribe();
     };
   }, [router, supabase]);

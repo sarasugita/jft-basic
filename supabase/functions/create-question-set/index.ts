@@ -7,6 +7,7 @@ import {
   parseUploadForm,
   replaceVisibility,
   requireSuperAdmin,
+  syncLegacyTestCatalog,
   uploadAssets,
   validateQuestionSetCsv,
 } from "../_shared/questionSet.ts";
@@ -28,7 +29,7 @@ serve(async (req) => {
   const visibleSchools = await ensureVisibleSchools(context.adminClient, parsed.metadata.school_ids);
   if (!visibleSchools.ok) return bad(visibleSchools.error ?? "Invalid schools");
 
-  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles);
+  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, parsed.metadata.test_type);
   if (!validation.valid) {
     return bad("Validation failed", { validation });
   }
@@ -85,12 +86,21 @@ serve(async (req) => {
       parsed.metadata.visibility_scope === "restricted" ? parsed.metadata.school_ids : [],
     );
 
+    await syncLegacyTestCatalog(context.adminClient, {
+      setId: parsed.metadata.title,
+      testType: parsed.metadata.test_type,
+      category: parsed.metadata.category,
+      questions: validation.questions,
+      uploadedAssets,
+    });
+
     await logAuditEvent(context.adminClient, context, {
       actionType: "upload",
       entityType: "question_set",
       entityId: inserted.id,
       metadata: {
         title: parsed.metadata.title,
+        category: parsed.metadata.category,
         version_label: parsed.metadata.version_label,
         test_type: parsed.metadata.test_type,
         status: parsed.metadata.status,

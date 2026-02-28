@@ -544,10 +544,10 @@ function parseDailyCsv(text, defaultTestVersion = "") {
   const idxTest = findIdx(["testid", "test_id", "test id"]);
   const idxNo = findIdx(["no.", "no", "number"]);
   const idxQuestion = findIdx(["question"]);
-  const idxCorrect = findIdx(["correct answer", "correct"]);
-  const idxWrong1 = findIdx(["wrong option 1", "wrong1", "wrong option1"]);
-  const idxWrong2 = findIdx(["wrong option 2", "wrong2", "wrong option2"]);
-  const idxWrong3 = findIdx(["wrong option 3", "wrong3", "wrong option3"]);
+  const idxCorrect = findIdx(["correct_answer", "correct answer", "correct"]);
+  const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1", "wrong1", "wrong option1"]);
+  const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2", "wrong2", "wrong option2"]);
+  const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3", "wrong3", "wrong option3"]);
   const idxTarget = findIdx(["target"]);
   const idxCanDo = findIdx(["can-do", "cando", "can do"]);
   const idxIllustration = findIdx(["illustration"]);
@@ -575,7 +575,7 @@ function parseDailyCsv(text, defaultTestVersion = "") {
     const description = cell(idxDescription);
 
     if (!testVersion) {
-      errors.push(`Row ${r + 1}: TestID is required.`);
+      errors.push(`Row ${r + 1}: SetID is required.`);
       continue;
     }
     if (!questionText) {
@@ -1854,7 +1854,7 @@ export default function AdminConsole({
     setEditingTestMsg("Saving...");
     const nextVersion = editingTestForm.version.trim();
     if (!nextVersion) {
-      setEditingTestMsg("Test ID is required.");
+      setEditingTestMsg("SetID is required.");
       return;
     }
     const passRate = Number(editingTestForm.pass_rate);
@@ -1878,11 +1878,11 @@ export default function AdminConsole({
         return;
       }
       if (exists?.length && exists[0].id !== editingTestForm.id) {
-        setEditingTestMsg("That Test ID already exists.");
+        setEditingTestMsg("That SetID already exists.");
         return;
       }
       const ok = window.confirm(
-        `Rename Test ID from ${editingTestForm.originalVersion} to ${nextVersion}? This updates sessions, attempts, links, questions, assets.`
+        `Rename SetID from ${editingTestForm.originalVersion} to ${nextVersion}? This updates sessions, attempts, links, questions, assets.`
       );
       if (!ok) {
         setEditingTestMsg("Rename cancelled.");
@@ -1962,6 +1962,16 @@ export default function AdminConsole({
   }
 
   async function fetchStudents() {
+    if (!activeSchoolId) {
+      setStudents([]);
+      setStudentMsg("Select a school.");
+      setSelectedStudentId("");
+      setStudentAttempts([]);
+      setStudentAttendance([]);
+      setStudentAttemptsMsg("");
+      setStudentAttendanceMsg("");
+      return;
+    }
     setStudentMsg("Loading...");
     let query = supabase
       .from("profiles")
@@ -1999,6 +2009,12 @@ export default function AdminConsole({
   }
 
   async function fetchStudentListMetrics() {
+    if (!activeSchoolId) {
+      setStudentListAttendanceMap({});
+      setStudentListAttempts([]);
+      setStudentListLoading(false);
+      return;
+    }
     setStudentListLoading(true);
     const { from, to } = studentListFilters;
     let daysQuery = supabase
@@ -2642,6 +2658,23 @@ export default function AdminConsole({
     fetchAttendanceDays();
   }
 
+  async function hasDuplicateSessionTitle(title, excludeId = "") {
+    const normalizedTitle = String(title ?? "").trim();
+    if (!normalizedTitle) return false;
+    let query = supabase
+      .from("test_sessions")
+      .select("id")
+      .eq("title", normalizedTitle)
+      .limit(1);
+    if (excludeId) query = query.neq("id", excludeId);
+    const { data, error } = await query;
+    if (error) {
+      console.error("test_sessions duplicate title check error:", error);
+      throw new Error(error.message);
+    }
+    return Boolean((data ?? []).length);
+  }
+
   async function createTestSession() {
     setTestSessionsMsg("");
     const problemSetId = testSessionForm.problem_set_id.trim();
@@ -2649,11 +2682,11 @@ export default function AdminConsole({
     const endsAt = testSessionForm.ends_at;
     const passRate = Number(testSessionForm.pass_rate);
     if (!problemSetId) {
-      setTestSessionsMsg("Problem Set ID is required.");
+      setTestSessionsMsg("SetID is required.");
       return;
     }
     if (!title) {
-      setTestSessionsMsg("Title is required.");
+      setTestSessionsMsg("Test Title is required.");
       return;
     }
     if (!endsAt) {
@@ -2662,6 +2695,15 @@ export default function AdminConsole({
     }
     if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
       setTestSessionsMsg("Pass rate must be between 0 and 1.");
+      return;
+    }
+    try {
+      if (await hasDuplicateSessionTitle(title)) {
+        setTestSessionsMsg("That Test Title already exists.");
+        return;
+      }
+    } catch (error) {
+      setTestSessionsMsg(`Check failed: ${error.message}`);
       return;
     }
     const payload = {
@@ -2712,11 +2754,11 @@ export default function AdminConsole({
     const endsAt = dailySessionForm.ends_at;
     const passRate = Number(dailySessionForm.pass_rate);
     if (!problemSetId) {
-      setDailySessionsMsg("Problem Set ID is required.");
+      setDailySessionsMsg("SetID is required.");
       return;
     }
     if (!title) {
-      setDailySessionsMsg("Title is required.");
+      setDailySessionsMsg("Test Title is required.");
       return;
     }
     if (!endsAt) {
@@ -2725,6 +2767,15 @@ export default function AdminConsole({
     }
     if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
       setDailySessionsMsg("Pass rate must be between 0 and 1.");
+      return;
+    }
+    try {
+      if (await hasDuplicateSessionTitle(title)) {
+        setDailySessionsMsg("That Test Title already exists.");
+        return;
+      }
+    } catch (error) {
+      setDailySessionsMsg(`Check failed: ${error.message}`);
       return;
     }
     const payload = {
@@ -2815,7 +2866,7 @@ export default function AdminConsole({
       allow_multiple_attempts
     } = editingSessionForm;
     if (!title.trim()) {
-      setEditingSessionMsg("Title is required.");
+      setEditingSessionMsg("Test Title is required.");
       return;
     }
     if (!ends_at) {
@@ -2825,6 +2876,15 @@ export default function AdminConsole({
     const passRateValue = Number(pass_rate);
     if (!Number.isFinite(passRateValue) || passRateValue <= 0 || passRateValue > 1) {
       setEditingSessionMsg("Pass rate must be between 0 and 1.");
+      return;
+    }
+    try {
+      if (await hasDuplicateSessionTitle(title, editingSessionId)) {
+        setEditingSessionMsg("That Test Title already exists.");
+        return;
+      }
+    } catch (error) {
+      setEditingSessionMsg(`Check failed: ${error.message}`);
       return;
     }
     setEditingSessionMsg("Saving...");
@@ -3226,7 +3286,7 @@ export default function AdminConsole({
       (singleFile && singleFile.name.toLowerCase().endsWith(".csv")) ||
       files.some((f) => f.name.toLowerCase().endsWith(".csv"));
     if (!hasCsv) {
-      setAssetUploadMsg("CSV file is required for Upload & Register Problem Set.");
+      setAssetUploadMsg("CSV file is required for Upload & Register Set.");
       return;
     }
 
@@ -3446,7 +3506,7 @@ export default function AdminConsole({
       return;
     }
     if (!testVersion) {
-      setDailyUploadMsg("TestID is required.");
+      setDailyUploadMsg("SetID is required.");
       return;
     }
 
@@ -3533,7 +3593,7 @@ export default function AdminConsole({
     }
     const versionSet = new Set(questions.map((q) => q.test_version));
     if (versionSet.size > 1) {
-      setDailyImportMsg("Multiple TestID values detected. Split CSV per TestID.");
+      setDailyImportMsg("Multiple SetID values detected. Split CSV per SetID.");
       return;
     }
     const resolvedVersion = Array.from(versionSet)[0] || testVersion;
@@ -3541,7 +3601,7 @@ export default function AdminConsole({
       setDailyForm((s) => ({ ...s, test_version: resolvedVersion }));
     }
     if (!resolvedVersion) {
-      setDailyImportMsg("TestID is required (either in form or CSV).");
+      setDailyImportMsg("SetID is required (either in form or CSV).");
       return;
     }
 
@@ -5090,10 +5150,10 @@ export default function AdminConsole({
         {modelSubTab === "conduct" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
-              <div className="admin-title">Test Sessions</div>
-              <div className="admin-subtitle">Problem Setから実施テストを作成します。</div>
-            </div>
+              <div>
+                <div className="admin-title">Test Sessions</div>
+                <div className="admin-subtitle">SetIDから実施テストを作成します。</div>
+              </div>
             <button
               className="btn"
               onClick={() => {
@@ -5124,7 +5184,7 @@ export default function AdminConsole({
               </select>
             </div>
             <div className="field">
-              <label>Problem Set</label>
+              <label>SetID</label>
               <select
                 value={testSessionForm.problem_set_id}
                 onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
@@ -5141,7 +5201,7 @@ export default function AdminConsole({
               </select>
             </div>
             <div className="field">
-              <label>Title</label>
+              <label>Test Title</label>
               <input
                 value={testSessionForm.title}
                 onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
@@ -5221,8 +5281,8 @@ export default function AdminConsole({
               <thead>
                 <tr>
                   <th>Created</th>
-                  <th>Title</th>
-                  <th>Problem Set</th>
+                  <th>Test Title</th>
+                  <th>SetID</th>
                   <th>Show Answers</th>
                   <th>Attempts</th>
                   <th>Start</th>
@@ -5367,16 +5427,16 @@ export default function AdminConsole({
         <>
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
-              <div className="admin-title">Problem Set Upload (CSV)</div>
-              <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します（タイトルはTest Sessionで設定）。</div>
-            </div>
+              <div>
+                <div className="admin-title">Set Upload (CSV)</div>
+                <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します（タイトルはTest Sessionで設定）。</div>
+              </div>
             <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
           </div>
 
           <div className="admin-form" style={{ marginTop: 10 }}>
             <div className="field">
-              <label>Problem Set ID</label>
+              <label>SetID</label>
               <input
                 value={assetForm.test_version}
                 onChange={(e) => setAssetForm((s) => ({ ...s, test_version: e.target.value }))}
@@ -5470,7 +5530,7 @@ export default function AdminConsole({
             <div className="field small">
               <label>&nbsp;</label>
               <button className="btn btn-primary" type="button" onClick={uploadAssets}>
-                Upload & Register Problem Set
+                Upload & Register Set
               </button>
             </div>
           </div>
@@ -5479,7 +5539,7 @@ export default function AdminConsole({
             Bucket: <b>test-assets</b> / CSV, PNG, MP3 (他拡張子もOK)
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
-            Upload &amp; Register Problem SetでCSV/PNG/MP3をアップロードします。
+            Upload &amp; Register SetでCSV/PNG/MP3をアップロードします。
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
             CSVにはファイル名のみ記載してください。
@@ -5505,8 +5565,8 @@ export default function AdminConsole({
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
-              <div className="admin-title">Problem Sets</div>
-              <div className="admin-subtitle">問題セット（CSV/Assets）の一覧です。</div>
+              <div className="admin-title">Sets</div>
+              <div className="admin-subtitle">セット（CSV/Assets）の一覧です。</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <select
@@ -5520,7 +5580,7 @@ export default function AdminConsole({
                   </option>
                 ))}
               </select>
-              <button className="btn" onClick={() => fetchTests()}>Refresh Problem Sets</button>
+              <button className="btn" onClick={() => fetchTests()}>Refresh Sets</button>
             </div>
           </div>
 
@@ -5529,7 +5589,7 @@ export default function AdminConsole({
               <thead>
                 <tr>
                   <th>Created</th>
-                  <th>Problem Set ID</th>
+                  <th>SetID</th>
                   <th>Category</th>
                   <th>Questions</th>
                   <th>Preview</th>
@@ -5660,10 +5720,10 @@ export default function AdminConsole({
         {dailySubTab === "conduct" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
-              <div className="admin-title">Daily Test Sessions</div>
-              <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
-            </div>
+              <div>
+                <div className="admin-title">Daily Test Sessions</div>
+                <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
+              </div>
             <button
               className="btn"
               onClick={() => {
@@ -5694,7 +5754,7 @@ export default function AdminConsole({
               </select>
             </div>
             <div className="field">
-              <label>Problem Set</label>
+              <label>SetID</label>
               <select
                 value={dailySessionForm.problem_set_id}
                 onChange={(e) => setDailySessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
@@ -5711,7 +5771,7 @@ export default function AdminConsole({
               </select>
             </div>
             <div className="field">
-              <label>Title</label>
+              <label>Test Title</label>
               <input
                 value={dailySessionForm.title}
                 onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
@@ -5791,8 +5851,8 @@ export default function AdminConsole({
               <thead>
                 <tr>
                   <th>Created</th>
-                  <th>Title</th>
-                  <th>Problem Set</th>
+                  <th>Test Title</th>
+                  <th>SetID</th>
                   <th>Show Answers</th>
                   <th>Start</th>
                   <th>End</th>
@@ -5930,7 +5990,7 @@ export default function AdminConsole({
 
           <div className="admin-form" style={{ marginTop: 10 }}>
             <div className="field">
-              <label>TestID</label>
+              <label>SetID</label>
               <input
                 value={dailyForm.test_version}
                 onChange={(e) => setDailyForm((s) => ({ ...s, test_version: e.target.value }))}
@@ -6043,7 +6103,7 @@ export default function AdminConsole({
             Bucket: <b>test-assets</b> / CSV, PNG
           </div>
           <div className="admin-help" style={{ marginTop: 4 }}>
-            CSV header: <code>TestID, No., Question, Correct Answer, Wrong Option 1, Wrong Option 2, Wrong Option 3, Target, Can-do, Illustration, Description</code>
+            Daily CSV headers used: <code>no</code>, <code>question</code>, <code>correct_answer</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>illustration</code>, <code>description</code>. Extra headers are ignored.
           </div>
           <div className="admin-msg">{dailyUploadMsg}</div>
           {dailyImportMsg ? (
@@ -6081,7 +6141,7 @@ export default function AdminConsole({
                 <tr>
                   <th>Created</th>
                   <th>Category</th>
-                  <th>Test ID</th>
+                  <th>SetID</th>
                   <th>Questions</th>
                   <th>Preview</th>
                   <th>Edit</th>
@@ -6637,8 +6697,8 @@ export default function AdminConsole({
                   <thead>
                     <tr>
                       <th>Created</th>
-                      <th>Problem Set ID</th>
-                      <th>Title</th>
+                      <th>SetID</th>
+                      <th>Category</th>
                       <th>Questions</th>
                     </tr>
                   </thead>
@@ -6829,7 +6889,7 @@ export default function AdminConsole({
                   {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
                   {!previewMsg && previewQuestions.length === 0 ? (
                     <div className="admin-help" style={{ marginTop: 6 }}>
-                      No questions. Upload & Register Problem SetでCSVを取り込むか、CSVの`test_version`がこの問題セットと一致しているか確認してください。
+                      No questions. Upload & Register SetでCSVを取り込むか、CSVの`test_version`がこのセットと一致しているか確認してください。
                     </div>
                   ) : null}
                 </div>
@@ -6881,13 +6941,18 @@ export default function AdminConsole({
                           {q.id} {q.sectionKey ? `(${q.sectionKey})` : ""}
                         </div>
                         {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
+                        {q.type === "daily" && stemExtra ? (
+                          <div style={{ marginTop: 6, fontSize: 13, color: "#667085" }}>
+                            {stemExtra}
+                          </div>
+                        ) : null}
                         {stemText ? (
                           <div
                             style={{ marginTop: 6 }}
                             dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
                           />
                         ) : null}
-                        {stemLines.length ? (
+                        {stemLines.length && q.type !== "daily" ? (
                           <div style={{ marginTop: 6 }}>
                             {stemLines.map((line, i2) => (
                               <div
