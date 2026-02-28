@@ -6,6 +6,7 @@
 - `/super/dashboard` is the Super Admin landing page
 - `/super/schools` is the school management hub
 - `/super/tests/import` is the global question-set management shell
+- `/super/tests/import` supports CSV validation, asset upload, versioning, metadata edits, and visibility management
 - `/super/tests/analytics` is the cross-school analytics shell
 - `/super/audit` is the audit/logs placeholder
 - `/super/schools/:schoolId` redirects to `/super/schools/:schoolId/admin`
@@ -42,6 +43,7 @@
 - Tests import page: `apps/admin/src/app/super/tests/import/page.jsx`
 - Tests analytics page: `apps/admin/src/app/super/tests/analytics/page.jsx`
 - Audit page: `apps/admin/src/app/super/audit/page.jsx`
+- Upload guide: `docs/question-set-upload.md`
 
 ## Adding A New Super Page
 
@@ -63,7 +65,16 @@ Required existing vars:
 
 - SQL migration: `supabase/sql/phase2_super_admin_school_scope.sql`
 - SQL migration: `supabase/sql/phase3_initial_school_and_admins.sql`
+- SQL migration: `supabase/sql/phase4_tests_management_architecture.sql`
+- SQL migration: `supabase/sql/phase5_question_set_upload_support.sql`
 - Edge Function: `supabase/functions/manage-school-admins`
+- Edge Functions:
+  `supabase/functions/validate-question-set-upload`
+  `supabase/functions/create-question-set`
+  `supabase/functions/upload-question-set-version`
+  `supabase/functions/update-question-set-metadata`
+  `supabase/functions/set-question-set-visibility`
+  `supabase/functions/archive-question-set`
 
 ## Aggregation Rules
 

@@ -1,8 +1,8 @@
 {
-  "/page": "app/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
   "/super/dashboard/page": "app/super/dashboard/page.js",
-  "/super/schools/page": "app/super/schools/page.js",
-  "/super/audit/page": "app/super/audit/page.js",
   "/super/tests/analytics/page": "app/super/tests/analytics/page.js",
-  "/super/tests/import/page": "app/super/tests/import/page.js"
+  "/super/audit/page": "app/super/audit/page.js",
+  "/page": "app/page.js",
+  "/super/schools/page": "app/super/schools/page.js"
 }
