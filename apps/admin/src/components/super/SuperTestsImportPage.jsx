@@ -43,6 +43,27 @@ function formatDateTime(value) {
   return date.toLocaleString();
 }
 
+function isImageAsset(value) {
+  return /\.(png|jpe?g|webp|gif|svg)$/i.test(String(value ?? "").trim());
+}
+
+function isAudioAsset(value) {
+  return /\.(mp3|wav|m4a|ogg)$/i.test(String(value ?? "").trim());
+}
+
+function renderQuestionPrompt(item) {
+  return String(item?.question_text ?? "").trim();
+}
+
+function resolveMediaUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  if (!baseUrl) return raw;
+  return `${baseUrl}/storage/v1/object/public/test-assets/${raw}`;
+}
+
 function CsvGuideline({ testType }) {
   if (testType === "daily") {
     return (
@@ -137,6 +158,10 @@ export default function SuperTestsImportPage() {
   const [assetFiles, setAssetFiles] = useState([]);
   const [validation, setValidation] = useState(null);
   const [validationMsg, setValidationMsg] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSet, setPreviewSet] = useState(null);
+  const [previewQuestions, setPreviewQuestions] = useState([]);
+  const [previewMsg, setPreviewMsg] = useState("");
 
   async function loadLibrary() {
     setLoading(true);
@@ -349,6 +374,32 @@ export default function SuperTestsImportPage() {
     }
   }
 
+  async function openPreview(questionSet) {
+    setPreviewSet(questionSet);
+    setPreviewQuestions([]);
+    setPreviewMsg("Loading...");
+    setPreviewOpen(true);
+    const { data, error } = await supabase
+      .from("question_set_questions")
+      .select("qid, question_text, question_type, correct_answer, options, media_type, media_url, order_index, metadata")
+      .eq("question_set_id", questionSet.id)
+      .order("order_index", { ascending: true });
+    if (error) {
+      setPreviewMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const list = data ?? [];
+    setPreviewQuestions(list);
+    setPreviewMsg(list.length ? "" : "No questions.");
+  }
+
+  function closePreview() {
+    setPreviewOpen(false);
+    setPreviewSet(null);
+    setPreviewQuestions([]);
+    setPreviewMsg("");
+  }
+
   return (
     <div className="super-page-content">
       <div className="admin-panel">
@@ -393,7 +444,7 @@ export default function SuperTestsImportPage() {
                 <th>Questions</th>
                 <th>Visibility</th>
                 <th>Version</th>
-                <th>Updated At</th>
+                <th>Preview</th>
                 <th>Manage</th>
                 <th>New Version</th>
                 <th>Archive</th>
@@ -420,7 +471,9 @@ export default function SuperTestsImportPage() {
                     ) : null}
                   </td>
                   <td>{item.version_label || `v${item.version}`}</td>
-                  <td>{formatDateTime(item.updated_at)}</td>
+                  <td>
+                    <button className="btn" onClick={() => openPreview(item)}>Preview</button>
+                  </td>
                   <td>
                     <button className="btn" onClick={() => openMetadataModal(item)}>Edit</button>
                   </td>
@@ -624,6 +677,93 @@ export default function SuperTestsImportPage() {
             <div className="admin-actions" style={{ marginTop: 14 }}>
               <button className="btn btn-primary" onClick={saveMetadata} disabled={saving}>Save Metadata</button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {previewOpen ? (
+        <div className="admin-modal-overlay" onClick={closePreview}>
+          <div
+            className="admin-modal"
+            style={{ maxWidth: 1100, width: "min(1100px, calc(100vw - 32px))" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="admin-modal-header">
+              <div>
+                <div className="admin-title">Preview: {previewSet?.title || ""}</div>
+                <div className="admin-help">
+                  Total: <b>{previewQuestions.length}</b>
+                </div>
+              </div>
+              <button className="admin-modal-close" onClick={closePreview} aria-label="Close">
+                ×
+              </button>
+            </div>
+
+            {previewMsg ? <div className="admin-msg" style={{ marginTop: 12 }}>{previewMsg}</div> : null}
+
+            {!previewMsg ? (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14, maxHeight: "70vh", overflow: "auto" }}>
+                {previewQuestions.map((question, index) => {
+                  const options = Array.isArray(question.options) ? question.options : [];
+                  const correctAnswer = question.correct_answer;
+                  const description = String(question.metadata?.description ?? "").trim();
+                  const mediaUrl = resolveMediaUrl(question.media_url);
+                  return (
+                    <div key={`${question.qid}-${index}`} className="admin-panel" style={{ padding: 14 }}>
+                      <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>
+                        {question.qid} {question.question_type ? `(${question.question_type})` : ""}
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: 16, fontWeight: 600 }}>
+                        {renderQuestionPrompt(question)}
+                      </div>
+                      {description ? (
+                        <div style={{ marginTop: 6, fontSize: 13, color: "#667085" }}>
+                          {description}
+                        </div>
+                      ) : null}
+                      {mediaUrl && isImageAsset(mediaUrl) ? (
+                        <div style={{ marginTop: 10 }}>
+                          <img
+                            src={mediaUrl}
+                            alt=""
+                            style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #d0d5dd" }}
+                          />
+                        </div>
+                      ) : null}
+                      {mediaUrl && isAudioAsset(mediaUrl) ? (
+                        <div style={{ marginTop: 10 }}>
+                          <audio controls src={mediaUrl} style={{ width: "100%" }} />
+                        </div>
+                      ) : null}
+                      {options.length ? (
+                        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                          {options.map((option, optionIndex) => {
+                            const isCorrect = typeof correctAnswer === "number"
+                              ? correctAnswer === optionIndex
+                              : String(option ?? "").trim() === String(correctAnswer ?? "").trim();
+                            return (
+                              <div
+                                key={`${question.qid}-option-${optionIndex}`}
+                                style={{
+                                  padding: "10px 12px",
+                                  borderRadius: 10,
+                                  border: isCorrect ? "2px solid #3b7f1e" : "1px solid #d0d5dd",
+                                  background: isCorrect ? "#eef8e8" : "#fff",
+                                  fontWeight: isCorrect ? 700 : 400,
+                                }}
+                              >
+                                {String(option ?? "")}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
