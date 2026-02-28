@@ -35,6 +35,11 @@ function unauthorized(message = "Unauthorized") {
   return json({ error: message }, { status: 401 });
 }
 
+function isMissingRelationError(message: string | null | undefined, relationName: string) {
+  const text = String(message ?? "").toLowerCase();
+  return text.includes(`relation "${relationName.toLowerCase()}" does not exist`);
+}
+
 async function logAuditEvent(adminClient: ReturnType<typeof createClient>, payload: Record<string, unknown>) {
   const { error } = await adminClient.from("audit_logs").insert(payload);
   if (error) console.error("audit log insert failed:", error.message);
@@ -68,6 +73,9 @@ async function adminAssignedToSchool(
     .maybeSingle();
   if (error) {
     console.error("admin school assignment lookup failed:", error.message);
+    if (isMissingRelationError(error.message, "admin_school_assignments")) {
+      return false;
+    }
     return false;
   }
   return Boolean(data);
@@ -193,7 +201,9 @@ serve(async (req) => {
         { onConflict: "admin_user_id,school_id" },
       );
     if (assignmentError) {
-      return bad("Failed to create admin school assignment", { detail: assignmentError.message });
+      if (!isMissingRelationError(assignmentError.message, "admin_school_assignments")) {
+        return bad("Failed to create admin school assignment", { detail: assignmentError.message });
+      }
     }
 
     await logAuditEvent(adminClient, {
@@ -253,6 +263,11 @@ serve(async (req) => {
         created_by: callerUserData.user.id,
       });
     if (assignmentError) {
+      if (isMissingRelationError(assignmentError.message, "admin_school_assignments")) {
+        return bad(
+          "Shared admin assignments are not enabled yet. Apply phase7_admin_multi_school_access.sql first.",
+        );
+      }
       return bad("Failed to attach admin to school", { detail: assignmentError.message });
     }
 

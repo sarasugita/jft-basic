@@ -194,6 +194,23 @@ export default function SuperAdminShell({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  async function invokeWithAuth(functionName, body) {
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession();
+
+    if (!currentSession) {
+      throw new Error("No active session found");
+    }
+
+    return supabase.functions.invoke(functionName, {
+      body,
+      headers: {
+        Authorization: `Bearer ${currentSession.access_token}`,
+      },
+    });
+  }
+
   useEffect(() => {
     let mounted = true;
 
@@ -267,7 +284,7 @@ export default function SuperAdminShell({ children }) {
   const pageMeta = getPageMeta(pathname);
 
   return (
-    <SuperAdminContext.Provider value={{ supabase, session, profile }}>
+    <SuperAdminContext.Provider value={{ supabase, session, profile, invokeWithAuth }}>
       <div className="admin-shell">
         <SuperSidebar
           pathname={pathname}

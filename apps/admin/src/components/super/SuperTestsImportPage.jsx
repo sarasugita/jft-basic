@@ -98,7 +98,7 @@ function SchoolSelector({ schools, selected, onChange }) {
 }
 
 export default function SuperTestsImportPage() {
-  const { supabase } = useSuperAdmin();
+  const { supabase, invokeWithAuth } = useSuperAdmin();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -173,7 +173,7 @@ export default function SuperTestsImportPage() {
   }, [questionSets, testType, visibility, statusFilter]);
 
   async function invokeJsonFunction(name, payload) {
-    const { data, error } = await supabase.functions.invoke(name, { body: payload });
+    const { data, error } = await invokeWithAuth(name, payload);
     if (error) throw new Error(error.message || `Failed to call ${name}`);
     if (data?.error) throw new Error(data.error);
     return data;
@@ -189,7 +189,7 @@ export default function SuperTestsImportPage() {
     if (csvFile) formData.append("csv", csvFile);
     assetFiles.forEach((file) => formData.append("assets", file));
 
-    const { data, error } = await supabase.functions.invoke(name, { body: formData });
+    const { data, error } = await invokeWithAuth(name, formData);
     if (error) throw new Error(error.message || `Failed to call ${name}`);
     if (data?.error) throw new Error(data.error);
     return data;

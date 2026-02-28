@@ -35,7 +35,7 @@ function formatDateTime(value) {
 
 export default function SchoolAdminsPage({ schoolId }) {
   const router = useRouter();
-  const { supabase } = useSuperAdmin();
+  const { supabase, invokeWithAuth } = useSuperAdmin();
   const [school, setSchool] = useState(null);
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -208,18 +208,27 @@ export default function SchoolAdminsPage({ schoolId }) {
   }
 
   async function invokeManage(payload) {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
-    if (!accessToken) {
-      setMsg("Session expired. Please log in again.");
+    let data;
+    let error;
+    try {
+      ({ data, error } = await invokeWithAuth("manage-school-admins", payload));
+    } catch (invokeError) {
+      setMsg(`Action failed: ${String(invokeError.message ?? invokeError)}`);
       return null;
     }
-    const { data, error } = await supabase.functions.invoke("manage-school-admins", {
-      body: payload,
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
     if (error) {
-      setMsg(`Action failed: ${error.message}`);
+      let serverMessage = "";
+      try {
+        if (error.context) {
+          const errorBody = await error.context.json();
+          serverMessage = errorBody?.detail
+            ? `${errorBody.error}: ${errorBody.detail}`
+            : errorBody?.error ?? "";
+        }
+      } catch {
+        serverMessage = "";
+      }
+      setMsg(`Action failed: ${serverMessage || error.message}`);
       return null;
     }
     if (data?.error) {
@@ -439,9 +448,11 @@ export default function SchoolAdminsPage({ schoolId }) {
                     <div className="field">
                       <label>Temporary Password</label>
                       <input
+                        placeholder="Leave blank to auto-generate"
                         value={form.temp_password}
                         onChange={(event) => setForm((prev) => ({ ...prev, temp_password: event.target.value }))}
                       />
+                      <div className="admin-help">Optional. The server will generate one if empty.</div>
                     </div>
                   ) : null}
                 </div>

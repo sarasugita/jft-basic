@@ -36,7 +36,7 @@ function computeSummary(schoolId, metrics) {
 }
 
 export default function SuperSchoolsPage() {
-  const { supabase } = useSuperAdmin();
+  const { supabase, invokeWithAuth } = useSuperAdmin();
   const [schools, setSchools] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -139,6 +139,40 @@ export default function SuperSchoolsPage() {
     setMsg("");
   }
 
+  async function invokeManageSchools(payload) {
+    let data;
+    let error;
+    try {
+      ({ data, error } = await invokeWithAuth("manage-schools", payload));
+    } catch (invokeError) {
+      setMsg(`Save failed: ${String(invokeError.message ?? invokeError)}`);
+      return null;
+    }
+
+    if (error) {
+      let serverMessage = "";
+      try {
+        if (error.context) {
+          const errorBody = await error.context.json();
+          serverMessage = errorBody?.detail
+            ? `${errorBody.error}: ${errorBody.detail}`
+            : errorBody?.error ?? "";
+        }
+      } catch {
+        serverMessage = "";
+      }
+      setMsg(`Save failed: ${serverMessage || error.message}`);
+      return null;
+    }
+
+    if (data?.error) {
+      setMsg(`Save failed: ${data.detail ? `${data.error}: ${data.detail}` : data.error}`);
+      return null;
+    }
+
+    return data;
+  }
+
   async function saveSchool() {
     const payload = {
       action: form.id ? "update" : "create",
@@ -147,7 +181,7 @@ export default function SuperSchoolsPage() {
       status: form.status,
       academic_year: form.academic_year.trim() || null,
       term: form.term.trim() || null,
-      start_date: form.start_date || new Date().toISOString().slice(0, 10),
+      start_date: form.start_date || null,
       end_date: form.end_date || null,
       updated_at: new Date().toISOString(),
     };
@@ -158,12 +192,9 @@ export default function SuperSchoolsPage() {
 
     setSaving(true);
     setMsg("");
-    const { data, error } = await supabase.functions.invoke("manage-schools", { body: payload });
+    const data = await invokeManageSchools(payload);
     setSaving(false);
-    if (error || data?.error) {
-      setMsg(`Save failed: ${error?.message || data?.error}`);
-      return;
-    }
+    if (!data) return;
     setModalOpen(false);
     setForm(emptyForm());
     setRefreshNonce((value) => value + 1);
@@ -172,17 +203,12 @@ export default function SuperSchoolsPage() {
   async function toggleSchoolStatus(school) {
     setMsg("");
     const nextStatus = school.status === "active" ? "inactive" : "active";
-    const { data, error } = await supabase.functions.invoke("manage-schools", {
-      body: {
-        action: "set_status",
-        school_id: school.id,
-        status: nextStatus,
-      },
+    const data = await invokeManageSchools({
+      action: "set_status",
+      school_id: school.id,
+      status: nextStatus,
     });
-    if (error || data?.error) {
-      setMsg(`Status update failed: ${error?.message || data?.error}`);
-      return;
-    }
+    if (!data) return;
     setRefreshNonce((value) => value + 1);
   }
 
@@ -358,6 +384,7 @@ export default function SuperSchoolsPage() {
                   value={form.start_date}
                   onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))}
                 />
+                <div className="admin-help">Optional.</div>
               </div>
               <div className="field small">
                 <label>End Date</label>
@@ -366,6 +393,7 @@ export default function SuperSchoolsPage() {
                   value={form.end_date}
                   onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))}
                 />
+                <div className="admin-help">Optional.</div>
               </div>
             </div>
             <div className="admin-actions" style={{ marginTop: 16 }}>
