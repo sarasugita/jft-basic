@@ -952,7 +952,9 @@ export default function AdminConsole({
     end_at: ""
   });
   const canUseAdminConsole = Boolean(
-    profile && (profile.role === "admin" || (profile.role === "super_admin" && forcedSchoolId))
+    profile &&
+      profile.account_status === "active" &&
+      (profile.role === "admin" || (profile.role === "super_admin" && forcedSchoolId))
   );
 
   function generateTempPassword(length = 10) {
@@ -1519,7 +1521,7 @@ export default function AdminConsole({
     }
     supabase
       .from("profiles")
-      .select("id, role, display_name, school_id")
+      .select("id, role, display_name, school_id, account_status")
       .eq("id", session.user.id)
       .single()
       .then(({ data, error }) => {
@@ -3762,7 +3764,9 @@ export default function AdminConsole({
       <div className="admin-login">
         <h2>Unauthorized</h2>
         <div className="admin-help">
-          {profile.role === "super_admin"
+          {profile.account_status !== "active"
+            ? "This account is disabled."
+            : profile.role === "super_admin"
             ? "Super Admin must enter a school from the Schools list before using the admin console."
             : "このユーザーは admin 権限ではありません。"}
         </div>

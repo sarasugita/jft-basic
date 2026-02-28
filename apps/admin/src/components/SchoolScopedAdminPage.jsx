@@ -31,12 +31,12 @@ export default function SchoolScopedAdminPage({ schoolId }) {
 
       const { data: nextProfile } = await supabase
         .from("profiles")
-        .select("id, role")
+        .select("id, role, account_status")
         .eq("id", nextSession.user.id)
         .single();
       if (!mounted) return;
       setProfile(nextProfile ?? null);
-      if (!nextProfile || nextProfile.role !== "super_admin") {
+      if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
         router.replace("/");
         return;
       }

@@ -31,11 +31,12 @@ export async function middleware(request) {
   }
 
   const profile = await fetchJson(
-    `${supabaseUrl}/rest/v1/profiles?select=role&id=eq.${encodeURIComponent(user.id)}`,
+    `${supabaseUrl}/rest/v1/profiles?select=role,account_status&id=eq.${encodeURIComponent(user.id)}`,
     token
   );
   const role = Array.isArray(profile) ? profile[0]?.role : null;
-  if (role !== "super_admin") {
+  const accountStatus = Array.isArray(profile) ? profile[0]?.account_status : null;
+  if (role !== "super_admin" || accountStatus !== "active") {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
