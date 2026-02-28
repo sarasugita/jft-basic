@@ -2417,6 +2417,7 @@ export default function AdminConsole({
     const { data, error } = await supabase
       .from("tests")
       .select("id, version, title, type, pass_rate, is_public, created_at, questions(count)")
+      .eq("is_public", true)
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
@@ -2425,6 +2426,7 @@ export default function AdminConsole({
         const fallback = await supabase
           .from("tests")
           .select("id, version, title, type, pass_rate, is_public, created_at")
+          .eq("is_public", true)
           .order("created_at", { ascending: false })
           .limit(200);
         if (fallback.error) {
@@ -5762,7 +5764,7 @@ export default function AdminConsole({
                 {dailyConductTests.length ? (
                   dailyConductTests.map((t) => (
                     <option key={`daily-ps-${t.version}`} value={t.version}>
-                      {(t.title ? `${t.title} (${t.version})` : t.version)}
+                      {t.version}
                     </option>
                   ))
                 ) : (

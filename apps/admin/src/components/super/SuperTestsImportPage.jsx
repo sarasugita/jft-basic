@@ -51,8 +51,39 @@ function isAudioAsset(value) {
   return /\.(mp3|wav|m4a|ogg)$/i.test(String(value ?? "").trim());
 }
 
-function renderQuestionPrompt(item) {
-  return String(item?.question_text ?? "").trim();
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function renderUnderlinesHtml(text) {
+  const escaped = escapeHtml(text ?? "");
+  return escaped.replace(/【(.*?)】/g, '<span class="u">$1</span>');
+}
+
+function splitStemLines(text) {
+  return String(text ?? "")
+    .split(/\r?\n|\|/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function mapDbQuestion(row) {
+  const data = row.data ?? {};
+  return {
+    id: row.question_id,
+    sectionKey: row.section_key,
+    type: row.type,
+    promptEn: row.prompt_en,
+    promptBn: row.prompt_bn,
+    answerIndex: row.answer_index,
+    orderIndex: row.order_index ?? 0,
+    ...data,
+  };
 }
 
 function resolveMediaUrl(value) {
@@ -61,7 +92,11 @@ function resolveMediaUrl(value) {
   if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
   const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   if (!baseUrl) return raw;
-  return `${baseUrl}/storage/v1/object/public/test-assets/${raw}`;
+  const encodedPath = raw
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${baseUrl}/storage/v1/object/public/test-assets/${encodedPath}`;
 }
 
 function CsvGuideline({ testType }) {
@@ -171,6 +206,7 @@ export default function SuperTestsImportPage() {
       supabase
         .from("question_sets")
         .select("id, library_key, source_question_set_id, title, description, test_type, version, version_label, status, visibility_scope, created_at, updated_at")
+        .neq("status", "archived")
         .order("updated_at", { ascending: false }),
       supabase
         .from("question_set_school_access")
@@ -325,6 +361,17 @@ export default function SuperTestsImportPage() {
     setSaving(true);
     setValidationMsg("");
     try {
+      if (uploadForm.mode === "create") {
+        const normalizedSetId = String(uploadForm.title ?? "").trim();
+        const duplicate = questionSets.find(
+          (item) => item.title === normalizedSetId && item.test_type === uploadForm.test_type,
+        );
+        if (duplicate) {
+          setValidationMsg("That SetID already exists for this test type. Use Upload on the existing set to add a new version.");
+          return;
+        }
+      }
+
       const nextValidation = await validateUpload();
       if (!nextValidation?.valid) {
         if (!nextValidation) {
@@ -365,7 +412,7 @@ export default function SuperTestsImportPage() {
     setSaving(true);
     try {
       await invokeJsonFunction("archive-question-set", { question_set_id: questionSetId });
-      setMsg("Set archived.");
+      setMsg("Set deleted.");
       await loadLibrary();
     } catch (error) {
       setMsg(String(error.message ?? error));
@@ -380,15 +427,15 @@ export default function SuperTestsImportPage() {
     setPreviewMsg("Loading...");
     setPreviewOpen(true);
     const { data, error } = await supabase
-      .from("question_set_questions")
-      .select("qid, question_text, question_type, correct_answer, options, media_type, media_url, order_index, metadata")
-      .eq("question_set_id", questionSet.id)
+      .from("questions")
+      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .eq("test_version", questionSet.title)
       .order("order_index", { ascending: true });
     if (error) {
       setPreviewMsg(`Load failed: ${error.message}`);
       return;
     }
-    const list = data ?? [];
+    const list = (data ?? []).map(mapDbQuestion);
     setPreviewQuestions(list);
     setPreviewMsg(list.length ? "" : "No questions.");
   }
@@ -447,7 +494,7 @@ export default function SuperTestsImportPage() {
                 <th>Preview</th>
                 <th>Manage</th>
                 <th>New Version</th>
-                <th>Archive</th>
+                <th>Delete</th>
               </tr>
             </thead>
             <tbody>
@@ -482,7 +529,7 @@ export default function SuperTestsImportPage() {
                   </td>
                   <td>
                     {item.status !== "archived" ? (
-                      <button className="btn btn-danger" onClick={() => archiveQuestionSet(item.id)}>Archive</button>
+                      <button className="btn btn-danger" onClick={() => archiveQuestionSet(item.id)}>Delete</button>
                     ) : statusBadge(item.status)}
                   </td>
                 </tr>
@@ -705,46 +752,79 @@ export default function SuperTestsImportPage() {
             {!previewMsg ? (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14, maxHeight: "70vh", overflow: "auto" }}>
                 {previewQuestions.map((question, index) => {
-                  const options = Array.isArray(question.options) ? question.options : [];
-                  const correctAnswer = question.correct_answer;
-                  const description = String(question.metadata?.description ?? "").trim();
-                  const mediaUrl = resolveMediaUrl(question.media_url);
+                  const prompt = question.promptEn || question.promptBn || "";
+                  const choices = question.choices ?? question.choicesJa ?? [];
+                  const stemKind = question.stemKind || "";
+                  const stemText = question.stemText;
+                  const stemExtra = question.stemExtra;
+                  const stemAsset = resolveMediaUrl(
+                    question.stemAsset ||
+                    question.image ||
+                    question.stemImage ||
+                    question.passageImage ||
+                    question.tableImage ||
+                    question.stem_image ||
+                    question.stem_image_url ||
+                    null,
+                  );
+                  const boxText = question.boxText;
+                  const isImageStem = ["image", "passage_image", "table_image"].includes(stemKind);
+                  const isAudioStem = stemKind === "audio";
+                  const shouldShowImage = isImageStem || (!stemKind && isImageAsset(stemAsset));
+                  const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
+                  const stemLines = splitStemLines(stemExtra);
                   return (
                     <div key={`${question.qid}-${index}`} className="admin-panel" style={{ padding: 14 }}>
                       <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>
-                        {question.qid} {question.question_type ? `(${question.question_type})` : ""}
+                        {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""}
                       </div>
-                      <div style={{ marginTop: 6, fontSize: 16, fontWeight: 600 }}>
-                        {renderQuestionPrompt(question)}
-                      </div>
-                      {description ? (
+                      {prompt ? <div style={{ marginTop: 6, fontSize: 16, fontWeight: 600 }}>{prompt}</div> : null}
+                      {question.type === "daily" && stemExtra ? (
                         <div style={{ marginTop: 6, fontSize: 13, color: "#667085" }}>
-                          {description}
+                          {stemExtra}
                         </div>
                       ) : null}
-                      {mediaUrl && isImageAsset(mediaUrl) ? (
-                        <div style={{ marginTop: 10 }}>
-                          <img
-                            src={mediaUrl}
-                            alt=""
-                            style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #d0d5dd" }}
-                          />
+                      {stemText ? (
+                        <div
+                          style={{ marginTop: 6 }}
+                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
+                        />
+                      ) : null}
+                      {stemLines.length && question.type !== "daily" ? (
+                        <div style={{ marginTop: 6 }}>
+                          {stemLines.map((line, lineIndex) => (
+                            <div
+                              key={`${question.id}-line-${lineIndex}`}
+                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(line) }}
+                            />
+                          ))}
                         </div>
                       ) : null}
-                      {mediaUrl && isAudioAsset(mediaUrl) ? (
-                        <div style={{ marginTop: 10 }}>
-                          <audio controls src={mediaUrl} style={{ width: "100%" }} />
-                        </div>
+                      {boxText ? (
+                        <div
+                          className="boxed"
+                          style={{ marginTop: 8 }}
+                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(boxText) }}
+                        />
                       ) : null}
-                      {options.length ? (
+                      {shouldShowImage && stemAsset ? (
+                        <img
+                          src={stemAsset}
+                          alt="stem"
+                          style={{ marginTop: 8, maxWidth: "100%", borderRadius: 12, border: "1px solid #d0d5dd" }}
+                        />
+                      ) : null}
+                      {shouldShowAudio && stemAsset ? (
+                        <audio controls src={stemAsset} style={{ marginTop: 8, width: "100%" }} />
+                      ) : null}
+                      {choices.length ? (
                         <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                          {options.map((option, optionIndex) => {
-                            const isCorrect = typeof correctAnswer === "number"
-                              ? correctAnswer === optionIndex
-                              : String(option ?? "").trim() === String(correctAnswer ?? "").trim();
+                          {choices.map((choice, optionIndex) => {
+                            const optionUrl = resolveMediaUrl(choice);
+                            const isCorrect = question.answerIndex === optionIndex;
                             return (
                               <div
-                                key={`${question.qid}-option-${optionIndex}`}
+                                key={`${question.id}-option-${optionIndex}`}
                                 style={{
                                   padding: "10px 12px",
                                   borderRadius: 10,
@@ -753,7 +833,17 @@ export default function SuperTestsImportPage() {
                                   fontWeight: isCorrect ? 700 : 400,
                                 }}
                               >
-                                {String(option ?? "")}
+                                {optionUrl && isImageAsset(optionUrl) ? (
+                                  <img
+                                    src={optionUrl}
+                                    alt=""
+                                    style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 8 }}
+                                  />
+                                ) : optionUrl && isAudioAsset(optionUrl) ? (
+                                  <audio controls src={optionUrl} style={{ width: "100%" }} />
+                                ) : (
+                                  String(choice ?? "")
+                                )}
                               </div>
                             );
                           })}

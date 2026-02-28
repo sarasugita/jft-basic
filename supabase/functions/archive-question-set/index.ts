@@ -18,11 +18,24 @@ serve(async (req) => {
   const questionSetId = normalizeText(body.question_set_id);
   if (!questionSetId) return bad("question_set_id is required");
 
+  const { data: questionSet, error: questionSetError } = await context.adminClient
+    .from("question_sets")
+    .select("id, title")
+    .eq("id", questionSetId)
+    .single();
+  if (questionSetError || !questionSet) return bad(questionSetError?.message ?? "Question set not found");
+
   const { error } = await context.adminClient
     .from("question_sets")
     .update({ status: "archived" })
     .eq("id", questionSetId);
   if (error) return bad(error.message);
+
+  const { error: legacyError } = await context.adminClient
+    .from("tests")
+    .update({ is_public: false, updated_at: new Date().toISOString() })
+    .eq("version", questionSet.title);
+  if (legacyError) return bad(legacyError.message);
 
   await logAuditEvent(context.adminClient, context, {
     actionType: "archive",

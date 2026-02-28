@@ -250,6 +250,36 @@ export default function SuperAdminShell({ children }) {
 
     console.log("[EdgeInvoke]", functionName, "token?", !!accessToken);
 
+    if (body instanceof FormData) {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/${functionName}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        },
+        body,
+      });
+
+      const text = await response.text();
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = text;
+      }
+
+      if (!response.ok) {
+        return {
+          data: null,
+          error: {
+            message: data?.error || data?.message || text || `Failed to call ${functionName}`,
+          },
+        };
+      }
+
+      return { data, error: null };
+    }
+
     const { data, error } = await supabase.functions.invoke(functionName, {
       body: body ?? {},
       headers: {

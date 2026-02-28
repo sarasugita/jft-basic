@@ -29,6 +29,35 @@ serve(async (req) => {
   const visibleSchools = await ensureVisibleSchools(context.adminClient, parsed.metadata.school_ids);
   if (!visibleSchools.ok) return bad(visibleSchools.error ?? "Invalid schools");
 
+  let legacySchoolId = parsed.metadata.school_ids[0] ?? null;
+  if (!legacySchoolId) {
+    const { data: fallbackSchool, error: fallbackSchoolError } = await context.adminClient
+      .from("schools")
+      .select("id")
+      .eq("status", "active")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (fallbackSchoolError) return bad(fallbackSchoolError.message);
+    legacySchoolId = fallbackSchool?.id ?? null;
+  }
+  if (!legacySchoolId) return bad("No active school found for legacy test sync");
+
+  const { data: existingSet, error: existingSetError } = await context.adminClient
+    .from("question_sets")
+    .select("id, title, test_type, version_label")
+    .eq("title", parsed.metadata.title)
+    .eq("test_type", parsed.metadata.test_type)
+    .limit(1)
+    .maybeSingle();
+  if (existingSetError) return bad(existingSetError.message);
+  if (existingSet) {
+    return bad("That SetID already exists for this test type. Use Upload on the existing set to add a new version.", {
+      existing_question_set_id: existingSet.id,
+      existing_version_label: existingSet.version_label,
+    });
+  }
+
   const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, parsed.metadata.test_type);
   if (!validation.valid) {
     return bad("Validation failed", { validation });
@@ -90,6 +119,7 @@ serve(async (req) => {
       setId: parsed.metadata.title,
       testType: parsed.metadata.test_type,
       category: parsed.metadata.category,
+      schoolId: legacySchoolId,
       questions: validation.questions,
       uploadedAssets,
     });

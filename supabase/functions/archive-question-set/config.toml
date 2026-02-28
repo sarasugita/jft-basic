@@ -1,0 +1,2 @@
+[functions.archive-question-set]
+verify_jwt = false

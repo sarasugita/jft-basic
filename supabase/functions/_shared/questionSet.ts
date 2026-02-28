@@ -679,12 +679,14 @@ export async function syncLegacyTestCatalog(
     setId,
     testType,
     category,
+    schoolId,
     questions,
     uploadedAssets,
   }: {
     setId: string;
     testType: "daily" | "model";
     category: string | null;
+    schoolId: string;
     questions: ValidationResult["questions"];
     uploadedAssets: Map<string, string>;
   },
@@ -695,15 +697,20 @@ export async function syncLegacyTestCatalog(
 
   const { data: existingTest, error: testLookupError } = await adminClient
     .from("tests")
-    .select("id")
+    .select("id, school_id")
     .eq("version", setId)
     .maybeSingle();
   if (testLookupError) throw new Error(`Legacy test lookup failed: ${testLookupError.message}`);
+  const legacySchoolId = existingTest?.school_id || schoolId;
+  if (!legacySchoolId) {
+    throw new Error("Legacy test sync requires a school scope");
+  }
 
   if (existingTest?.id) {
     const { error } = await adminClient
       .from("tests")
       .update({
+        school_id: legacySchoolId,
         title: categoryLabel,
         type: legacyType,
         is_public: true,
@@ -713,6 +720,7 @@ export async function syncLegacyTestCatalog(
     if (error) throw new Error(`Legacy test update failed: ${error.message}`);
   } else {
     const { error } = await adminClient.from("tests").insert({
+      school_id: legacySchoolId,
       version: setId,
       title: categoryLabel,
       type: legacyType,
@@ -735,6 +743,7 @@ export async function syncLegacyTestCatalog(
     }
 
     return {
+      school_id: legacySchoolId,
       test_version: setId,
       question_id: question.qid,
       section_key: testType === "daily"
