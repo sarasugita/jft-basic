@@ -784,3 +784,58 @@ body { padding: 0; }
   box-shadow: var(--shadow);
 }
 .admin-login h2 { margin: 0 0 6px; }
+
+.admin-scope-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.super-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(63, 107, 15, 0.14), transparent 32%),
+    linear-gradient(180deg, #f7f8f3 0%, #eef2e6 100%);
+}
+
+.super-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px 18px 40px;
+}
+
+.super-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.super-title {
+  margin: 12px 0 4px;
+  font-size: 34px;
+  line-height: 1.1;
+}
+
+.super-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: capitalize;
+}
+
+.super-status.active {
+  background: rgba(63, 107, 15, 0.12);
+  color: #254807;
+}
+
+.super-status.inactive {
+  background: rgba(127, 29, 29, 0.12);
+  color: #991b1b;
+}

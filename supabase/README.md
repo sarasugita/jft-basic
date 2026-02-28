@@ -38,9 +38,11 @@ See `supabase/sql/schema.sql` for required tables/columns:
 - `tests` / `questions` / `choices`
 - `test_assets`
 - `supabase/sql/phase1_multi_school_rbac.sql` for schools, RBAC, school scoping, and RLS
+- `supabase/sql/phase2_super_admin_school_scope.sql` for scoped super-admin admin-console reuse
 
 Multi-school setup and promotion steps:
 - `docs/multi-school-rbac.md`
+- `docs/super-admin-ui.md`
 
 Question CSV format: `docs/question_csv.md`
 
