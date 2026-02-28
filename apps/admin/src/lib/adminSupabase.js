@@ -8,11 +8,27 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Missing Supabase env vars for admin app.");
 }
 
+let defaultClient;
+const scopedClients = new Map();
+
 export function createAdminSupabaseClient({ schoolScopeId } = {}) {
+  if (!schoolScopeId) {
+    if (!defaultClient) {
+      defaultClient = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
+    }
+    return defaultClient;
+  }
+
+  if (scopedClients.has(schoolScopeId)) {
+    return scopedClients.get(schoolScopeId);
+  }
+
   const headers = schoolScopeId
     ? { [SUPER_ADMIN_SCOPE_HEADER]: schoolScopeId }
     : undefined;
-  return createClient(supabaseUrl ?? "", supabaseAnonKey ?? "", {
+  const client = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "", {
     global: headers ? { headers } : undefined,
   });
+  scopedClients.set(schoolScopeId, client);
+  return client;
 }

@@ -390,6 +390,7 @@ export default function SuperSchoolsPage() {
             <table className="admin-table" style={{ minWidth: 1200 }}>
               <thead>
                 <tr>
+                  <th>Enter</th>
                   <th>School</th>
                   <th>Attendance Rate</th>
                   <th>Daily Test</th>
@@ -407,6 +408,25 @@ export default function SuperSchoolsPage() {
                   return (
                     <tr key={school.id}>
                       <td>
+                        <Link
+                          className="super-enter-btn"
+                          href={`/super/schools/${school.id}/admin`}
+                          aria-label={`Enter ${school.name}`}
+                          title={`Enter ${school.name}`}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M9 6l6 6-6 6"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </Link>
+                      </td>
+                      <td>
                         <div className="daily-name">{school.name}</div>
                         <div className="daily-code">
                           {[school.academic_year, school.term].filter(Boolean).join(" / ") || school.id}
@@ -423,9 +443,6 @@ export default function SuperSchoolsPage() {
                       </td>
                       <td>
                         <div className="admin-actions">
-                          <Link className="btn btn-primary" href={`/super/schools/${school.id}/admin`}>
-                            Enter
-                          </Link>
                           <Link className="btn" href={`/super/schools/${school.id}/admins`}>
                             Admin List
                           </Link>
@@ -440,7 +457,7 @@ export default function SuperSchoolsPage() {
                 })}
                 {!loading && filteredSchools.length === 0 ? (
                   <tr>
-                    <td colSpan={9}>No schools found.</td>
+                    <td colSpan={10}>No schools found.</td>
                   </tr>
                 ) : null}
               </tbody>
