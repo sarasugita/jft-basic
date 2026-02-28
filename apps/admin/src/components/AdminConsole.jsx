@@ -764,10 +764,13 @@ export default function AdminConsole({
   forcedSchoolScope = null,
   changeSchoolHref = null,
   homeHref = "/",
+  homeLabel = "Admin Home",
+  forcedSchoolOptions = [],
 }) {
   const router = useRouter();
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
   const forcedSchoolName = forcedSchoolScope?.name ?? forcedSchoolId ?? "";
+  const rootSupabase = useMemo(() => createAdminSupabaseClient(), []);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [schoolAssignments, setSchoolAssignments] = useState([]);
@@ -1584,7 +1587,7 @@ export default function AdminConsole({
       const schoolIds = Array.from(
         new Set([profile.school_id, ...(assignments ?? []).map((row) => row.school_id)].filter(Boolean))
       );
-      const { data: schoolsData, error: schoolsError } = await supabase
+      const { data: schoolsData, error: schoolsError } = await rootSupabase
         .from("schools")
         .select("id, name, status")
         .in("id", schoolIds);
@@ -1618,7 +1621,7 @@ export default function AdminConsole({
     return () => {
       mounted = false;
     };
-  }, [forcedSchoolId, profile, session, supabase]);
+  }, [forcedSchoolId, profile, rootSupabase, session, supabase]);
 
   useEffect(() => {
     if (forcedSchoolId || !profile || profile.role !== "admin" || !schoolScopeId || typeof window === "undefined") {
@@ -3889,6 +3892,11 @@ export default function AdminConsole({
     setSchoolScopeId(nextSchoolId || null);
   }
 
+  function handleForcedSchoolScopeChange(nextSchoolId) {
+    if (!nextSchoolId || nextSchoolId === forcedSchoolId) return;
+    router.push(`/super/schools/${nextSchoolId}/admin`);
+  }
+
   if (!session) {
     return (
       <div className="admin-login">
@@ -4196,9 +4204,23 @@ export default function AdminConsole({
         <div className="admin-wrap">
           {forcedSchoolId || (profile?.role === "admin" && schoolAssignments.length > 0) ? (
             <div className="admin-scope-banner">
-              <div className="admin-chip">
-                Viewing: <strong>{activeSchoolName}</strong>
-              </div>
+              {forcedSchoolId && profile?.role === "super_admin" ? (
+                <div className="admin-school-switcher">
+                  <label htmlFor="admin-school-switcher">School</label>
+                  <select
+                    id="admin-school-switcher"
+                    value={activeSchoolId ?? ""}
+                    onChange={(event) => handleForcedSchoolScopeChange(event.target.value)}
+                  >
+                    {forcedSchoolOptions.map((schoolOption) => (
+                      <option key={schoolOption.school_id} value={schoolOption.school_id}>
+                        {schoolOption.school_name}
+                        {schoolOption.school_status === "inactive" ? " (Inactive)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               {!forcedSchoolId && profile?.role === "admin" ? (
                 <div className="admin-school-switcher">
                   <label htmlFor="admin-school-switcher">School</label>
@@ -4216,10 +4238,12 @@ export default function AdminConsole({
                   </select>
                 </div>
               ) : null}
-              {changeSchoolHref ? (
+              {changeSchoolHref && profile?.role !== "super_admin" ? (
                 <Link className="btn" href={changeSchoolHref}>Change school</Link>
               ) : null}
-              <Link className="btn" href={homeHref}>Admin Home</Link>
+              {forcedSchoolId && profile?.role === "super_admin" ? (
+                <Link className="btn" href={homeHref}>{homeLabel}</Link>
+              ) : null}
             </div>
           ) : null}
 

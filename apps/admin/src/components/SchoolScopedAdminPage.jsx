@@ -12,6 +12,7 @@ export default function SchoolScopedAdminPage({ schoolId }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [school, setSchool] = useState(null);
+  const [schoolOptions, setSchoolOptions] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -52,6 +53,24 @@ export default function SchoolScopedAdminPage({ schoolId }) {
         return;
       }
       setSchool(schoolRow);
+
+      const { data: schoolsData, error: schoolsError } = await supabase
+        .from("schools")
+        .select("id, name, status")
+        .order("created_at", { ascending: true });
+      if (!mounted) return;
+      if (schoolsError) {
+        console.error("school options load error:", schoolsError);
+      } else {
+        setSchoolOptions(
+          (schoolsData ?? []).map((row) => ({
+            school_id: row.id,
+            school_name: row.name ?? row.id,
+            school_status: row.status ?? null,
+          })),
+        );
+      }
+
       setLoading(false);
     }
 
@@ -73,7 +92,9 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     <AdminConsole
       forcedSchoolScope={school}
       changeSchoolHref="/super/schools"
-      homeHref={`/super/schools/${schoolId}/admin`}
+      homeHref="/super/schools"
+      homeLabel="SuperAdmin Home"
+      forcedSchoolOptions={schoolOptions}
     />
   );
 }

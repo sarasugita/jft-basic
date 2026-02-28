@@ -45,6 +45,7 @@ export default function SchoolAdminsPage({ schoolId }) {
   const [modalMode, setModalMode] = useState("create");
   const [form, setForm] = useState(emptyForm());
   const [tempPassword, setTempPassword] = useState("");
+  const [copyMsg, setCopyMsg] = useState("");
   const [existingAdmins, setExistingAdmins] = useState([]);
   const [existingAdminsLoading, setExistingAdminsLoading] = useState(false);
 
@@ -174,6 +175,7 @@ export default function SchoolAdminsPage({ schoolId }) {
     setModalMode("create");
     setForm(emptyForm());
     setTempPassword("");
+    setCopyMsg("");
     setModalOpen(true);
     setMsg("");
   }
@@ -188,6 +190,7 @@ export default function SchoolAdminsPage({ schoolId }) {
       existing_admin_id: "",
     });
     setTempPassword("");
+    setCopyMsg("");
     setModalOpen(true);
     setMsg("");
   }
@@ -202,9 +205,20 @@ export default function SchoolAdminsPage({ schoolId }) {
       existing_admin_id: "",
     });
     setTempPassword("");
+    setCopyMsg("");
     setModalOpen(true);
     setMsg("");
     await loadExistingAdmins();
+  }
+
+  async function copyTempPassword() {
+    if (!tempPassword) return;
+    try {
+      await navigator.clipboard.writeText(tempPassword);
+      setCopyMsg("Copied.");
+    } catch {
+      setCopyMsg("Copy failed.");
+    }
   }
 
   async function invokeManage(payload) {
@@ -280,6 +294,7 @@ export default function SchoolAdminsPage({ schoolId }) {
     setModalOpen(false);
     setForm(emptyForm());
     setTempPassword(result.temp_password ?? "");
+    setCopyMsg("");
     setMsg(
       result.temp_password
         ? `Admin created. Temporary password: ${result.temp_password}`
@@ -340,6 +355,10 @@ export default function SchoolAdminsPage({ schoolId }) {
         {tempPassword ? (
           <div className="admin-help" style={{ marginTop: 8 }}>
             Last issued temporary password: <strong>{tempPassword}</strong>
+            <button className="btn" style={{ marginLeft: 8 }} onClick={copyTempPassword}>
+              Copy
+            </button>
+            {copyMsg ? <span style={{ marginLeft: 8 }}>{copyMsg}</span> : null}
           </div>
         ) : null}
         <div className="admin-table-wrap" style={{ marginTop: 12 }}>
