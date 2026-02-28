@@ -1,0 +1,5 @@
+{
+  "/super/schools/page": "app/super/schools/page.js",
+  "/page": "app/page.js",
+  "/super/schools/[schoolId]/admin/[[...slug]]/page": "app/super/schools/[schoolId]/admin/[[...slug]]/page.js"
+}
