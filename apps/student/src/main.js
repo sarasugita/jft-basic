@@ -2626,7 +2626,15 @@ function renderTestSelect(app) {
         const todayKey = getBdtDateKey(new Date());
         const sessions = (testSessionsState.list ?? [])
           .filter((s) => s?.starts_at && s.is_published)
-          .filter((s) => getBdtDateKey(s.starts_at) === todayKey);
+          .filter((s) => getBdtDateKey(s.starts_at) === todayKey)
+          .sort((a, b) => {
+            const aTime = new Date(a.starts_at).getTime();
+            const bTime = new Date(b.starts_at).getTime();
+            if (!Number.isFinite(aTime) && !Number.isFinite(bTime)) return 0;
+            if (!Number.isFinite(aTime)) return 1;
+            if (!Number.isFinite(bTime)) return -1;
+            return aTime - bTime;
+          });
         if (!testSessionsState.loaded) {
           return `<div class="text-muted">Loading today's tests...</div>`;
         }
