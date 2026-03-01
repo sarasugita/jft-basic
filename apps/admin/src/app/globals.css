@@ -381,6 +381,17 @@ body { padding: 0; }
   font-family: inherit;
 }
 
+.admin-table input,
+.admin-table select {
+  width: 100%;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  padding: 8px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+
 .admin-form textarea, .admin-table textarea {
   font-size: 14px;
   font-family: inherit;
@@ -548,6 +559,13 @@ body { padding: 0; }
   width: min(980px, 95vw);
 }
 
+.daily-record-modal {
+  max-width: 1040px;
+  width: min(1040px, 96vw);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
 .admin-modal-header {
   display: flex;
   align-items: center;
@@ -619,9 +637,110 @@ body { padding: 0; }
   min-width: 0;
 }
 
+.daily-record-comments-section {
+  margin-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 16px;
+}
+
+.daily-record-comments-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.daily-record-comments-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.daily-record-comment-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.daily-record-comment-fields {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 12px;
+  flex: 1;
+}
+
+.daily-record-comment-fields label {
+  display: block;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.daily-record-comment-fields select,
+.daily-record-comment-fields textarea {
+  width: 100%;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  padding: 10px 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.daily-record-comment-actions {
+  display: flex;
+  align-items: flex-start;
+}
+
+.ranking-empty-cell {
+  text-align: center;
+  color: #6b7280;
+}
+
+.ranking-table th {
+  text-align: center;
+  vertical-align: top;
+}
+
+.ranking-period-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ranking-period-title {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.ranking-period-range {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.ranking-period-range input {
+  min-width: 0;
+}
+
 @media (max-width: 720px) {
   .student-info-grid {
     grid-template-columns: 1fr;
+  }
+
+  .daily-record-comment-row {
+    flex-direction: column;
+  }
+
+  .daily-record-comment-fields {
+    grid-template-columns: 1fr;
+    width: 100%;
   }
 }
 

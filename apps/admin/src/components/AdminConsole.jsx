@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { createAdminSupabaseClient } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
@@ -32,6 +32,8 @@ const CERTIFICATE_STATUS_OPTIONS = [
   { value: "completed", label: "Completed" }
 ];
 const SEX_OPTIONS = ["Male", "Female", "Other"];
+const DAILY_RECORD_COMMENT_FIELDS =
+  "id, student_id, comment, profiles:student_id(display_name, student_code)";
 
 function downloadText(filename, text, mime = "text/plain") {
   const blob = new Blob([text], { type: mime });
@@ -101,6 +103,100 @@ function getPersonalInfoForm(student) {
     bnmc_registration_number: student?.bnmc_registration_number ?? "",
     bnmc_registration_expiry_date: student?.bnmc_registration_expiry_date ?? ""
   };
+}
+
+function getTodayDateInput() {
+  const today = new Date();
+  if (Number.isNaN(today.getTime())) return "";
+  return today.toISOString().slice(0, 10);
+}
+
+function addDays(dateString, offsetDays) {
+  const base = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return dateString;
+  base.setDate(base.getDate() + offsetDays);
+  return base.toISOString().slice(0, 10);
+}
+
+function getEmptyDailyRecordPlanDraft() {
+  return {
+    mini_test_1: "",
+    mini_test_2: "",
+    special_test_1: "",
+    special_test_2: "",
+  };
+}
+
+function createDailyRecordCommentRow(studentId = "") {
+  return {
+    tempId: `comment-${Math.random().toString(36).slice(2, 10)}`,
+    student_id: studentId,
+    comment: "",
+  };
+}
+
+function getEmptyDailyRecordForm(recordDate = "") {
+  return {
+    id: "",
+    record_date: recordDate,
+    todays_content: "",
+    comments: [createDailyRecordCommentRow("")]
+  };
+}
+
+function getDailyRecordForm(record) {
+  if (!record) return getEmptyDailyRecordForm("");
+  const comments = (record.daily_record_student_comments ?? []).length
+    ? record.daily_record_student_comments.map((item) => ({
+        tempId: item.id ?? `comment-${Math.random().toString(36).slice(2, 10)}`,
+        id: item.id ?? "",
+        student_id: item.student_id ?? "",
+        comment: item.comment ?? "",
+      }))
+    : [createDailyRecordCommentRow("")];
+  return {
+    id: record.id ?? "",
+    record_date: record.record_date ?? "",
+    todays_content: record.todays_content ?? "",
+    comments,
+  };
+}
+
+function buildDailyRecordPlanDrafts(records) {
+  const drafts = {};
+  (records ?? []).forEach((record) => {
+    if (!record?.record_date) return;
+    drafts[record.record_date] = {
+      mini_test_1: record.mini_test_1 ?? "",
+      mini_test_2: record.mini_test_2 ?? "",
+      special_test_1: record.special_test_1 ?? "",
+      special_test_2: record.special_test_2 ?? "",
+    };
+  });
+  return drafts;
+}
+
+function summarizeDailyRecordComments(record) {
+  const comments = record?.daily_record_student_comments ?? [];
+  if (!comments.length) return "-";
+  const names = comments
+    .map((item) => item?.profiles?.display_name || item?.profiles?.student_code || "")
+    .filter(Boolean)
+    .slice(0, 3);
+  const suffix = comments.length > names.length ? ` +${comments.length - names.length}` : "";
+  return `${comments.length} comment${comments.length > 1 ? "s" : ""}${names.length ? `: ${names.join(", ")}${suffix}` : ""}`;
+}
+
+function getRankingDrafts(periods) {
+  const drafts = {};
+  (periods ?? []).forEach((period) => {
+    if (!period?.id) return;
+    drafts[period.id] = {
+      start_date: period.start_date ?? "",
+      end_date: period.end_date ?? "",
+    };
+  });
+  return drafts;
 }
 
 function toCsv(rows) {
@@ -918,6 +1014,19 @@ export default function AdminConsole({
   const [studentInfoSaving, setStudentInfoSaving] = useState(false);
   const [studentInfoMsg, setStudentInfoMsg] = useState("");
   const [studentInfoForm, setStudentInfoForm] = useState(() => getPersonalInfoForm(null));
+  const [dailyRecords, setDailyRecords] = useState([]);
+  const [dailyRecordsMsg, setDailyRecordsMsg] = useState("");
+  const [dailyRecordDate, setDailyRecordDate] = useState(() => getTodayDateInput());
+  const [dailyRecordModalOpen, setDailyRecordModalOpen] = useState(false);
+  const [dailyRecordSaving, setDailyRecordSaving] = useState(false);
+  const [dailyRecordForm, setDailyRecordForm] = useState(() => getEmptyDailyRecordForm(getTodayDateInput()));
+  const [dailyRecordPlanDrafts, setDailyRecordPlanDrafts] = useState({});
+  const [dailyRecordPlanSavingDate, setDailyRecordPlanSavingDate] = useState("");
+  const dailyRecordTableWrapRef = useRef(null);
+  const [rankingPeriods, setRankingPeriods] = useState([]);
+  const [rankingMsg, setRankingMsg] = useState("");
+  const [rankingDrafts, setRankingDrafts] = useState({});
+  const [rankingRefreshingId, setRankingRefreshingId] = useState("");
   const [studentListFilters, setStudentListFilters] = useState({
     from: "",
     to: "",
@@ -1503,6 +1612,52 @@ export default function AdminConsole({
     [sortedStudents]
   );
 
+  const scheduleRecordRows = useMemo(() => {
+    const today = getTodayDateInput();
+    const dateSet = new Set();
+    for (let i = 0; i < 14; i += 1) {
+      dateSet.add(addDays(today, i));
+    }
+    (dailyRecords ?? []).forEach((record) => {
+      if (record?.record_date) dateSet.add(record.record_date);
+    });
+    return Array.from(dateSet)
+      .sort((a, b) => a.localeCompare(b))
+      .map((recordDate) => {
+        const record = (dailyRecords ?? []).find((item) => item.record_date === recordDate) ?? null;
+        const draft = {
+          ...getEmptyDailyRecordPlanDraft(),
+          ...(record ? {
+            mini_test_1: record.mini_test_1 ?? "",
+            mini_test_2: record.mini_test_2 ?? "",
+            special_test_1: record.special_test_1 ?? "",
+            special_test_2: record.special_test_2 ?? "",
+          } : {}),
+          ...(dailyRecordPlanDrafts[recordDate] ?? {}),
+        };
+        return { recordDate, record, draft };
+      });
+  }, [dailyRecords, dailyRecordPlanDrafts]);
+
+  const rankingRowCount = useMemo(
+    () => Math.max(0, ...rankingPeriods.map((period) => period.ranking_entries?.length ?? 0)),
+    [rankingPeriods]
+  );
+
+  useEffect(() => {
+    if (activeTab !== "dailyRecord") return;
+    const wrap = dailyRecordTableWrapRef.current;
+    if (!(wrap instanceof HTMLElement)) return;
+    const today = getTodayDateInput();
+    const targetRow = wrap.querySelector(`[data-daily-record-date="${today}"]`);
+    if (!(targetRow instanceof HTMLElement)) return;
+    requestAnimationFrame(() => {
+      const wrapRect = wrap.getBoundingClientRect();
+      const rowRect = targetRow.getBoundingClientRect();
+      wrap.scrollTop += rowRect.top - wrapRect.top;
+    });
+  }, [activeTab, scheduleRecordRows.length]);
+
   const attendanceFilteredStudents = useMemo(() => {
     const minRate = attendanceFilter.minRate === "" ? null : Number(attendanceFilter.minRate);
     const minAbsences = attendanceFilter.minAbsences === "" ? null : Number(attendanceFilter.minAbsences);
@@ -1747,6 +1902,18 @@ export default function AdminConsole({
     if (activeTab !== "students") return;
     fetchStudentListMetrics();
   }, [activeSchoolId, activeTab, studentListFilters.from, studentListFilters.to]);
+
+  useEffect(() => {
+    if (activeTab !== "dailyRecord") return;
+    fetchDailyRecords();
+    if (!students.length) fetchStudents();
+  }, [activeSchoolId, activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "ranking") return;
+    fetchRankingPeriods();
+    if (!students.length) fetchStudents();
+  }, [activeSchoolId, activeTab]);
 
   useEffect(() => {
     if (!dailyCategories.length) return;
@@ -2207,6 +2374,419 @@ export default function AdminConsole({
     setStudentInfoForm(getPersonalInfoForm(data ?? payload));
     setStudentInfoSaving(false);
     setStudentInfoOpen(false);
+  }
+
+  async function fetchDailyRecords() {
+    if (!activeSchoolId) {
+      setDailyRecords([]);
+      setDailyRecordPlanDrafts({});
+      setDailyRecordsMsg("Select a school.");
+      return;
+    }
+    setDailyRecordsMsg("Loading...");
+    const { data, error } = await supabase
+      .from("daily_records")
+      .select(`
+        id,
+        school_id,
+        record_date,
+        todays_content,
+        mini_test_1,
+        mini_test_2,
+        special_test_1,
+        special_test_2,
+        created_at,
+        updated_at,
+        daily_record_student_comments(${DAILY_RECORD_COMMENT_FIELDS})
+      `)
+      .eq("school_id", activeSchoolId)
+      .order("record_date", { ascending: false })
+      .limit(180);
+    if (error) {
+      console.error("daily records fetch error:", error);
+      setDailyRecords([]);
+      setDailyRecordPlanDrafts({});
+      setDailyRecordsMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const list = data ?? [];
+    setDailyRecords(list);
+    setDailyRecordPlanDrafts(buildDailyRecordPlanDrafts(list));
+    setDailyRecordsMsg(list.length ? "" : "No daily records yet. The next 2 weeks are shown below for planning.");
+  }
+
+  function openDailyRecordModal(record = null, recordDate = "") {
+    const existingRecord =
+      record
+      ?? dailyRecords.find((item) => item.record_date === recordDate)
+      ?? null;
+    const nextForm = existingRecord
+      ? getDailyRecordForm(existingRecord)
+      : getEmptyDailyRecordForm(recordDate || getTodayDateInput());
+    setDailyRecordForm(nextForm);
+    setDailyRecordDate(nextForm.record_date || recordDate || getTodayDateInput());
+    setDailyRecordsMsg("");
+    setDailyRecordSaving(false);
+    setDailyRecordModalOpen(true);
+  }
+
+  function closeDailyRecordModal() {
+    setDailyRecordModalOpen(false);
+    setDailyRecordSaving(false);
+    setDailyRecordForm(getEmptyDailyRecordForm(dailyRecordDate || getTodayDateInput()));
+  }
+
+  function updateDailyRecordPlanDraft(recordDate, field, value) {
+    setDailyRecordPlanDrafts((prev) => ({
+      ...prev,
+      [recordDate]: {
+        ...getEmptyDailyRecordPlanDraft(),
+        ...(prev[recordDate] ?? {}),
+        [field]: value,
+      }
+    }));
+  }
+
+  function updateDailyRecordComment(tempId, patch) {
+    setDailyRecordForm((prev) => ({
+      ...prev,
+      comments: prev.comments.map((item) => (item.tempId === tempId ? { ...item, ...patch } : item))
+    }));
+  }
+
+  function addDailyRecordCommentRow() {
+    setDailyRecordForm((prev) => ({
+      ...prev,
+      comments: [...prev.comments, createDailyRecordCommentRow("")]
+    }));
+  }
+
+  function removeDailyRecordCommentRow(tempId) {
+    setDailyRecordForm((prev) => {
+      const nextComments = prev.comments.filter((item) => item.tempId !== tempId);
+      return {
+        ...prev,
+        comments: nextComments.length ? nextComments : [createDailyRecordCommentRow("")]
+      };
+    });
+  }
+
+  async function saveDailyRecord() {
+    if (!activeSchoolId) {
+      setDailyRecordsMsg("Select a school.");
+      return;
+    }
+    if (!dailyRecordForm.record_date) {
+      setDailyRecordsMsg("Date is required.");
+      return;
+    }
+    setDailyRecordSaving(true);
+    setDailyRecordsMsg("");
+    const payload = {
+      school_id: activeSchoolId,
+      record_date: dailyRecordForm.record_date,
+      todays_content: dailyRecordForm.todays_content.trim() || null,
+      updated_at: new Date().toISOString(),
+      created_by: session?.user?.id ?? null,
+    };
+
+    let recordId = dailyRecordForm.id;
+    if (recordId) {
+      const { error } = await supabase
+        .from("daily_records")
+        .update(payload)
+        .eq("id", recordId);
+      if (error) {
+        console.error("daily record update error:", error);
+        setDailyRecordsMsg(`Save failed: ${error.message}`);
+        setDailyRecordSaving(false);
+        return;
+      }
+    } else {
+      const { data, error } = await supabase
+        .from("daily_records")
+        .insert(payload)
+        .select("id")
+        .single();
+      if (error) {
+        console.error("daily record insert error:", error);
+        setDailyRecordsMsg(`Save failed: ${error.message}`);
+        setDailyRecordSaving(false);
+        return;
+      }
+      recordId = data?.id ?? "";
+    }
+
+    const { error: deleteError } = await supabase
+      .from("daily_record_student_comments")
+      .delete()
+      .eq("record_id", recordId);
+    if (deleteError) {
+      console.error("daily record comments clear error:", deleteError);
+      setDailyRecordsMsg(`Save failed: ${deleteError.message}`);
+      setDailyRecordSaving(false);
+      return;
+    }
+
+    const commentsPayload = (dailyRecordForm.comments ?? [])
+      .map((item) => ({
+        record_id: recordId,
+        student_id: item.student_id,
+        comment: item.comment.trim(),
+      }))
+      .filter((item) => item.student_id && item.comment);
+    if (commentsPayload.length) {
+      const { error: commentsError } = await supabase
+        .from("daily_record_student_comments")
+        .insert(commentsPayload);
+      if (commentsError) {
+        console.error("daily record comments insert error:", commentsError);
+        setDailyRecordsMsg(`Save failed: ${commentsError.message}`);
+        setDailyRecordSaving(false);
+        return;
+      }
+    }
+
+    setDailyRecordSaving(false);
+    setDailyRecordModalOpen(false);
+    setDailyRecordDate(dailyRecordForm.record_date);
+    await fetchDailyRecords();
+  }
+
+  async function saveDailyRecordPlan(recordDate) {
+    if (!activeSchoolId || !recordDate) return;
+    setDailyRecordPlanSavingDate(recordDate);
+    setDailyRecordsMsg("");
+    const draft = {
+      ...getEmptyDailyRecordPlanDraft(),
+      ...(dailyRecordPlanDrafts[recordDate] ?? {})
+    };
+    const existingRecord = dailyRecords.find((item) => item.record_date === recordDate) ?? null;
+    const payload = {
+      school_id: activeSchoolId,
+      record_date: recordDate,
+      mini_test_1: draft.mini_test_1.trim() || null,
+      mini_test_2: draft.mini_test_2.trim() || null,
+      special_test_1: draft.special_test_1.trim() || null,
+      special_test_2: draft.special_test_2.trim() || null,
+      updated_at: new Date().toISOString(),
+      created_by: session?.user?.id ?? null,
+    };
+    if (existingRecord?.id) {
+      const { error } = await supabase
+        .from("daily_records")
+        .update(payload)
+        .eq("id", existingRecord.id);
+      if (error) {
+        console.error("daily record plan update error:", error);
+        setDailyRecordsMsg(`Save failed: ${error.message}`);
+        setDailyRecordPlanSavingDate("");
+        return;
+      }
+    } else {
+      const { error } = await supabase
+        .from("daily_records")
+        .insert({
+          ...payload,
+          todays_content: null,
+        });
+      if (error) {
+        console.error("daily record plan insert error:", error);
+        setDailyRecordsMsg(`Save failed: ${error.message}`);
+        setDailyRecordPlanSavingDate("");
+        return;
+      }
+    }
+    setDailyRecordPlanSavingDate("");
+    setDailyRecordsMsg(`Saved plan for ${recordDate}.`);
+    await fetchDailyRecords();
+  }
+
+  async function fetchRankingPeriods() {
+    if (!activeSchoolId) {
+      setRankingPeriods([]);
+      setRankingDrafts({});
+      setRankingMsg("Select a school.");
+      return;
+    }
+    setRankingMsg("Loading...");
+    let { data, error } = await supabase
+      .from("ranking_periods")
+      .select(`
+        id,
+        school_id,
+        label,
+        start_date,
+        end_date,
+        sort_order,
+        updated_at,
+        ranking_entries(id, student_id, student_name, average_rate, rank_position)
+      `)
+      .eq("school_id", activeSchoolId)
+      .order("sort_order", { ascending: true });
+    if (error) {
+      console.error("ranking periods fetch error:", error);
+      setRankingPeriods([]);
+      setRankingDrafts({});
+      setRankingMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    const periods = data ?? [];
+    const normalized = periods.map((period) => ({
+      ...period,
+      ranking_entries: [...(period.ranking_entries ?? [])].sort((a, b) => (a.rank_position ?? 0) - (b.rank_position ?? 0))
+    }));
+    setRankingPeriods(normalized);
+    setRankingDrafts(getRankingDrafts(normalized));
+    setRankingMsg(normalized.length ? "" : "No ranking periods yet. Click Add Period.");
+  }
+
+  function updateRankingDraft(periodId, field, value) {
+    setRankingDrafts((prev) => ({
+      ...prev,
+      [periodId]: {
+        start_date: prev[periodId]?.start_date ?? "",
+        end_date: prev[periodId]?.end_date ?? "",
+        [field]: value,
+      }
+    }));
+  }
+
+  async function addRankingPeriod() {
+    if (!activeSchoolId) {
+      setRankingMsg("Select a school.");
+      return;
+    }
+    const nextSortOrder = (rankingPeriods ?? []).reduce((max, period) => Math.max(max, Number(period.sort_order ?? -1)), -1) + 1;
+    const nextLabel = `Period ${nextSortOrder + 1}`;
+    const { error } = await supabase
+      .from("ranking_periods")
+      .insert({
+        school_id: activeSchoolId,
+        label: nextLabel,
+        sort_order: nextSortOrder,
+      });
+    if (error) {
+      console.error("ranking period create error:", error);
+      setRankingMsg(`Add period failed: ${error.message}`);
+      return;
+    }
+    setRankingMsg("");
+    await fetchRankingPeriods();
+  }
+
+  async function refreshRankingPeriod(period) {
+    if (!period?.id) return;
+    const draft = rankingDrafts[period.id] ?? { start_date: "", end_date: "" };
+    if (!draft.start_date || !draft.end_date) {
+      setRankingMsg(`Set both start and end dates for ${period.label}.`);
+      return;
+    }
+    setRankingRefreshingId(period.id);
+    setRankingMsg("");
+    const { error: periodError } = await supabase
+      .from("ranking_periods")
+      .update({
+        start_date: draft.start_date,
+        end_date: draft.end_date,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", period.id);
+    if (periodError) {
+      console.error("ranking period update error:", periodError);
+      setRankingMsg(`Refresh failed: ${periodError.message}`);
+      setRankingRefreshingId("");
+      return;
+    }
+
+    const { data: attemptsData, error: attemptsError } = await supabase
+      .from("attempts")
+      .select("student_id, score_rate, correct, total, created_at")
+      .eq("school_id", activeSchoolId)
+      .gte("created_at", new Date(`${draft.start_date}T00:00:00`).toISOString())
+      .lte("created_at", new Date(`${draft.end_date}T23:59:59`).toISOString());
+    if (attemptsError) {
+      console.error("ranking attempts fetch error:", attemptsError);
+      setRankingMsg(`Refresh failed: ${attemptsError.message}`);
+      setRankingRefreshingId("");
+      return;
+    }
+
+    let rankingStudents = activeStudents ?? [];
+    if (!rankingStudents.length) {
+      const { data: studentRows, error: studentsError } = await supabase
+        .from("profiles")
+        .select("id, display_name, email, student_code, is_withdrawn")
+        .eq("role", "student")
+        .eq("school_id", activeSchoolId)
+        .order("created_at", { ascending: false });
+      if (studentsError) {
+        console.error("ranking students fetch error:", studentsError);
+        setRankingMsg(`Refresh failed: ${studentsError.message}`);
+        setRankingRefreshingId("");
+        return;
+      }
+      rankingStudents = (studentRows ?? []).filter((student) => !student.is_withdrawn);
+    }
+    const studentMeta = new Map(
+      rankingStudents.map((student) => [
+        student.id,
+        student.display_name || student.email || student.student_code || student.id
+      ])
+    );
+    const totalsByStudent = new Map();
+    (attemptsData ?? []).forEach((row) => {
+      if (!row?.student_id || !studentMeta.has(row.student_id)) return;
+      const rate = Number(row.score_rate ?? (row.total ? row.correct / row.total : 0));
+      if (!Number.isFinite(rate)) return;
+      const current = totalsByStudent.get(row.student_id) ?? { sum: 0, count: 0 };
+      current.sum += rate;
+      current.count += 1;
+      totalsByStudent.set(row.student_id, current);
+    });
+    const rankings = Array.from(totalsByStudent.entries())
+      .map(([studentId, stats]) => ({
+        student_id: studentId,
+        student_name: studentMeta.get(studentId) ?? studentId,
+        average_rate: stats.count ? stats.sum / stats.count : 0,
+      }))
+      .sort((a, b) => {
+        if (b.average_rate !== a.average_rate) return b.average_rate - a.average_rate;
+        return String(a.student_name).localeCompare(String(b.student_name));
+      })
+      .map((item, index) => ({
+        period_id: period.id,
+        school_id: activeSchoolId,
+        student_id: item.student_id,
+        student_name: item.student_name,
+        average_rate: item.average_rate,
+        rank_position: index + 1,
+      }));
+
+    const { error: clearError } = await supabase
+      .from("ranking_entries")
+      .delete()
+      .eq("period_id", period.id);
+    if (clearError) {
+      console.error("ranking entries clear error:", clearError);
+      setRankingMsg(`Refresh failed: ${clearError.message}`);
+      setRankingRefreshingId("");
+      return;
+    }
+    if (rankings.length) {
+      const { error: insertError } = await supabase
+        .from("ranking_entries")
+        .insert(rankings);
+      if (insertError) {
+        console.error("ranking entries insert error:", insertError);
+        setRankingMsg(`Refresh failed: ${insertError.message}`);
+        setRankingRefreshingId("");
+        return;
+      }
+    }
+    setRankingRefreshingId("");
+    setRankingMsg(`Updated ${period.label}.`);
+    await fetchRankingPeriods();
   }
 
   useEffect(() => {
@@ -4375,6 +4955,34 @@ export default function AdminConsole({
           </div>
 
           <button
+            className={`admin-nav-item ${activeTab === "dailyRecord" ? "active" : ""}`}
+            onClick={() => setActiveTab("dailyRecord")}
+          >
+            <span className="admin-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                <path d="M6 4h12v16H6z" />
+                <path d="M9 8h6M9 12h6M9 16h4" />
+              </svg>
+            </span>
+            Schedule & Record
+          </button>
+
+          <button
+            className={`admin-nav-item ${activeTab === "ranking" ? "active" : ""}`}
+            onClick={() => setActiveTab("ranking")}
+          >
+            <span className="admin-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                <path d="M5 19h14" />
+                <path d="M7 17V9" />
+                <path d="M12 17V5" />
+                <path d="M17 17v-6" />
+              </svg>
+            </span>
+            Ranking
+          </button>
+
+          <button
             className={`admin-nav-item ${activeTab === "announcements" ? "active" : ""}`}
             onClick={() => setActiveTab("announcements")}
           >
@@ -5113,6 +5721,196 @@ export default function AdminConsole({
             </table>
           </div>
           <div className="admin-msg">{attendanceMsg}</div>
+        </div>
+        ) : null}
+
+        {activeTab === "dailyRecord" ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div>
+              <div className="admin-title">Schedule & Record</div>
+              <div className="admin-subtitle">Track what was covered each day, planned mini/special tests, and student-specific comments.</div>
+            </div>
+            <button className="btn" onClick={() => fetchDailyRecords()}>Refresh</button>
+          </div>
+
+          <div className="attendance-control-row" style={{ marginTop: 10 }}>
+            <div className="admin-form">
+              <div className="field">
+                <label>Date</label>
+                <input
+                  type="date"
+                  value={dailyRecordDate}
+                  onChange={(e) => setDailyRecordDate(e.target.value)}
+                />
+              </div>
+              <div className="field small">
+                <label>&nbsp;</label>
+                <button className="btn btn-primary" type="button" onClick={() => openDailyRecordModal(null, dailyRecordDate)}>
+                  Open Record
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 12, maxHeight: "70vh" }} ref={dailyRecordTableWrapRef}>
+            <table className="admin-table" style={{ minWidth: 1360 }}>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Today's Content</th>
+                  <th>Student Comments</th>
+                  <th>Mini Test 1</th>
+                  <th>Mini Test 2</th>
+                  <th>Special Test 1</th>
+                  <th>Special Test 2</th>
+                  <th>Open Record</th>
+                  <th>Save Plan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scheduleRecordRows.map(({ recordDate, record, draft }) => (
+                  <tr key={record?.id ?? recordDate} data-daily-record-date={recordDate}>
+                    <td>{formatDateFull(recordDate)}</td>
+                    <td>{record?.todays_content ? (record.todays_content.length > 140 ? `${record.todays_content.slice(0, 140)}...` : record.todays_content) : "-"}</td>
+                    <td>{record ? summarizeDailyRecordComments(record) : "-"}</td>
+                    <td>
+                      <input
+                        value={draft.mini_test_1}
+                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_1", e.target.value)}
+                        placeholder="Plan"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={draft.mini_test_2}
+                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
+                        placeholder="Plan"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={draft.special_test_1}
+                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
+                        placeholder="Plan"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={draft.special_test_2}
+                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_2", e.target.value)}
+                        placeholder="Plan"
+                      />
+                    </td>
+                    <td>
+                      <button className="btn" type="button" onClick={() => openDailyRecordModal(record, recordDate)}>
+                        Open Record
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => saveDailyRecordPlan(recordDate)}
+                        disabled={dailyRecordPlanSavingDate === recordDate}
+                      >
+                        {dailyRecordPlanSavingDate === recordDate ? "Saving..." : "Save Plan"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{dailyRecordsMsg}</div>
+        </div>
+        ) : null}
+
+        {activeTab === "ranking" ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div>
+              <div className="admin-title">Ranking</div>
+              <div className="admin-subtitle">Set a date range for each ranking column, then refresh that column to recalculate average test percentages.</div>
+            </div>
+            <button className="btn btn-primary" type="button" onClick={addRankingPeriod}>
+              Add Period
+            </button>
+          </div>
+
+          <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+            <table className="admin-table ranking-table" style={{ minWidth: Math.max(420, 160 + rankingPeriods.length * 260) }}>
+              <thead>
+                <tr>
+                  <th rowSpan={2}>Rank</th>
+                  {rankingPeriods.map((period) => {
+                    const draft = rankingDrafts[period.id] ?? { start_date: "", end_date: "" };
+                    return (
+                      <th key={period.id} colSpan={2}>
+                        <div className="ranking-period-head">
+                          <div className="ranking-period-title">{period.label}</div>
+                          <button
+                            className="btn btn-primary"
+                            type="button"
+                            onClick={() => refreshRankingPeriod(period)}
+                            disabled={rankingRefreshingId === period.id}
+                          >
+                            {rankingRefreshingId === period.id ? "Refreshing..." : "Refresh"}
+                          </button>
+                        </div>
+                        <div className="ranking-period-range">
+                          <input
+                            type="date"
+                            value={draft.start_date}
+                            onChange={(e) => updateRankingDraft(period.id, "start_date", e.target.value)}
+                          />
+                          <span>to</span>
+                          <input
+                            type="date"
+                            value={draft.end_date}
+                            onChange={(e) => updateRankingDraft(period.id, "end_date", e.target.value)}
+                          />
+                        </div>
+                      </th>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  {rankingPeriods.map((period) => (
+                    <Fragment key={`cols-${period.id}`}>
+                      <th>Student</th>
+                      <th>Average %</th>
+                    </Fragment>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rankingPeriods.length && rankingRowCount ? (
+                  Array.from({ length: rankingRowCount }, (_, idx) => (
+                    <tr key={`ranking-row-${idx + 1}`}>
+                      <td>{idx + 1}</td>
+                      {rankingPeriods.map((period) => {
+                        const entry = period.ranking_entries?.[idx] ?? null;
+                        return (
+                          <Fragment key={`${period.id}-${idx + 1}`}>
+                            <td>{entry?.student_name || "-"}</td>
+                            <td>{entry ? `${(Number(entry.average_rate) * 100).toFixed(2)}%` : "-"}</td>
+                          </Fragment>
+                        );
+                      })}
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={Math.max(1, 1 + rankingPeriods.length * 2)} className="ranking-empty-cell">
+                      {rankingPeriods.length ? "Press Refresh to calculate the configured periods." : "No ranking periods yet. Click Add Period."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-msg">{rankingMsg}</div>
         </div>
         ) : null}
 
@@ -6531,6 +7329,112 @@ export default function AdminConsole({
         ) : null}
 
         </>
+        ) : null}
+
+        {dailyRecordModalOpen ? (
+          <div
+            className="admin-modal-overlay"
+            onClick={() => {
+              if (dailyRecordSaving) return;
+              closeDailyRecordModal();
+            }}
+          >
+            <div className="admin-modal invite-modal daily-record-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">Schedule & Record</div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    if (dailyRecordSaving) return;
+                    closeDailyRecordModal();
+                  }}
+                  aria-label="Close"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className="field">
+                  <label>Date</label>
+                  <input
+                    type="date"
+                    value={dailyRecordForm.record_date}
+                    onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, record_date: e.target.value }))}
+                  />
+                </div>
+                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                  <label>Today's Content</label>
+                  <textarea
+                    rows={5}
+                    value={dailyRecordForm.todays_content}
+                    onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, todays_content: e.target.value }))}
+                    placeholder="Write what was covered in class today."
+                  />
+                </div>
+              </div>
+
+              <div className="daily-record-comments-section">
+                <div className="daily-record-comments-header">
+                  <div>
+                    <div className="admin-title" style={{ fontSize: 16 }}>Student Comments</div>
+                    <div className="admin-subtitle">Select one or more students and add notes for the day.</div>
+                  </div>
+                  <button className="btn" type="button" onClick={addDailyRecordCommentRow}>
+                    Add Student
+                  </button>
+                </div>
+
+                <div className="daily-record-comments-list">
+                  {dailyRecordForm.comments.map((item, index) => (
+                    <div key={item.tempId} className="daily-record-comment-row">
+                      <div className="daily-record-comment-fields">
+                        <div>
+                          <label>Student</label>
+                          <select
+                            value={item.student_id}
+                            onChange={(e) => updateDailyRecordComment(item.tempId, { student_id: e.target.value })}
+                          >
+                            <option value="">Select student</option>
+                            {activeStudents.map((student) => (
+                              <option key={student.id} value={student.id}>
+                                {student.display_name || student.email || student.id}{student.student_code ? ` (${student.student_code})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label>Comment</label>
+                          <textarea
+                            rows={3}
+                            value={item.comment}
+                            onChange={(e) => updateDailyRecordComment(item.tempId, { comment: e.target.value })}
+                            placeholder="Add a comment about this student."
+                          />
+                        </div>
+                      </div>
+                      <div className="daily-record-comment-actions">
+                        <button className="btn" type="button" onClick={() => removeDailyRecordCommentRow(item.tempId)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {dailyRecordsMsg ? <div className="admin-msg">{dailyRecordsMsg}</div> : null}
+
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button className="btn" onClick={closeDailyRecordModal} disabled={dailyRecordSaving}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={saveDailyRecord} disabled={dailyRecordSaving}>
+                  {dailyRecordSaving ? "Saving..." : "Save Record"}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
 
         {studentInfoOpen && selectedStudent ? (

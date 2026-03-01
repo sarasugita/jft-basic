@@ -170,3 +170,72 @@ create table if not exists public.attendance_entries (
 
 create index if not exists attendance_entries_day_idx on public.attendance_entries (day_id);
 create index if not exists attendance_entries_student_idx on public.attendance_entries (student_id);
+
+-- daily records
+create table if not exists public.daily_records (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  record_date date not null,
+  todays_content text,
+  mini_test_1 text,
+  mini_test_2 text,
+  special_test_1 text,
+  special_test_2 text,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists daily_records_school_date_key
+  on public.daily_records (school_id, record_date);
+
+create index if not exists daily_records_school_idx on public.daily_records (school_id);
+
+create table if not exists public.daily_record_student_comments (
+  id uuid primary key default gen_random_uuid(),
+  record_id uuid not null references public.daily_records(id) on delete cascade,
+  student_id uuid not null references public.profiles(id) on delete cascade,
+  comment text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists daily_record_student_comments_record_idx
+  on public.daily_record_student_comments (record_id);
+
+create index if not exists daily_record_student_comments_student_idx
+  on public.daily_record_student_comments (student_id);
+
+-- ranking periods and snapshots
+create table if not exists public.ranking_periods (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  label text not null,
+  start_date date,
+  end_date date,
+  sort_order int not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists ranking_periods_school_sort_order_key
+  on public.ranking_periods (school_id, sort_order);
+
+create index if not exists ranking_periods_school_idx
+  on public.ranking_periods (school_id);
+
+create table if not exists public.ranking_entries (
+  id uuid primary key default gen_random_uuid(),
+  period_id uuid not null references public.ranking_periods(id) on delete cascade,
+  school_id uuid not null references public.schools(id) on delete cascade,
+  student_id uuid not null references public.profiles(id) on delete cascade,
+  student_name text,
+  average_rate numeric not null,
+  rank_position int not null,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists ranking_entries_period_student_key
+  on public.ranking_entries (period_id, student_id);
+
+create index if not exists ranking_entries_period_rank_idx
+  on public.ranking_entries (period_id, rank_position);

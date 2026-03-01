@@ -10,6 +10,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
 const PROFILE_SELECT_FIELDS = [
   "id",
   "role",
+  "school_id",
   "email",
   "display_name",
   "student_code",
@@ -57,6 +58,14 @@ let studentResultsState = {
 };
 
 let studentAttendanceState = {
+  loaded: false,
+  loading: false,
+  list: [],
+  error: "",
+  userId: "",
+};
+
+let rankingState = {
   loaded: false,
   loading: false,
   list: [],
@@ -136,6 +145,7 @@ const defaultState = {
   studentTab: "home",
   dailyResultsCategory: "",
   dailyResultsFailedOnly: false,
+  rankingSelectedPeriod: "",
   attendanceMonthKey: "",
   focusWarnings: 0,
   focusWarningAt: 0,
@@ -163,7 +173,7 @@ function loadState() {
     }
     if (loaded.studentTab === "results") loaded.studentTab = "dailyResults";
     if (loaded.studentTab === "take") loaded.studentTab = "home";
-    if (!["home", "personalInformation", "dailyResults", "modelResults", "attendance", "attendanceHistory"].includes(loaded.studentTab)) {
+    if (!["home", "personalInformation", "dailyResults", "modelResults", "ranking", "attendance", "attendanceHistory"].includes(loaded.studentTab)) {
       loaded.studentTab = "home";
     }
     return loaded;
@@ -410,6 +420,10 @@ async function refreshAuthState() {
     studentAttendanceState.loaded = false;
     studentAttendanceState.list = [];
     studentAttendanceState.error = "";
+    rankingState.userId = "";
+    rankingState.loaded = false;
+    rankingState.list = [];
+    rankingState.error = "";
     return;
   }
 
@@ -460,6 +474,12 @@ async function refreshAuthState() {
     studentAttendanceState.loaded = false;
     studentAttendanceState.list = [];
     studentAttendanceState.error = "";
+  }
+  if (rankingState.userId !== currentUserId) {
+    rankingState.userId = currentUserId;
+    rankingState.loaded = false;
+    rankingState.list = [];
+    rankingState.error = "";
   }
   if (authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
@@ -867,6 +887,51 @@ async function fetchStudentAttendance() {
   }
   studentAttendanceState.loaded = true;
   studentAttendanceState.loading = false;
+}
+
+async function fetchStudentRanking() {
+  if (rankingState.loading) return;
+  if (!authState.profile?.school_id) {
+    rankingState.list = [];
+    rankingState.error = "School information is missing.";
+    rankingState.loaded = true;
+    return;
+  }
+  rankingState.loading = true;
+  rankingState.error = "";
+  const { data, error } = await supabase
+    .from("ranking_periods")
+    .select(`
+      id,
+      label,
+      start_date,
+      end_date,
+      sort_order,
+      ranking_entries(student_id, student_name, average_rate, rank_position)
+    `)
+    .eq("school_id", authState.profile.school_id)
+    .order("sort_order", { ascending: true });
+  if (error) {
+    rankingState.list = [];
+    rankingState.error = error.message || "Failed to load rankings.";
+    rankingState.loaded = true;
+    rankingState.loading = false;
+    return;
+  }
+  const currentUserId = authState.session?.user?.id ?? "";
+  rankingState.list = (data ?? []).map((period) => {
+    const entries = [...(period.ranking_entries ?? [])].sort((a, b) => (a.rank_position ?? 0) - (b.rank_position ?? 0));
+    const index = entries.findIndex((entry) => entry.student_id === currentUserId);
+    return {
+      ...period,
+      ranking_entries: entries,
+      currentEntry: index >= 0 ? entries[index] : null,
+      higherEntry: index > 0 ? entries[index - 1] : null,
+      lowerEntry: index >= 0 && index < entries.length - 1 ? entries[index + 1] : null,
+    };
+  });
+  rankingState.loaded = true;
+  rankingState.loading = false;
 }
 
 async function fetchAbsenceApplications() {
@@ -1536,6 +1601,10 @@ function registerStudentMenu() {
         fetchStudentResults().finally(render);
         return;
       }
+      if (nextTab === "ranking" && !rankingState.loaded) {
+        fetchStudentRanking().finally(render);
+        return;
+      }
       if (nextTab === "attendance" && !studentAttendanceState.loaded) {
         fetchStudentAttendance().finally(render);
         return;
@@ -2045,6 +2114,7 @@ function renderTestSelect(app) {
   const showPersonalInformation = showTabs && activeTab === "personalInformation";
   const showDailyResults = showTabs && activeTab === "dailyResults";
   const showModelResults = showTabs && activeTab === "modelResults";
+  const showRanking = showTabs && activeTab === "ranking";
   const showAttendance = showTabs && activeTab === "attendance";
   const showAttendanceHistory = showTabs && activeTab === "attendanceHistory";
   const showTakeTest = !showTabs;
@@ -2064,6 +2134,9 @@ function renderTestSelect(app) {
   }
   if ((showDailyResults || showModelResults) && authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
+  }
+  if (showRanking && authState.session && !rankingState.loaded && !rankingState.loading) {
+    fetchStudentRanking().finally(render);
   }
   if (showModelResults && studentResultsState.loaded && !modelRankState.loaded && !modelRankState.loading) {
     const modelAttempts = (studentResultsState.list ?? []).filter((a) => getAttemptTestType(a) === "mock");
@@ -2121,6 +2194,12 @@ function renderTestSelect(app) {
                 <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </span>
               Model Test Results
+            </button>
+            <button class="student-menu-item" data-student-tab="ranking">
+              <span class="student-menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M5 19h14M7 17V9M12 17V5M17 17v-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              Ranking
             </button>
             <button class="student-menu-item" data-student-tab="attendance">
               <span class="student-menu-icon" aria-hidden="true">
@@ -2458,6 +2537,65 @@ function renderTestSelect(app) {
                   .join("")}
               </tbody>
             </table>
+          </div>
+        `;
+      })()
+    : "";
+
+  const rankingHtml = showRanking
+    ? (() => {
+        if (!authState.session) {
+          return `<div class="text-muted">Log in to see ranking.</div>`;
+        }
+        if (rankingState.loading) {
+          return `<div class="text-muted">Loading ranking...</div>`;
+        }
+        if (rankingState.error) {
+          return `<div class="text-error">${escapeHtml(rankingState.error)}</div>`;
+        }
+        const periods = (rankingState.list ?? []).filter((period) => period.start_date && period.end_date);
+        if (!periods.length) {
+          return `<div class="text-muted">No ranking periods have been configured yet.</div>`;
+        }
+        return `
+          <div class="student-ranking-list">
+            ${periods
+              .map((period) => {
+                const currentEntry = period.currentEntry;
+                const higherEntry = period.higherEntry;
+                const lowerEntry = period.lowerEntry;
+                return `
+                  <section class="home-card student-ranking-card">
+                    <div class="student-ranking-header">
+                      <div>
+                        <div class="student-results-title">${escapeHtml(period.label || "Ranking")}</div>
+                        <div class="student-info-subtitle">${escapeHtml(formatDateFull(period.start_date))} - ${escapeHtml(formatDateFull(period.end_date))}</div>
+                      </div>
+                    </div>
+                    ${
+                      currentEntry
+                        ? `
+                          <div class="student-ranking-main">
+                            <div class="student-ranking-rank">#${currentEntry.rank_position}</div>
+                            <div class="student-ranking-rate">${(Number(currentEntry.average_rate) * 100).toFixed(2)}%</div>
+                          </div>
+                          <div class="student-ranking-neighbors">
+                            <div class="student-ranking-neighbor">
+                              <div class="student-ranking-label">One rank higher</div>
+                              <div class="student-ranking-name">${escapeHtml(higherEntry?.student_name || "-")}</div>
+                            </div>
+                            <div class="student-ranking-neighbor">
+                              <div class="student-ranking-label">One rank lower</div>
+                              <div class="student-ranking-name">${escapeHtml(lowerEntry?.student_name || "-")}</div>
+                            </div>
+                          </div>
+                        `
+                        : `<div class="text-muted">You are not ranked for this period yet.</div>`
+                    }
+                  </section>
+                `;
+              })
+              .join("")}
           </div>
         `;
       })()
@@ -3028,7 +3166,7 @@ function renderTestSelect(app) {
 
   const resultDetailHtml = "";
 
-  const plainContent = showHome || showPersonalInformation || showAttendance || showAttendanceHistory;
+  const plainContent = showHome || showPersonalInformation || showRanking || showAttendance || showAttendanceHistory;
 
   app.innerHTML = `
     <div class="app ${showTabs ? "has-student-topbar" : ""}">
@@ -3125,7 +3263,7 @@ function renderTestSelect(app) {
               `
               : `
                 <div class="intro-form" style="margin-top:16px; max-width:900px;">
-                  ${showPersonalInformation ? personalInformationHtml : showDailyResults ? dailyResultsHtml : showModelResults ? modelResultsHtml : showAttendanceHistory ? attendanceHistoryHtml : attendanceHtml}
+                  ${showPersonalInformation ? personalInformationHtml : showDailyResults ? dailyResultsHtml : showModelResults ? modelResultsHtml : showRanking ? rankingHtml : showAttendanceHistory ? attendanceHistoryHtml : attendanceHtml}
                 </div>
               `
         }

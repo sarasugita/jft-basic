@@ -1832,6 +1832,68 @@ button.student-application-view {
   font-weight: 700;
 }
 
+.student-ranking-list {
+  display: grid;
+  gap: 14px;
+}
+
+.student-ranking-card {
+  display: grid;
+  gap: 14px;
+}
+
+.student-ranking-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.student-ranking-main {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.student-ranking-rank {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.student-ranking-rate {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.student-ranking-neighbors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.student-ranking-neighbor {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 12px;
+}
+
+.student-ranking-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.student-ranking-name {
+  margin-top: 6px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
 .student-home-title-icon {
   display: inline-flex;
   align-items: center;
@@ -2305,7 +2367,8 @@ button.student-application-view {
 
 @media (max-width: 520px) {
   .student-info-grid,
-  .student-info-form-grid {
+  .student-info-form-grid,
+  .student-ranking-neighbors {
     grid-template-columns: 1fr;
   }
 
