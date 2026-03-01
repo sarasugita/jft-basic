@@ -570,6 +570,61 @@ body { padding: 0; }
   color: #0f172a;
 }
 
+.student-info-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.student-info-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.student-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.student-info-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.student-info-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  font-weight: 700;
+}
+
+.student-info-value {
+  margin-top: 6px;
+  color: #111827;
+  font-size: 15px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.student-info-form .field {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .student-info-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .link-btn {
   background: transparent;
   border: 0;

@@ -9,6 +9,29 @@ import { syncAdminAuthCookie } from "../lib/authCookies";
 
 const DEFAULT_MODEL_CATEGORY = "Book Review";
 const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
+const PROFILE_SELECT_FIELDS = [
+  "id",
+  "email",
+  "role",
+  "display_name",
+  "student_code",
+  "phone_number",
+  "date_of_birth",
+  "sex",
+  "current_working_facility",
+  "years_of_experience",
+  "nursing_certificate",
+  "nursing_certificate_status",
+  "bnmc_registration_number",
+  "bnmc_registration_expiry_date",
+  "created_at",
+  "is_withdrawn"
+].join(", ");
+const CERTIFICATE_STATUS_OPTIONS = [
+  { value: "ongoing", label: "Ongoing" },
+  { value: "completed", label: "Completed" }
+];
+const SEX_OPTIONS = ["Male", "Female", "Other"];
 
 function downloadText(filename, text, mime = "text/plain") {
   const blob = new Blob([text], { type: mime });
@@ -20,6 +43,64 @@ function downloadText(filename, text, mime = "text/plain") {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return null;
+  const match = String(dateOfBirth).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const monthDiff = today.getMonth() + 1 - month;
+  const dayDiff = today.getDate() - day;
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+function formatYearsOfExperience(value) {
+  if (value == null || value === "") return "";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  return Number.isInteger(num) ? `${num}` : `${num.toFixed(1)}`;
+}
+
+function buildPersonalInfoPayload(values) {
+  const yearsRaw = String(values.years_of_experience ?? "").trim();
+  const years = yearsRaw === "" ? null : Number(yearsRaw);
+  return {
+    display_name: String(values.display_name ?? "").trim() || null,
+    email: String(values.email ?? "").trim() || null,
+    phone_number: String(values.phone_number ?? "").trim() || null,
+    date_of_birth: String(values.date_of_birth ?? "").trim() || null,
+    sex: String(values.sex ?? "").trim() || null,
+    student_code: String(values.student_code ?? "").trim() || null,
+    current_working_facility: String(values.current_working_facility ?? "").trim() || null,
+    years_of_experience: Number.isFinite(years) ? years : null,
+    nursing_certificate: String(values.nursing_certificate ?? "").trim() || null,
+    nursing_certificate_status: String(values.nursing_certificate_status ?? "").trim() || null,
+    bnmc_registration_number: String(values.bnmc_registration_number ?? "").trim() || null,
+    bnmc_registration_expiry_date: String(values.bnmc_registration_expiry_date ?? "").trim() || null
+  };
+}
+
+function getPersonalInfoForm(student) {
+  return {
+    display_name: student?.display_name ?? "",
+    email: student?.email ?? "",
+    phone_number: student?.phone_number ?? "",
+    date_of_birth: student?.date_of_birth ?? "",
+    sex: student?.sex ?? "",
+    student_code: student?.student_code ?? "",
+    current_working_facility: student?.current_working_facility ?? "",
+    years_of_experience: formatYearsOfExperience(student?.years_of_experience),
+    nursing_certificate: student?.nursing_certificate ?? "",
+    nursing_certificate_status: student?.nursing_certificate_status ?? "",
+    bnmc_registration_number: student?.bnmc_registration_number ?? "",
+    bnmc_registration_expiry_date: student?.bnmc_registration_expiry_date ?? ""
+  };
 }
 
 function toCsv(rows) {
@@ -826,13 +907,17 @@ export default function AdminConsole({
   const [reissueLoading, setReissueLoading] = useState(false);
   const [reissueMsg, setReissueMsg] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [selectedStudentTab, setSelectedStudentTab] = useState("model");
+  const [selectedStudentTab, setSelectedStudentTab] = useState("information");
   const [studentAttempts, setStudentAttempts] = useState([]);
   const [studentAttemptsMsg, setStudentAttemptsMsg] = useState("");
   const [studentAttemptRanks, setStudentAttemptRanks] = useState({});
   const [studentAttendance, setStudentAttendance] = useState([]);
   const [studentAttendanceMsg, setStudentAttendanceMsg] = useState("");
   const [studentAttendanceRange, setStudentAttendanceRange] = useState({ from: "", to: "" });
+  const [studentInfoOpen, setStudentInfoOpen] = useState(false);
+  const [studentInfoSaving, setStudentInfoSaving] = useState(false);
+  const [studentInfoMsg, setStudentInfoMsg] = useState("");
+  const [studentInfoForm, setStudentInfoForm] = useState(() => getPersonalInfoForm(null));
   const [studentListFilters, setStudentListFilters] = useState({
     from: "",
     to: "",
@@ -1001,6 +1086,13 @@ export default function AdminConsole({
     () => students.find((s) => s.id === selectedStudentId) ?? null,
     [students, selectedStudentId]
   );
+
+  useEffect(() => {
+    if (!studentInfoOpen) {
+      setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+      setStudentInfoMsg("");
+    }
+  }, [selectedStudent, studentInfoOpen]);
 
   const modelTests = useMemo(() => tests.filter((t) => t.type === "mock"), [tests]);
   const dailyTests = useMemo(() => tests.filter((t) => t.type === "daily"), [tests]);
@@ -1979,7 +2071,7 @@ export default function AdminConsole({
     setStudentMsg("Loading...");
     let query = supabase
       .from("profiles")
-      .select("id, email, role, display_name, student_code, created_at, is_withdrawn")
+      .select(PROFILE_SELECT_FIELDS)
       .eq("role", "student")
       .eq("school_id", activeSchoolId)
       .order("created_at", { ascending: false })
@@ -2006,9 +2098,8 @@ export default function AdminConsole({
     if (!exists) {
       const first = list[0];
       setSelectedStudentId(first.id);
-      setSelectedStudentTab("model");
+      setSelectedStudentTab("information");
       setStudentAttendanceRange({ from: "", to: "" });
-      fetchStudentAttempts(first.id);
     }
   }
 
@@ -2093,6 +2184,29 @@ export default function AdminConsole({
       return;
     }
     fetchStudents();
+  }
+
+  async function saveStudentInformation() {
+    if (!selectedStudentId) return;
+    setStudentInfoMsg("");
+    setStudentInfoSaving(true);
+    const payload = buildPersonalInfoPayload(studentInfoForm);
+    const { data, error } = await supabase
+      .from("profiles")
+      .update(payload)
+      .eq("id", selectedStudentId)
+      .select(PROFILE_SELECT_FIELDS)
+      .single();
+    if (error) {
+      console.error("student info update error:", error);
+      setStudentInfoMsg(`Save failed: ${error.message}`);
+      setStudentInfoSaving(false);
+      return;
+    }
+    setStudents((prev) => prev.map((student) => (student.id === selectedStudentId ? { ...student, ...(data ?? payload) } : student)));
+    setStudentInfoForm(getPersonalInfoForm(data ?? payload));
+    setStudentInfoSaving(false);
+    setStudentInfoOpen(false);
   }
 
   useEffect(() => {
@@ -4444,12 +4558,11 @@ export default function AdminConsole({
                           key={s.id}
                           onClick={() => {
                             setSelectedStudentId(s.id);
-                            setSelectedStudentTab("model");
+                            setSelectedStudentTab("information");
                             setStudentAttendance([]);
                             setStudentAttendanceMsg("");
                             setStudentAttendanceRange({ from: "", to: "" });
                             setStudentDetailOpen(true);
-                            fetchStudentAttempts(s.id);
                           }}
                           className={s.is_withdrawn ? "row-withdrawn" : ""}
                         >
@@ -4542,6 +4655,14 @@ export default function AdminConsole({
               <div className="student-detail-tab-row">
                 <div className="admin-top-tabs">
                   <button
+                    className={`admin-top-tab ${selectedStudentTab === "information" ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedStudentTab("information");
+                    }}
+                  >
+                    Information
+                  </button>
+                  <button
                     className={`admin-top-tab ${selectedStudentTab === "attendance" ? "active" : ""}`}
                     onClick={() => {
                       setSelectedStudentTab("attendance");
@@ -4572,7 +4693,9 @@ export default function AdminConsole({
                 <button
                   className="btn"
                   onClick={() => {
-                    if (selectedStudentTab === "attendance") {
+                    if (selectedStudentTab === "information") {
+                      fetchStudents();
+                    } else if (selectedStudentTab === "attendance") {
                       fetchStudentAttendance(selectedStudentId);
                     } else {
                       fetchStudentAttempts(selectedStudentId);
@@ -4582,6 +4705,63 @@ export default function AdminConsole({
                   Refresh
                 </button>
               </div>
+
+              {selectedStudentTab === "information" ? (
+                <>
+                  <div className="student-info-panel" style={{ marginTop: 12 }}>
+                    <div className="student-info-panel-header">
+                      <div>
+                        <div className="admin-title">Personal Information</div>
+                        <div className="admin-subtitle">Shared student profile data visible from both student and admin portals.</div>
+                      </div>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => {
+                          setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+                          setStudentInfoMsg("");
+                          setStudentInfoOpen(true);
+                        }}
+                      >
+                        Edit Information
+                      </button>
+                    </div>
+                    <div className="student-info-grid admin-student-info-grid">
+                      {[
+                        { label: "Full Name", value: selectedStudent?.display_name || "-" },
+                        { label: "Email", value: selectedStudent?.email || "-" },
+                        { label: "Phone Number", value: selectedStudent?.phone_number || "-" },
+                        {
+                          label: "Date of Birth",
+                          value: selectedStudent?.date_of_birth
+                            ? `${formatDateFull(selectedStudent.date_of_birth)}${calculateAge(selectedStudent.date_of_birth) != null ? ` • Age ${calculateAge(selectedStudent.date_of_birth)}` : ""}`
+                            : "-"
+                        },
+                        { label: "Sex", value: selectedStudent?.sex || "-" },
+                        { label: "UID", value: selectedStudent?.student_code || "-" },
+                        { label: "Current Working Facility", value: selectedStudent?.current_working_facility || "-" },
+                        {
+                          label: "Years of Experience",
+                          value: formatYearsOfExperience(selectedStudent?.years_of_experience) || "-"
+                        },
+                        { label: "Nursing Certificate", value: selectedStudent?.nursing_certificate || "-" },
+                        { label: "Certificate Status", value: selectedStudent?.nursing_certificate_status || "-" },
+                        { label: "BNMC Registration Number", value: selectedStudent?.bnmc_registration_number || "-" },
+                        {
+                          label: "BNMC Registration Expiry Date",
+                          value: selectedStudent?.bnmc_registration_expiry_date
+                            ? formatDateFull(selectedStudent.bnmc_registration_expiry_date)
+                            : "-"
+                        }
+                      ].map((item) => (
+                        <div key={item.label} className="student-info-row">
+                          <div className="student-info-label">{item.label}</div>
+                          <div className="student-info-value">{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : null}
 
               {selectedStudentTab === "model" ? (
                 <>
@@ -6351,6 +6531,165 @@ export default function AdminConsole({
         ) : null}
 
         </>
+        ) : null}
+
+        {studentInfoOpen && selectedStudent ? (
+          <div
+            className="admin-modal-overlay"
+            onClick={() => {
+              if (studentInfoSaving) return;
+              setStudentInfoOpen(false);
+              setStudentInfoMsg("");
+              setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+            }}
+          >
+            <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">Edit Personal Information</div>
+                <button
+                  className="admin-modal-close"
+                  onClick={() => {
+                    if (studentInfoSaving) return;
+                    setStudentInfoOpen(false);
+                    setStudentInfoMsg("");
+                    setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+                  }}
+                  aria-label="Close"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="admin-form student-info-form" style={{ marginTop: 10 }}>
+                <div className="field">
+                  <label>Full Name</label>
+                  <input
+                    value={studentInfoForm.display_name}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, display_name: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>Email</label>
+                  <input
+                    type="email"
+                    value={studentInfoForm.email}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, email: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>Phone Number</label>
+                  <input
+                    value={studentInfoForm.phone_number}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, phone_number: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>UID</label>
+                  <input
+                    value={studentInfoForm.student_code}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, student_code: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>Date of Birth</label>
+                  <input
+                    type="date"
+                    value={studentInfoForm.date_of_birth}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, date_of_birth: e.target.value }))}
+                  />
+                  <div className="admin-help" style={{ marginTop: 4 }}>
+                    {calculateAge(studentInfoForm.date_of_birth) != null ? `Age ${calculateAge(studentInfoForm.date_of_birth)}` : "Age -"}
+                  </div>
+                </div>
+                <div className="field">
+                  <label>Sex</label>
+                  <select
+                    value={studentInfoForm.sex}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, sex: e.target.value }))}
+                  >
+                    <option value="">Select</option>
+                    {SEX_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Current Working Facility</label>
+                  <input
+                    value={studentInfoForm.current_working_facility}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, current_working_facility: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>Years of Experience</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={studentInfoForm.years_of_experience}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, years_of_experience: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>Nursing Certificate</label>
+                  <input
+                    value={studentInfoForm.nursing_certificate}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, nursing_certificate: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>Certificate Status</label>
+                  <select
+                    value={studentInfoForm.nursing_certificate_status}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, nursing_certificate_status: e.target.value }))}
+                  >
+                    <option value="">Select</option>
+                    {CERTIFICATE_STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>BNMC Registration Number</label>
+                  <input
+                    value={studentInfoForm.bnmc_registration_number}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, bnmc_registration_number: e.target.value }))}
+                  />
+                </div>
+                <div className="field">
+                  <label>BNMC Registration Expiry Date</label>
+                  <input
+                    type="date"
+                    value={studentInfoForm.bnmc_registration_expiry_date}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, bnmc_registration_expiry_date: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {studentInfoMsg ? <div className="admin-msg">{studentInfoMsg}</div> : null}
+
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    if (studentInfoSaving) return;
+                    setStudentInfoOpen(false);
+                    setStudentInfoMsg("");
+                    setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={saveStudentInformation}
+                  disabled={studentInfoSaving}
+                >
+                  {studentInfoSaving ? "Saving..." : "Save Information"}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
 
         {reissueOpen && reissueStudent ? (

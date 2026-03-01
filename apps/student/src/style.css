@@ -1693,9 +1693,11 @@ button.student-application-view {
   background: rgba(0, 0, 0, 0.45);
   z-index: 120;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 16px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .student-modal-overlay[hidden] {
@@ -1708,6 +1710,13 @@ button.student-application-view {
   width: min(520px, 100%);
   padding: 16px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+  margin: auto 0;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.student-info-modal {
+  width: min(760px, 100%);
 }
 
 .student-modal-header {
@@ -1736,6 +1745,73 @@ button.student-application-view {
   font-size: 16px;
   font-weight: 800;
   margin-bottom: 10px;
+}
+
+.student-info-card {
+  display: grid;
+  gap: 16px;
+}
+
+.student-info-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.student-info-subtitle {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.student-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.student-info-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.student-info-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.student-info-value {
+  margin-top: 6px;
+  font-size: 15px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.student-info-meta {
+  display: inline-block;
+  margin-left: 8px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.student-info-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.student-info-age {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .student-home-title-icon {
@@ -2210,6 +2286,11 @@ button.student-application-view {
 }
 
 @media (max-width: 520px) {
+  .student-info-grid,
+  .student-info-form-grid {
+    grid-template-columns: 1fr;
+  }
+
   .result {
     align-items: stretch;
   }

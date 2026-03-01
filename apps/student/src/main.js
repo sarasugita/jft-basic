@@ -7,6 +7,28 @@ inject();
 
 const STORAGE_KEY = "jft_mock_state_v3";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
+const PROFILE_SELECT_FIELDS = [
+  "id",
+  "role",
+  "email",
+  "display_name",
+  "student_code",
+  "phone_number",
+  "date_of_birth",
+  "sex",
+  "current_working_facility",
+  "years_of_experience",
+  "nursing_certificate",
+  "nursing_certificate_status",
+  "bnmc_registration_number",
+  "bnmc_registration_expiry_date",
+  "force_password_change"
+].join(", ");
+const CERTIFICATE_STATUS_OPTIONS = [
+  { value: "ongoing", label: "Ongoing" },
+  { value: "completed", label: "Completed" }
+];
+const SEX_OPTIONS = ["Male", "Female", "Other"];
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
 const TEST_VERSION = "test_exam";
@@ -140,7 +162,7 @@ function loadState() {
     }
     if (loaded.studentTab === "results") loaded.studentTab = "dailyResults";
     if (loaded.studentTab === "take") loaded.studentTab = "home";
-    if (!["home", "dailyResults", "modelResults", "attendance", "attendanceHistory"].includes(loaded.studentTab)) {
+    if (!["home", "personalInformation", "dailyResults", "modelResults", "attendance", "attendanceHistory"].includes(loaded.studentTab)) {
       loaded.studentTab = "home";
     }
     return loaded;
@@ -246,6 +268,51 @@ function resetAll() {
   checkLinkFromUrl().finally(render);
 }
 
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return null;
+  const match = String(dateOfBirth).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const monthDiff = today.getMonth() + 1 - month;
+  const dayDiff = today.getDate() - day;
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+function formatYearsOfExperience(value) {
+  if (value == null || value === "") return "";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  return Number.isInteger(num) ? `${num}` : `${num.toFixed(1)}`;
+}
+
+function getPersonalInfoPayload(values) {
+  const yearsRaw = String(values.years_of_experience ?? "").trim();
+  const years = yearsRaw === "" ? null : Number(yearsRaw);
+  return {
+    display_name: String(values.display_name ?? "").trim() || null,
+    email: String(values.email ?? "").trim() || null,
+    phone_number: String(values.phone_number ?? "").trim() || null,
+    date_of_birth: String(values.date_of_birth ?? "").trim() || null,
+    sex: String(values.sex ?? "").trim() || null,
+    student_code: String(values.student_code ?? "").trim() || null,
+    current_working_facility: String(values.current_working_facility ?? "").trim() || null,
+    years_of_experience: Number.isFinite(years) ? years : null,
+    nursing_certificate: String(values.nursing_certificate ?? "").trim() || null,
+    nursing_certificate_status: String(values.nursing_certificate_status ?? "").trim() || null,
+    bnmc_registration_number: String(values.bnmc_registration_number ?? "").trim() || null,
+    bnmc_registration_expiry_date: String(values.bnmc_registration_expiry_date ?? "").trim() || null
+  };
+}
+
+function formatPersonalInfoValue(value, emptyLabel = "Not provided") {
+  return value ? escapeHtml(String(value)) : `<span class="placeholder">${escapeHtml(emptyLabel)}</span>`;
+}
+
 function exitToHome() {
   if (authState.session && state.linkId) {
     state.linkId = null;
@@ -318,7 +385,13 @@ function renderAndSync(fn, app) {
 
 async function refreshAuthState() {
   const { data, error } = await supabase.auth.getSession();
-  if (error) console.error("getSession error:", error);
+  if (error) {
+    console.error("getSession error:", error);
+    const authMessage = String(error.message || "");
+    if (authMessage.includes("Invalid Refresh Token") || authMessage.includes("Refresh Token Not Found")) {
+      await supabase.auth.signOut({ scope: "local" });
+    }
+  }
   authState.session = data?.session ?? null;
   authState.profile = null;
 
@@ -341,7 +414,7 @@ async function refreshAuthState() {
 
   const { data: prof, error: profErr } = await supabase
     .from("profiles")
-    .select("id, role, display_name, student_code, force_password_change")
+    .select(PROFILE_SELECT_FIELDS)
     .eq("id", authState.session.user.id)
     .single();
   authState.mustChangePassword = Boolean(authState.recoveryMode);
@@ -589,6 +662,22 @@ function formatDateShort(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "2-digit", day: "2-digit" });
+}
+
+function formatDateFull(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
 }
 
 function formatWeekday(value) {
@@ -1952,6 +2041,7 @@ function renderTestSelect(app) {
   const showTabs = Boolean(authState.session);
   const activeTab = showTabs ? state.studentTab : "take";
   const showHome = showTabs && activeTab === "home";
+  const showPersonalInformation = showTabs && activeTab === "personalInformation";
   const showDailyResults = showTabs && activeTab === "dailyResults";
   const showModelResults = showTabs && activeTab === "modelResults";
   const showAttendance = showTabs && activeTab === "attendance";
@@ -2012,6 +2102,12 @@ function renderTestSelect(app) {
                 <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5M6 10.5V20h12v-9.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </span>
               Home
+            </button>
+            <button class="student-menu-item" data-student-tab="personalInformation">
+              <span class="student-menu-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm-7 8a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              Personal Information
             </button>
             <button class="student-menu-item" data-student-tab="dailyResults">
               <span class="student-menu-icon" aria-hidden="true">
@@ -2470,6 +2566,133 @@ function renderTestSelect(app) {
       })()
     : "";
 
+  const personalInformationHtml = showPersonalInformation
+    ? (() => {
+        const profile = authState.profile ?? {};
+        const dateOfBirth = profile.date_of_birth || "";
+        const age = calculateAge(dateOfBirth);
+        const yearsOfExperience = formatYearsOfExperience(profile.years_of_experience);
+        const personalInfoRows = [
+          { label: "Full Name", value: formatPersonalInfoValue(profile.display_name) },
+          { label: "Email", value: formatPersonalInfoValue(profile.email || authState.session?.user?.email || "") },
+          { label: "Phone Number", value: formatPersonalInfoValue(profile.phone_number) },
+          {
+            label: "Date of Birth",
+            value: dateOfBirth
+              ? `${escapeHtml(formatDateFull(dateOfBirth))}${age != null ? ` <span class="student-info-meta">Age ${age}</span>` : ""}`
+              : `<span class="placeholder">Not provided</span>`
+          },
+          { label: "Sex", value: formatPersonalInfoValue(profile.sex) },
+          { label: "UID", value: formatPersonalInfoValue(profile.student_code) },
+          { label: "Current Working Facility", value: formatPersonalInfoValue(profile.current_working_facility) },
+          { label: "Years of Experience", value: formatPersonalInfoValue(yearsOfExperience, "Not provided") },
+          { label: "Nursing Certificate", value: formatPersonalInfoValue(profile.nursing_certificate) },
+          { label: "Certificate Status", value: formatPersonalInfoValue(profile.nursing_certificate_status) },
+          { label: "BNMC Registration Number", value: formatPersonalInfoValue(profile.bnmc_registration_number) },
+          {
+            label: "BNMC Registration Expiry Date",
+            value: profile.bnmc_registration_expiry_date
+              ? escapeHtml(formatDateFull(profile.bnmc_registration_expiry_date))
+              : `<span class="placeholder">Not provided</span>`
+          }
+        ];
+        return `
+          <section class="home-card student-info-card">
+            <div class="student-info-header">
+              <div>
+                <div class="student-home-title" style="margin-bottom:4px;">Personal Information</div>
+                <div class="student-info-subtitle">Review your profile details and update them when needed.</div>
+              </div>
+              <button class="btn btn-primary" type="button" id="openPersonalInfoModal">Edit Information</button>
+            </div>
+            <div class="student-info-grid">
+              ${personalInfoRows
+                .map(
+                  (row) => `
+                    <div class="student-info-row">
+                      <div class="student-info-label">${escapeHtml(row.label)}</div>
+                      <div class="student-info-value">${row.value}</div>
+                    </div>
+                  `
+                )
+                .join("")}
+            </div>
+          </section>
+          <div class="student-modal-overlay" id="personalInfoModal" hidden>
+            <div class="student-modal student-info-modal" role="dialog" aria-modal="true" aria-labelledby="personalInfoTitle">
+              <div class="student-modal-header">
+                <div class="student-modal-title" id="personalInfoTitle">Edit Personal Information</div>
+                <button class="btn" type="button" id="personalInfoClose">Close</button>
+              </div>
+              <div class="student-modal-body">
+                <div class="student-info-form-grid">
+                  <div>
+                    <label class="form-label">Full Name</label>
+                    <input class="form-input" id="personalFullName" value="${escapeHtml(profile.display_name || "")}" />
+                  </div>
+                  <div>
+                    <label class="form-label">Email</label>
+                    <input class="form-input" id="personalEmail" type="email" value="${escapeHtml(profile.email || authState.session?.user?.email || "")}" />
+                  </div>
+                  <div>
+                    <label class="form-label">Phone Number</label>
+                    <input class="form-input" id="personalPhone" value="${escapeHtml(profile.phone_number || "")}" />
+                  </div>
+                  <div>
+                    <label class="form-label">UID</label>
+                    <input class="form-input" id="personalUid" value="${escapeHtml(profile.student_code || "")}" />
+                  </div>
+                  <div>
+                    <label class="form-label">Date of Birth</label>
+                    <input class="form-input" id="personalDob" type="date" value="${escapeHtml(dateOfBirth)}" />
+                    <div class="student-info-age" id="personalAgeValue">${age != null ? `Age ${age}` : "Age -"}</div>
+                  </div>
+                  <div>
+                    <label class="form-label">Sex</label>
+                    <select class="form-input" id="personalSex">
+                      <option value="">Select</option>
+                      ${SEX_OPTIONS.map((option) => `<option value="${escapeHtml(option)}" ${profile.sex === option ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label">Current Working Facility</label>
+                    <input class="form-input" id="personalFacility" value="${escapeHtml(profile.current_working_facility || "")}" />
+                  </div>
+                  <div>
+                    <label class="form-label">Years of Experience</label>
+                    <input class="form-input" id="personalYearsExperience" type="number" min="0" step="0.1" value="${escapeHtml(yearsOfExperience)}" />
+                  </div>
+                  <div>
+                    <label class="form-label">Nursing Certificate</label>
+                    <input class="form-input" id="personalNursingCertificate" value="${escapeHtml(profile.nursing_certificate || "")}" />
+                  </div>
+                  <div>
+                    <label class="form-label">Certificate Status</label>
+                    <select class="form-input" id="personalCertificateStatus">
+                      <option value="">Select</option>
+                      ${CERTIFICATE_STATUS_OPTIONS.map((option) => `<option value="${option.value}" ${profile.nursing_certificate_status === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label">BNMC Registration Number</label>
+                    <input class="form-input" id="personalBnmcNumber" value="${escapeHtml(profile.bnmc_registration_number || "")}" />
+                  </div>
+                  <div>
+                    <label class="form-label">BNMC Registration Expiry Date</label>
+                    <input class="form-input" id="personalBnmcExpiry" type="date" value="${escapeHtml(profile.bnmc_registration_expiry_date || "")}" />
+                  </div>
+                </div>
+                <div class="admin-msg" id="personalInfoMsg" style="margin-top:10px;"></div>
+              </div>
+              <div class="student-modal-actions">
+                <button class="btn btn-primary" id="personalInfoSave" type="button">Save Information</button>
+              </div>
+            </div>
+          </div>
+        `;
+      })()
+    : "";
+
   const attendanceHtml = showAttendance
     ? (() => {
         if (!authState.session) {
@@ -2797,7 +3020,7 @@ function renderTestSelect(app) {
 
   const resultDetailHtml = "";
 
-  const plainContent = showHome || showAttendance || showAttendanceHistory;
+  const plainContent = showHome || showPersonalInformation || showAttendance || showAttendanceHistory;
 
   app.innerHTML = `
     <div class="app ${showTabs ? "has-student-topbar" : ""}">
@@ -2894,7 +3117,7 @@ function renderTestSelect(app) {
               `
               : `
                 <div class="intro-form" style="margin-top:16px; max-width:900px;">
-                  ${showDailyResults ? dailyResultsHtml : showModelResults ? modelResultsHtml : showAttendanceHistory ? attendanceHistoryHtml : attendanceHtml}
+                  ${showPersonalInformation ? personalInformationHtml : showDailyResults ? dailyResultsHtml : showModelResults ? modelResultsHtml : showAttendanceHistory ? attendanceHistoryHtml : attendanceHtml}
                 </div>
               `
         }
@@ -2961,6 +3184,74 @@ function renderTestSelect(app) {
     setTimeout(() => {
       if (state.studentTab === "home") render();
     }, 30000);
+  }
+
+  if (showPersonalInformation) {
+    const personalModal = app.querySelector("#personalInfoModal");
+    const personalMsg = app.querySelector("#personalInfoMsg");
+    const dobInput = app.querySelector("#personalDob");
+    const ageValue = app.querySelector("#personalAgeValue");
+    const syncAge = () => {
+      if (!ageValue || !(dobInput instanceof HTMLInputElement)) return;
+      const age = calculateAge(dobInput.value);
+      ageValue.textContent = age != null ? `Age ${age}` : "Age -";
+    };
+
+    app.querySelector("#openPersonalInfoModal")?.addEventListener("click", () => {
+      if (personalModal) personalModal.hidden = false;
+      syncAge();
+    });
+    app.querySelector("#personalInfoClose")?.addEventListener("click", () => {
+      if (personalModal) personalModal.hidden = true;
+    });
+    dobInput?.addEventListener("input", syncAge);
+    personalModal?.addEventListener("click", (event) => {
+      if (event.target === personalModal) personalModal.hidden = true;
+    });
+    app.querySelector("#personalInfoSave")?.addEventListener("click", async () => {
+      if (!authState.session?.user?.id) return;
+      if (personalMsg) personalMsg.textContent = "";
+      const saveBtn = app.querySelector("#personalInfoSave");
+      if (saveBtn instanceof HTMLButtonElement) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving...";
+      }
+      const payload = getPersonalInfoPayload({
+        display_name: app.querySelector("#personalFullName")?.value,
+        email: app.querySelector("#personalEmail")?.value,
+        phone_number: app.querySelector("#personalPhone")?.value,
+        date_of_birth: app.querySelector("#personalDob")?.value,
+        sex: app.querySelector("#personalSex")?.value,
+        student_code: app.querySelector("#personalUid")?.value,
+        current_working_facility: app.querySelector("#personalFacility")?.value,
+        years_of_experience: app.querySelector("#personalYearsExperience")?.value,
+        nursing_certificate: app.querySelector("#personalNursingCertificate")?.value,
+        nursing_certificate_status: app.querySelector("#personalCertificateStatus")?.value,
+        bnmc_registration_number: app.querySelector("#personalBnmcNumber")?.value,
+        bnmc_registration_expiry_date: app.querySelector("#personalBnmcExpiry")?.value
+      });
+      const { data, error } = await supabase
+        .from("profiles")
+        .update(payload)
+        .eq("id", authState.session.user.id)
+        .select(PROFILE_SELECT_FIELDS)
+        .single();
+      if (error) {
+        if (personalMsg) personalMsg.textContent = `Save failed: ${error.message}`;
+        if (saveBtn instanceof HTMLButtonElement) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Save Information";
+        }
+        return;
+      }
+      authState.profile = data ?? { ...(authState.profile || {}), ...payload };
+      state.user = {
+        name: (authState.profile?.display_name ?? "").trim(),
+        id: (authState.profile?.student_code ?? "").trim()
+      };
+      saveState();
+      render();
+    });
   }
 
   if (showAttendance) {

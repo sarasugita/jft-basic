@@ -4,7 +4,16 @@
 alter table public.profiles
   add column if not exists email text,
   add column if not exists force_password_change boolean not null default false,
-  add column if not exists is_withdrawn boolean not null default false;
+  add column if not exists is_withdrawn boolean not null default false,
+  add column if not exists phone_number text,
+  add column if not exists date_of_birth date,
+  add column if not exists sex text,
+  add column if not exists current_working_facility text,
+  add column if not exists years_of_experience numeric,
+  add column if not exists nursing_certificate text,
+  add column if not exists nursing_certificate_status text,
+  add column if not exists bnmc_registration_number text,
+  add column if not exists bnmc_registration_expiry_date date;
 
 -- tests master
 create table if not exists public.tests (
