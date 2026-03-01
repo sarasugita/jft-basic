@@ -660,6 +660,11 @@ body { overflow-x: hidden; }
   .student-results-filter select {
     flex: 1;
   }
+
+  .student-results-check {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 @media (max-width: 520px) {
@@ -988,6 +993,7 @@ body { overflow-x: hidden; }
   align-items: center;
   gap: 8px;
   font-size: 14px;
+  flex-wrap: wrap;
 }
 
 .student-results-filter select {
@@ -995,6 +1001,18 @@ body { overflow-x: hidden; }
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #fff;
+}
+
+.student-results-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.student-results-check input {
+  margin: 0;
 }
 
 .student-results-table .student-results-row {

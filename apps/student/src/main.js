@@ -135,6 +135,7 @@ const defaultState = {
   selectedTestSessionId: "",
   studentTab: "home",
   dailyResultsCategory: "",
+  dailyResultsFailedOnly: false,
   attendanceMonthKey: "",
   focusWarnings: 0,
   focusWarningAt: 0,
@@ -2205,9 +2206,12 @@ function renderTestSelect(app) {
           )
         ).filter(Boolean);
         const categoryFilter = state.dailyResultsCategory || "";
-        const filteredAttempts = categoryFilter
-          ? dailyAttempts.filter((a) => getAttemptCategory(a) === categoryFilter)
-          : dailyAttempts;
+        const failedOnly = Boolean(state.dailyResultsFailedOnly);
+        const filteredAttempts = dailyAttempts.filter((attempt) => {
+          if (categoryFilter && getAttemptCategory(attempt) !== categoryFilter) return false;
+          if (failedOnly && getScoreRateFromAttempt(attempt) >= getPassRateForVersion(attempt.test_version)) return false;
+          return true;
+        });
 
         if (resultDetailState.open && resultDetailState.mode === "daily" && resultDetailState.attempt) {
           const attempt = resultDetailState.attempt;
@@ -2249,6 +2253,10 @@ function renderTestSelect(app) {
                   )
                   .join("")}
               </select>
+              <label class="student-results-check">
+                <input id="dailyFailedOnlyToggle" type="checkbox" ${failedOnly ? "checked" : ""} />
+                Failed only
+              </label>
             </div>
           </div>
           <div class="detail-table-wrap">
@@ -3434,6 +3442,12 @@ function renderTestSelect(app) {
     app.querySelector("#dailyCategorySelect")?.addEventListener("change", (event) => {
       if (!(event.target instanceof HTMLSelectElement)) return;
       state.dailyResultsCategory = event.target.value;
+      saveState();
+      render();
+    });
+    app.querySelector("#dailyFailedOnlyToggle")?.addEventListener("change", (event) => {
+      if (!(event.target instanceof HTMLInputElement)) return;
+      state.dailyResultsFailedOnly = event.target.checked;
       saveState();
       render();
     });
