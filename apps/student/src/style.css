@@ -1796,6 +1796,10 @@ button.student-application-view {
   background: #fafafa;
 }
 
+.student-info-row-wide {
+  grid-column: 1 / -1;
+}
+
 .student-info-label {
   font-size: 12px;
   font-weight: 700;
@@ -1830,6 +1834,40 @@ button.student-application-view {
   font-size: 13px;
   color: var(--muted);
   font-weight: 700;
+}
+
+.student-info-upload-help {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.student-info-image-block {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.student-info-image-link {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f766e;
+  text-decoration: none;
+}
+
+.student-info-image-link:hover {
+  text-decoration: underline;
+}
+
+.student-info-image-preview {
+  display: block;
+  width: min(100%, 320px);
+  height: auto;
+  max-height: none;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
 }
 
 .student-ranking-list {

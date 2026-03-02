@@ -23,6 +23,8 @@ const PROFILE_SELECT_FIELDS = [
   "nursing_certificate_status",
   "bnmc_registration_number",
   "bnmc_registration_expiry_date",
+  "passport_number",
+  "profile_uploads",
   "force_password_change"
 ].join(", ");
 const CERTIFICATE_STATUS_OPTIONS = [
@@ -30,6 +32,10 @@ const CERTIFICATE_STATUS_OPTIONS = [
   { value: "completed", label: "Completed" }
 ];
 const SEX_OPTIONS = ["Male", "Female", "Other"];
+const PROFILE_UPLOAD_BUCKET = "test-assets";
+const PERSONAL_UPLOAD_FIELDS = [
+  { key: "passport_bio_page", label: "Bio Page Image", accept: "image/*" }
+];
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
 const TEST_VERSION = "test_exam";
@@ -316,12 +322,71 @@ function getPersonalInfoPayload(values) {
     nursing_certificate: String(values.nursing_certificate ?? "").trim() || null,
     nursing_certificate_status: String(values.nursing_certificate_status ?? "").trim() || null,
     bnmc_registration_number: String(values.bnmc_registration_number ?? "").trim() || null,
-    bnmc_registration_expiry_date: String(values.bnmc_registration_expiry_date ?? "").trim() || null
+    bnmc_registration_expiry_date: String(values.bnmc_registration_expiry_date ?? "").trim() || null,
+    passport_number: String(values.passport_number ?? "").trim() || null,
+    profile_uploads: getProfileUploads(values.profile_uploads)
   };
 }
 
 function formatPersonalInfoValue(value, emptyLabel = "Not provided") {
   return value ? escapeHtml(String(value)) : `<span class="placeholder">${escapeHtml(emptyLabel)}</span>`;
+}
+
+function getProfileUploads(value) {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value;
+}
+
+function getFileExtension(filename) {
+  const ext = String(filename ?? "").trim().split(".").pop() ?? "";
+  return ext.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+async function uploadProfileDocument(file, userId, uploadKey) {
+  if (!file || !userId || !uploadKey) return { asset: null, error: null };
+  const ext = getFileExtension(file.name) || "jpg";
+  const filePath = `profile-documents/${userId}/${uploadKey}-${Date.now()}.${ext}`;
+  const { error: uploadError } = await supabase.storage
+    .from(PROFILE_UPLOAD_BUCKET)
+    .upload(filePath, file, { upsert: true, contentType: file.type || undefined });
+  if (uploadError) return { asset: null, error: uploadError };
+  const { data } = supabase.storage.from(PROFILE_UPLOAD_BUCKET).getPublicUrl(filePath);
+  return {
+    asset: {
+      url: data?.publicUrl ?? "",
+      name: file.name,
+      mime_type: file.type || null,
+      uploaded_at: new Date().toISOString()
+    },
+    error: null
+  };
+}
+
+function isImageUpload(asset) {
+  const mime = String(asset?.mime_type ?? "").toLowerCase();
+  const url = String(asset?.url ?? "").toLowerCase();
+  return mime.startsWith("image/") || [".png", ".jpg", ".jpeg", ".gif", ".webp"].some((ext) => url.endsWith(ext));
+}
+
+function renderPersonalInfoUpload(asset) {
+  const url = String(asset?.url ?? "").trim();
+  if (!url) return `<span class="placeholder">Not uploaded</span>`;
+  const safeUrl = escapeHtml(url);
+  const safeName = escapeHtml(String(asset?.name ?? "View file"));
+  return `
+    <div class="student-info-image-block">
+      <a class="student-info-image-link" href="${safeUrl}" target="_blank" rel="noreferrer">${safeName}</a>
+      ${isImageUpload(asset) ? `<img class="student-info-image-preview" src="${safeUrl}" alt="${safeName}" />` : ""}
+    </div>
+  `;
 }
 
 function exitToHome() {
@@ -2723,6 +2788,7 @@ function renderTestSelect(app) {
   const personalInformationHtml = showPersonalInformation
     ? (() => {
         const profile = authState.profile ?? {};
+        const profileUploads = getProfileUploads(profile.profile_uploads);
         const dateOfBirth = profile.date_of_birth || "";
         const age = calculateAge(dateOfBirth);
         const yearsOfExperience = formatYearsOfExperience(profile.years_of_experience);
@@ -2748,7 +2814,13 @@ function renderTestSelect(app) {
             value: profile.bnmc_registration_expiry_date
               ? escapeHtml(formatDateFull(profile.bnmc_registration_expiry_date))
               : `<span class="placeholder">Not provided</span>`
-          }
+          },
+          { label: "Passport Number", value: formatPersonalInfoValue(profile.passport_number) },
+          ...PERSONAL_UPLOAD_FIELDS.map((field) => ({
+            label: field.label,
+            value: renderPersonalInfoUpload(profileUploads[field.key]),
+            wide: true
+          }))
         ];
         return `
           <section class="home-card student-info-card">
@@ -2763,7 +2835,7 @@ function renderTestSelect(app) {
               ${personalInfoRows
                 .map(
                   (row) => `
-                    <div class="student-info-row">
+                    <div class="student-info-row ${row.wide ? "student-info-row-wide" : ""}">
                       <div class="student-info-label">${escapeHtml(row.label)}</div>
                       <div class="student-info-value">${row.value}</div>
                     </div>
@@ -2835,6 +2907,32 @@ function renderTestSelect(app) {
                     <label class="form-label">BNMC Registration Expiry Date</label>
                     <input class="form-input" id="personalBnmcExpiry" type="date" value="${escapeHtml(profile.bnmc_registration_expiry_date || "")}" />
                   </div>
+                  <div>
+                    <label class="form-label">Passport Number</label>
+                    <input class="form-input" id="personalPassportNumber" value="${escapeHtml(profile.passport_number || "")}" />
+                  </div>
+                  ${PERSONAL_UPLOAD_FIELDS.map((field) => {
+                    const currentUpload = profileUploads[field.key];
+                    return `
+                      <div>
+                        <label class="form-label">${escapeHtml(field.label)}</label>
+                        <input
+                          class="form-input"
+                          data-profile-upload-key="${escapeHtml(field.key)}"
+                          type="file"
+                          accept="${escapeHtml(field.accept)}"
+                        />
+                        ${
+                          currentUpload?.url
+                            ? `
+                              <div class="student-info-upload-help">Current file</div>
+                              ${renderPersonalInfoUpload(currentUpload)}
+                            `
+                            : `<div class="student-info-upload-help">Upload ${escapeHtml(field.label.toLowerCase())}.</div>`
+                        }
+                      </div>
+                    `;
+                  }).join("")}
                 </div>
                 <div class="admin-msg" id="personalInfoMsg" style="margin-top:10px;"></div>
               </div>
@@ -3370,6 +3468,22 @@ function renderTestSelect(app) {
         saveBtn.disabled = true;
         saveBtn.textContent = "Saving...";
       }
+      const nextUploads = { ...getProfileUploads(authState.profile?.profile_uploads) };
+      for (const field of PERSONAL_UPLOAD_FIELDS) {
+        const input = app.querySelector(`[data-profile-upload-key="${field.key}"]`);
+        const file = input instanceof HTMLInputElement ? input.files?.[0] ?? null : null;
+        if (!file) continue;
+        const { asset, error: uploadError } = await uploadProfileDocument(file, authState.session.user.id, field.key);
+        if (uploadError) {
+          if (personalMsg) personalMsg.textContent = `Upload failed: ${uploadError.message}`;
+          if (saveBtn instanceof HTMLButtonElement) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Save Information";
+          }
+          return;
+        }
+        if (asset?.url) nextUploads[field.key] = asset;
+      }
       const payload = getPersonalInfoPayload({
         display_name: app.querySelector("#personalFullName")?.value,
         email: app.querySelector("#personalEmail")?.value,
@@ -3382,7 +3496,9 @@ function renderTestSelect(app) {
         nursing_certificate: app.querySelector("#personalNursingCertificate")?.value,
         nursing_certificate_status: app.querySelector("#personalCertificateStatus")?.value,
         bnmc_registration_number: app.querySelector("#personalBnmcNumber")?.value,
-        bnmc_registration_expiry_date: app.querySelector("#personalBnmcExpiry")?.value
+        bnmc_registration_expiry_date: app.querySelector("#personalBnmcExpiry")?.value,
+        passport_number: app.querySelector("#personalPassportNumber")?.value,
+        profile_uploads: nextUploads
       });
       const { data, error } = await supabase
         .from("profiles")

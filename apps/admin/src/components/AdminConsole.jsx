@@ -24,6 +24,8 @@ const PROFILE_SELECT_FIELDS = [
   "nursing_certificate_status",
   "bnmc_registration_number",
   "bnmc_registration_expiry_date",
+  "passport_number",
+  "profile_uploads",
   "created_at",
   "is_withdrawn"
 ].join(", ");
@@ -32,6 +34,10 @@ const CERTIFICATE_STATUS_OPTIONS = [
   { value: "completed", label: "Completed" }
 ];
 const SEX_OPTIONS = ["Male", "Female", "Other"];
+const PROFILE_UPLOAD_BUCKET = "test-assets";
+const PERSONAL_UPLOAD_FIELDS = [
+  { key: "passport_bio_page", label: "Bio Page Image", accept: "image/*" }
+];
 const DAILY_RECORD_COMMENT_FIELDS =
   "id, student_id, comment, profiles:student_id(display_name, student_code)";
 
@@ -69,6 +75,19 @@ function formatYearsOfExperience(value) {
   return Number.isInteger(num) ? `${num}` : `${num.toFixed(1)}`;
 }
 
+function getProfileUploads(value) {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value;
+}
+
 function buildPersonalInfoPayload(values) {
   const yearsRaw = String(values.years_of_experience ?? "").trim();
   const years = yearsRaw === "" ? null : Number(yearsRaw);
@@ -84,7 +103,9 @@ function buildPersonalInfoPayload(values) {
     nursing_certificate: String(values.nursing_certificate ?? "").trim() || null,
     nursing_certificate_status: String(values.nursing_certificate_status ?? "").trim() || null,
     bnmc_registration_number: String(values.bnmc_registration_number ?? "").trim() || null,
-    bnmc_registration_expiry_date: String(values.bnmc_registration_expiry_date ?? "").trim() || null
+    bnmc_registration_expiry_date: String(values.bnmc_registration_expiry_date ?? "").trim() || null,
+    passport_number: String(values.passport_number ?? "").trim() || null,
+    profile_uploads: getProfileUploads(values.profile_uploads)
   };
 }
 
@@ -101,8 +122,55 @@ function getPersonalInfoForm(student) {
     nursing_certificate: student?.nursing_certificate ?? "",
     nursing_certificate_status: student?.nursing_certificate_status ?? "",
     bnmc_registration_number: student?.bnmc_registration_number ?? "",
-    bnmc_registration_expiry_date: student?.bnmc_registration_expiry_date ?? ""
+    bnmc_registration_expiry_date: student?.bnmc_registration_expiry_date ?? "",
+    passport_number: student?.passport_number ?? "",
+    profile_uploads: getProfileUploads(student?.profile_uploads)
   };
+}
+
+function getFileExtension(filename) {
+  const ext = String(filename ?? "").trim().split(".").pop() ?? "";
+  return ext.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+async function uploadProfileDocument(supabase, file, userId, uploadKey) {
+  if (!supabase || !file || !userId || !uploadKey) return { asset: null, error: null };
+  const ext = getFileExtension(file.name) || "jpg";
+  const filePath = `profile-documents/${userId}/${uploadKey}-${Date.now()}.${ext}`;
+  const { error: uploadError } = await supabase.storage
+    .from(PROFILE_UPLOAD_BUCKET)
+    .upload(filePath, file, { upsert: true, contentType: file.type || undefined });
+  if (uploadError) return { asset: null, error: uploadError };
+  const { data } = supabase.storage.from(PROFILE_UPLOAD_BUCKET).getPublicUrl(filePath);
+  return {
+    asset: {
+      url: data?.publicUrl ?? "",
+      name: file.name,
+      mime_type: file.type || null,
+      uploaded_at: new Date().toISOString()
+    },
+    error: null
+  };
+}
+
+function isImageUpload(asset) {
+  const mime = String(asset?.mime_type ?? "").toLowerCase();
+  const url = String(asset?.url ?? "").toLowerCase();
+  return mime.startsWith("image/") || [".png", ".jpg", ".jpeg", ".gif", ".webp"].some((ext) => url.endsWith(ext));
+}
+
+function renderProfileUpload(asset, label) {
+  const url = String(asset?.url ?? "").trim();
+  if (!url) return "-";
+  const name = String(asset?.name ?? label ?? "View file").trim() || "View file";
+  return (
+    <div className="student-info-image-block">
+      <a className="student-info-image-link" href={url} target="_blank" rel="noreferrer">
+        {name}
+      </a>
+      {isImageUpload(asset) ? <img className="student-info-image-preview" src={url} alt={name} /> : null}
+    </div>
+  );
 }
 
 function getTodayDateInput() {
@@ -1014,6 +1082,7 @@ export default function AdminConsole({
   const [studentInfoSaving, setStudentInfoSaving] = useState(false);
   const [studentInfoMsg, setStudentInfoMsg] = useState("");
   const [studentInfoForm, setStudentInfoForm] = useState(() => getPersonalInfoForm(null));
+  const [studentInfoUploadFiles, setStudentInfoUploadFiles] = useState({});
   const [dailyRecords, setDailyRecords] = useState([]);
   const [dailyRecordsMsg, setDailyRecordsMsg] = useState("");
   const [dailyRecordDate, setDailyRecordDate] = useState(() => getTodayDateInput());
@@ -1199,6 +1268,7 @@ export default function AdminConsole({
   useEffect(() => {
     if (!studentInfoOpen) {
       setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+      setStudentInfoUploadFiles({});
       setStudentInfoMsg("");
     }
   }, [selectedStudent, studentInfoOpen]);
@@ -2357,7 +2427,20 @@ export default function AdminConsole({
     if (!selectedStudentId) return;
     setStudentInfoMsg("");
     setStudentInfoSaving(true);
-    const payload = buildPersonalInfoPayload(studentInfoForm);
+    const nextUploads = { ...getProfileUploads(studentInfoForm.profile_uploads) };
+    for (const field of PERSONAL_UPLOAD_FIELDS) {
+      const file = studentInfoUploadFiles[field.key];
+      if (!file) continue;
+      const { asset, error: uploadError } = await uploadProfileDocument(supabase, file, selectedStudentId, field.key);
+      if (uploadError) {
+        console.error("profile upload error:", uploadError);
+        setStudentInfoMsg(`Upload failed: ${uploadError.message}`);
+        setStudentInfoSaving(false);
+        return;
+      }
+      if (asset?.url) nextUploads[field.key] = asset;
+    }
+    const payload = buildPersonalInfoPayload({ ...studentInfoForm, profile_uploads: nextUploads });
     const { data, error } = await supabase
       .from("profiles")
       .update(payload)
@@ -2372,6 +2455,7 @@ export default function AdminConsole({
     }
     setStudents((prev) => prev.map((student) => (student.id === selectedStudentId ? { ...student, ...(data ?? payload) } : student)));
     setStudentInfoForm(getPersonalInfoForm(data ?? payload));
+    setStudentInfoUploadFiles({});
     setStudentInfoSaving(false);
     setStudentInfoOpen(false);
   }
@@ -5326,6 +5410,7 @@ export default function AdminConsole({
                         className="btn btn-primary"
                         onClick={() => {
                           setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+                          setStudentInfoUploadFiles({});
                           setStudentInfoMsg("");
                           setStudentInfoOpen(true);
                         }}
@@ -5359,9 +5444,15 @@ export default function AdminConsole({
                           value: selectedStudent?.bnmc_registration_expiry_date
                             ? formatDateFull(selectedStudent.bnmc_registration_expiry_date)
                             : "-"
-                        }
+                        },
+                        { label: "Passport Number", value: selectedStudent?.passport_number || "-" },
+                        ...PERSONAL_UPLOAD_FIELDS.map((field) => ({
+                          label: field.label,
+                          value: renderProfileUpload(getProfileUploads(selectedStudent?.profile_uploads)[field.key], field.label),
+                          wide: true
+                        }))
                       ].map((item) => (
-                        <div key={item.label} className="student-info-row">
+                        <div key={item.label} className={`student-info-row ${item.wide ? "student-info-row-wide" : ""}`}>
                           <div className="student-info-label">{item.label}</div>
                           <div className="student-info-value">{item.value}</div>
                         </div>
@@ -7445,6 +7536,7 @@ export default function AdminConsole({
               setStudentInfoOpen(false);
               setStudentInfoMsg("");
               setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+              setStudentInfoUploadFiles({});
             }}
           >
             <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
@@ -7457,6 +7549,7 @@ export default function AdminConsole({
                     setStudentInfoOpen(false);
                     setStudentInfoMsg("");
                     setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+                    setStudentInfoUploadFiles({});
                   }}
                   aria-label="Close"
                 >
@@ -7568,6 +7661,37 @@ export default function AdminConsole({
                     onChange={(e) => setStudentInfoForm((s) => ({ ...s, bnmc_registration_expiry_date: e.target.value }))}
                   />
                 </div>
+                <div className="field">
+                  <label>Passport Number</label>
+                  <input
+                    value={studentInfoForm.passport_number}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, passport_number: e.target.value }))}
+                  />
+                </div>
+                {PERSONAL_UPLOAD_FIELDS.map((field) => {
+                  const currentUpload = getProfileUploads(studentInfoForm.profile_uploads)[field.key];
+                  return (
+                    <div key={field.key} className="field">
+                      <label>{field.label}</label>
+                      <input
+                        type="file"
+                        accept={field.accept}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] ?? null;
+                          setStudentInfoUploadFiles((prev) => ({ ...prev, [field.key]: file }));
+                        }}
+                      />
+                      <div className="admin-help" style={{ marginTop: 6 }}>
+                        {studentInfoUploadFiles[field.key]
+                          ? `Selected: ${studentInfoUploadFiles[field.key].name}`
+                          : currentUpload?.url
+                            ? "Current file"
+                            : `Upload ${field.label.toLowerCase()}.`}
+                      </div>
+                      {currentUpload?.url ? renderProfileUpload(currentUpload, field.label) : null}
+                    </div>
+                  );
+                })}
               </div>
 
               {studentInfoMsg ? <div className="admin-msg">{studentInfoMsg}</div> : null}
@@ -7580,6 +7704,7 @@ export default function AdminConsole({
                     setStudentInfoOpen(false);
                     setStudentInfoMsg("");
                     setStudentInfoForm(getPersonalInfoForm(selectedStudent));
+                    setStudentInfoUploadFiles({});
                   }}
                 >
                   Cancel

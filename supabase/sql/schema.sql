@@ -13,7 +13,9 @@ alter table public.profiles
   add column if not exists nursing_certificate text,
   add column if not exists nursing_certificate_status text,
   add column if not exists bnmc_registration_number text,
-  add column if not exists bnmc_registration_expiry_date date;
+  add column if not exists bnmc_registration_expiry_date date,
+  add column if not exists passport_number text,
+  add column if not exists profile_uploads jsonb not null default '{}'::jsonb;
 
 -- tests master
 create table if not exists public.tests (
