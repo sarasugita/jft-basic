@@ -201,6 +201,11 @@ function isMissingTabLeftCountError(error) {
   return /tab_left_count/i.test(text) && /does not exist/i.test(text);
 }
 
+function isMissingRetakeSessionFieldsError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /(retake_source_session_id|retake_release_scope)/i.test(text) && /does not exist/i.test(text);
+}
+
 function hasLinkParam() {
   try {
     const url = new URL(window.location.href);
@@ -597,12 +602,20 @@ async function fetchPublicTests() {
 
 async function fetchTestSessions() {
   testSessionsState.error = "";
-  const { data, error } = await publicSupabase
+  let { data, error } = await publicSupabase
     .from("test_sessions")
-    .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
+    .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
     .eq("is_published", true)
     .order("created_at", { ascending: false })
     .limit(200);
+  if (error && isMissingRetakeSessionFieldsError(error)) {
+    ({ data, error } = await publicSupabase
+      .from("test_sessions")
+      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
+      .eq("is_published", true)
+      .order("created_at", { ascending: false })
+      .limit(200));
+  }
   if (error) {
     testSessionsState.list = [];
     const msg = error.message || "Failed to load test sessions.";
@@ -614,7 +627,11 @@ async function fetchTestSessions() {
     testSessionsState.loaded = true;
     return;
   }
-  const list = data ?? [];
+  const list = (data ?? []).map((session) => ({
+    retake_source_session_id: null,
+    retake_release_scope: "all",
+    ...session,
+  }));
   testSessionsState.list = list;
   testSessionsState.loaded = true;
   if (!state.linkId && !state.selectedTestSessionId && list.length) {
@@ -657,6 +674,44 @@ function getSessionTestType(session) {
   if (!session?.problem_set_id) return "";
   const test = testsState.list.find((t) => t.version === session.problem_set_id);
   return test?.type || "";
+}
+
+function isRetakeSession(session) {
+  return Boolean(session?.retake_source_session_id);
+}
+
+function getSourceSessionForRetake(session) {
+  if (!session?.retake_source_session_id) return null;
+  return testSessionsState.list.find((item) => item.id === session.retake_source_session_id) || null;
+}
+
+function getBestAttemptForSession(sessionId) {
+  if (!sessionId) return null;
+  let bestAttempt = null;
+  let bestRate = -1;
+  (studentResultsState.list ?? []).forEach((attempt) => {
+    if (attempt?.test_session_id !== sessionId) return;
+    const rate = getScoreRateFromAttempt(attempt);
+    if (!bestAttempt || rate > bestRate) {
+      bestAttempt = attempt;
+      bestRate = rate;
+    }
+  });
+  return bestAttempt;
+}
+
+function canAccessSession(session) {
+  if (!session) return false;
+  if (!isRetakeSession(session)) return true;
+  const releaseScope = String(session.retake_release_scope || "all");
+  if (releaseScope === "all") return true;
+  if (!authState.session || !studentResultsState.loaded) return false;
+  const sourceSession = getSourceSessionForRetake(session);
+  if (!sourceSession?.id) return false;
+  const sourceAttempt = getBestAttemptForSession(sourceSession.id);
+  if (!sourceAttempt) return false;
+  const passRate = getPassRateForVersion(sourceSession.problem_set_id || session.problem_set_id);
+  return getScoreRateFromAttempt(sourceAttempt) < passRate;
 }
 
 function allowMultipleAttempts(session) {
@@ -2060,6 +2115,12 @@ function renderIntro(app) {
   const activeTitle = getActiveTestTitle();
   const isGuest = !authState.session;
   const isDaily = getActiveTestType() === "daily";
+  const visibleSessions = testSessionsState.list.filter((session) => canAccessSession(session));
+  const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
+  const activeSession = activeSessionId
+    ? testSessionsState.list.find((session) => session.id === activeSessionId)
+    : null;
+  const linkBlocked = Boolean(state.linkId && activeSession && !canAccessSession(activeSession));
   app.innerHTML = `
     <div class="app">
       <main class="content" style="margin:12px;">
@@ -2089,8 +2150,8 @@ function renderIntro(app) {
                 <label class="form-label">Test Session</label>
                 <select class="form-input" id="testSelect">
                   ${
-                    testSessionsState.list.length
-                      ? testSessionsState.list
+                    visibleSessions.length
+                      ? visibleSessions
                           .map((t) => {
                             const label = `${t.title} (${t.problem_set_id})`;
                             return `<option value="${escapeHtml(t.id)}" ${
@@ -2117,11 +2178,16 @@ function renderIntro(app) {
                     : ""
                 }
                 ${
-                  testSessionsState.loaded && testSessionsState.list.length === 0
+                  testSessionsState.loaded && visibleSessions.length === 0
                     ? `<div style="margin-top:6px;color:#666;">公開テストがありません。</div>`
                     : ""
                 }
               `
+          }
+          ${
+            linkBlocked
+              ? `<div style="margin-top:10px;color:#b00;">This retake session is available only to students who failed the original test.</div>`
+              : ""
           }
 
           ${
@@ -2183,6 +2249,14 @@ function renderIntro(app) {
       const id = document.querySelector("#idInput").value.trim();
       state.user = { name, id };
     }
+    if (linkBlocked) {
+      window.alert("You are not eligible to take this retake session.");
+      return;
+    }
+    if (!state.linkId && !canAccessSession(activeSession)) {
+      window.alert("You are not eligible to take this retake session.");
+      return;
+    }
     state.phase = "sectionIntro";
     state.sectionIndex = 0;
     state.questionIndexInSection = 0;
@@ -2222,6 +2296,7 @@ function renderTestSelect(app) {
   const showAttendance = showTabs && activeTab === "attendance";
   const showAttendanceHistory = showTabs && activeTab === "attendanceHistory";
   const showTakeTest = !showTabs;
+  const visibleSessions = (testSessionsState.list ?? []).filter((session) => canAccessSession(session));
   const canStart = activeSections.length > 0;
 
   if (showAttendance && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
@@ -2232,6 +2307,9 @@ function renderTestSelect(app) {
   }
   if (showHome && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
     fetchStudentAttendance().finally(render);
+  }
+  if (authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
+    fetchStudentResults().finally(render);
   }
   if (showHome && !announcementsState.loaded && !announcementsState.loading) {
     fetchAnnouncements().finally(render);
@@ -2334,7 +2412,7 @@ function renderTestSelect(app) {
         <table class="detail-table wide">
           <thead>
             <tr>
-              <th>No.</th>
+              <th class="col-no">No.</th>
               <th class="col-question">Question</th>
               <th>Chosen</th>
               ${showAnswers ? "<th>Correct</th>" : ""}
@@ -2346,7 +2424,7 @@ function renderTestSelect(app) {
               .map(
                 (r, idx) => `
                   <tr>
-                    <td>${idx + 1}</td>
+                    <td class="cell-no">${idx + 1}</td>
                     <td class="cell-question">
                       <div class="detail-question">
                         <div class="detail-question-text">${escapeHtml(r.prompt)}</div>
@@ -3335,8 +3413,8 @@ function renderTestSelect(app) {
                 <label class="form-label">Test Session</label>
                 <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
                   ${
-                    testSessionsState.list.length
-                      ? testSessionsState.list
+                    visibleSessions.length
+                      ? visibleSessions
                           .map((t) => {
                             const problemSet = testsState.list.find((ps) => ps.version === t.problem_set_id);
                             const passRate = Number(problemSet?.pass_rate ?? PASS_RATE_DEFAULT);
@@ -3433,6 +3511,10 @@ function renderTestSelect(app) {
         session = testSessionsState.list.find((s) => s.id === selected.value);
         if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
       }
+      if (!canAccessSession(session)) {
+        window.alert("You are not eligible to take this retake session.");
+        return;
+      }
       if (!allowMultipleAttempts(session) && hasAttemptForSession(session?.id)) {
         window.alert("You have already taken this test.");
         return;
@@ -3458,6 +3540,9 @@ function renderTestSelect(app) {
         if (!session?.starts_at) return;
         const startMs = new Date(session.starts_at).getTime();
         if (!Number.isFinite(startMs) || Date.now() < startMs) return;
+        if (!canAccessSession(session)) {
+          return;
+        }
         if (!allowMultipleAttempts(session) && hasAttemptForSession(sessionId)) {
           return;
         }

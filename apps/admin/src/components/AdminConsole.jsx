@@ -285,6 +285,32 @@ function getProblemSetTitle(problemSetId, testsList) {
   return item?.title || problemSetId || "";
 }
 
+function isRetakeSessionTitle(title) {
+  return String(title ?? "").trim().startsWith("[Retake]");
+}
+
+function buildRetakeTitle(title) {
+  const baseTitle = String(title ?? "").trim();
+  if (!baseTitle) return "[Retake]";
+  return isRetakeSessionTitle(baseTitle) ? baseTitle : `[Retake] ${baseTitle}`;
+}
+
+function getRetakeBaseTitle(title) {
+  return String(title ?? "").trim().replace(/^\[Retake\]\s*/i, "").trim();
+}
+
+function isPastSession(session) {
+  if (!session) return false;
+  const now = Date.now();
+  const endTime = session.ends_at ? new Date(session.ends_at).getTime() : NaN;
+  const startTime = session.starts_at ? new Date(session.starts_at).getTime() : NaN;
+  const createdTime = session.created_at ? new Date(session.created_at).getTime() : NaN;
+  if (Number.isFinite(endTime)) return endTime <= now;
+  if (Number.isFinite(startTime)) return startTime <= now;
+  if (Number.isFinite(createdTime)) return createdTime <= now;
+  return false;
+}
+
 function renderTwoLineHeader(title) {
   const text = String(title ?? "");
   const idx = text.lastIndexOf(" ");
@@ -564,6 +590,11 @@ function getTabLeftCount(attempt) {
 function isMissingTabLeftCountError(error) {
   const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
   return /tab_left_count/i.test(text) && /does not exist/i.test(text);
+}
+
+function isMissingRetakeSessionFieldsError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /(retake_source_session_id|retake_release_scope)/i.test(text) && /does not exist/i.test(text);
 }
 
 function parseSeparatedRows(text, delimiter) {
@@ -1141,6 +1172,10 @@ export default function AdminConsole({
   const [modelUploadOpen, setModelUploadOpen] = useState(false);
   const [dailyConductOpen, setDailyConductOpen] = useState(false);
   const [dailyUploadOpen, setDailyUploadOpen] = useState(false);
+  const [modelConductMode, setModelConductMode] = useState("normal");
+  const [dailyConductMode, setDailyConductMode] = useState("normal");
+  const [modelRetakeSourceId, setModelRetakeSourceId] = useState("");
+  const [dailyRetakeSourceId, setDailyRetakeSourceId] = useState("");
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingSessionMsg, setEditingSessionMsg] = useState("");
   const [editingSessionForm, setEditingSessionForm] = useState({
@@ -1162,7 +1197,8 @@ export default function AdminConsole({
     time_limit_min: "",
     show_answers: true,
     allow_multiple_attempts: true,
-    pass_rate: "0.8"
+    pass_rate: "0.8",
+    retake_release_scope: "all"
   });
   const [assets, setAssets] = useState([]);
   const [assetsMsg, setAssetsMsg] = useState("");
@@ -1203,7 +1239,8 @@ export default function AdminConsole({
     time_limit_min: "",
     show_answers: false,
     allow_multiple_attempts: true,
-    pass_rate: "0.8"
+    pass_rate: "0.8",
+    retake_release_scope: "all"
   });
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
   const [attendanceDays, setAttendanceDays] = useState([]);
@@ -1296,6 +1333,14 @@ export default function AdminConsole({
   const dailySessions = useMemo(
     () => testSessions.filter((s) => dailyTests.some((t) => t.version === s.problem_set_id)),
     [testSessions, dailyTests]
+  );
+  const pastModelSessions = useMemo(
+    () => modelSessions.filter((session) => !isRetakeSessionTitle(session.title) && isPastSession(session)),
+    [modelSessions]
+  );
+  const pastDailySessions = useMemo(
+    () => dailySessions.filter((session) => !isRetakeSessionTitle(session.title) && isPastSession(session)),
+    [dailySessions]
   );
 
   const testPassRateByVersion = useMemo(() => {
@@ -1617,33 +1662,68 @@ export default function AdminConsole({
     if (!testsForCategory.length) return { sessions: [], rows: [] };
 
     const testByVersion = new Map(testsForCategory.map((test) => [test.version, test]));
-    const sessionList = (testSessions ?? [])
+    const categorySessions = (testSessions ?? [])
       .filter((session) => testByVersion.has(session.problem_set_id))
-      .filter((session) => (attempts ?? []).some((attempt) => attempt?.test_session_id === session.id))
       .map((session) => ({
         ...session,
         linkedTest: testByVersion.get(session.problem_set_id) ?? null,
       }));
 
-    if (!sessionList.length) return { sessions: [], rows: [] };
-    const sessionIdSet = new Set(sessionList.map((session) => session.id));
+    if (!categorySessions.length) return { sessions: [], rows: [] };
+
+    const sessionById = new Map(categorySessions.map((session) => [session.id, session]));
+    const originalSessionById = new Map(
+      categorySessions
+        .filter((session) => !isRetakeSessionTitle(session.title))
+        .map((session) => [session.id, session])
+    );
+    const originalSessionByKey = new Map(
+      categorySessions
+        .filter((session) => !isRetakeSessionTitle(session.title))
+        .map((session) => [`${session.problem_set_id}::${String(session.title ?? "").trim()}`, session])
+    );
+
+    const getCanonicalSession = (session) => {
+      if (!session || !isRetakeSessionTitle(session.title)) return session;
+      if (session.retake_source_session_id && originalSessionById.has(session.retake_source_session_id)) {
+        return originalSessionById.get(session.retake_source_session_id);
+      }
+      return originalSessionByKey.get(`${session.problem_set_id}::${getRetakeBaseTitle(session.title)}`) ?? session;
+    };
 
     const byStudent = new Map();
+    const canonicalSessionIdsWithAttempts = new Set();
     (attempts ?? []).forEach((attempt) => {
       if (!attempt?.student_id || !attempt?.test_session_id) return;
-      if (!sessionIdSet.has(attempt.test_session_id)) return;
+      const sourceSession = sessionById.get(attempt.test_session_id);
+      if (!sourceSession) return;
+      const canonicalSession = getCanonicalSession(sourceSession);
+      if (!canonicalSession?.id) return;
+      canonicalSessionIdsWithAttempts.add(canonicalSession.id);
       const perStudent = byStudent.get(attempt.student_id) ?? new Map();
-      const perSession = perStudent.get(attempt.test_session_id) ?? [];
-      perSession.push(attempt);
-      perStudent.set(attempt.test_session_id, perSession);
+      const perSession = perStudent.get(canonicalSession.id) ?? [];
+      perSession.push({
+        ...attempt,
+        __isRetake: isRetakeSessionTitle(sourceSession.title),
+        __sourceSessionId: sourceSession.id,
+      });
+      perStudent.set(canonicalSession.id, perSession);
       byStudent.set(attempt.student_id, perStudent);
     });
+
+    const sessionList = categorySessions
+      .map((session) => getCanonicalSession(session))
+      .filter((session, idx, list) => session?.id && list.findIndex((item) => item?.id === session.id) === idx)
+      .filter((session) => canonicalSessionIdsWithAttempts.has(session.id));
+
+    if (!sessionList.length) return { sessions: [], rows: [] };
 
     byStudent.forEach((perStudent) => {
       perStudent.forEach((perSession, sessionId) => {
         perStudent.set(
           sessionId,
           perSession.slice().sort((a, b) => {
+            if (Boolean(a.__isRetake) !== Boolean(b.__isRetake)) return a.__isRetake ? -1 : 1;
             const aTime = new Date(a.ended_at || a.created_at || 0).getTime();
             const bTime = new Date(b.ended_at || b.created_at || 0).getTime();
             return bTime - aTime;
@@ -3314,18 +3394,29 @@ export default function AdminConsole({
 
   async function fetchTestSessions() {
     setTestSessionsMsg("Loading...");
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
+      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
+    if (error && isMissingRetakeSessionFieldsError(error)) {
+      ({ data, error } = await supabase
+        .from("test_sessions")
+        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
+        .order("created_at", { ascending: false })
+        .limit(500));
+    }
     if (error) {
       console.error("test_sessions fetch error:", error);
       setTestSessions([]);
       setTestSessionsMsg(`Load failed: ${error.message}`);
       return;
     }
-    const list = data ?? [];
+    const list = (data ?? []).map((session) => ({
+      retake_source_session_id: null,
+      retake_release_scope: "all",
+      ...session,
+    }));
     setTestSessions(list);
     setTestSessionsMsg(list.length ? "" : "No test sessions.");
     if (list.length && !testSessionForm.problem_set_id) {
@@ -3497,8 +3588,69 @@ export default function AdminConsole({
     return Boolean((data ?? []).length);
   }
 
+  function applySourceSessionToForm(session, setForm) {
+    if (!session) return;
+    const passRate = testPassRateByVersion[session.problem_set_id];
+    setForm((current) => ({
+      ...current,
+      problem_set_id: session.problem_set_id ?? current.problem_set_id,
+      title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
+      starts_at: "",
+      ends_at: "",
+      time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
+      show_answers: Boolean(session.show_answers),
+      allow_multiple_attempts: Boolean(session.allow_multiple_attempts),
+      retake_release_scope: current.retake_release_scope || "all",
+      pass_rate: passRate != null ? String(passRate) : current.pass_rate,
+    }));
+  }
+
+  function openModelConductModal(mode = "normal") {
+    setModelConductMode(mode);
+    setModelConductOpen(true);
+    setTestSessionsMsg("");
+    if (mode !== "retake") {
+      setModelRetakeSourceId("");
+      setTestSessionForm((current) => ({ ...current, retake_release_scope: "all" }));
+      return;
+    }
+    const source = pastModelSessions[0] ?? null;
+    setModelRetakeSourceId(source?.id ?? "");
+    if (source) applySourceSessionToForm(source, setTestSessionForm);
+  }
+
+  function openDailyConductModal(mode = "normal") {
+    setDailyConductMode(mode);
+    setDailyConductOpen(true);
+    setDailySessionsMsg("");
+    if (mode !== "retake") {
+      setDailyRetakeSourceId("");
+      setDailySessionForm((current) => ({ ...current, retake_release_scope: "all" }));
+      return;
+    }
+    const source = pastDailySessions[0] ?? null;
+    setDailyRetakeSourceId(source?.id ?? "");
+    if (source) applySourceSessionToForm(source, setDailySessionForm);
+  }
+
+  function selectModelRetakeSource(sessionId) {
+    setModelRetakeSourceId(sessionId);
+    const source = pastModelSessions.find((session) => session.id === sessionId);
+    if (source) applySourceSessionToForm(source, setTestSessionForm);
+  }
+
+  function selectDailyRetakeSource(sessionId) {
+    setDailyRetakeSourceId(sessionId);
+    const source = pastDailySessions.find((session) => session.id === sessionId);
+    if (source) applySourceSessionToForm(source, setDailySessionForm);
+  }
+
   async function createTestSession() {
     setTestSessionsMsg("");
+    if (modelConductMode === "retake" && !modelRetakeSourceId) {
+      setTestSessionsMsg("Please choose a past session to retake.");
+      return;
+    }
     const problemSetId = testSessionForm.problem_set_id.trim();
     const title = testSessionForm.title.trim();
     const endsAt = testSessionForm.ends_at;
@@ -3536,7 +3688,11 @@ export default function AdminConsole({
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
       is_published: true,
       show_answers: Boolean(testSessionForm.show_answers),
-      allow_multiple_attempts: Boolean(testSessionForm.allow_multiple_attempts)
+      allow_multiple_attempts: Boolean(testSessionForm.allow_multiple_attempts),
+      retake_source_session_id: modelConductMode === "retake" ? modelRetakeSourceId : null,
+      retake_release_scope: modelConductMode === "retake"
+        ? (testSessionForm.retake_release_scope || "all")
+        : "all"
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
     if (error || !created?.id) {
@@ -3564,13 +3720,19 @@ export default function AdminConsole({
       return;
     }
     setTestSessionsMsg("Created (session + link).");
-    setTestSessionForm((s) => ({ ...s, title: "" }));
+    setTestSessionForm((s) => ({ ...s, title: "", retake_release_scope: "all" }));
+    setModelConductMode("normal");
+    setModelRetakeSourceId("");
     fetchTestSessions();
     fetchExamLinks();
   }
 
   async function createDailySession() {
     setDailySessionsMsg("");
+    if (dailyConductMode === "retake" && !dailyRetakeSourceId) {
+      setDailySessionsMsg("Please choose a past session to retake.");
+      return;
+    }
     const problemSetId = dailySessionForm.problem_set_id.trim();
     const title = dailySessionForm.title.trim();
     const endsAt = dailySessionForm.ends_at;
@@ -3608,7 +3770,11 @@ export default function AdminConsole({
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
       is_published: true,
       show_answers: Boolean(dailySessionForm.show_answers),
-      allow_multiple_attempts: Boolean(dailySessionForm.allow_multiple_attempts)
+      allow_multiple_attempts: Boolean(dailySessionForm.allow_multiple_attempts),
+      retake_source_session_id: dailyConductMode === "retake" ? dailyRetakeSourceId : null,
+      retake_release_scope: dailyConductMode === "retake"
+        ? (dailySessionForm.retake_release_scope || "all")
+        : "all"
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
     if (error || !created?.id) {
@@ -3636,7 +3802,9 @@ export default function AdminConsole({
       return;
     }
     setDailySessionsMsg("Created (session + link).");
-    setDailySessionForm((s) => ({ ...s, title: "" }));
+    setDailySessionForm((s) => ({ ...s, title: "", retake_release_scope: "all" }));
+    setDailyConductMode("normal");
+    setDailyRetakeSourceId("");
     fetchTestSessions();
     fetchExamLinks();
   }
@@ -6278,8 +6446,11 @@ export default function AdminConsole({
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <div className="admin-title">Test Sessions</div>
-                  <button className="btn btn-primary" onClick={() => setModelConductOpen(true)}>
+                  <button className="btn btn-primary" onClick={() => openModelConductModal("normal")}>
                     Create Test Session
+                  </button>
+                  <button className="btn btn-retake" onClick={() => openModelConductModal("retake")}>
+                    Create Retake Session
                   </button>
                 </div>
                 <div className="admin-subtitle">SetIDから実施テストを作成します。</div>
@@ -6442,16 +6613,62 @@ export default function AdminConsole({
           {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
 
           {modelConductOpen ? (
-            <div className="admin-modal-overlay" onClick={() => setModelConductOpen(false)}>
+            <div
+              className="admin-modal-overlay"
+              onClick={() => {
+                setModelConductOpen(false);
+                setModelConductMode("normal");
+                setModelRetakeSourceId("");
+              }}
+            >
               <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="admin-modal-header">
-                  <div className="admin-title">Conduct Model Test</div>
-                  <button className="admin-modal-close" onClick={() => setModelConductOpen(false)} aria-label="Close">
+                  <div className="admin-title">{modelConductMode === "retake" ? "Conduct Model Retake" : "Conduct Model Test"}</div>
+                  <button
+                    className="admin-modal-close"
+                    onClick={() => {
+                      setModelConductOpen(false);
+                      setModelConductMode("normal");
+                      setModelRetakeSourceId("");
+                    }}
+                    aria-label="Close"
+                  >
                     &times;
                   </button>
                 </div>
 
                 <div className="admin-form" style={{ marginTop: 10 }}>
+                  {modelConductMode === "retake" ? (
+                    <>
+                      <div className="field">
+                        <label>Original Session</label>
+                        <select
+                          value={modelRetakeSourceId}
+                          onChange={(e) => selectModelRetakeSource(e.target.value)}
+                        >
+                          {pastModelSessions.length ? (
+                            pastModelSessions.map((session) => (
+                              <option key={`model-retake-${session.id}`} value={session.id}>
+                                {session.title || session.problem_set_id} ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">No past model sessions</option>
+                          )}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>Release To</label>
+                        <select
+                          value={testSessionForm.retake_release_scope}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, retake_release_scope: e.target.value }))}
+                        >
+                          <option value="all">All students</option>
+                          <option value="failed_only">Only students who failed</option>
+                        </select>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="field">
                     <label>Category</label>
                     <select
@@ -6473,6 +6690,7 @@ export default function AdminConsole({
                     <label>SetID</label>
                     <select
                       value={testSessionForm.problem_set_id}
+                      disabled={modelConductMode === "retake"}
                       onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
                     >
                       {modelConductTests.length ? (
@@ -6552,7 +6770,12 @@ export default function AdminConsole({
                   </div>
                   <div className="field small">
                     <label>&nbsp;</label>
-                    <button className="btn btn-primary" type="button" onClick={createTestSession}>
+                    <button
+                      className={`btn ${modelConductMode === "retake" ? "btn-retake" : "btn-primary"}`}
+                      type="button"
+                      onClick={createTestSession}
+                      disabled={modelConductMode === "retake" && !modelRetakeSourceId}
+                    >
                       Create Session
                     </button>
                   </div>
@@ -6888,8 +7111,11 @@ export default function AdminConsole({
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <div className="admin-title">Daily Test Sessions</div>
-                  <button className="btn btn-primary" onClick={() => setDailyConductOpen(true)}>
+                  <button className="btn btn-primary" onClick={() => openDailyConductModal("normal")}>
                     Create Test Session
+                  </button>
+                  <button className="btn btn-retake" onClick={() => openDailyConductModal("retake")}>
+                    Create Retake Session
                   </button>
                 </div>
                 <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
@@ -7036,16 +7262,62 @@ export default function AdminConsole({
           {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
 
           {dailyConductOpen ? (
-            <div className="admin-modal-overlay" onClick={() => setDailyConductOpen(false)}>
+            <div
+              className="admin-modal-overlay"
+              onClick={() => {
+                setDailyConductOpen(false);
+                setDailyConductMode("normal");
+                setDailyRetakeSourceId("");
+              }}
+            >
               <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="admin-modal-header">
-                  <div className="admin-title">Conduct Daily Test</div>
-                  <button className="admin-modal-close" onClick={() => setDailyConductOpen(false)} aria-label="Close">
+                  <div className="admin-title">{dailyConductMode === "retake" ? "Conduct Daily Retake" : "Conduct Daily Test"}</div>
+                  <button
+                    className="admin-modal-close"
+                    onClick={() => {
+                      setDailyConductOpen(false);
+                      setDailyConductMode("normal");
+                      setDailyRetakeSourceId("");
+                    }}
+                    aria-label="Close"
+                  >
                     &times;
                   </button>
                 </div>
 
                 <div className="admin-form" style={{ marginTop: 10 }}>
+                  {dailyConductMode === "retake" ? (
+                    <>
+                      <div className="field">
+                        <label>Original Session</label>
+                        <select
+                          value={dailyRetakeSourceId}
+                          onChange={(e) => selectDailyRetakeSource(e.target.value)}
+                        >
+                          {pastDailySessions.length ? (
+                            pastDailySessions.map((session) => (
+                              <option key={`daily-retake-${session.id}`} value={session.id}>
+                                {session.title || session.problem_set_id} ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">No past daily sessions</option>
+                          )}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>Release To</label>
+                        <select
+                          value={dailySessionForm.retake_release_scope}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, retake_release_scope: e.target.value }))}
+                        >
+                          <option value="all">All students</option>
+                          <option value="failed_only">Only students who failed</option>
+                        </select>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="field">
                     <label>Category</label>
                     <select
@@ -7067,6 +7339,7 @@ export default function AdminConsole({
                     <label>SetID</label>
                     <select
                       value={dailySessionForm.problem_set_id}
+                      disabled={dailyConductMode === "retake"}
                       onChange={(e) => setDailySessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
                     >
                       {dailyConductTests.length ? (
@@ -7146,7 +7419,12 @@ export default function AdminConsole({
                   </div>
                   <div className="field small">
                     <label>&nbsp;</label>
-                    <button className="btn btn-primary" type="button" onClick={createDailySession}>
+                    <button
+                      className={`btn ${dailyConductMode === "retake" ? "btn-retake" : "btn-primary"}`}
+                      type="button"
+                      onClick={createDailySession}
+                      disabled={dailyConductMode === "retake" && !dailyRetakeSourceId}
+                    >
                       Create Session
                     </button>
                   </div>
@@ -8177,7 +8455,10 @@ export default function AdminConsole({
                                       openAttemptDetail(attempt);
                                     }}
                                   >
-                                    <span>{label}</span>
+                                    <span className="daily-score-main">
+                                      {attempt.__isRetake ? <span className="daily-retake-icon">Re</span> : null}
+                                      <span>{label}</span>
+                                    </span>
                                     {tabLeftCount > 0 ? (
                                       <span className="daily-score-meta daily-score-meta-alert">
                                         Tabs left: {tabLeftCount}

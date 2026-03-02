@@ -2155,6 +2155,14 @@ button.student-application-view {
   min-width: 720px;
 }
 
+.detail-table .col-no,
+.detail-table .cell-no {
+  width: 1%;
+  white-space: nowrap;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
 .detail-table .col-question,
 .detail-table .cell-question {
   width: 50%;

@@ -102,6 +102,8 @@ create table if not exists public.test_sessions (
   is_published boolean not null default true,
   show_answers boolean not null default true,
   allow_multiple_attempts boolean not null default true,
+  retake_source_session_id uuid references public.test_sessions(id) on delete set null,
+  retake_release_scope text not null default 'all' check (retake_release_scope in ('all', 'failed_only')),
   created_at timestamptz not null default now()
 );
 
