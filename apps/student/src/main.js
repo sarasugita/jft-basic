@@ -154,6 +154,7 @@ const defaultState = {
   rankingSelectedPeriod: "",
   attendanceMonthKey: "",
   focusWarnings: 0,
+  tabLeftCount: 0,
   focusWarningAt: 0,
 };
 
@@ -177,6 +178,10 @@ function loadState() {
     if (!["quiz", "sectionIntro", "result"].includes(loaded.phase)) {
       loaded.phase = "intro";
     }
+    loaded.tabLeftCount = Math.max(
+      0,
+      Number(loaded.tabLeftCount ?? loaded.focusWarnings ?? 0)
+    );
     if (loaded.studentTab === "results") loaded.studentTab = "dailyResults";
     if (loaded.studentTab === "take") loaded.studentTab = "home";
     if (!["home", "personalInformation", "dailyResults", "modelResults", "ranking", "attendance", "attendanceHistory"].includes(loaded.studentTab)) {
@@ -189,6 +194,11 @@ function loadState() {
 }
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function isMissingTabLeftCountError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /tab_left_count/i.test(text) && /does not exist/i.test(text);
 }
 
 function hasLinkParam() {
@@ -272,6 +282,7 @@ function resetAll() {
   state.testEndAt = null;
   state.requireLogin = true;
   state.focusWarnings = 0;
+  state.tabLeftCount = 0;
   state.focusWarningAt = 0;
   const url = new URL(window.location.href);
   const linkId = url.searchParams.get("link");
@@ -416,6 +427,7 @@ function exitToHome() {
   state.requireLogin = false;
   state.linkLoginRequired = false;
   state.focusWarnings = 0;
+  state.tabLeftCount = 0;
   state.focusWarningAt = 0;
   saveState();
   render();
@@ -429,6 +441,9 @@ function goIntro() {
   state.testStartAt = null; // ★全体タイマーを戻す
   state.testEndAt = null;
   state.attemptSaved = false;
+  state.focusWarnings = 0;
+  state.tabLeftCount = 0;
+  state.focusWarningAt = 0;
   saveState();
   render();
 }
@@ -850,12 +865,20 @@ async function fetchStudentResults() {
   modelRankState.loading = false;
   modelRankState.map = {};
   modelRankState.totalMap = {};
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("attempts")
-    .select("id, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
+    .select("id, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json, tab_left_count")
     .eq("student_id", authState.session.user.id)
     .order("created_at", { ascending: false })
     .limit(200);
+  if (error && isMissingTabLeftCountError(error)) {
+    ({ data, error } = await supabase
+      .from("attempts")
+      .select("id, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
+      .eq("student_id", authState.session.user.id)
+      .order("created_at", { ascending: false })
+      .limit(200));
+  }
   if (error) {
     studentResultsState.list = [];
     studentResultsState.error = error.message || "Failed to load results.";
@@ -1407,6 +1430,7 @@ function startTestTimer() {
   if (state.testStartAt) return;      // すでに開始してたら何もしない
   state.testStartAt = Date.now();
   state.focusWarnings = 0;
+  state.tabLeftCount = 0;
   state.focusWarningAt = 0;
   saveState();
 }
@@ -1548,6 +1572,10 @@ async function saveAttemptIfNeeded() {
   const { correct, total } = scoreAll();
   const scoreRate = total === 0 ? 0 : correct / total;
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId || null;
+  const tabLeftCount = Math.max(
+    0,
+    Number(state.tabLeftCount ?? state.focusWarnings ?? 0)
+  );
   const payload = {
     student_id: authState.session?.user?.id ?? null,
     display_name: state.user?.name?.trim() || null,
@@ -1558,11 +1586,21 @@ async function saveAttemptIfNeeded() {
     total,
     started_at: state.testStartAt ? new Date(state.testStartAt).toISOString() : null,
     ended_at: state.testEndAt ? new Date(state.testEndAt).toISOString() : new Date().toISOString(),
-    answers_json: state.answers ?? {},
+    answers_json: {
+      ...(state.answers ?? {}),
+      __meta: {
+        tab_left_count: tabLeftCount,
+      },
+    },
+    tab_left_count: tabLeftCount,
     link_id: state.linkId,
   };
 
-  const { error } = await supabase.from("attempts").insert(payload);
+  let { error } = await supabase.from("attempts").insert(payload);
+  if (error && isMissingTabLeftCountError(error)) {
+    const { tab_left_count, ...legacyPayload } = payload;
+    ({ error } = await supabase.from("attempts").insert(legacyPayload));
+  }
   if (error) {
     console.error("saveAttempt error:", error);
     if (statusEl) statusEl.textContent = `Save failed: ${error.message}`;
@@ -1710,10 +1748,11 @@ function banglaButtonHTML() {
 }
 
 function focusWarningHTML() {
-  if (!state.focusWarnings) return "";
+  const count = Math.max(0, Number(state.tabLeftCount ?? state.focusWarnings ?? 0));
+  if (!count) return "";
   return `
     <div class="focus-warning">
-      <b>Warning:</b> You left the exam tab. Count: ${state.focusWarnings}
+      <b>Warning:</b> You left the exam tab. Count: ${count}
     </div>
   `;
 }
@@ -4433,16 +4472,19 @@ function registerFocusWarning() {
     if (now - (state.focusWarningAt || 0) < 1000) return;
     if (!["quiz", "sectionIntro"].includes(state.phase)) return;
     state.focusWarnings = (state.focusWarnings || 0) + 1;
+    state.tabLeftCount = (state.tabLeftCount || 0) + 1;
     state.focusWarningAt = now;
     saveState();
     render();
   };
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) bumpWarning();
-  });
-  window.addEventListener("blur", () => {
-    bumpWarning();
-  });
+  const handleHidden = () => {
+    if (document.hidden || document.visibilityState === "hidden") bumpWarning();
+  };
+  document.addEventListener("visibilitychange", handleHidden);
+  window.addEventListener("blur", bumpWarning);
+  // Mobile browsers often emit pagehide/freeze when the app is backgrounded.
+  window.addEventListener("pagehide", bumpWarning);
+  document.addEventListener("freeze", bumpWarning);
 }
 
 Promise.all([checkLinkFromUrl(), refreshAuthState()]).finally(render);

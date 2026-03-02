@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { createAdminSupabaseClient } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
@@ -553,6 +553,19 @@ function getScoreRate(attempt) {
   return correct / total;
 }
 
+function getTabLeftCount(attempt) {
+  const directCount = Number(attempt?.tab_left_count);
+  const metaCount = Number(attempt?.answers_json?.__meta?.tab_left_count);
+  const normalizedDirect = Number.isFinite(directCount) && directCount >= 0 ? Math.floor(directCount) : 0;
+  const normalizedMeta = Number.isFinite(metaCount) && metaCount >= 0 ? Math.floor(metaCount) : 0;
+  return Math.max(normalizedDirect, normalizedMeta);
+}
+
+function isMissingTabLeftCountError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /tab_left_count/i.test(text) && /does not exist/i.test(text);
+}
+
 function parseSeparatedRows(text, delimiter) {
   const rows = [];
   let row = [];
@@ -1024,6 +1037,7 @@ export default function AdminConsole({
   const [selectedId, setSelectedId] = useState(null);
   const [selectedAttemptObj, setSelectedAttemptObj] = useState(null);
   const [attemptDetailOpen, setAttemptDetailOpen] = useState(false);
+  const [expandedResultCells, setExpandedResultCells] = useState({});
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
   const [filters, setFilters] = useState({
@@ -1228,13 +1242,13 @@ export default function AdminConsole({
     publish_at: "",
     end_at: ""
   });
+  const activeSchoolId = forcedSchoolId ?? schoolScopeId ?? profile?.school_id ?? null;
   const canUseAdminConsole = Boolean(
     profile &&
       profile.account_status === "active" &&
-      ((profile.role === "admin" && (forcedSchoolId || schoolScopeId || profile.school_id))
-        || (profile.role === "super_admin" && forcedSchoolId))
+      ["admin", "super_admin"].includes(profile.role) &&
+      activeSchoolId
   );
-  const activeSchoolId = forcedSchoolId ?? schoolScopeId ?? profile?.school_id ?? null;
   const activeSchoolName = forcedSchoolName
     || schoolAssignments.find((assignment) => assignment.school_id === activeSchoolId)?.school_name
     || activeSchoolId
@@ -1598,65 +1612,64 @@ export default function AdminConsole({
     return list;
   }, [students]);
 
-  const dailyResultsMatrix = useMemo(() => {
-    const testsForCategory = selectedDailyCategory?.tests ?? [];
-    if (!testsForCategory.length) return { tests: [], rows: [] };
-    const versions = testsForCategory.map((t) => t.version);
-    const versionSet = new Set(versions);
+  const buildSessionResultsMatrix = useCallback((selectedCategory) => {
+    const testsForCategory = selectedCategory?.tests ?? [];
+    if (!testsForCategory.length) return { sessions: [], rows: [] };
+
+    const testByVersion = new Map(testsForCategory.map((test) => [test.version, test]));
+    const sessionList = (testSessions ?? [])
+      .filter((session) => testByVersion.has(session.problem_set_id))
+      .filter((session) => (attempts ?? []).some((attempt) => attempt?.test_session_id === session.id))
+      .map((session) => ({
+        ...session,
+        linkedTest: testByVersion.get(session.problem_set_id) ?? null,
+      }));
+
+    if (!sessionList.length) return { sessions: [], rows: [] };
+    const sessionIdSet = new Set(sessionList.map((session) => session.id));
+
     const byStudent = new Map();
-    (attempts ?? []).forEach((a) => {
-      if (!a?.student_id) return;
-      if (!versionSet.has(a.test_version)) return;
-      const key = a.student_id;
-      const perStudent = byStudent.get(key) ?? new Map();
-      const existing = perStudent.get(a.test_version);
-      const nextTime = new Date(a.ended_at || a.created_at || 0).getTime();
-      const existingTime = existing
-        ? new Date(existing.ended_at || existing.created_at || 0).getTime()
-        : -1;
-      if (!existing || nextTime >= existingTime) {
-        perStudent.set(a.test_version, a);
-      }
-      byStudent.set(key, perStudent);
+    (attempts ?? []).forEach((attempt) => {
+      if (!attempt?.student_id || !attempt?.test_session_id) return;
+      if (!sessionIdSet.has(attempt.test_session_id)) return;
+      const perStudent = byStudent.get(attempt.student_id) ?? new Map();
+      const perSession = perStudent.get(attempt.test_session_id) ?? [];
+      perSession.push(attempt);
+      perStudent.set(attempt.test_session_id, perSession);
+      byStudent.set(attempt.student_id, perStudent);
     });
 
-    const rows = (sortedStudents ?? []).map((s, idx) => {
-      const perStudent = byStudent.get(s.id) ?? new Map();
-      const cells = versions.map((v) => perStudent.get(v) ?? null);
-      return { index: idx + 1, student: s, cells };
-    });
-    return { tests: testsForCategory, rows };
-  }, [attempts, sortedStudents, selectedDailyCategory]);
-
-  const modelResultsMatrix = useMemo(() => {
-    const testsForCategory = selectedModelCategory?.tests ?? [];
-    if (!testsForCategory.length) return { tests: [], rows: [] };
-    const versions = testsForCategory.map((t) => t.version);
-    const versionSet = new Set(versions);
-    const byStudent = new Map();
-    (attempts ?? []).forEach((a) => {
-      if (!a?.student_id) return;
-      if (!versionSet.has(a.test_version)) return;
-      const key = a.student_id;
-      const perStudent = byStudent.get(key) ?? new Map();
-      const existing = perStudent.get(a.test_version);
-      const nextTime = new Date(a.ended_at || a.created_at || 0).getTime();
-      const existingTime = existing
-        ? new Date(existing.ended_at || existing.created_at || 0).getTime()
-        : -1;
-      if (!existing || nextTime >= existingTime) {
-        perStudent.set(a.test_version, a);
-      }
-      byStudent.set(key, perStudent);
+    byStudent.forEach((perStudent) => {
+      perStudent.forEach((perSession, sessionId) => {
+        perStudent.set(
+          sessionId,
+          perSession.slice().sort((a, b) => {
+            const aTime = new Date(a.ended_at || a.created_at || 0).getTime();
+            const bTime = new Date(b.ended_at || b.created_at || 0).getTime();
+            return bTime - aTime;
+          })
+        );
+      });
     });
 
-    const rows = (sortedStudents ?? []).map((s, idx) => {
-      const perStudent = byStudent.get(s.id) ?? new Map();
-      const cells = versions.map((v) => perStudent.get(v) ?? null);
-      return { index: idx + 1, student: s, cells };
+    const rows = (sortedStudents ?? []).map((student, idx) => {
+      const perStudent = byStudent.get(student.id) ?? new Map();
+      const cells = sessionList.map((session) => perStudent.get(session.id) ?? []);
+      return { index: idx + 1, student, cells };
     });
-    return { tests: testsForCategory, rows };
-  }, [attempts, sortedStudents, selectedModelCategory]);
+
+    return { sessions: sessionList, rows };
+  }, [attempts, sortedStudents, testSessions]);
+
+  const dailyResultsMatrix = useMemo(
+    () => buildSessionResultsMatrix(selectedDailyCategory),
+    [buildSessionResultsMatrix, selectedDailyCategory]
+  );
+
+  const modelResultsMatrix = useMemo(
+    () => buildSessionResultsMatrix(selectedModelCategory),
+    [buildSessionResultsMatrix, selectedModelCategory]
+  );
 
   const attendanceDayColumns = useMemo(() => {
     return attendanceDays.map((d) => ({
@@ -2091,23 +2104,13 @@ export default function AdminConsole({
     setMsg("Loading...");
     const { code, name, from, to, limit, testVersion } = filters;
 
-    let query = supabase
-      .from("attempts")
-      .select(
-        "id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, ended_at, created_at, answers_json"
-      )
-      .order("created_at", { ascending: false })
-      .limit(Number(limit || 200));
-
     let allowedVersions = [];
     if (testType) {
       allowedVersions = tests.filter((t) => t.type === testType).map((t) => t.version);
       if (testVersion && allowedVersions.length && !allowedVersions.includes(testVersion)) {
         setFilters((s) => ({ ...s, testVersion: "" }));
       }
-      if (allowedVersions.length) {
-        query = query.in("test_version", allowedVersions);
-      } else {
+      if (!allowedVersions.length) {
         setAttempts([]);
         setSelectedId(null);
         setMsg("No tests.");
@@ -2115,15 +2118,32 @@ export default function AdminConsole({
         return;
       }
     }
-    if (code) query = query.ilike("student_code", `%${code}%`);
-    if (name) query = query.ilike("display_name", `%${name}%`);
-    if (from) query = query.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
-    if (to) query = query.lte("created_at", new Date(`${to}T23:59:59`).toISOString());
-    if (testVersion && (!testType || allowedVersions.includes(testVersion))) {
-      query = query.eq("test_version", testVersion);
-    }
 
-    const { data, error } = await query;
+    const buildAttemptsQuery = (fields) => {
+      let query = supabase
+        .from("attempts")
+        .select(fields)
+        .order("created_at", { ascending: false })
+        .limit(Number(limit || 200));
+      if (testType) query = query.in("test_version", allowedVersions);
+      if (code) query = query.ilike("student_code", `%${code}%`);
+      if (name) query = query.ilike("display_name", `%${name}%`);
+      if (from) query = query.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
+      if (to) query = query.lte("created_at", new Date(`${to}T23:59:59`).toISOString());
+      if (testVersion && (!testType || allowedVersions.includes(testVersion))) {
+        query = query.eq("test_version", testVersion);
+      }
+      return query;
+    };
+
+    let { data, error } = await buildAttemptsQuery(
+      "id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, ended_at, created_at, answers_json, tab_left_count"
+    );
+    if (error && isMissingTabLeftCountError(error)) {
+      ({ data, error } = await buildAttemptsQuery(
+        "id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, ended_at, created_at, answers_json"
+      ));
+    }
     if (error) {
       console.error("attempts fetch error:", error);
       setAttempts([]);
@@ -2390,15 +2410,25 @@ export default function AdminConsole({
       }
     }
 
-    let attemptsQuery = supabase
-      .from("attempts")
-      .select("id, student_id, test_version, correct, total, score_rate, created_at, ended_at")
-      .eq("school_id", activeSchoolId)
-      .order("created_at", { ascending: false })
-      .limit(2000);
-    if (from) attemptsQuery = attemptsQuery.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
-    if (to) attemptsQuery = attemptsQuery.lte("created_at", new Date(`${to}T23:59:59`).toISOString());
-    const { data: attemptsData, error: attemptsError } = await attemptsQuery;
+    const buildStudentListAttemptsQuery = (fields) => {
+      let attemptsQuery = supabase
+        .from("attempts")
+        .select(fields)
+        .eq("school_id", activeSchoolId)
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      if (from) attemptsQuery = attemptsQuery.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
+      if (to) attemptsQuery = attemptsQuery.lte("created_at", new Date(`${to}T23:59:59`).toISOString());
+      return attemptsQuery;
+    };
+    let { data: attemptsData, error: attemptsError } = await buildStudentListAttemptsQuery(
+      "id, student_id, test_version, correct, total, score_rate, created_at, ended_at, tab_left_count"
+    );
+    if (attemptsError && isMissingTabLeftCountError(attemptsError)) {
+      ({ data: attemptsData, error: attemptsError } = await buildStudentListAttemptsQuery(
+        "id, student_id, test_version, correct, total, score_rate, created_at, ended_at"
+      ));
+    }
     if (attemptsError) {
       console.error("student list attempts error:", attemptsError);
       setStudentListAttempts([]);
@@ -3033,12 +3063,20 @@ export default function AdminConsole({
   async function fetchStudentAttempts(studentId) {
     if (!studentId) return;
     setStudentAttemptsMsg("Loading...");
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("attempts")
-      .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
+      .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json, tab_left_count")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false })
       .limit(200);
+    if (error && isMissingTabLeftCountError(error)) {
+      ({ data, error } = await supabase
+        .from("attempts")
+        .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
+        .eq("student_id", studentId)
+        .order("created_at", { ascending: false })
+        .limit(200));
+    }
     if (error) {
       console.error("student attempts fetch error:", error);
       setStudentAttempts([]);
@@ -3347,7 +3385,7 @@ export default function AdminConsole({
 
   async function openAttendanceDay(dayDate) {
     if (!dayDate) return;
-    if (!profile?.school_id) {
+    if (!activeSchoolId) {
       setAttendanceMsg("School context is missing for this admin.");
       return;
     }
@@ -3357,7 +3395,7 @@ export default function AdminConsole({
     setApprovedAbsenceByStudent({});
     const { data, error } = await supabase
       .from("attendance_days")
-      .upsert({ school_id: profile.school_id, day_date: dayDate }, { onConflict: "school_id,day_date" })
+      .upsert({ school_id: activeSchoolId, day_date: dayDate }, { onConflict: "school_id,day_date" })
       .select()
       .single();
     if (error || !data?.id) {
@@ -4531,7 +4569,7 @@ export default function AdminConsole({
   async function exportSummaryCsv(list) {
     const emailMap = await buildProfileEmailMap(supabase, list);
     const rows = [
-      ["attempt_id", "created_at", "display_name", "student_code", "email", "test_version", "correct", "total", "score_rate"],
+      ["attempt_id", "created_at", "display_name", "student_code", "email", "test_version", "correct", "total", "score_rate", "tab_left_count"],
       ...list.map((a) => [
         a.id,
         a.created_at,
@@ -4541,7 +4579,8 @@ export default function AdminConsole({
         a.test_version ?? "",
         a.correct ?? 0,
         a.total ?? 0,
-        getScoreRate(a)
+        getScoreRate(a),
+        getTabLeftCount(a)
       ])
     ];
     downloadText(`attempts_summary_${Date.now()}.csv`, toCsv(rows), "text/csv");
@@ -4550,17 +4589,27 @@ export default function AdminConsole({
   async function exportQuizSummaryCsv() {
     setQuizMsg("");
     const quizVersions = (tests ?? []).filter((t) => t.type === "quiz").map((t) => t.version);
-    let query = supabase
-      .from("attempts")
-      .select("id, student_id, display_name, student_code, test_version, correct, total, score_rate, created_at")
-      .order("created_at", { ascending: false })
-      .limit(2000);
-    if (quizVersions.length) {
-      query = query.in("test_version", quizVersions);
-    } else {
-      query = query.ilike("test_version", "quiz_%");
+    const buildQuizSummaryQuery = (fields) => {
+      let query = supabase
+        .from("attempts")
+        .select(fields)
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      if (quizVersions.length) {
+        query = query.in("test_version", quizVersions);
+      } else {
+        query = query.ilike("test_version", "quiz_%");
+      }
+      return query;
+    };
+    let { data, error } = await buildQuizSummaryQuery(
+      "id, student_id, display_name, student_code, test_version, correct, total, score_rate, created_at, tab_left_count"
+    );
+    if (error && isMissingTabLeftCountError(error)) {
+      ({ data, error } = await buildQuizSummaryQuery(
+        "id, student_id, display_name, student_code, test_version, correct, total, score_rate, created_at"
+      ));
     }
-    const { data, error } = await query;
     if (error) {
       console.error("quiz attempts fetch error:", error);
       setQuizMsg(`Load failed: ${error.message}`);
@@ -4573,7 +4622,7 @@ export default function AdminConsole({
     }
     const emailMap = await buildProfileEmailMap(supabase, list);
     const rows = [
-      ["attempt_id", "created_at", "display_name", "student_code", "email", "test_version", "correct", "total", "score_rate"],
+      ["attempt_id", "created_at", "display_name", "student_code", "email", "test_version", "correct", "total", "score_rate", "tab_left_count"],
       ...list.map((a) => [
         a.id,
         a.created_at,
@@ -4583,7 +4632,8 @@ export default function AdminConsole({
         a.test_version ?? "",
         a.correct ?? 0,
         a.total ?? 0,
-        getScoreRate(a)
+        getScoreRate(a),
+        getTabLeftCount(a)
       ])
     ];
     downloadText(`quiz_attempts_summary_${Date.now()}.csv`, toCsv(rows), "text/csv");
@@ -8069,8 +8119,8 @@ export default function AdminConsole({
                   minWidth: Math.max(
                     860,
                     360 + ((resultContext.type === "daily"
-                      ? dailyResultsMatrix.tests.length
-                      : modelResultsMatrix.tests.length) || 0) * 140
+                      ? dailyResultsMatrix.sessions.length
+                      : modelResultsMatrix.sessions.length) || 0) * 140
                   )
                 }}
               >
@@ -8078,10 +8128,11 @@ export default function AdminConsole({
                   <tr>
                     <th className="daily-sticky-1 daily-col-no">Student ID</th>
                     <th className="daily-sticky-2 daily-col-name">Student Name</th>
-                    {(resultContext.type === "daily" ? dailyResultsMatrix.tests : modelResultsMatrix.tests).map((t) => (
-                      <th key={`daily-col-${t.version}`}>
-                        <div className="daily-col-title">{t.version ?? ""}</div>
-                        <div className="daily-col-date">{formatDateShort(t.created_at)}</div>
+                    {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem) => (
+                      <th key={`daily-col-${sessionItem.id}`}>
+                        <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
+                        <div className="daily-col-subtitle">{sessionItem.problem_set_id ?? ""}</div>
+                        <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
                       </th>
                     ))}
                   </tr>
@@ -8096,31 +8147,62 @@ export default function AdminConsole({
                         <div className="daily-name">{row.student.display_name ?? ""}</div>
                         <div className="daily-code">{row.student.student_code ?? ""}</div>
                       </td>
-                      {row.cells.map((attempt, idx) => {
-                        const test = (resultContext.type === "daily"
-                          ? dailyResultsMatrix.tests
-                          : modelResultsMatrix.tests)[idx];
-                        if (!attempt) return <td key={`daily-cell-${row.student.id}-${idx}`}>—</td>;
-                        const rateValue = getScoreRate(attempt);
-                        const label = `${(rateValue * 100).toFixed(1)}%`;
-                        const passRate = Number(test?.pass_rate ?? 0);
-                        const isLow = Number.isFinite(passRate) && passRate > 0 && rateValue < passRate;
+                      {row.cells.map((attemptList, idx) => {
+                        const sessionItem = (resultContext.type === "daily"
+                          ? dailyResultsMatrix.sessions
+                          : modelResultsMatrix.sessions)[idx];
+                        if (!attemptList?.length) return <td key={`daily-cell-${row.student.id}-${idx}`}>—</td>;
+                        const passRate = Number(sessionItem?.linkedTest?.pass_rate ?? 0);
+                        const cellKey = `${row.student.id}:${sessionItem.id}`;
+                        const extraAttempts = attemptList.slice(1);
+                        const visibleAttempts = expandedResultCells[cellKey] ? attemptList : attemptList.slice(0, 1);
                         return (
                           <td
                             key={`daily-cell-${row.student.id}-${idx}`}
                             className="daily-score-cell"
-                            onClick={() => openAttemptDetail(attempt)}
                           >
-                            <button
-                              className={`daily-score-btn ${isLow ? "low" : ""}`}
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openAttemptDetail(attempt);
-                              }}
-                            >
-                              {label}
-                            </button>
+                            <div className="daily-score-stack">
+                              {visibleAttempts.map((attempt, attemptIdx) => {
+                                const rateValue = getScoreRate(attempt);
+                                const label = `${(rateValue * 100).toFixed(1)}%`;
+                                const isLow = Number.isFinite(passRate) && passRate > 0 && rateValue < passRate;
+                                const tabLeftCount = getTabLeftCount(attempt);
+                                return (
+                                  <button
+                                    key={`daily-cell-${row.student.id}-${idx}-${attempt.id || attemptIdx}`}
+                                    className={`daily-score-btn ${isLow ? "low" : ""}`}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAttemptDetail(attempt);
+                                    }}
+                                  >
+                                    <span>{label}</span>
+                                    {tabLeftCount > 0 ? (
+                                      <span className="daily-score-meta daily-score-meta-alert">
+                                        Tabs left: {tabLeftCount}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                );
+                              })}
+                              {extraAttempts.length ? (
+                                <button
+                                  className="daily-more-btn"
+                                  type="button"
+                                  onClick={() => {
+                                    setExpandedResultCells((prev) => ({
+                                      ...prev,
+                                      [cellKey]: !prev[cellKey],
+                                    }));
+                                  }}
+                                >
+                                  {expandedResultCells[cellKey]
+                                    ? "Hide extra attempts"
+                                    : `${extraAttempts.length} more attempt${extraAttempts.length > 1 ? "s" : ""}`}
+                                </button>
+                              ) : null}
+                            </div>
                           </td>
                         );
                       })}
@@ -8471,6 +8553,8 @@ export default function AdminConsole({
                       <br />
                       score: <b>{selectedAttempt.correct}/{selectedAttempt.total}</b> (
                       {(getScoreRate(selectedAttempt) * 100).toFixed(1)}%)
+                      <br />
+                      tab left count: <b>{getTabLeftCount(selectedAttempt)}</b>
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
