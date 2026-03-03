@@ -640,6 +640,73 @@ body { padding: 0; }
   line-height: 1.15;
 }
 
+.student-warning-history {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.student-warning-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.student-warning-history-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.student-warning-card {
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fffdf2 0%, #fff7d6 100%);
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+}
+
+.student-warning-card-title {
+  font-weight: 900;
+  color: #854d0e;
+}
+
+.student-warning-card-meta {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.student-warning-card-summary {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.35;
+}
+
+.student-list-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.student-warning-badge {
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .session-analysis-list {
   display: grid;
   gap: 10px;

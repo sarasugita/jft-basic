@@ -268,6 +268,99 @@ function getRankingDrafts(periods) {
   return drafts;
 }
 
+function getDefaultStudentWarningForm(filters = {}) {
+  return {
+    title: "",
+    from: filters.from ?? "",
+    to: filters.to ?? "",
+    maxAttendance: "",
+    minUnexcused: "",
+    maxModelAvg: "",
+    maxDailyAvg: "",
+  };
+}
+
+function isMissingStudentWarningsTableError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /(student_warnings|student_warning_recipients)/i.test(text) && /does not exist/i.test(text);
+}
+
+function summarizeWarningCriteria(criteria) {
+  const items = [];
+  if (criteria?.maxAttendance !== "" && criteria?.maxAttendance != null) {
+    items.push(`Attendance <= ${criteria.maxAttendance}%`);
+  }
+  if (criteria?.minUnexcused !== "" && criteria?.minUnexcused != null) {
+    items.push(`Unexcused >= ${criteria.minUnexcused}`);
+  }
+  if (criteria?.maxModelAvg !== "" && criteria?.maxModelAvg != null) {
+    items.push(`Model Avg <= ${criteria.maxModelAvg}%`);
+  }
+  if (criteria?.maxDailyAvg !== "" && criteria?.maxDailyAvg != null) {
+    items.push(`Daily Avg <= ${criteria.maxDailyAvg}%`);
+  }
+  if (criteria?.from || criteria?.to) {
+    items.push(`Range: ${criteria.from || "Any"} to ${criteria.to || "Any"}`);
+  }
+  return items;
+}
+
+function getStudentWarningIssues(row, criteria) {
+  const issues = [];
+  const maxAttendance = criteria.maxAttendance === "" ? null : Number(criteria.maxAttendance);
+  const minUnexcused = criteria.minUnexcused === "" ? null : Number(criteria.minUnexcused);
+  const maxModelAvg = criteria.maxModelAvg === "" ? null : Number(criteria.maxModelAvg);
+  const maxDailyAvg = criteria.maxDailyAvg === "" ? null : Number(criteria.maxDailyAvg);
+
+  if (maxAttendance != null) {
+    const rate = row.attendanceRate ?? 0;
+    if (rate <= maxAttendance) issues.push(`Attendance ${rate.toFixed(1)}% <= ${maxAttendance}%`);
+  }
+  if (minUnexcused != null && (row.unexcused ?? 0) >= minUnexcused) {
+    issues.push(`Unexcused ${row.unexcused ?? 0} >= ${minUnexcused}`);
+  }
+  if (maxModelAvg != null) {
+    const value = row.modelAvg ?? 0;
+    if (value <= maxModelAvg) issues.push(`Model Avg ${value.toFixed(1)}% <= ${maxModelAvg}%`);
+  }
+  if (maxDailyAvg != null) {
+    const value = row.dailyAvg ?? 0;
+    if (value <= maxDailyAvg) issues.push(`Daily Avg ${value.toFixed(1)}% <= ${maxDailyAvg}%`);
+  }
+  return issues;
+}
+
+function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, testMetaByVersion) {
+  const byStudent = new Map();
+  (attemptsList ?? []).forEach((attempt) => {
+    if (!attempt?.student_id) return;
+    const list = byStudent.get(attempt.student_id) || [];
+    list.push(attempt);
+    byStudent.set(attempt.student_id, list);
+  });
+
+  return (sortedStudents ?? []).map((student) => {
+    const attendance = attendanceMap?.[student.id] || { total: 0, present: 0, unexcused: 0, rate: null };
+    const studentAttempts = byStudent.get(student.id) || [];
+    const modelScores = [];
+    const dailyScores = [];
+    studentAttempts.forEach((attempt) => {
+      const meta = testMetaByVersion?.[attempt.test_version];
+      if (!meta?.type) return;
+      const rate = getScoreRate(attempt) * 100;
+      if (meta.type === "mock") modelScores.push(rate);
+      if (meta.type === "daily") dailyScores.push(rate);
+    });
+    return {
+      student,
+      attendanceRate: attendance.rate,
+      unexcused: attendance.unexcused ?? 0,
+      modelAvg: modelScores.length ? modelScores.reduce((acc, rate) => acc + rate, 0) / modelScores.length : null,
+      dailyAvg: dailyScores.length ? dailyScores.reduce((acc, rate) => acc + rate, 0) / dailyScores.length : null,
+    };
+  });
+}
+
 function toCsv(rows) {
   const escapeCell = (v) => {
     const s = String(v ?? "");
@@ -1447,7 +1540,14 @@ export default function AdminConsole({
     minModelAvg: "",
     minDailyAvg: ""
   });
-  const [studentListDailyCategory, setStudentListDailyCategory] = useState("");
+  const [studentWarnings, setStudentWarnings] = useState([]);
+  const [studentWarningsLoading, setStudentWarningsLoading] = useState(false);
+  const [studentWarningsMsg, setStudentWarningsMsg] = useState("");
+  const [studentWarningIssueOpen, setStudentWarningIssueOpen] = useState(false);
+  const [studentWarningIssueSaving, setStudentWarningIssueSaving] = useState(false);
+  const [studentWarningIssueMsg, setStudentWarningIssueMsg] = useState("");
+  const [studentWarningForm, setStudentWarningForm] = useState(() => getDefaultStudentWarningForm());
+  const [selectedStudentWarning, setSelectedStudentWarning] = useState(null);
   const [studentListAttendanceMap, setStudentListAttendanceMap] = useState({});
   const [studentListAttempts, setStudentListAttempts] = useState([]);
   const [studentListLoading, setStudentListLoading] = useState(false);
@@ -1623,6 +1723,17 @@ export default function AdminConsole({
     () => students.find((s) => s.id === selectedStudentId) ?? null,
     [students, selectedStudentId]
   );
+
+  const studentWarningCounts = useMemo(() => {
+    const map = {};
+    (studentWarnings ?? []).forEach((warning) => {
+      (warning.recipients ?? []).forEach((recipient) => {
+        if (!recipient?.student_id) return;
+        map[recipient.student_id] = (map[recipient.student_id] ?? 0) + 1;
+      });
+    });
+    return map;
+  }, [studentWarnings]);
 
   useEffect(() => {
     if (!studentInfoOpen) {
@@ -2227,46 +2338,7 @@ export default function AdminConsole({
   }, [activeStudents, attendanceFilter, attendanceRangeColumns, attendanceEntriesByDay]);
 
   const studentListRows = useMemo(() => {
-    const byStudent = new Map();
-    (studentListAttempts ?? []).forEach((a) => {
-      if (!a?.student_id) return;
-      const list = byStudent.get(a.student_id) || [];
-      list.push(a);
-      byStudent.set(a.student_id, list);
-    });
-
-    const dailyCategory = studentListDailyCategory || "__all__";
-    const rows = (sortedStudents ?? []).map((s) => {
-      const att = studentListAttendanceMap[s.id] || { total: 0, present: 0, unexcused: 0, rate: null };
-      const attemptsList = byStudent.get(s.id) || [];
-      const modelScores = [];
-      const dailyScores = [];
-      attemptsList.forEach((a) => {
-        const meta = testMetaByVersion[a.test_version];
-        if (!meta?.type) return;
-        const rate = getScoreRate(a) * 100;
-        if (meta.type === "mock") {
-          modelScores.push(rate);
-        } else if (meta.type === "daily") {
-          if (dailyCategory === "__all__" || meta.category === dailyCategory) {
-            dailyScores.push(rate);
-          }
-        }
-      });
-      const modelAvg = modelScores.length
-        ? modelScores.reduce((acc, r) => acc + r, 0) / modelScores.length
-        : null;
-      const dailyAvg = dailyScores.length
-        ? dailyScores.reduce((acc, r) => acc + r, 0) / dailyScores.length
-        : null;
-      return {
-        student: s,
-        attendanceRate: att.rate,
-        unexcused: att.unexcused ?? 0,
-        modelAvg,
-        dailyAvg
-      };
-    });
+    const rows = buildStudentMetricRows(sortedStudents, studentListAttendanceMap, studentListAttempts, testMetaByVersion);
 
     const maxAttendance =
       studentListFilters.maxAttendance === "" ? null : Number(studentListFilters.maxAttendance);
@@ -2297,7 +2369,6 @@ export default function AdminConsole({
     sortedStudents,
     studentListAttendanceMap,
     studentListAttempts,
-    studentListDailyCategory,
     studentListFilters,
     testMetaByVersion
   ]);
@@ -2454,6 +2525,7 @@ export default function AdminConsole({
   useEffect(() => {
     if (activeTab !== "students") return;
     fetchStudentListMetrics();
+    fetchStudentWarnings();
   }, [activeSchoolId, activeTab, studentListFilters.from, studentListFilters.to]);
 
   useEffect(() => {
@@ -2467,13 +2539,6 @@ export default function AdminConsole({
     fetchRankingPeriods();
     if (!students.length) fetchStudents();
   }, [activeSchoolId, activeTab]);
-
-  useEffect(() => {
-    if (!dailyCategories.length) return;
-    if (!studentListDailyCategory) {
-      setStudentListDailyCategory("__all__");
-    }
-  }, [dailyCategories, studentListDailyCategory]);
 
   useEffect(() => {
     if (!session || !canUseAdminConsole) return;
@@ -2538,6 +2603,9 @@ export default function AdminConsole({
     setStudentAttendance([]);
     setAbsenceApplications([]);
     setAnnouncements([]);
+    setStudentWarnings([]);
+    setStudentWarningsMsg("");
+    setSelectedStudentWarning(null);
   }, [activeSchoolId]);
 
   useEffect(() => {
@@ -3052,6 +3120,207 @@ export default function AdminConsole({
       setStudentListAttempts(attemptsData ?? []);
     }
     setStudentListLoading(false);
+  }
+
+  async function fetchStudentWarnings() {
+    if (!activeSchoolId) {
+      setStudentWarnings([]);
+      setStudentWarningsLoading(false);
+      setStudentWarningsMsg("");
+      return;
+    }
+    setStudentWarningsLoading(true);
+    setStudentWarningsMsg("");
+    const { data: warningRows, error: warningError } = await supabase
+      .from("student_warnings")
+      .select("id, school_id, title, criteria, student_count, created_by, created_at")
+      .eq("school_id", activeSchoolId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (warningError) {
+      if (!isMissingStudentWarningsTableError(warningError)) {
+        console.error("student warnings fetch error:", warningError);
+        setStudentWarningsMsg(`Warnings load failed: ${warningError.message}`);
+      }
+      setStudentWarnings([]);
+      setStudentWarningsLoading(false);
+      return;
+    }
+    const warningsList = warningRows ?? [];
+    if (!warningsList.length) {
+      setStudentWarnings([]);
+      setStudentWarningsLoading(false);
+      return;
+    }
+    const warningIds = warningsList.map((row) => row.id);
+    const { data: recipientRows, error: recipientError } = await supabase
+      .from("student_warning_recipients")
+      .select("id, warning_id, student_id, issues, created_at")
+      .in("warning_id", warningIds);
+    if (recipientError) {
+      if (!isMissingStudentWarningsTableError(recipientError)) {
+        console.error("student warning recipients fetch error:", recipientError);
+        setStudentWarningsMsg(`Warnings load failed: ${recipientError.message}`);
+      }
+      setStudentWarnings([]);
+      setStudentWarningsLoading(false);
+      return;
+    }
+    const recipientsByWarning = new Map();
+    (recipientRows ?? []).forEach((recipient) => {
+      const list = recipientsByWarning.get(recipient.warning_id) || [];
+      list.push({
+        ...recipient,
+        issues: Array.isArray(recipient.issues) ? recipient.issues : [],
+      });
+      recipientsByWarning.set(recipient.warning_id, list);
+    });
+    setStudentWarnings(
+      warningsList.map((warning) => ({
+        ...warning,
+        criteria: warning.criteria && typeof warning.criteria === "object" ? warning.criteria : {},
+        recipients: (recipientsByWarning.get(warning.id) || []).sort((a, b) => String(a.student_id).localeCompare(String(b.student_id))),
+      }))
+    );
+    setStudentWarningsLoading(false);
+  }
+
+  async function loadStudentWarningMetrics(criteria) {
+    const { from, to } = criteria;
+    let daysQuery = supabase
+      .from("attendance_days")
+      .select("id, day_date")
+      .eq("school_id", activeSchoolId);
+    if (from) daysQuery = daysQuery.gte("day_date", from);
+    if (to) daysQuery = daysQuery.lte("day_date", to);
+    const { data: daysData, error: daysError } = await daysQuery;
+    if (daysError) throw daysError;
+
+    let attendanceMap = {};
+    const dayIds = (daysData ?? []).map((day) => day.id);
+    if (dayIds.length) {
+      const { data: entriesData, error: entriesError } = await supabase
+        .from("attendance_entries")
+        .select("day_id, student_id, status")
+        .in("day_id", dayIds);
+      if (entriesError) throw entriesError;
+      attendanceMap = {};
+      (entriesData ?? []).forEach((row) => {
+        if (!row?.student_id) return;
+        const stats = attendanceMap[row.student_id] || { total: 0, present: 0, unexcused: 0 };
+        if (row.status) stats.total += 1;
+        if (row.status === "P" || row.status === "L") stats.present += 1;
+        if (row.status === "A") stats.unexcused += 1;
+        attendanceMap[row.student_id] = stats;
+      });
+      Object.keys(attendanceMap).forEach((id) => {
+        const stats = attendanceMap[id];
+        stats.rate = stats.total ? (stats.present / stats.total) * 100 : null;
+      });
+    }
+
+    const buildAttemptsQuery = (fields) => {
+      let query = supabase
+        .from("attempts")
+        .select(fields)
+        .eq("school_id", activeSchoolId)
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      if (from) query = query.gte("created_at", new Date(`${from}T00:00:00`).toISOString());
+      if (to) query = query.lte("created_at", new Date(`${to}T23:59:59`).toISOString());
+      return query;
+    };
+    let { data: attemptsData, error: attemptsError } = await buildAttemptsQuery(
+      "id, student_id, test_version, correct, total, score_rate, created_at, ended_at, tab_left_count"
+    );
+    if (attemptsError && isMissingTabLeftCountError(attemptsError)) {
+      ({ data: attemptsData, error: attemptsError } = await buildAttemptsQuery(
+        "id, student_id, test_version, correct, total, score_rate, created_at, ended_at"
+      ));
+    }
+    if (attemptsError) throw attemptsError;
+
+    return buildStudentMetricRows(sortedStudents, attendanceMap, attemptsData ?? [], testMetaByVersion);
+  }
+
+  async function issueStudentWarning() {
+    if (!activeSchoolId) {
+      setStudentWarningIssueMsg("Select a school.");
+      return;
+    }
+    setStudentWarningIssueSaving(true);
+    setStudentWarningIssueMsg("");
+    try {
+      const criteria = {
+        title: String(studentWarningForm.title ?? "").trim(),
+        from: studentWarningForm.from || "",
+        to: studentWarningForm.to || "",
+        maxAttendance: studentWarningForm.maxAttendance === "" ? "" : Number(studentWarningForm.maxAttendance),
+        minUnexcused: studentWarningForm.minUnexcused === "" ? "" : Number(studentWarningForm.minUnexcused),
+        maxModelAvg: studentWarningForm.maxModelAvg === "" ? "" : Number(studentWarningForm.maxModelAvg),
+        maxDailyAvg: studentWarningForm.maxDailyAvg === "" ? "" : Number(studentWarningForm.maxDailyAvg),
+      };
+      const rows = await loadStudentWarningMetrics(criteria);
+      const matched = rows
+        .filter((row) => !row.student?.is_withdrawn)
+        .map((row) => ({ row, issues: getStudentWarningIssues(row, criteria) }))
+        .filter((item) => item.issues.length > 0);
+      if (!matched.length) {
+        setStudentWarningIssueMsg("No students matched the selected warning criteria.");
+        setStudentWarningIssueSaving(false);
+        return;
+      }
+      const criteriaSummary = summarizeWarningCriteria(criteria);
+      const title =
+        criteria.title ||
+        (criteriaSummary.length
+          ? `Warning: ${criteriaSummary[0]}`
+          : `Warning issued on ${new Date().toLocaleDateString()}`);
+      const { data: warningRow, error: warningError } = await supabase
+        .from("student_warnings")
+        .insert({
+          school_id: activeSchoolId,
+          title,
+          criteria: {
+            ...criteria,
+            title: undefined,
+            summary: criteriaSummary,
+          },
+          student_count: matched.length,
+          created_by: session?.user?.id ?? null,
+        })
+        .select("id")
+        .single();
+      if (warningError) throw warningError;
+
+      const recipientsPayload = matched.map(({ row, issues }) => ({
+        warning_id: warningRow.id,
+        school_id: activeSchoolId,
+        student_id: row.student.id,
+        issues,
+      }));
+      const { error: recipientsError } = await supabase
+        .from("student_warning_recipients")
+        .insert(recipientsPayload);
+      if (recipientsError) throw recipientsError;
+
+      setStudentWarningIssueOpen(false);
+      setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters));
+      setStudentWarningIssueMsg("");
+      setStudentMsg(`Issued warning to ${matched.length} student${matched.length > 1 ? "s" : ""}.`);
+      await fetchStudentWarnings();
+    } catch (error) {
+      if (!isMissingStudentWarningsTableError(error)) {
+        console.error("issue student warning error:", error);
+      }
+      setStudentWarningIssueMsg(
+        isMissingStudentWarningsTableError(error)
+          ? "Warning tables are not available yet. Apply the latest Supabase migration first."
+          : `Issue warning failed: ${error.message || error}`
+      );
+    } finally {
+      setStudentWarningIssueSaving(false);
+    }
   }
 
   async function toggleWithdrawn(student, nextValue) {
@@ -6320,6 +6589,16 @@ export default function AdminConsole({
                   <div className="admin-subtitle">Student list and performance overview.</div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => {
+                      setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters));
+                      setStudentWarningIssueMsg("");
+                      setStudentWarningIssueOpen(true);
+                    }}
+                  >
+                    Issue Warning
+                  </button>
                   <button className="btn btn-primary" onClick={() => setInviteOpen(true)}>Add New Student</button>
                   <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
                   <button className="btn" onClick={() => fetchStudentListMetrics()}>Refresh Metrics</button>
@@ -6386,18 +6665,38 @@ export default function AdminConsole({
                     onChange={(e) => setStudentListFilters((s) => ({ ...s, minDailyAvg: e.target.value }))}
                   />
                 </div>
-                <div className="field">
-                  <label>Daily Category</label>
-                  <select
-                    value={studentListDailyCategory}
-                    onChange={(e) => setStudentListDailyCategory(e.target.value)}
-                  >
-                    <option value="__all__">All Categories</option>
-                    {dailyCategories.map((c) => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
+              </div>
+
+              <div className="student-warning-history">
+                <div className="student-warning-history-head">
+                  <div className="admin-title" style={{ fontSize: 18 }}>Issued Warnings</div>
+                  {studentWarningsLoading ? <div className="admin-help">Loading warnings...</div> : null}
                 </div>
+                <div className="student-warning-history-list">
+                  {studentWarnings.map((warning) => {
+                    const summary = summarizeWarningCriteria(warning.criteria);
+                    return (
+                      <button
+                        key={warning.id}
+                        type="button"
+                        className="student-warning-card"
+                        onClick={() => setSelectedStudentWarning(warning)}
+                      >
+                        <div className="student-warning-card-title">{warning.title || "Warning"}</div>
+                        <div className="student-warning-card-meta">
+                          {formatDateTime(warning.created_at)} · {warning.student_count || warning.recipients?.length || 0} student{(warning.student_count || warning.recipients?.length || 0) === 1 ? "" : "s"}
+                        </div>
+                        <div className="student-warning-card-summary">
+                          {(summary.length ? summary : ["No criteria summary"]).join(" / ")}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {!studentWarningsLoading && !studentWarnings.length ? (
+                    <div className="admin-help">No warnings issued yet.</div>
+                  ) : null}
+                </div>
+                {studentWarningsMsg ? <div className="admin-msg">{studentWarningsMsg}</div> : null}
               </div>
 
               <div className="admin-table-wrap" style={{ marginTop: 10 }}>
@@ -6433,7 +6732,16 @@ export default function AdminConsole({
                           className={s.is_withdrawn ? "row-withdrawn" : ""}
                         >
                           <td>{s.student_code ?? ""}</td>
-                          <td>{s.display_name ?? ""}</td>
+                          <td>
+                            <div className="student-list-name-cell">
+                              <span>{s.display_name ?? ""}</span>
+                              {studentWarningCounts[s.id] ? (
+                                <span className="student-warning-badge" title={`${studentWarningCounts[s.id]} warning(s) issued`}>
+                                  !
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
                           <td>{s.email ?? ""}</td>
                           <td>{rateLabel}</td>
                           <td>{row.unexcused ?? 0}</td>
@@ -6849,6 +7157,150 @@ export default function AdminConsole({
                   <div className="admin-msg">{studentAttendanceMsg}</div>
                 </>
               ) : null}
+            </div>
+          ) : null}
+
+          {studentWarningIssueOpen ? (
+            <div className="admin-modal-overlay" onClick={() => setStudentWarningIssueOpen(false)}>
+              <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Issue Warning</div>
+                  <button className="admin-modal-close" onClick={() => setStudentWarningIssueOpen(false)} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+                <div className="admin-form" style={{ marginTop: 10 }}>
+                  <div className="field">
+                    <label>Title (optional)</label>
+                    <input
+                      value={studentWarningForm.title}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, title: e.target.value }))}
+                      placeholder="Warning title"
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Date From</label>
+                    <input
+                      type="date"
+                      value={studentWarningForm.from}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, from: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Date To</label>
+                    <input
+                      type="date"
+                      value={studentWarningForm.to}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, to: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Attendance % (≤)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={studentWarningForm.maxAttendance}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxAttendance: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Unexcused (≥)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={studentWarningForm.minUnexcused}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, minUnexcused: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Model Avg % (≤)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={studentWarningForm.maxModelAvg}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxModelAvg: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Daily Avg % (≤)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={studentWarningForm.maxDailyAvg}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxDailyAvg: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="admin-help" style={{ marginTop: 10 }}>
+                  Students are included if they match any selected warning threshold.
+                </div>
+                {studentWarningIssueMsg ? <div className="admin-msg">{studentWarningIssueMsg}</div> : null}
+                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button className="btn btn-primary" onClick={issueStudentWarning} disabled={studentWarningIssueSaving}>
+                    {studentWarningIssueSaving ? "Issuing..." : "Issue Warning"}
+                  </button>
+                  <button className="btn" onClick={() => setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters))}>
+                    Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {selectedStudentWarning ? (
+            <div className="admin-modal-overlay" onClick={() => setSelectedStudentWarning(null)}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div>
+                    <div className="admin-title">{selectedStudentWarning.title || "Warning"}</div>
+                    <div className="admin-help" style={{ marginTop: 6 }}>
+                      {formatDateTime(selectedStudentWarning.created_at)} · {selectedStudentWarning.student_count || selectedStudentWarning.recipients?.length || 0} student{(selectedStudentWarning.student_count || selectedStudentWarning.recipients?.length || 0) === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <button className="admin-modal-close" onClick={() => setSelectedStudentWarning(null)} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+                <div className="admin-help" style={{ marginTop: 10 }}>
+                  {(summarizeWarningCriteria(selectedStudentWarning.criteria).length
+                    ? summarizeWarningCriteria(selectedStudentWarning.criteria)
+                    : ["No criteria summary"]
+                  ).join(" / ")}
+                </div>
+                <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+                  <table className="admin-table" style={{ minWidth: 760 }}>
+                    <thead>
+                      <tr>
+                        <th>Code</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Issues</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedStudentWarning.recipients ?? []).map((recipient) => {
+                        const student = students.find((item) => item.id === recipient.student_id) ?? null;
+                        return (
+                          <tr key={`warning-recipient-${recipient.id}`}>
+                            <td>{student?.student_code ?? ""}</td>
+                            <td>{student?.display_name ?? recipient.student_id}</td>
+                            <td>{student?.email ?? ""}</td>
+                            <td>{(recipient.issues ?? []).join(" / ") || "-"}</td>
+                          </tr>
+                        );
+                      })}
+                      {!(selectedStudentWarning.recipients ?? []).length ? (
+                        <tr>
+                          <td colSpan={4}>No recipients found.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           ) : null}
         </div>

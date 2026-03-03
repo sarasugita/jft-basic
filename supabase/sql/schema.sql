@@ -259,3 +259,33 @@ create unique index if not exists ranking_entries_period_student_key
 
 create index if not exists ranking_entries_period_rank_idx
   on public.ranking_entries (period_id, rank_position);
+
+-- student warnings
+create table if not exists public.student_warnings (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  title text not null,
+  criteria jsonb not null default '{}'::jsonb,
+  student_count integer not null default 0,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists student_warnings_school_idx
+  on public.student_warnings (school_id, created_at desc);
+
+create table if not exists public.student_warning_recipients (
+  id uuid primary key default gen_random_uuid(),
+  warning_id uuid not null references public.student_warnings(id) on delete cascade,
+  school_id uuid not null references public.schools(id) on delete cascade,
+  student_id uuid not null references public.profiles(id) on delete cascade,
+  issues jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  unique (warning_id, student_id)
+);
+
+create index if not exists student_warning_recipients_warning_idx
+  on public.student_warning_recipients (warning_id);
+
+create index if not exists student_warning_recipients_student_idx
+  on public.student_warning_recipients (student_id);
