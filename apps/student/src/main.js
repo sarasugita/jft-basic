@@ -108,6 +108,7 @@ let resultDetailState = {
   open: false,
   mode: "",
   subTab: "score",
+  sectionFilter: "",
   attempt: null,
   loading: false,
   error: "",
@@ -563,6 +564,7 @@ async function refreshAuthState() {
   if (!state.linkLoginRequired) {
     state.requireLogin = false;
     if (state.phase === "login") {
+      state.studentTab = "home";
       state.phase = "intro";
       saveState();
     }
@@ -1361,6 +1363,7 @@ function renderLogin(app) {
       msgEl.textContent = error.message;
       return;
     }
+    state.studentTab = "home";
     state.requireLogin = false;
     state.linkLoginRequired = false;
     state.phase = "intro";
@@ -2757,6 +2760,7 @@ function renderTestSelect(app) {
           const showAnswers = shouldShowAnswers(attempt);
           const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
           const detailRows = buildAttemptDetailRows(attempt, questionsList);
+          const sectionOptions = getAvailableSections(detailRows);
           const summary = buildSectionSummary(detailRows);
           const detailRate = getScoreRateFromAttempt(attempt);
           const detailPassRate = getPassRateForVersion(attempt.test_version);
@@ -2768,6 +2772,28 @@ function renderTestSelect(app) {
               ? `${formatOrdinal(detailRank)} of ${detailTotalRank} students`
               : "—";
           const subTab = resultDetailState.subTab || "score";
+          const sectionFilterRaw = resultDetailState.sectionFilter || "";
+          const sectionFilter = sectionOptions.includes(sectionFilterRaw) ? sectionFilterRaw : "";
+          const filteredDetailRows = sectionFilter
+            ? detailRows.filter((row) => row.section === sectionFilter)
+            : detailRows;
+          const detailFilterHtml =
+            subTab === "all" || subTab === "wrong"
+              ? `
+                <div class="student-detail-filter">
+                  <label for="modelSectionFilter">Section</label>
+                  <select id="modelSectionFilter">
+                    <option value="" ${sectionFilter ? "" : "selected"}>All Sections</option>
+                    ${sectionOptions
+                      .map(
+                        (section) =>
+                          `<option value="${escapeHtml(section)}" ${sectionFilter === section ? "selected" : ""}>${escapeHtml(section)}</option>`
+                      )
+                      .join("")}
+                  </select>
+                </div>
+              `
+              : "";
           let detailBody = "";
           if (resultDetailState.loading) {
             detailBody = `<div class="text-muted">Loading details...</div>`;
@@ -2819,7 +2845,13 @@ function renderTestSelect(app) {
                         .map(
                           (s) => `
                             <tr>
-                              <td>${escapeHtml(s.section)}</td>
+                              <td>
+                                <span class="score-section-label">
+                                  ${getSectionLabelLines(s.section)
+                                    .map((line) => `<span>${escapeHtml(line)}</span>`)
+                                    .join("")}
+                                </span>
+                              </td>
                               <td>${s.correct}</td>
                               <td>${s.total}</td>
                               <td>${(s.rate * 100).toFixed(1)}%</td>
@@ -2833,12 +2865,12 @@ function renderTestSelect(app) {
               `
               : `<div class="text-muted">No score data.</div>`;
           } else if (subTab === "wrong") {
-            const wrongRows = detailRows.filter((r) => !r.isCorrect);
+            const wrongRows = filteredDetailRows.filter((r) => !r.isCorrect);
             detailBody = wrongRows.length
               ? renderDetailTable(wrongRows, showAnswers)
               : `<div class="text-muted">No wrong questions.</div>`;
           } else {
-            detailBody = renderDetailTable(detailRows, showAnswers);
+            detailBody = renderDetailTable(filteredDetailRows, showAnswers);
           }
           return `
             <div class="student-detail-topbar">
@@ -2852,6 +2884,7 @@ function renderTestSelect(app) {
               <button class="student-detail-tab ${subTab === "wrong" ? "active" : ""}" data-model-detail-tab="wrong">Wrong Questions</button>
             </div>
             <div class="student-detail-body">
+              ${detailFilterHtml}
               ${detailBody}
             </div>
           `;
@@ -4030,6 +4063,7 @@ function renderTestSelect(app) {
         resultDetailState.open = true;
         resultDetailState.mode = "daily";
         resultDetailState.subTab = "score";
+        resultDetailState.sectionFilter = "";
         resultDetailState.attempt = attempt;
         resultDetailState.error = "";
         if (attempt.test_version) {
@@ -4049,6 +4083,7 @@ function renderTestSelect(app) {
         resultDetailState.open = true;
         resultDetailState.mode = "model";
         resultDetailState.subTab = "score";
+        resultDetailState.sectionFilter = "";
         resultDetailState.attempt = attempt;
         resultDetailState.error = "";
         if (attempt.test_version) {
@@ -4062,14 +4097,22 @@ function renderTestSelect(app) {
       btn.addEventListener("click", () => {
         const next = btn.dataset.modelDetailTab || "score";
         resultDetailState.subTab = next;
+        if (next === "score") resultDetailState.sectionFilter = "";
         render();
       });
+    });
+
+    app.querySelector("#modelSectionFilter")?.addEventListener("change", (event) => {
+      if (!(event.target instanceof HTMLSelectElement)) return;
+      resultDetailState.sectionFilter = event.target.value;
+      render();
     });
   }
 
   app.querySelector("#dailyResultBack")?.addEventListener("click", () => {
     resultDetailState.open = false;
     resultDetailState.mode = "";
+    resultDetailState.sectionFilter = "";
     resultDetailState.attempt = null;
     render();
   });
@@ -4077,6 +4120,7 @@ function renderTestSelect(app) {
   app.querySelector("#modelResultBack")?.addEventListener("click", () => {
     resultDetailState.open = false;
     resultDetailState.mode = "";
+    resultDetailState.sectionFilter = "";
     resultDetailState.attempt = null;
     render();
   });
@@ -4086,6 +4130,7 @@ function renderTestSelect(app) {
     resultDetailState.open = false;
     resultDetailState.mode = "";
     resultDetailState.subTab = "score";
+    resultDetailState.sectionFilter = "";
     resultDetailState.attempt = null;
     saveState();
     render();
@@ -4095,6 +4140,7 @@ function renderTestSelect(app) {
     resultDetailState.open = false;
     resultDetailState.mode = "";
     resultDetailState.subTab = "score";
+    resultDetailState.sectionFilter = "";
     resultDetailState.attempt = null;
     supabase.auth.signOut();
     state.requireLogin = true;
@@ -4414,6 +4460,20 @@ function buildSectionSummary(rows) {
   }));
 }
 
+function getSectionLabelLines(label) {
+  if (label === "Script and Vocabulary") return ["Script and", "Vocabulary"];
+  if (label === "Reading Comprehension") return ["Reading", "Comprehension"];
+  if (label === "Listening Comprehension") return ["Listening", "Comprehension"];
+  if (label === "Conversation and Expression") return ["Conversation and", "Expression"];
+  return String(label || "")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function getAvailableSections(rows) {
+  return Array.from(new Set((rows ?? []).map((row) => String(row.section || "").trim()).filter(Boolean)));
+}
+
 function buildRadarSvg(data) {
   if (!data.length) return "";
   const size = 220;
@@ -4441,17 +4501,26 @@ function buildRadarSvg(data) {
       return `<line x1="${center}" y1="${center}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="radar-axis" />`;
     })
     .join("");
-  const formatRadarLabel = (label) => {
-    if (label === "Reading Comprehension") return ["Reading", "Comprehension"];
-    if (label === "Conversation and Expression") return ["Conversation and", "Expression"];
-    return [label];
+  const getRadarLabelPosition = (label, angle) => {
+    let radius = maxR + 18;
+    let xOffset = 0;
+    if (label === "Reading Comprehension") {
+      radius = maxR + 4;
+      xOffset = 18;
+    } else if (label === "Conversation and Expression") {
+      radius = maxR + 4;
+      xOffset = -18;
+    }
+    return {
+      x: center + Math.cos(angle) * radius + xOffset,
+      y: center + Math.sin(angle) * radius,
+    };
   };
   const labels = data
     .map((d, i) => {
       const angle = -Math.PI / 2 + (2 * Math.PI * i) / data.length;
-      const x = center + Math.cos(angle) * (maxR + 18);
-      const y = center + Math.sin(angle) * (maxR + 18);
-      const lines = formatRadarLabel(d.label);
+      const { x, y } = getRadarLabelPosition(d.label, angle);
+      const lines = getSectionLabelLines(d.label);
       return `
         <text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="radar-label">
           ${lines

@@ -1101,6 +1101,29 @@ body { overflow-x: hidden; }
   gap: 12px;
 }
 
+.student-detail-filter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.student-detail-filter label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #6b7280;
+}
+
+.student-detail-filter select {
+  min-width: 150px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+}
+
 .student-score-summary {
   display: grid;
   gap: 6px;
@@ -1156,12 +1179,16 @@ body { overflow-x: hidden; }
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 8px 0;
+  padding: 4px 0;
+  margin-inline: -10px;
+  overflow: visible;
 }
 
 .attendance-radar {
-  width: min(260px, 100%);
+  width: min(320px, calc(100% + 20px));
   height: auto;
+  max-width: none;
+  overflow: visible;
 }
 
 .radar-grid {
@@ -1182,7 +1209,7 @@ body { overflow-x: hidden; }
 }
 
 .radar-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   fill: #374151;
   text-anchor: middle;
@@ -1191,6 +1218,53 @@ body { overflow-x: hidden; }
 
 .score-detail-table thead th {
   color: #6b7280;
+}
+
+.score-detail-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 0;
+}
+
+.score-detail-table th:nth-child(1),
+.score-detail-table td:nth-child(1) {
+  width: 42%;
+  padding-right: 2px;
+}
+
+.score-detail-table th:nth-child(2),
+.score-detail-table td:nth-child(2) {
+  width: 28px;
+  padding-left: 2px;
+  padding-right: 2px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.score-detail-table th:nth-child(3),
+.score-detail-table td:nth-child(3) {
+  width: 28px;
+  padding-left: 2px;
+  padding-right: 2px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.score-detail-table th:nth-child(4),
+.score-detail-table td:nth-child(4) {
+  width: 44px;
+  padding-left: 2px;
+  padding-right: 2px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.score-section-label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.15;
+  max-width: 100%;
 }
 
 .student-topbar {
@@ -2160,6 +2234,10 @@ button.student-application-view {
   min-width: 720px;
 }
 
+.detail-table.score-detail-table {
+  min-width: 0;
+}
+
 .detail-table .col-no,
 .detail-table .cell-no {
   width: 1%;
@@ -2466,6 +2544,52 @@ button.student-application-view {
 .attendance-record-card .detail-table td:nth-child(3) {
   width: auto;
 }
+
+@media (max-width: 520px) {
+  .student-detail-filter {
+    justify-content: stretch;
+  }
+
+  .student-detail-filter label {
+    display: none;
+  }
+
+  .student-detail-filter select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .detail-table.score-detail-table th,
+  .detail-table.score-detail-table td {
+    font-size: 12px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .detail-table.score-detail-table th:nth-child(1),
+  .detail-table.score-detail-table td:nth-child(1) {
+    width: 40%;
+    padding-left: 4px;
+    padding-right: 1px;
+  }
+
+  .detail-table.score-detail-table th:nth-child(2),
+  .detail-table.score-detail-table td:nth-child(2),
+  .detail-table.score-detail-table th:nth-child(3),
+  .detail-table.score-detail-table td:nth-child(3) {
+    width: 24px;
+    padding-left: 1px;
+    padding-right: 1px;
+  }
+
+  .detail-table.score-detail-table th:nth-child(4),
+  .detail-table.score-detail-table td:nth-child(4) {
+    width: 38px;
+    padding-left: 1px;
+    padding-right: 1px;
+  }
+}
+
 .question-area img {
   max-width: 100%;
   height: auto;

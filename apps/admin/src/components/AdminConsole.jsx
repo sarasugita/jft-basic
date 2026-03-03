@@ -260,6 +260,7 @@ function getRankingDrafts(periods) {
   (periods ?? []).forEach((period) => {
     if (!period?.id) return;
     drafts[period.id] = {
+      label: period.label ?? "",
       start_date: period.start_date ?? "",
       end_date: period.end_date ?? "",
     };
@@ -3207,11 +3208,56 @@ export default function AdminConsole({
     setRankingDrafts((prev) => ({
       ...prev,
       [periodId]: {
+        label: prev[periodId]?.label ?? "",
         start_date: prev[periodId]?.start_date ?? "",
         end_date: prev[periodId]?.end_date ?? "",
         [field]: value,
       }
     }));
+  }
+
+  async function saveRankingPeriodLabel(period) {
+    if (!period?.id) return;
+    const draft = rankingDrafts[period.id] ?? { label: "", start_date: "", end_date: "" };
+    const nextLabel = String(draft.label ?? "").trim();
+    const currentLabel = String(period.label ?? "").trim();
+    if (!nextLabel) {
+      setRankingMsg("Period name is required.");
+      setRankingDrafts((prev) => ({
+        ...prev,
+        [period.id]: {
+          label: currentLabel,
+          start_date: prev[period.id]?.start_date ?? period.start_date ?? "",
+          end_date: prev[period.id]?.end_date ?? period.end_date ?? "",
+        }
+      }));
+      return;
+    }
+    if (nextLabel === currentLabel) return;
+    const { error } = await supabase
+      .from("ranking_periods")
+      .update({
+        label: nextLabel,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", period.id);
+    if (error) {
+      console.error("ranking period label update error:", error);
+      setRankingMsg(`Save failed: ${error.message}`);
+      return;
+    }
+    setRankingPeriods((prev) =>
+      prev.map((item) => (item.id === period.id ? { ...item, label: nextLabel } : item))
+    );
+    setRankingDrafts((prev) => ({
+      ...prev,
+      [period.id]: {
+        label: nextLabel,
+        start_date: prev[period.id]?.start_date ?? period.start_date ?? "",
+        end_date: prev[period.id]?.end_date ?? period.end_date ?? "",
+      }
+    }));
+    setRankingMsg(`Saved ${nextLabel}.`);
   }
 
   async function addRankingPeriod() {
@@ -3239,9 +3285,14 @@ export default function AdminConsole({
 
   async function refreshRankingPeriod(period) {
     if (!period?.id) return;
-    const draft = rankingDrafts[period.id] ?? { start_date: "", end_date: "" };
+    const draft = rankingDrafts[period.id] ?? { label: "", start_date: "", end_date: "" };
+    const nextLabel = String(draft.label ?? "").trim();
+    if (!nextLabel) {
+      setRankingMsg("Period name is required.");
+      return;
+    }
     if (!draft.start_date || !draft.end_date) {
-      setRankingMsg(`Set both start and end dates for ${period.label}.`);
+      setRankingMsg(`Set both start and end dates for ${nextLabel}.`);
       return;
     }
     setRankingRefreshingId(period.id);
@@ -3249,6 +3300,7 @@ export default function AdminConsole({
     const { error: periodError } = await supabase
       .from("ranking_periods")
       .update({
+        label: nextLabel,
         start_date: draft.start_date,
         end_date: draft.end_date,
         updated_at: new Date().toISOString(),
@@ -3347,7 +3399,7 @@ export default function AdminConsole({
       }
     }
     setRankingRefreshingId("");
-    setRankingMsg(`Updated ${period.label}.`);
+    setRankingMsg(`Updated ${nextLabel}.`);
     await fetchRankingPeriods();
   }
 
@@ -6791,11 +6843,23 @@ export default function AdminConsole({
                 <tr>
                   <th rowSpan={2}>Rank</th>
                   {rankingPeriods.map((period) => {
-                    const draft = rankingDrafts[period.id] ?? { start_date: "", end_date: "" };
+                    const draft = rankingDrafts[period.id] ?? { label: period.label ?? "", start_date: "", end_date: "" };
                     return (
                       <th key={period.id} colSpan={2}>
                         <div className="ranking-period-head">
-                          <div className="ranking-period-title">{period.label}</div>
+                          <input
+                            type="text"
+                            value={draft.label}
+                            onChange={(e) => updateRankingDraft(period.id, "label", e.target.value)}
+                            onBlur={() => saveRankingPeriodLabel(period)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur();
+                            }}
+                            placeholder="Period name"
+                            aria-label={`Name for ${period.label}`}
+                            className="admin-input"
+                            style={{ minWidth: 0, width: "100%" }}
+                          />
                           <button
                             className="btn btn-primary"
                             type="button"
