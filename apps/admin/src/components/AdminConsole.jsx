@@ -498,6 +498,151 @@ function buildSectionSummary(rows) {
   }));
 }
 
+function getSectionLabelLines(label) {
+  if (label === "Script and Vocabulary") return ["Script and", "Vocabulary"];
+  if (label === "Reading Comprehension") return ["Reading", "Comprehension"];
+  if (label === "Listening Comprehension") return ["Listening", "Comprehension"];
+  if (label === "Conversation and Expression") return ["Conversation and", "Expression"];
+  return [String(label ?? "")];
+}
+
+function getOrderedSectionTitles(questionsList, extraTitles = []) {
+  const titles = Array.from(
+    new Set([
+      ...(questionsList ?? []).map((q) => getSectionTitle(q.sectionKey)).filter(Boolean),
+      ...(extraTitles ?? []).filter(Boolean),
+    ])
+  );
+  const ordered = (sections ?? [])
+    .map((section) => section?.title)
+    .filter((title) => titles.includes(title));
+  const leftovers = titles.filter((title) => !ordered.includes(title)).sort((a, b) => a.localeCompare(b));
+  return [...ordered, ...leftovers];
+}
+
+function buildSectionAverageRows(attemptsList, questionsList) {
+  if (!questionsList?.length || !attemptsList?.length) return [];
+  const baseRows = buildAttemptDetailRowsFromList({}, questionsList);
+  const baseSummary = buildSectionSummary(baseRows);
+  const sectionTitles = getOrderedSectionTitles(
+    questionsList,
+    baseSummary.map((row) => row.section)
+  );
+  return sectionTitles
+    .map((sectionTitle) => {
+      const baseRow = baseSummary.find((row) => row.section === sectionTitle);
+      const totalQuestions = Number(baseRow?.total ?? 0);
+      const stats = attemptsList.reduce(
+        (acc, attempt) => {
+          const summary = buildSectionSummary(buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList));
+          const row = summary.find((item) => item.section === sectionTitle);
+          acc.rateSum += Number(row?.rate ?? 0);
+          acc.correctSum += Number(row?.correct ?? 0);
+          return acc;
+        },
+        { rateSum: 0, correctSum: 0 }
+      );
+      return {
+        section: sectionTitle,
+        averageRate: stats.rateSum / attemptsList.length,
+        averageCorrect: stats.correctSum / attemptsList.length,
+        totalQuestions,
+      };
+    })
+    .filter((row) => row.totalQuestions > 0);
+}
+
+function buildSessionStudentRankingRows(attemptsList, questionsList, studentsList) {
+  if (!attemptsList?.length) return [];
+  const sectionAverageRows = buildSectionAverageRows(attemptsList, questionsList);
+  const sectionTitles = sectionAverageRows.map((row) => row.section);
+  const rows = attemptsList.map((attempt) => {
+    const student = (studentsList ?? []).find((item) => item.id === attempt.student_id) ?? null;
+    const detailRows = buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList);
+    const sectionSummary = buildSectionSummary(detailRows);
+    const sectionRates = Object.fromEntries(
+      sectionTitles.map((title) => [title, Number(sectionSummary.find((row) => row.section === title)?.rate ?? 0)])
+    );
+    return {
+      attempt,
+      student_id: attempt.student_id,
+      display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+      student_code: attempt.student_code || student?.student_code || "",
+      totalCorrect: Number(attempt?.correct ?? 0),
+      totalQuestions: Number(attempt?.total ?? 0),
+      totalRate: getScoreRate(attempt),
+      sectionRates,
+    };
+  });
+  rows.sort((a, b) => {
+    if (b.totalRate !== a.totalRate) return b.totalRate - a.totalRate;
+    if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
+    const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+    if (nameCompare !== 0) return nameCompare;
+    return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+  });
+  return rows.map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
+function buildSectionRadarSvg(data) {
+  if (!data?.length) return null;
+  const size = 300;
+  const center = size / 2;
+  const maxR = 96;
+  const steps = 4;
+  const points = data
+    .map((item, index) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * index) / data.length;
+      const r = maxR * Math.max(0, Math.min(1, Number(item?.value ?? 0)));
+      const x = center + Math.cos(angle) * r;
+      const y = center + Math.sin(angle) * r;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const grid = Array.from({ length: steps }, (_, index) => {
+    const r = (maxR * (index + 1)) / steps;
+    return <circle key={`grid-${r}`} cx={center} cy={center} r={r} className="session-radar-grid" />;
+  });
+  const axes = data.map((_, index) => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * index) / data.length;
+    const x = center + Math.cos(angle) * maxR;
+    const y = center + Math.sin(angle) * maxR;
+    return <line key={`axis-${index}`} x1={center} y1={center} x2={x} y2={y} className="session-radar-axis" />;
+  });
+  const labels = data.map((item, index) => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * index) / data.length;
+    let radius = maxR + 24;
+    let xOffset = 0;
+    if (item.label === "Reading Comprehension") {
+      radius = maxR + 10;
+      xOffset = 24;
+    } else if (item.label === "Conversation and Expression") {
+      radius = maxR + 10;
+      xOffset = -24;
+    }
+    const x = center + Math.cos(angle) * radius + xOffset;
+    const y = center + Math.sin(angle) * radius;
+    const lines = getSectionLabelLines(item.label);
+    return (
+      <text key={`label-${item.label}`} x={x} y={y} className="session-radar-label">
+        {lines.map((line, lineIndex) => (
+          <tspan key={`label-line-${item.label}-${lineIndex}`} x={x} dy={lineIndex === 0 ? "0" : "1.15em"}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    );
+  });
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} className="session-radar-chart" role="img" aria-label="Average section performance radar chart">
+      {grid}
+      {axes}
+      <polygon points={points} className="session-radar-shape" />
+      {labels}
+    </svg>
+  );
+}
+
 function getRowTimestamp(row) {
   const value = row?.ended_at || row?.created_at || row?.started_at || null;
   if (!value) return 0;
@@ -543,6 +688,18 @@ function buildQuestionAnalysisRows(attemptsList, questionsList) {
     ...row,
     rate: row.total ? row.correct / row.total : 0,
   }));
+}
+
+function formatOrdinal(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value ?? "");
+  const mod10 = num % 10;
+  const mod100 = num % 100;
+  let suffix = "th";
+  if (mod10 === 1 && mod100 !== 11) suffix = "st";
+  else if (mod10 === 2 && mod100 !== 12) suffix = "nd";
+  else if (mod10 === 3 && mod100 !== 13) suffix = "rd";
+  return `${num}${suffix}`;
 }
 
 function QuestionPreviewCard({ question, index }) {
@@ -1603,6 +1760,16 @@ export default function AdminConsole({
         return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
       });
   }, [sessionDetailLatestAttempts, students]);
+
+  const sessionDetailSectionAverages = useMemo(() => {
+    if (sessionDetail.type !== "mock") return [];
+    return buildSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
+  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions]);
+
+  const sessionDetailStudentRankingRows = useMemo(() => {
+    if (sessionDetail.type !== "mock") return [];
+    return buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, students);
+  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions, students]);
 
   const studentModelAttempts = useMemo(() => {
     return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
@@ -5396,6 +5563,7 @@ export default function AdminConsole({
 
   function renderSessionDetailView() {
     if (!selectedSessionDetail) return null;
+    const isMockSessionDetail = sessionDetail.type === "mock";
 
     const bestQuestions = sessionDetailQuestionAnalysis.slice(0, 5);
     const worstQuestions = [...sessionDetailQuestionAnalysis]
@@ -5404,6 +5572,16 @@ export default function AdminConsole({
         return String(a.qid).localeCompare(String(b.qid));
       })
       .slice(0, 5);
+    const sessionDetailTabs = [
+      ["questions", "Questions"],
+      ["attempts", "Attempts"],
+      ...(isMockSessionDetail ? [["studentRanking", "Student Ranking"]] : []),
+      ["analysis", "Result Analysis"],
+    ];
+    const analysisRadarData = sessionDetailSectionAverages.map((row) => ({
+      label: row.section,
+      value: row.averageRate,
+    }));
 
     return (
       <div className="session-detail-page">
@@ -5424,11 +5602,7 @@ export default function AdminConsole({
             </div>
           </div>
           <div className="admin-top-tabs">
-            {[
-              ["questions", "Questions"],
-              ["attempts", "Attempts"],
-              ["analysis", "Result Analysis"],
-            ].map(([key, label]) => (
+            {sessionDetailTabs.map(([key, label]) => (
               <button
                 key={`session-detail-tab-${key}`}
                 className={`admin-top-tab ${sessionDetailTab === key ? "active" : ""}`}
@@ -5553,6 +5727,54 @@ export default function AdminConsole({
           </div>
         ) : null}
 
+        {!sessionDetailLoading && !sessionDetailMsg && isMockSessionDetail && sessionDetailTab === "studentRanking" ? (
+          <div className="session-detail-section">
+            <div className="admin-table-wrap">
+              <table className="admin-table session-student-ranking-table" style={{ minWidth: Math.max(900, 420 + sessionDetailSectionAverages.length * 120) }}>
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Student</th>
+                    <th>Code</th>
+                    <th>Total Score</th>
+                    <th>Total %</th>
+                    {sessionDetailSectionAverages.map((section) => (
+                      <th key={`student-ranking-col-${section.section}`}>
+                        <span className="session-ranking-section-header">
+                          {getSectionLabelLines(section.section).map((line, index) => (
+                            <span key={`student-ranking-col-${section.section}-${index}`}>{line}</span>
+                          ))}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessionDetailStudentRankingRows.map((row) => (
+                    <tr key={`student-ranking-row-${row.student_id}`}>
+                      <td>{formatOrdinal(row.rank)}</td>
+                      <td>{row.display_name}</td>
+                      <td>{row.student_code || "—"}</td>
+                      <td>{row.totalCorrect}/{row.totalQuestions}</td>
+                      <td>{(row.totalRate * 100).toFixed(1)}%</td>
+                      {sessionDetailSectionAverages.map((section) => (
+                        <td key={`student-ranking-cell-${row.student_id}-${section.section}`}>
+                          {((row.sectionRates?.[section.section] ?? 0) * 100).toFixed(1)}%
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {!sessionDetailStudentRankingRows.length ? (
+                    <tr>
+                      <td colSpan={Math.max(5, 5 + sessionDetailSectionAverages.length)}>No ranking data available.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
         {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "analysis" ? (
           <div className="session-detail-section">
             <div className="admin-kpi session-detail-kpi">
@@ -5569,6 +5791,50 @@ export default function AdminConsole({
                 <div className="value">{sessionDetailOverview.passCount}/{sessionDetailOverview.count}</div>
               </div>
             </div>
+
+            {isMockSessionDetail ? (
+              <div className="session-detail-analysis-summary">
+                <div className="admin-panel">
+                  <div className="admin-title" style={{ fontSize: 18 }}>Average Section Performance</div>
+                  <div className="session-analysis-summary-grid">
+                    <div className="session-radar-wrap">
+                      {analysisRadarData.length ? (
+                        buildSectionRadarSvg(analysisRadarData)
+                      ) : (
+                        <div className="admin-help">No section average data yet.</div>
+                      )}
+                    </div>
+                    <div className="admin-table-wrap">
+                      <table className="admin-table session-section-average-table" style={{ minWidth: 520 }}>
+                        <thead>
+                          <tr>
+                            <th>Section</th>
+                            <th>Average %</th>
+                            <th>Average Correct No.</th>
+                            <th>Total Questions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessionDetailSectionAverages.map((row) => (
+                            <tr key={`session-section-average-${row.section}`}>
+                              <td>{row.section}</td>
+                              <td>{(row.averageRate * 100).toFixed(1)}%</td>
+                              <td>{row.averageCorrect.toFixed(2)}</td>
+                              <td>{row.totalQuestions}</td>
+                            </tr>
+                          ))}
+                          {!sessionDetailSectionAverages.length ? (
+                            <tr>
+                              <td colSpan={4}>No section average data available.</td>
+                            </tr>
+                          ) : null}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className="session-detail-analysis-grid">
               <div className="admin-panel">
