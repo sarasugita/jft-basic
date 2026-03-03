@@ -596,12 +596,16 @@ async function refreshAuthState() {
 
 async function fetchPublicTests() {
   testsState.error = "";
-  const { data, error } = await publicSupabase
+  const client = authState.session ? supabase : publicSupabase;
+  let query = client
     .from("tests")
     .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
-    .eq("is_public", true)
     .order("created_at", { ascending: false })
     .limit(100);
+  if (!authState.session) {
+    query = query.eq("is_public", true);
+  }
+  const { data, error } = await query;
   if (error) {
     testsState.list = [];
     const msg = error.message || "Failed to load tests.";
@@ -699,13 +703,31 @@ function getSessionTestType(session) {
   return test?.type || "";
 }
 
+function isRetakeSessionTitle(title) {
+  return String(title ?? "").trim().startsWith("[Retake]");
+}
+
+function getRetakeBaseTitle(title) {
+  return String(title ?? "").trim().replace(/^\[Retake\]\s*/i, "").trim();
+}
+
 function isRetakeSession(session) {
-  return Boolean(session?.retake_source_session_id);
+  return Boolean(session?.retake_source_session_id) || isRetakeSessionTitle(session?.title);
 }
 
 function getSourceSessionForRetake(session) {
-  if (!session?.retake_source_session_id) return null;
-  return testSessionsState.list.find((item) => item.id === session.retake_source_session_id) || null;
+  if (!session) return null;
+  if (session.retake_source_session_id) {
+    const direct = testSessionsState.list.find((item) => item.id === session.retake_source_session_id) || null;
+    if (direct) return direct;
+  }
+  if (!isRetakeSessionTitle(session.title)) return null;
+  const baseTitle = getRetakeBaseTitle(session.title);
+  return testSessionsState.list.find((item) => {
+    if (!item?.id || item.id === session.id) return false;
+    if (String(item.problem_set_id ?? "") !== String(session.problem_set_id ?? "")) return false;
+    return String(item.title ?? "").trim() === baseTitle;
+  }) || null;
 }
 
 function getBestAttemptForSession(sessionId) {
@@ -812,6 +834,49 @@ function getAttemptTitle(attempt) {
   }
   const test = testsState.list.find((t) => t.version === attempt?.test_version);
   return test?.title || attempt?.test_version || "Test";
+}
+
+function getAttemptSession(attempt) {
+  if (!attempt?.test_session_id) return null;
+  return testSessionsState.list.find((session) => session.id === attempt.test_session_id) || null;
+}
+
+function buildResultAttemptEntries(testType) {
+  const attempts = (studentResultsState.list ?? []).filter(
+    (attempt) => getAttemptTestType(attempt) === testType
+  );
+  const convertedSourceSessionIds = new Set();
+
+  attempts.forEach((attempt) => {
+    const session = getAttemptSession(attempt);
+    if (!isRetakeSession(session)) return;
+    const sourceSession = getSourceSessionForRetake(session);
+    if (!sourceSession?.id) return;
+    const passRate = getPassRateForVersion(sourceSession.problem_set_id || session.problem_set_id || attempt.test_version);
+    if (getScoreRateFromAttempt(attempt) >= passRate) {
+      convertedSourceSessionIds.add(sourceSession.id);
+    }
+  });
+
+  return attempts.map((attempt) => {
+    const session = getAttemptSession(attempt);
+    const sourceSession = isRetakeSession(session) ? getSourceSessionForRetake(session) : null;
+    const isRetake = Boolean(sourceSession?.id);
+    const actualPassRate = getPassRateForVersion(sourceSession?.problem_set_id || attempt.test_version);
+    const actualPass = getScoreRateFromAttempt(attempt) >= actualPassRate;
+    const convertedToPass = !isRetake && Boolean(session?.id) && convertedSourceSessionIds.has(session.id);
+    const hideFromFailedOnly = convertedToPass || (isRetake && Boolean(sourceSession?.id) && convertedSourceSessionIds.has(sourceSession.id));
+    return {
+      attempt,
+      session,
+      sourceSession,
+      isRetake,
+      actualPass,
+      convertedToPass,
+      hideFromFailedOnly,
+      effectivePass: actualPass || convertedToPass,
+    };
+  });
 }
 
 function shouldShowAnswers(attempt) {
@@ -2524,9 +2589,8 @@ function renderTestSelect(app) {
           return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
         }
 
-        const dailyAttempts = (studentResultsState.list ?? []).filter(
-          (attempt) => getAttemptTestType(attempt) === "daily"
-        );
+        const dailyAttemptEntries = buildResultAttemptEntries("daily");
+        const dailyAttempts = dailyAttemptEntries.map((entry) => entry.attempt);
         const dailyCategories = Array.from(
           new Set(
             (testsState.list ?? [])
@@ -2534,11 +2598,12 @@ function renderTestSelect(app) {
               .map((t) => getAttemptCategory({ test_version: t.version }))
           )
         ).filter(Boolean);
-        const categoryFilter = state.dailyResultsCategory || "";
+        const rawCategoryFilter = state.dailyResultsCategory || "";
+        const categoryFilter = dailyCategories.includes(rawCategoryFilter) ? rawCategoryFilter : "";
         const failedOnly = Boolean(state.dailyResultsFailedOnly);
-        const filteredAttempts = dailyAttempts.filter((attempt) => {
-          if (categoryFilter && getAttemptCategory(attempt) !== categoryFilter) return false;
-          if (failedOnly && getScoreRateFromAttempt(attempt) >= getPassRateForVersion(attempt.test_version)) return false;
+        const filteredAttemptEntries = dailyAttemptEntries.filter((entry) => {
+          if (categoryFilter && getAttemptCategory(entry.attempt) !== categoryFilter) return false;
+          if (failedOnly && (entry.hideFromFailedOnly || entry.actualPass)) return false;
           return true;
         });
 
@@ -2564,7 +2629,7 @@ function renderTestSelect(app) {
           `;
         }
 
-        if (!filteredAttempts.length) {
+        if (!filteredAttemptEntries.length) {
           return `<div class="text-muted">No daily test results yet.</div>`;
         }
 
@@ -2600,18 +2665,23 @@ function renderTestSelect(app) {
                 </tr>
               </thead>
               <tbody>
-                ${filteredAttempts
-                  .map((attempt) => {
+                ${filteredAttemptEntries
+                  .map((entry) => {
+                    const attempt = entry.attempt;
                     const rate = getScoreRateFromAttempt(attempt);
-                    const passRate = getPassRateForVersion(attempt.test_version);
-                    const isPass = rate >= passRate;
+                    const isPass = entry.effectivePass;
+                    const passLabel = entry.convertedToPass
+                      ? "Converted to Pass"
+                      : entry.actualPass
+                        ? "Pass"
+                        : "Fail";
                     return `
                       <tr class="student-results-row" data-daily-attempt-id="${attempt.id}">
                         <td>${escapeHtml(getAttemptDateLabel(attempt))}</td>
                         <td>${escapeHtml(getAttemptTitle(attempt))}</td>
                         <td>${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
                         <td>${(rate * 100).toFixed(1)}%</td>
-                        <td class="col-pf ${isPass ? "result-pass-cell" : "result-fail-cell"}">${isPass ? "Pass" : "Fail"}</td>
+                        <td class="col-pf ${entry.convertedToPass ? "result-converted-cell" : isPass ? "result-pass-cell" : "result-fail-cell"}">${passLabel}</td>
                       </tr>
                     `;
                   })
@@ -2634,9 +2704,8 @@ function renderTestSelect(app) {
         if (studentResultsState.error) {
           return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
         }
-        const modelAttempts = (studentResultsState.list ?? []).filter(
-          (attempt) => getAttemptTestType(attempt) === "mock"
-        );
+        const modelAttemptEntries = buildResultAttemptEntries("mock");
+        const modelAttempts = modelAttemptEntries.map((entry) => entry.attempt);
 
         if (resultDetailState.open && resultDetailState.mode === "model" && resultDetailState.attempt) {
           const attempt = resultDetailState.attempt;
@@ -2765,19 +2834,24 @@ function renderTestSelect(app) {
                 </tr>
               </thead>
               <tbody>
-                ${modelAttempts
-                  .map((attempt) => {
+                ${modelAttemptEntries
+                  .map((entry) => {
+                    const attempt = entry.attempt;
                     const rate = getScoreRateFromAttempt(attempt);
-                    const passRate = getPassRateForVersion(attempt.test_version);
-                    const isPass = rate >= passRate;
+                    const isPass = entry.effectivePass;
                     const rank = modelRankState.map[attempt.id] || "";
                     const totalRank = modelRankState.totalMap[attempt.id] || "";
                     const rankLabel = rank && totalRank ? `${rank}/${totalRank}` : "—";
+                    const passLabel = entry.convertedToPass
+                      ? "Converted to Pass"
+                      : entry.actualPass
+                        ? "Pass"
+                        : "Fail";
                     return `
                       <tr class="student-results-row" data-model-attempt-id="${attempt.id}">
                         <td>${escapeHtml(getAttemptDateLabel(attempt))}</td>
                         <td>${escapeHtml(getAttemptTitle(attempt))}</td>
-                        <td class="col-pf ${isPass ? "result-pass-cell" : "result-fail-cell"}">${isPass ? "Pass" : "Fail"}</td>
+                        <td class="col-pf ${entry.convertedToPass ? "result-converted-cell" : isPass ? "result-pass-cell" : "result-fail-cell"}">${passLabel}</td>
                         <td>${(rate * 100).toFixed(1)}%</td>
                         <td class="col-total-score">${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
                         <td>${escapeHtml(rankLabel)}</td>

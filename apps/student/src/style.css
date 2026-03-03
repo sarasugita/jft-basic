@@ -1028,6 +1028,11 @@ body { overflow-x: hidden; }
   font-weight: 700;
 }
 
+.result-converted-cell {
+  color: #2563eb;
+  font-weight: 700;
+}
+
 .result-fail-cell {
   color: #b00020;
   font-weight: 700;
