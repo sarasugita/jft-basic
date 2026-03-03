@@ -63,6 +63,14 @@ let studentResultsState = {
   userId: "",
 };
 
+let sessionAttemptOverrideState = {
+  loaded: false,
+  loading: false,
+  map: {},
+  error: "",
+  userId: "",
+};
+
 let studentAttendanceState = {
   loaded: false,
   loading: false,
@@ -204,6 +212,11 @@ function isMissingTabLeftCountError(error) {
 function isMissingRetakeSessionFieldsError(error) {
   const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
   return /(retake_source_session_id|retake_release_scope)/i.test(text) && /does not exist/i.test(text);
+}
+
+function isMissingSessionAttemptOverrideTableError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /test_session_attempt_overrides/i.test(text) && /does not exist/i.test(text);
 }
 
 function hasLinkParam() {
@@ -509,6 +522,10 @@ async function refreshAuthState() {
     rankingState.loaded = false;
     rankingState.list = [];
     rankingState.error = "";
+    sessionAttemptOverrideState.userId = "";
+    sessionAttemptOverrideState.loaded = false;
+    sessionAttemptOverrideState.map = {};
+    sessionAttemptOverrideState.error = "";
     return;
   }
 
@@ -565,6 +582,12 @@ async function refreshAuthState() {
     rankingState.loaded = false;
     rankingState.list = [];
     rankingState.error = "";
+  }
+  if (sessionAttemptOverrideState.userId !== currentUserId) {
+    sessionAttemptOverrideState.userId = currentUserId;
+    sessionAttemptOverrideState.loaded = false;
+    sessionAttemptOverrideState.map = {};
+    sessionAttemptOverrideState.error = "";
   }
   if (authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
@@ -718,9 +741,26 @@ function allowMultipleAttempts(session) {
   return session?.allow_multiple_attempts !== false;
 }
 
+function getAttemptCountForSession(sessionId) {
+  if (!sessionId) return 0;
+  return (studentResultsState.list ?? []).filter((a) => a.test_session_id === sessionId).length;
+}
+
+function getExtraAttemptsForSession(sessionId) {
+  if (!sessionId) return 0;
+  return Math.max(0, Number(sessionAttemptOverrideState.map?.[sessionId] ?? 0));
+}
+
 function hasAttemptForSession(sessionId) {
-  if (!sessionId) return false;
-  return (studentResultsState.list ?? []).some((a) => a.test_session_id === sessionId);
+  return getAttemptCountForSession(sessionId) > 0;
+}
+
+function hasRemainingAttemptsForSession(session) {
+  if (!session?.id) return false;
+  if (allowMultipleAttempts(session)) return true;
+  if (!authState.session) return !hasAttemptForSession(session.id);
+  const totalAllowedAttempts = 1 + getExtraAttemptsForSession(session.id);
+  return getAttemptCountForSession(session.id) < totalAllowedAttempts;
 }
 
 function getActivePassRate() {
@@ -942,6 +982,34 @@ async function fetchStudentResults() {
   }
   studentResultsState.loaded = true;
   studentResultsState.loading = false;
+  await fetchSessionAttemptOverrides();
+}
+
+async function fetchSessionAttemptOverrides() {
+  if (!authState.session) return;
+  if (sessionAttemptOverrideState.loading || sessionAttemptOverrideState.loaded) return;
+  sessionAttemptOverrideState.loading = true;
+  sessionAttemptOverrideState.error = "";
+  const { data, error } = await supabase
+    .from("test_session_attempt_overrides")
+    .select("test_session_id, extra_attempts")
+    .eq("student_id", authState.session.user.id);
+  if (error) {
+    if (!isMissingSessionAttemptOverrideTableError(error)) {
+      console.warn("session attempt overrides fetch error:", error);
+      sessionAttemptOverrideState.error = error.message || "Failed to load extra attempts.";
+    }
+    sessionAttemptOverrideState.map = {};
+  } else {
+    const map = {};
+    (data ?? []).forEach((row) => {
+      if (!row?.test_session_id) return;
+      map[row.test_session_id] = Math.max(0, Number(row.extra_attempts ?? 0));
+    });
+    sessionAttemptOverrideState.map = map;
+  }
+  sessionAttemptOverrideState.loaded = true;
+  sessionAttemptOverrideState.loading = false;
 }
 
 async function fetchModelRanks(attempts) {
@@ -2835,8 +2903,7 @@ function renderTestSelect(app) {
                   const startMs = new Date(session.starts_at).getTime();
                   const alreadyTaken =
                     studentResultsState.loaded &&
-                    !allowMultipleAttempts(session) &&
-                    hasAttemptForSession(session.id);
+                    !hasRemainingAttemptsForSession(session);
                   const canStart = Number.isFinite(startMs) && nowMs >= startMs && !alreadyTaken;
                   return `
                     <div class="student-home-card">
@@ -3420,8 +3487,7 @@ function renderTestSelect(app) {
                             const passRate = Number(problemSet?.pass_rate ?? PASS_RATE_DEFAULT);
                             const alreadyTaken =
                               studentResultsState.loaded &&
-                              !allowMultipleAttempts(t) &&
-                              hasAttemptForSession(t.id);
+                              !hasRemainingAttemptsForSession(t);
                             return `
                               <label style="display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;">
                                 <input type="radio" name="testSelect" value="${escapeHtml(t.id)}" ${
@@ -3515,7 +3581,7 @@ function renderTestSelect(app) {
         window.alert("You are not eligible to take this retake session.");
         return;
       }
-      if (!allowMultipleAttempts(session) && hasAttemptForSession(session?.id)) {
+      if (!hasRemainingAttemptsForSession(session)) {
         window.alert("You have already taken this test.");
         return;
       }
@@ -3543,7 +3609,7 @@ function renderTestSelect(app) {
         if (!canAccessSession(session)) {
           return;
         }
-        if (!allowMultipleAttempts(session) && hasAttemptForSession(sessionId)) {
+        if (!hasRemainingAttemptsForSession(session)) {
           return;
         }
         if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;

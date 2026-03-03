@@ -497,6 +497,141 @@ function buildSectionSummary(rows) {
   }));
 }
 
+function getRowTimestamp(row) {
+  const value = row?.ended_at || row?.created_at || row?.started_at || null;
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function buildLatestAttemptMapByStudent(attemptsList) {
+  const map = new Map();
+  for (const attempt of attemptsList ?? []) {
+    if (!attempt?.student_id) continue;
+    const existing = map.get(attempt.student_id);
+    if (!existing || getRowTimestamp(attempt) >= getRowTimestamp(existing)) {
+      map.set(attempt.student_id, attempt);
+    }
+  }
+  return map;
+}
+
+function buildQuestionAnalysisRows(attemptsList, questionsList) {
+  const stats = new Map();
+  for (const attempt of attemptsList ?? []) {
+    const rows = buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList);
+    for (const row of rows) {
+      const current = stats.get(row.qid) || {
+        qid: row.qid,
+        section: row.section,
+        prompt: row.prompt,
+        image: row.image,
+        correct: 0,
+        total: 0,
+        byStudent: {},
+      };
+      current.total += 1;
+      if (row.isCorrect) current.correct += 1;
+      if (attempt?.student_id) {
+        current.byStudent[attempt.student_id] = row.isCorrect;
+      }
+      stats.set(row.qid, current);
+    }
+  }
+  return Array.from(stats.values()).map((row) => ({
+    ...row,
+    rate: row.total ? row.correct / row.total : 0,
+  }));
+}
+
+function QuestionPreviewCard({ question, index }) {
+  const prompt = question.promptEn || question.promptBn || "";
+  const choices = question.choices ?? question.choicesJa ?? [];
+  const stemKind = question.stemKind || "";
+  const stemText = question.stemText;
+  const stemExtra = question.stemExtra;
+  const stemAsset = question.stemAsset;
+  const boxText = question.boxText;
+  const isImageStem = ["image", "passage_image", "table_image"].includes(stemKind);
+  const isAudioStem = stemKind === "audio";
+  const shouldShowImage = isImageStem || (!stemKind && isImageAsset(stemAsset));
+  const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
+  const stemLines = splitStemLines(stemExtra);
+
+  const renderChoices = () => (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
+      {choices.map((choice, choiceIndex) => {
+        const isCorrect = question.answerIndex === choiceIndex;
+        const isImage = isImageAsset(choice);
+        return (
+          <div
+            key={`choice-${question.id}-${choiceIndex}`}
+            className="btn"
+            style={{
+              border: isCorrect ? "2px solid #1a7f37" : "1px solid #ddd",
+              background: isCorrect ? "#e7f7ee" : "#fff",
+              padding: 8,
+            }}
+          >
+            {isImage ? (
+              <img src={choice} alt="choice" style={{ maxWidth: "100%" }} />
+            ) : (
+              choice
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
+      <div style={{ fontWeight: 700 }}>
+        {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""} {index != null ? `#${index + 1}` : ""}
+      </div>
+      {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
+      {question.type === "daily" && stemExtra ? (
+        <div style={{ marginTop: 6, fontSize: 13, color: "#667085" }}>
+          {stemExtra}
+        </div>
+      ) : null}
+      {stemText ? (
+        <div
+          style={{ marginTop: 6 }}
+          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
+        />
+      ) : null}
+      {stemLines.length && question.type !== "daily" ? (
+        <div style={{ marginTop: 6 }}>
+          {stemLines.map((line, lineIndex) => (
+            <div
+              key={`line-${question.id}-${lineIndex}`}
+              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(line) }}
+            />
+          ))}
+        </div>
+      ) : null}
+      {boxText ? (
+        <div
+          className="boxed"
+          style={{ marginTop: 8 }}
+          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(boxText) }}
+        />
+      ) : null}
+      {shouldShowImage && stemAsset ? (
+        <img src={stemAsset} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} />
+      ) : null}
+      {shouldShowAudio && stemAsset ? (
+        <audio controls src={stemAsset} style={{ marginTop: 8, width: "100%" }} />
+      ) : null}
+
+      <div style={{ marginTop: 10 }}>
+        {choices.length ? renderChoices() : null}
+      </div>
+    </div>
+  );
+}
+
 const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
 
 function formatDateTime(iso) {
@@ -595,6 +730,11 @@ function isMissingTabLeftCountError(error) {
 function isMissingRetakeSessionFieldsError(error) {
   const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
   return /(retake_source_session_id|retake_release_scope)/i.test(text) && /does not exist/i.test(text);
+}
+
+function isMissingSessionAttemptOverrideTableError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /test_session_attempt_overrides/i.test(text) && /does not exist/i.test(text);
 }
 
 function parseSeparatedRows(text, delimiter) {
@@ -1243,6 +1383,16 @@ export default function AdminConsole({
     retake_release_scope: "all"
   });
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
+  const [sessionDetail, setSessionDetail] = useState({ type: "", sessionId: "" });
+  const [sessionDetailTab, setSessionDetailTab] = useState("questions");
+  const [sessionDetailQuestions, setSessionDetailQuestions] = useState([]);
+  const [sessionDetailAttempts, setSessionDetailAttempts] = useState([]);
+  const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
+  const [sessionDetailMsg, setSessionDetailMsg] = useState("");
+  const [sessionDetailAllowStudentId, setSessionDetailAllowStudentId] = useState("");
+  const [sessionDetailAllowMsg, setSessionDetailAllowMsg] = useState("");
+  const [sessionDetailAllowances, setSessionDetailAllowances] = useState({});
+  const [sessionDetailShowAllAnalysis, setSessionDetailShowAllAnalysis] = useState(false);
   const [attendanceDays, setAttendanceDays] = useState([]);
   const [attendanceEntries, setAttendanceEntries] = useState({});
   const [attendanceMsg, setAttendanceMsg] = useState("");
@@ -1334,6 +1484,10 @@ export default function AdminConsole({
     () => testSessions.filter((s) => dailyTests.some((t) => t.version === s.problem_set_id)),
     [testSessions, dailyTests]
   );
+  const selectedSessionDetail = useMemo(() => {
+    if (!sessionDetail?.sessionId) return null;
+    return testSessions.find((session) => session.id === sessionDetail.sessionId) ?? null;
+  }, [sessionDetail, testSessions]);
   const pastModelSessions = useMemo(
     () => modelSessions.filter((session) => !isRetakeSessionTitle(session.title) && isPastSession(session)),
     [modelSessions]
@@ -1380,6 +1534,74 @@ export default function AdminConsole({
     });
     return map;
   }, [tests]);
+
+  const sessionDetailStudentOptions = useMemo(() => {
+    const unique = new Map();
+    (sessionDetailAttempts ?? []).forEach((attempt) => {
+      if (!attempt?.student_id || unique.has(attempt.student_id)) return;
+      const student = students.find((item) => item.id === attempt.student_id) ?? null;
+      unique.set(attempt.student_id, {
+        id: attempt.student_id,
+        display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+        student_code: attempt.student_code || student?.student_code || "",
+      });
+    });
+    return Array.from(unique.values()).sort((a, b) => {
+      const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+      if (nameCompare !== 0) return nameCompare;
+      return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+    });
+  }, [sessionDetailAttempts, students]);
+
+  const sessionDetailLatestAttempts = useMemo(() => {
+    const latestMap = buildLatestAttemptMapByStudent(sessionDetailAttempts);
+    return Array.from(latestMap.values()).sort((a, b) => getRowTimestamp(a) - getRowTimestamp(b));
+  }, [sessionDetailAttempts]);
+
+  const sessionDetailPassRate = useMemo(() => {
+    const value = Number(testPassRateByVersion[selectedSessionDetail?.problem_set_id] ?? 0.8);
+    return Number.isFinite(value) && value > 0 ? value : 0.8;
+  }, [selectedSessionDetail, testPassRateByVersion]);
+
+  const sessionDetailOverview = useMemo(() => {
+    const count = sessionDetailLatestAttempts.length;
+    const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
+    const averageScore = count
+      ? sessionDetailLatestAttempts.reduce((total, attempt) => total + getScoreRate(attempt), 0) / count
+      : 0;
+    return {
+      count,
+      averageScore,
+      passCount,
+      passRate: count ? passCount / count : 0,
+    };
+  }, [sessionDetailLatestAttempts, sessionDetailPassRate]);
+
+  const sessionDetailQuestionAnalysis = useMemo(() => {
+    if (!sessionDetailQuestions.length || !sessionDetailLatestAttempts.length) return [];
+    return buildQuestionAnalysisRows(sessionDetailLatestAttempts, sessionDetailQuestions)
+      .sort((a, b) => {
+        if (b.rate !== a.rate) return b.rate - a.rate;
+        return String(a.qid).localeCompare(String(b.qid));
+      });
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions]);
+
+  const sessionDetailQuestionStudents = useMemo(() => {
+    return sessionDetailLatestAttempts
+      .map((attempt) => {
+        const student = students.find((item) => item.id === attempt.student_id) ?? null;
+        return {
+          id: attempt.student_id,
+          display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+          student_code: attempt.student_code || student?.student_code || "",
+        };
+      })
+      .sort((a, b) => {
+        const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+        if (nameCompare !== 0) return nameCompare;
+        return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+      });
+  }, [sessionDetailLatestAttempts, students]);
 
   const studentModelAttempts = useMemo(() => {
     return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
@@ -2151,6 +2373,21 @@ export default function AdminConsole({
   }, [activeSchoolId]);
 
   useEffect(() => {
+    if (!selectedSessionDetail?.id) return;
+    fetchSessionDetail(selectedSessionDetail);
+  }, [selectedSessionDetail?.id, selectedSessionDetail?.problem_set_id]);
+
+  useEffect(() => {
+    if (sessionDetail.type === "mock" && !(activeTab === "model" && ["conduct", "results"].includes(modelSubTab))) {
+      closeSessionDetail();
+      return;
+    }
+    if (sessionDetail.type === "daily" && !(activeTab === "daily" && ["conduct", "results"].includes(dailySubTab))) {
+      closeSessionDetail();
+    }
+  }, [activeTab, modelSubTab, dailySubTab, sessionDetail.type]);
+
+  useEffect(() => {
     const version = selectedAttempt?.test_version;
     if (!attemptDetailOpen || !version) return;
     if (attemptQuestionsByVersion[version]) return;
@@ -2248,6 +2485,137 @@ export default function AdminConsole({
     setSelectedId(attempt.id);
     setSelectedAttemptObj(attempt);
     setAttemptDetailOpen(true);
+  }
+
+  function closeSessionDetail() {
+    setSessionDetail({ type: "", sessionId: "" });
+    setSessionDetailTab("questions");
+    setSessionDetailQuestions([]);
+    setSessionDetailAttempts([]);
+    setSessionDetailMsg("");
+    setSessionDetailAllowStudentId("");
+    setSessionDetailAllowMsg("");
+    setSessionDetailAllowances({});
+    setSessionDetailShowAllAnalysis(false);
+  }
+
+  function openSessionDetailView(session, type) {
+    if (!session?.id) return;
+    setEditingSessionId("");
+    setEditingSessionMsg("");
+    setSessionDetail({ type, sessionId: session.id });
+    setSessionDetailTab("questions");
+    setSessionDetailAllowStudentId("");
+    setSessionDetailAllowMsg("");
+    setSessionDetailShowAllAnalysis(false);
+  }
+
+  async function fetchSessionDetail(session) {
+    if (!session?.id || !session?.problem_set_id) return;
+    setSessionDetailLoading(true);
+    setSessionDetailMsg("Loading...");
+    setSessionDetailAllowMsg("");
+
+    const [{ data: questionsData, error: questionsError }, attemptsResult, allowancesResult] = await Promise.all([
+      supabase
+        .from("questions")
+        .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+        .eq("test_version", session.problem_set_id)
+        .order("order_index", { ascending: true }),
+      (async () => {
+        const buildAttemptsQuery = (fields) =>
+          supabase
+            .from("attempts")
+            .select(fields)
+            .eq("test_session_id", session.id)
+            .order("created_at", { ascending: true });
+        let result = await buildAttemptsQuery(
+          "id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, ended_at, created_at, answers_json, tab_left_count"
+        );
+        if (result.error && isMissingTabLeftCountError(result.error)) {
+          result = await buildAttemptsQuery(
+            "id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, ended_at, created_at, answers_json"
+          );
+        }
+        return result;
+      })(),
+      supabase
+        .from("test_session_attempt_overrides")
+        .select("student_id, extra_attempts")
+        .eq("test_session_id", session.id),
+    ]);
+
+    if (questionsError) {
+      console.error("session detail questions fetch error:", questionsError);
+      setSessionDetailQuestions([]);
+      setSessionDetailAttempts([]);
+      setSessionDetailAllowances({});
+      setSessionDetailMsg(`Load failed: ${questionsError.message}`);
+      setSessionDetailLoading(false);
+      return;
+    }
+    if (attemptsResult.error) {
+      console.error("session detail attempts fetch error:", attemptsResult.error);
+      setSessionDetailQuestions([]);
+      setSessionDetailAttempts([]);
+      setSessionDetailAllowances({});
+      setSessionDetailMsg(`Load failed: ${attemptsResult.error.message}`);
+      setSessionDetailLoading(false);
+      return;
+    }
+
+    const questionsList = (questionsData ?? []).map(mapDbQuestion);
+    const attemptsList = attemptsResult.data ?? [];
+    const allowancesMap = {};
+    if (allowancesResult.error) {
+      if (!isMissingSessionAttemptOverrideTableError(allowancesResult.error)) {
+        console.error("session detail overrides fetch error:", allowancesResult.error);
+      }
+    } else {
+      (allowancesResult.data ?? []).forEach((row) => {
+        if (!row?.student_id) return;
+        allowancesMap[row.student_id] = Number(row.extra_attempts ?? 0);
+      });
+    }
+
+    setSessionDetailQuestions(questionsList);
+    setSessionDetailAttempts(attemptsList);
+    setSessionDetailAllowances(allowancesMap);
+    setSessionDetailAllowStudentId((current) => {
+      if (current && attemptsList.some((attempt) => attempt.student_id === current)) return current;
+      return attemptsList[0]?.student_id ?? "";
+    });
+    setSessionDetailMsg("");
+    setSessionDetailLoading(false);
+  }
+
+  async function allowSessionAnotherAttempt() {
+    if (!selectedSessionDetail?.id || !sessionDetailAllowStudentId) return;
+    if (selectedSessionDetail.allow_multiple_attempts !== false) {
+      setSessionDetailAllowMsg("This session already allows multiple attempts.");
+      return;
+    }
+    setSessionDetailAllowMsg("Saving...");
+    const nextCount = Number(sessionDetailAllowances[sessionDetailAllowStudentId] ?? 0) + 1;
+    const { error } = await supabase
+      .from("test_session_attempt_overrides")
+      .upsert({
+        test_session_id: selectedSessionDetail.id,
+        student_id: sessionDetailAllowStudentId,
+        extra_attempts: nextCount,
+      }, { onConflict: "test_session_id,student_id" });
+    if (error) {
+      console.error("allow another attempt error:", error);
+      if (isMissingSessionAttemptOverrideTableError(error)) {
+        setSessionDetailAllowMsg("Allow another attempt requires the new Supabase migration.");
+        return;
+      }
+      setSessionDetailAllowMsg(`Save failed: ${error.message}`);
+      return;
+    }
+    setSessionDetailAllowances((prev) => ({ ...prev, [sessionDetailAllowStudentId]: nextCount }));
+    const student = sessionDetailStudentOptions.find((item) => item.id === sessionDetailAllowStudentId);
+    setSessionDetailAllowMsg(`Allowed one more attempt for ${student?.display_name ?? sessionDetailAllowStudentId}.`);
   }
 
   function startEditTest(test, categoryOptions) {
@@ -4974,6 +5342,276 @@ export default function AdminConsole({
     router.push(`/super/schools/${nextSchoolId}/admin`);
   }
 
+  function renderSessionDetailView() {
+    if (!selectedSessionDetail) return null;
+
+    const bestQuestions = sessionDetailQuestionAnalysis.slice(0, 5);
+    const worstQuestions = [...sessionDetailQuestionAnalysis]
+      .sort((a, b) => {
+        if (a.rate !== b.rate) return a.rate - b.rate;
+        return String(a.qid).localeCompare(String(b.qid));
+      })
+      .slice(0, 5);
+
+    return (
+      <div className="session-detail-page">
+        <div className="session-detail-header">
+          <div>
+            <button className="link-btn" type="button" onClick={closeSessionDetail}>
+              {"<- Back to sessions"}
+            </button>
+            <div className="admin-title" style={{ marginTop: 10 }}>
+              {selectedSessionDetail.title || selectedSessionDetail.problem_set_id}
+            </div>
+            <div className="admin-help" style={{ marginTop: 6 }}>
+              SetID: <b>{selectedSessionDetail.problem_set_id}</b>
+              {" · "}
+              Start: <b>{formatDateTime(selectedSessionDetail.starts_at) || "—"}</b>
+              {" · "}
+              End: <b>{formatDateTime(selectedSessionDetail.ends_at) || "—"}</b>
+            </div>
+          </div>
+          <div className="admin-top-tabs">
+            {[
+              ["questions", "Questions"],
+              ["attempts", "Attempts"],
+              ["analysis", "Result Analysis"],
+            ].map(([key, label]) => (
+              <button
+                key={`session-detail-tab-${key}`}
+                className={`admin-top-tab ${sessionDetailTab === key ? "active" : ""}`}
+                type="button"
+                onClick={() => setSessionDetailTab(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {sessionDetailLoading ? <div className="admin-msg">Loading...</div> : null}
+        {!sessionDetailLoading && sessionDetailMsg ? <div className="admin-msg">{sessionDetailMsg}</div> : null}
+
+        {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "questions" ? (
+          <div className="session-detail-section">
+            <div className="admin-help">
+              Total: <b>{sessionDetailQuestions.length}</b>
+            </div>
+            {!sessionDetailQuestions.length ? (
+              <div className="admin-help" style={{ marginTop: 8 }}>No questions found for this session.</div>
+            ) : (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+                {sessionDetailQuestions.map((question, index) => (
+                  <QuestionPreviewCard
+                    key={`session-detail-question-${question.id}-${index}`}
+                    question={question}
+                    index={index}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "attempts" ? (
+          <div className="session-detail-section">
+            <div className="session-detail-actions">
+              <div>
+                <div className="admin-title" style={{ fontSize: 18 }}>Allow another attempt</div>
+                <div className="admin-help">
+                  Select a student who already submitted this test and add one more allowed attempt.
+                </div>
+              </div>
+              <div className="session-detail-allow-form">
+                <select
+                  value={sessionDetailAllowStudentId}
+                  onChange={(e) => setSessionDetailAllowStudentId(e.target.value)}
+                  disabled={!sessionDetailStudentOptions.length || selectedSessionDetail.allow_multiple_attempts !== false}
+                >
+                  {sessionDetailStudentOptions.length ? (
+                    sessionDetailStudentOptions.map((student) => {
+                      const extraAttempts = Number(sessionDetailAllowances[student.id] ?? 0);
+                      return (
+                        <option key={`session-allow-${student.id}`} value={student.id}>
+                          {student.display_name}
+                          {student.student_code ? ` (${student.student_code})` : ""}
+                          {extraAttempts > 0 ? ` (+${extraAttempts} extra)` : ""}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <option value="">No submitted students</option>
+                  )}
+                </select>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={allowSessionAnotherAttempt}
+                  disabled={!sessionDetailAllowStudentId || selectedSessionDetail.allow_multiple_attempts !== false}
+                >
+                  Allow another attempt
+                </button>
+              </div>
+            </div>
+            {selectedSessionDetail.allow_multiple_attempts !== false ? (
+              <div className="admin-help" style={{ marginTop: 10 }}>
+                This session already allows multiple attempts for everyone.
+              </div>
+            ) : null}
+            {sessionDetailAllowMsg ? <div className="admin-msg">{sessionDetailAllowMsg}</div> : null}
+
+            <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+              <table className="admin-table" style={{ minWidth: 980 }}>
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>Submitted</th>
+                    <th>Name</th>
+                    <th>Code</th>
+                    <th>Score</th>
+                    <th>Rate</th>
+                    <th>Status</th>
+                    <th>Attempt ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessionDetailAttempts.map((attempt, index) => {
+                    const passed = getScoreRate(attempt) >= sessionDetailPassRate;
+                    return (
+                      <tr key={`session-attempt-${attempt.id}`} onClick={() => openAttemptDetail(attempt)}>
+                        <td>{index + 1}</td>
+                        <td>{formatDateTime(attempt.created_at)}</td>
+                        <td>{attempt.display_name ?? ""}</td>
+                        <td>{attempt.student_code ?? ""}</td>
+                        <td>{attempt.correct}/{attempt.total}</td>
+                        <td>{(getScoreRate(attempt) * 100).toFixed(1)}%</td>
+                        <td className={passed ? "pf-pass" : "pf-fail"}>{passed ? "Pass" : "Fail"}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{attempt.id}</td>
+                      </tr>
+                    );
+                  })}
+                  {!sessionDetailAttempts.length ? (
+                    <tr>
+                      <td colSpan={8}>No attempts yet.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "analysis" ? (
+          <div className="session-detail-section">
+            <div className="admin-kpi session-detail-kpi">
+              <div className="box">
+                <div className="label">Average Score</div>
+                <div className="value">{(sessionDetailOverview.averageScore * 100).toFixed(1)}%</div>
+              </div>
+              <div className="box">
+                <div className="label">Pass Rate</div>
+                <div className="value">{(sessionDetailOverview.passRate * 100).toFixed(1)}%</div>
+              </div>
+              <div className="box">
+                <div className="label">Students Passed</div>
+                <div className="value">{sessionDetailOverview.passCount}/{sessionDetailOverview.count}</div>
+              </div>
+            </div>
+
+            <div className="session-detail-analysis-grid">
+              <div className="admin-panel">
+                <div className="admin-title" style={{ fontSize: 18 }}>Top 5 Best Questions</div>
+                <div className="session-analysis-list">
+                  {bestQuestions.map((row) => (
+                    <div key={`best-${row.qid}`} className="session-analysis-item">
+                      <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
+                      <div>
+                        <div className="session-analysis-title">{row.qid}</div>
+                        <div className="admin-help">{row.prompt}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {!bestQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
+                </div>
+              </div>
+
+              <div className="admin-panel">
+                <div className="admin-title" style={{ fontSize: 18 }}>Top 5 Worst Questions</div>
+                <div className="session-analysis-list">
+                  {worstQuestions.map((row) => (
+                    <div key={`worst-${row.qid}`} className="session-analysis-item">
+                      <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
+                      <div>
+                        <div className="session-analysis-title">{row.qid}</div>
+                        <div className="admin-help">{row.prompt}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {!worstQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <button
+                className="link-btn"
+                type="button"
+                onClick={() => setSessionDetailShowAllAnalysis((current) => !current)}
+              >
+                {sessionDetailShowAllAnalysis ? "Hide all v" : "View all ->"}
+              </button>
+            </div>
+
+            {sessionDetailShowAllAnalysis ? (
+              <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+                <table className="admin-table session-analysis-table" style={{ minWidth: 1100 }}>
+                  <thead>
+                    <tr>
+                      <th>Question</th>
+                      <th>Accuracy</th>
+                      {sessionDetailQuestionStudents.map((student) => (
+                        <th key={`analysis-student-${student.id}`}>
+                          <div>{student.display_name}</div>
+                          {student.student_code ? (
+                            <div className="session-analysis-student-code">{student.student_code}</div>
+                          ) : null}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionDetailQuestionAnalysis.map((row) => (
+                      <tr key={`analysis-row-${row.qid}`}>
+                        <td>
+                          <div style={{ fontWeight: 800 }}>{row.qid}</div>
+                          <div className="admin-help">{row.prompt}</div>
+                        </td>
+                        <td>{(row.rate * 100).toFixed(1)}%</td>
+                        {sessionDetailQuestionStudents.map((student) => {
+                          const status = row.byStudent[student.id];
+                          return (
+                            <td key={`analysis-cell-${row.qid}-${student.id}`} className="session-analysis-cell">
+                              {status == null ? "—" : status ? "○" : "×"}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                    {!sessionDetailQuestionAnalysis.length ? (
+                      <tr>
+                        <td colSpan={Math.max(2, sessionDetailQuestionStudents.length + 2)}>No question analysis available.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   if (!session) {
     return (
       <div className="admin-login">
@@ -6442,175 +7080,191 @@ export default function AdminConsole({
         <>
         {modelSubTab === "conduct" ? (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <div className="admin-title">Test Sessions</div>
-                  <button className="btn btn-primary" onClick={() => openModelConductModal("normal")}>
-                    Create Test Session
-                  </button>
-                  <button className="btn btn-retake" onClick={() => openModelConductModal("retake")}>
-                    Create Retake Session
-                  </button>
+          {!(sessionDetail.type === "mock" && sessionDetail.sessionId) ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div className="admin-title">Test Sessions</div>
+                    <button className="btn btn-primary" onClick={() => openModelConductModal("normal")}>
+                      Create Test Session
+                    </button>
+                    <button className="btn btn-retake" onClick={() => openModelConductModal("retake")}>
+                      Create Retake Session
+                    </button>
+                  </div>
+                  <div className="admin-subtitle">SetIDから実施テストを作成します。</div>
                 </div>
-                <div className="admin-subtitle">SetIDから実施テストを作成します。</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    fetchTestSessions();
+                    fetchExamLinks();
+                  }}
+                >
+                  Refresh Sessions
+                </button>
               </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <button
-                className="btn"
-                onClick={() => {
-                  fetchTestSessions();
-                  fetchExamLinks();
-                }}
-              >
-                Refresh Sessions
-              </button>
             </div>
-          </div>
+          ) : null}
 
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Test Title</th>
-                  <th>SetID</th>
-                  <th>Show Answers</th>
-                  <th>Attempts</th>
-                  <th>Start</th>
-                  <th>End</th>
-                  <th>Time (min)</th>
-                  <th>Pass Rate</th>
-                  <th>Action</th>
-                  <th>Edit</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {modelSessions.map((t) => (
-                  <tr key={t.id}>
-                    <td>{formatDateTime(t.created_at)}</td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          value={editingSessionForm.title}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
-                        />
-                      ) : (
-                        t.title ?? ""
-                      )}
-                    </td>
-                    <td>{t.problem_set_id ?? ""}</td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <select
-                          value={editingSessionForm.show_answers ? "yes" : "no"}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-                        >
-                          <option value="yes">Yes</option>
-                          <option value="no">No</option>
-                        </select>
-                      ) : (
-                        t.show_answers ? "Yes" : "No"
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <select
-                          value={editingSessionForm.allow_multiple_attempts ? "multiple" : "once"}
-                          onChange={(e) =>
-                            setEditingSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
-                          }
-                        >
-                          <option value="once">Only once</option>
-                          <option value="multiple">Allow multiple</option>
-                        </select>
-                      ) : (
-                        t.allow_multiple_attempts === false ? "Only once" : "Allow multiple"
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={editingSessionForm.starts_at}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-                        />
-                      ) : (
-                        formatDateTime(t.starts_at)
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={editingSessionForm.ends_at}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-                        />
-                      ) : (
-                        formatDateTime(t.ends_at)
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          value={editingSessionForm.time_limit_min}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                        />
-                      ) : (
-                        t.time_limit_min ?? ""
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          value={editingSessionForm.pass_rate}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                        />
-                      ) : (
-                        testPassRateByVersion[t.problem_set_id] != null
-                          ? `${Number(testPassRateByVersion[t.problem_set_id]) * 100}%`
-                          : ""
-                      )}
-                    </td>
-                    <td>
-                      {linkBySession[t.id]?.id ? (
-                        <button className="btn" onClick={() => copyLink(linkBySession[t.id].id)}>Copy URL</button>
-                      ) : (
-                        ""
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button className="btn btn-primary" onClick={saveSessionEdits}>
-                            Save
+          {sessionDetail.type === "mock" && sessionDetail.sessionId ? (
+            renderSessionDetailView()
+          ) : (
+            <>
+              <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                <table className="admin-table" style={{ minWidth: 860 }}>
+                  <thead>
+                    <tr>
+                      <th>Created</th>
+                      <th>Test Title</th>
+                      <th>SetID</th>
+                      <th>Show Answers</th>
+                      <th>Attempts</th>
+                      <th>Start</th>
+                      <th>End</th>
+                      <th>Time (min)</th>
+                      <th>Pass Rate</th>
+                      <th>Action</th>
+                      <th>Edit</th>
+                      <th>Delete</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelSessions.map((t) => (
+                      <tr key={t.id} onClick={editingSessionId === t.id ? undefined : () => openSessionDetailView(t, "mock")}>
+                        <td>{formatDateTime(t.created_at)}</td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              value={editingSessionForm.title}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
+                            />
+                          ) : (
+                            t.title ?? ""
+                          )}
+                        </td>
+                        <td>{t.problem_set_id ?? ""}</td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <select
+                              value={editingSessionForm.show_answers ? "yes" : "no"}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                            >
+                              <option value="yes">Yes</option>
+                              <option value="no">No</option>
+                            </select>
+                          ) : (
+                            t.show_answers ? "Yes" : "No"
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <select
+                              value={editingSessionForm.allow_multiple_attempts ? "multiple" : "once"}
+                              onChange={(e) =>
+                                setEditingSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
+                              }
+                            >
+                              <option value="once">Only once</option>
+                              <option value="multiple">Allow multiple</option>
+                            </select>
+                          ) : (
+                            t.allow_multiple_attempts === false ? "Only once" : "Allow multiple"
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              type="datetime-local"
+                              step="300"
+                              value={editingSessionForm.starts_at}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                            />
+                          ) : (
+                            formatDateTime(t.starts_at)
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              type="datetime-local"
+                              step="300"
+                              value={editingSessionForm.ends_at}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                            />
+                          ) : (
+                            formatDateTime(t.ends_at)
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              value={editingSessionForm.time_limit_min}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                            />
+                          ) : (
+                            t.time_limit_min ?? ""
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              value={editingSessionForm.pass_rate}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                            />
+                          ) : (
+                            testPassRateByVersion[t.problem_set_id] != null
+                              ? `${Number(testPassRateByVersion[t.problem_set_id]) * 100}%`
+                              : ""
+                          )}
+                        </td>
+                        <td>
+                          {linkBySession[t.id]?.id ? (
+                            <button
+                              className="btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyLink(linkBySession[t.id].id);
+                              }}
+                            >
+                              Copy URL
+                            </button>
+                          ) : (
+                            ""
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); saveSessionEdits(); }}>
+                                Save
+                              </button>
+                              <button className="btn" onClick={(e) => { e.stopPropagation(); cancelEditSession(); }}>
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
+                              Edit
+                            </button>
+                          )}
+                        </td>
+                        <td>
+                          <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
+                            Delete
                           </button>
-                          <button className="btn" onClick={cancelEditSession}>
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button className="btn" onClick={() => startEditSession(t)}>
-                          Edit
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <button className="btn btn-danger" onClick={() => deleteTestSession(t.id)}>
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="admin-msg">{testSessionsMsg}</div>
-          <div className="admin-msg">{linkMsg}</div>
-          {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="admin-msg">{testSessionsMsg}</div>
+              <div className="admin-msg">{linkMsg}</div>
+              {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+            </>
+          )}
 
           {modelConductOpen ? (
             <div
@@ -7107,159 +7761,175 @@ export default function AdminConsole({
         <>
         {dailySubTab === "conduct" ? (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <div className="admin-title">Daily Test Sessions</div>
-                  <button className="btn btn-primary" onClick={() => openDailyConductModal("normal")}>
-                    Create Test Session
-                  </button>
-                  <button className="btn btn-retake" onClick={() => openDailyConductModal("retake")}>
-                    Create Retake Session
-                  </button>
+          {!(sessionDetail.type === "daily" && sessionDetail.sessionId) ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div className="admin-title">Daily Test Sessions</div>
+                    <button className="btn btn-primary" onClick={() => openDailyConductModal("normal")}>
+                      Create Test Session
+                    </button>
+                    <button className="btn btn-retake" onClick={() => openDailyConductModal("retake")}>
+                      Create Retake Session
+                    </button>
+                  </div>
+                  <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
                 </div>
-                <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    fetchTestSessions();
+                    fetchExamLinks();
+                  }}
+                >
+                  Refresh Sessions
+                </button>
               </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <button
-                className="btn"
-                onClick={() => {
-                  fetchTestSessions();
-                  fetchExamLinks();
-                }}
-              >
-                Refresh Sessions
-              </button>
             </div>
-          </div>
+          ) : null}
 
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Test Title</th>
-                  <th>SetID</th>
-                  <th>Show Answers</th>
-                  <th>Start</th>
-                  <th>End</th>
-                  <th>Time (min)</th>
-                  <th>Pass Rate</th>
-                  <th>Action</th>
-                  <th>Edit</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dailySessions.map((t) => (
-                  <tr key={t.id}>
-                    <td>{formatDateTime(t.created_at)}</td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          value={editingSessionForm.title}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
-                        />
-                      ) : (
-                        t.title ?? ""
-                      )}
-                    </td>
-                    <td>{t.problem_set_id ?? ""}</td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <select
-                          value={editingSessionForm.show_answers ? "yes" : "no"}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-                        >
-                          <option value="yes">Yes</option>
-                          <option value="no">No</option>
-                        </select>
-                      ) : (
-                        t.show_answers ? "Yes" : "No"
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={editingSessionForm.starts_at}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-                        />
-                      ) : (
-                        formatDateTime(t.starts_at)
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={editingSessionForm.ends_at}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-                        />
-                      ) : (
-                        formatDateTime(t.ends_at)
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          value={editingSessionForm.time_limit_min}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                        />
-                      ) : (
-                        t.time_limit_min ?? ""
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <input
-                          value={editingSessionForm.pass_rate}
-                          onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                        />
-                      ) : (
-                        testPassRateByVersion[t.problem_set_id] != null
-                          ? `${Number(testPassRateByVersion[t.problem_set_id]) * 100}%`
-                          : ""
-                      )}
-                    </td>
-                    <td>
-                      {linkBySession[t.id]?.id ? (
-                        <button className="btn" onClick={() => copyLink(linkBySession[t.id].id)}>Copy URL</button>
-                      ) : (
-                        ""
-                      )}
-                    </td>
-                    <td>
-                      {editingSessionId === t.id ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button className="btn btn-primary" onClick={saveSessionEdits}>
-                            Save
+          {sessionDetail.type === "daily" && sessionDetail.sessionId ? (
+            renderSessionDetailView()
+          ) : (
+            <>
+              <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                <table className="admin-table" style={{ minWidth: 860 }}>
+                  <thead>
+                    <tr>
+                      <th>Created</th>
+                      <th>Test Title</th>
+                      <th>SetID</th>
+                      <th>Show Answers</th>
+                      <th>Start</th>
+                      <th>End</th>
+                      <th>Time (min)</th>
+                      <th>Pass Rate</th>
+                      <th>Action</th>
+                      <th>Edit</th>
+                      <th>Delete</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dailySessions.map((t) => (
+                      <tr key={t.id} onClick={editingSessionId === t.id ? undefined : () => openSessionDetailView(t, "daily")}>
+                        <td>{formatDateTime(t.created_at)}</td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              value={editingSessionForm.title}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
+                            />
+                          ) : (
+                            t.title ?? ""
+                          )}
+                        </td>
+                        <td>{t.problem_set_id ?? ""}</td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <select
+                              value={editingSessionForm.show_answers ? "yes" : "no"}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                            >
+                              <option value="yes">Yes</option>
+                              <option value="no">No</option>
+                            </select>
+                          ) : (
+                            t.show_answers ? "Yes" : "No"
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              type="datetime-local"
+                              step="300"
+                              value={editingSessionForm.starts_at}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                            />
+                          ) : (
+                            formatDateTime(t.starts_at)
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              type="datetime-local"
+                              step="300"
+                              value={editingSessionForm.ends_at}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                            />
+                          ) : (
+                            formatDateTime(t.ends_at)
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              value={editingSessionForm.time_limit_min}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                            />
+                          ) : (
+                            t.time_limit_min ?? ""
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <input
+                              value={editingSessionForm.pass_rate}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                            />
+                          ) : (
+                            testPassRateByVersion[t.problem_set_id] != null
+                              ? `${Number(testPassRateByVersion[t.problem_set_id]) * 100}%`
+                              : ""
+                          )}
+                        </td>
+                        <td>
+                          {linkBySession[t.id]?.id ? (
+                            <button
+                              className="btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyLink(linkBySession[t.id].id);
+                              }}
+                            >
+                              Copy URL
+                            </button>
+                          ) : (
+                            ""
+                          )}
+                        </td>
+                        <td>
+                          {editingSessionId === t.id ? (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); saveSessionEdits(); }}>
+                                Save
+                              </button>
+                              <button className="btn" onClick={(e) => { e.stopPropagation(); cancelEditSession(); }}>
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
+                              Edit
+                            </button>
+                          )}
+                        </td>
+                        <td>
+                          <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
+                            Delete
                           </button>
-                          <button className="btn" onClick={cancelEditSession}>
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button className="btn" onClick={() => startEditSession(t)}>
-                          Edit
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <button className="btn btn-danger" onClick={() => deleteTestSession(t.id)}>
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="admin-msg">{dailySessionsMsg}</div>
-          <div className="admin-msg">{linkMsg}</div>
-          {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="admin-msg">{dailySessionsMsg}</div>
+              <div className="admin-msg">{linkMsg}</div>
+              {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+            </>
+          )}
 
           {dailyConductOpen ? (
             <div
@@ -8344,336 +9014,347 @@ export default function AdminConsole({
 
         {resultContext ? (
         <>
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div>
-              <div className="admin-title">{resultContext.title}</div>
-              <div className="admin-subtitle">受験結果を検索・詳細表示・CSV出力できます。</div>
-            </div>
-            <div className="admin-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn" onClick={() => runSearch(resultContext.type)}>Refresh</button>
-              <button className="btn" onClick={() => exportSummaryCsv(attempts)}>Export CSV (Summary)</button>
-              <button className="btn" onClick={() => exportDetailCsv(attempts)}>Export CSV (Detail)</button>
-              {resultContext.type === "mock" ? (
-                <button className="btn" onClick={() => exportQuizSummaryCsv()}>Export CSV (Quiz Summary)</button>
-              ) : null}
-            </div>
-          </div>
-          {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
-        </div>
-
-        {resultContext.type === "daily" || resultContext.type === "mock" ? (
-          <>
-            {(resultContext.type === "daily" ? dailyCategories : modelCategories).length ? (
-              <div className="admin-mini-tabs" style={{ marginBottom: 10 }}>
-                {(resultContext.type === "daily" ? dailyCategories : modelCategories).map((c) => (
-                  <button
-                    key={`daily-cat-${c.name}`}
-                    className={`admin-mini-tab ${((resultContext.type === "daily"
-                      ? selectedDailyCategory
-                      : selectedModelCategory)?.name === c.name)
-                      ? "active"
-                      : ""}`}
-                    onClick={() => {
-                      if (resultContext.type === "daily") {
-                        setDailyResultsCategory(c.name);
-                      } else {
-                        setModelResultsCategory(c.name);
-                      }
-                    }}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="admin-msg">No test categories yet.</div>
-            )}
-
-            <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-              <table
-                className="admin-table daily-results-table"
-                style={{
-                  minWidth: Math.max(
-                    860,
-                    360 + ((resultContext.type === "daily"
-                      ? dailyResultsMatrix.sessions.length
-                      : modelResultsMatrix.sessions.length) || 0) * 140
-                  )
-                }}
-              >
-                <thead>
-                  <tr>
-                    <th className="daily-sticky-1 daily-col-no">Student ID</th>
-                    <th className="daily-sticky-2 daily-col-name">Student Name</th>
-                    {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem) => (
-                      <th key={`daily-col-${sessionItem.id}`}>
-                        <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
-                        <div className="daily-col-subtitle">{sessionItem.problem_set_id ?? ""}</div>
-                        <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(resultContext.type === "daily" ? dailyResultsMatrix.rows : modelResultsMatrix.rows)
-                    .filter((row) => !row.student.is_withdrawn)
-                    .map((row) => (
-                    <tr key={`daily-row-${row.student.id}`}>
-                      <td className="daily-sticky-1 daily-col-no">{row.student.student_code ?? ""}</td>
-                      <td className="daily-sticky-2 daily-col-name">
-                        <div className="daily-name">{row.student.display_name ?? ""}</div>
-                        <div className="daily-code">{row.student.student_code ?? ""}</div>
-                      </td>
-                      {row.cells.map((attemptList, idx) => {
-                        const sessionItem = (resultContext.type === "daily"
-                          ? dailyResultsMatrix.sessions
-                          : modelResultsMatrix.sessions)[idx];
-                        if (!attemptList?.length) return <td key={`daily-cell-${row.student.id}-${idx}`}>—</td>;
-                        const passRate = Number(sessionItem?.linkedTest?.pass_rate ?? 0);
-                        const cellKey = `${row.student.id}:${sessionItem.id}`;
-                        const extraAttempts = attemptList.slice(1);
-                        const visibleAttempts = expandedResultCells[cellKey] ? attemptList : attemptList.slice(0, 1);
-                        return (
-                          <td
-                            key={`daily-cell-${row.student.id}-${idx}`}
-                            className="daily-score-cell"
-                          >
-                            <div className="daily-score-stack">
-                              {visibleAttempts.map((attempt, attemptIdx) => {
-                                const rateValue = getScoreRate(attempt);
-                                const label = `${(rateValue * 100).toFixed(1)}%`;
-                                const isLow = Number.isFinite(passRate) && passRate > 0 && rateValue < passRate;
-                                const tabLeftCount = getTabLeftCount(attempt);
-                                return (
-                                  <button
-                                    key={`daily-cell-${row.student.id}-${idx}-${attempt.id || attemptIdx}`}
-                                    className={`daily-score-btn ${isLow ? "low" : ""}`}
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openAttemptDetail(attempt);
-                                    }}
-                                  >
-                                    <span className="daily-score-main">
-                                      {attempt.__isRetake ? <span className="daily-retake-icon">Re</span> : null}
-                                      <span>{label}</span>
-                                    </span>
-                                    {tabLeftCount > 0 ? (
-                                      <span className="daily-score-meta daily-score-meta-alert">
-                                        Tabs left: {tabLeftCount}
-                                      </span>
-                                    ) : null}
-                                  </button>
-                                );
-                              })}
-                              {extraAttempts.length ? (
-                                <button
-                                  className="daily-more-btn"
-                                  type="button"
-                                  onClick={() => {
-                                    setExpandedResultCells((prev) => ({
-                                      ...prev,
-                                      [cellKey]: !prev[cellKey],
-                                    }));
-                                  }}
-                                >
-                                  {expandedResultCells[cellKey]
-                                    ? "Hide extra attempts"
-                                    : `${extraAttempts.length} more attempt${extraAttempts.length > 1 ? "s" : ""}`}
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="admin-msg">{loading ? "Loading..." : msg}</div>
-          </>
+        {sessionDetail.type === resultContext.type && sessionDetail.sessionId ? (
+          renderSessionDetailView()
         ) : (
           <>
             <div style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <div>
-                  <div className="admin-title">Tests</div>
-                  <div className="admin-subtitle">テストを選ぶと結果を絞り込みます。</div>
+                  <div className="admin-title">{resultContext.title}</div>
+                  <div className="admin-subtitle">受験結果を検索・詳細表示・CSV出力できます。</div>
                 </div>
-                <button className="btn" onClick={() => applyTestFilter("", resultContext.type)}>Clear Filter</button>
-              </div>
-              {filters.testVersion ? (
-                <div className="admin-help" style={{ marginTop: 6 }}>
-                  Filter: <b>{filters.testVersion}</b>
+                <div className="admin-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn" onClick={() => runSearch(resultContext.type)}>Refresh</button>
+                  <button className="btn" onClick={() => exportSummaryCsv(attempts)}>Export CSV (Summary)</button>
+                  <button className="btn" onClick={() => exportDetailCsv(attempts)}>Export CSV (Detail)</button>
+                  {resultContext.type === "mock" ? (
+                    <button className="btn" onClick={() => exportQuizSummaryCsv()}>Export CSV (Quiz Summary)</button>
+                  ) : null}
                 </div>
-              ) : null}
-              <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                <table className="admin-table" style={{ minWidth: 860 }}>
-                  <thead>
-                    <tr>
-                      <th>Created</th>
-                      <th>SetID</th>
-                      <th>Category</th>
-                      <th>Questions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {resultContext.tests.map((t) => (
-                      <tr key={`result-test-${t.id}`} onClick={() => applyTestFilter(t.version, resultContext.type)}>
-                        <td>{formatDateTime(t.created_at)}</td>
-                        <td>{t.version ?? ""}</td>
-                        <td>{t.title ?? ""}</td>
-                        <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
+              {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
             </div>
 
-            <form
-              className="admin-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                runSearch(resultContext.type);
-              }}
-            >
-              <div className="field">
-                <label>Student Code（部分一致）</label>
-                <input
-                  placeholder="ID001"
-                  value={filters.code}
-                  onChange={(e) => setFilters((s) => ({ ...s, code: e.target.value }))}
-                />
-              </div>
-              <div className="field">
-                <label>Display Name（部分一致）</label>
-                <input
-                  placeholder="Taro"
-                  value={filters.name}
-                  onChange={(e) => setFilters((s) => ({ ...s, name: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label>From（created_at）</label>
-                <input
-                  type="date"
-                  value={filters.from}
-                  onChange={(e) => setFilters((s) => ({ ...s, from: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label>To（created_at）</label>
-                <input
-                  type="date"
-                  value={filters.to}
-                  onChange={(e) => setFilters((s) => ({ ...s, to: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label>Limit</label>
-                <select
-                  value={filters.limit}
-                  onChange={(e) => setFilters((s) => ({ ...s, limit: Number(e.target.value) }))}
-                >
-                  <option value={50}>50</option>
-                  <option value={200}>200</option>
-                  <option value={500}>500</option>
-                  <option value={1000}>1000</option>
-                </select>
-              </div>
-              <div className="field small">
-                <label>&nbsp;</label>
-                <button className="btn btn-primary" type="submit">Search</button>
-              </div>
-            </form>
-
-            <div className="admin-kpi">
-              <div className="box">
-                <div className="label">Attempts</div>
-                <div className="value">{kpi.count}</div>
-              </div>
-              <div className="box">
-                <div className="label">Avg rate</div>
-                <div className="value">{(kpi.avgRate * 100).toFixed(1)}%</div>
-              </div>
-              <div className="box">
-                <div className="label">Max rate</div>
-                <div className="value">{(kpi.maxRate * 100).toFixed(1)}%</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12 }} className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Created</th>
-                    <th>Name</th>
-                    <th>Code</th>
-                    <th>Score</th>
-                    <th>Rate</th>
-                    <th>Test</th>
-                    <th>Attempt ID</th>
-                    <th>Detail CSV</th>
-                    <th>Delete</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attempts.map((a) => {
-                    const score = `${a.correct}/${a.total}`;
-                    const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
-                    return (
-                      <tr
-                        key={a.id}
+            {resultContext.type === "daily" || resultContext.type === "mock" ? (
+              <>
+                {(resultContext.type === "daily" ? dailyCategories : modelCategories).length ? (
+                  <div className="admin-mini-tabs" style={{ marginBottom: 10 }}>
+                    {(resultContext.type === "daily" ? dailyCategories : modelCategories).map((c) => (
+                      <button
+                        key={`daily-cat-${c.name}`}
+                        className={`admin-mini-tab ${((resultContext.type === "daily"
+                          ? selectedDailyCategory
+                          : selectedModelCategory)?.name === c.name)
+                          ? "active"
+                          : ""}`}
                         onClick={() => {
-                          setSelectedId(a.id);
-                          setSelectedAttemptObj(null);
-                          setAttemptDetailOpen(true);
+                          if (resultContext.type === "daily") {
+                            setDailyResultsCategory(c.name);
+                          } else {
+                            setModelResultsCategory(c.name);
+                          }
                         }}
                       >
-                        <td>{formatDateTime(a.created_at)}</td>
-                        <td>{a.display_name ?? ""}</td>
-                        <td>{a.student_code ?? ""}</td>
-                        <td>{score}</td>
-                        <td>{rate}</td>
-                        <td>{a.test_version ?? ""}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
-                        <td>
-                          <button
-                            className="btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              exportSelectedAttemptCsv(a);
-                            }}
-                          >
-                            Download
-                          </button>
-                        </td>
-                        <td>
-                          <button
-                            className="btn btn-danger"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteAttempt(a.id);
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="admin-msg">{loading ? "Loading..." : msg}</div>
-          </>
-        )}
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="admin-msg">No test categories yet.</div>
+                )}
 
-        </>
-        ) : null}
+                <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                  <table
+                    className="admin-table daily-results-table"
+                    style={{
+                      minWidth: Math.max(
+                        860,
+                        360 + ((resultContext.type === "daily"
+                          ? dailyResultsMatrix.sessions.length
+                          : modelResultsMatrix.sessions.length) || 0) * 140
+                      )
+                    }}
+                  >
+                    <thead>
+                      <tr>
+                        <th className="daily-sticky-1 daily-col-no">Student ID</th>
+                        <th className="daily-sticky-2 daily-col-name">Student Name</th>
+                        {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem) => (
+                          <th key={`daily-col-${sessionItem.id}`}>
+                            <button
+                              type="button"
+                              className="session-column-link"
+                              onClick={() => openSessionDetailView(sessionItem, resultContext.type)}
+                            >
+                              <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
+                              <div className="daily-col-subtitle">{sessionItem.problem_set_id ?? ""}</div>
+                              <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
+                            </button>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(resultContext.type === "daily" ? dailyResultsMatrix.rows : modelResultsMatrix.rows)
+                        .filter((row) => !row.student.is_withdrawn)
+                        .map((row) => (
+                        <tr key={`daily-row-${row.student.id}`}>
+                          <td className="daily-sticky-1 daily-col-no">{row.student.student_code ?? ""}</td>
+                          <td className="daily-sticky-2 daily-col-name">
+                            <div className="daily-name">{row.student.display_name ?? ""}</div>
+                            <div className="daily-code">{row.student.student_code ?? ""}</div>
+                          </td>
+                          {row.cells.map((attemptList, idx) => {
+                            const sessionItem = (resultContext.type === "daily"
+                              ? dailyResultsMatrix.sessions
+                              : modelResultsMatrix.sessions)[idx];
+                            if (!attemptList?.length) return <td key={`daily-cell-${row.student.id}-${idx}`}>—</td>;
+                            const passRate = Number(sessionItem?.linkedTest?.pass_rate ?? 0);
+                            const cellKey = `${row.student.id}:${sessionItem.id}`;
+                            const extraAttempts = attemptList.slice(1);
+                            const visibleAttempts = expandedResultCells[cellKey] ? attemptList : attemptList.slice(0, 1);
+                            return (
+                              <td
+                                key={`daily-cell-${row.student.id}-${idx}`}
+                                className="daily-score-cell"
+                              >
+                                <div className="daily-score-stack">
+                                  {visibleAttempts.map((attempt, attemptIdx) => {
+                                    const rateValue = getScoreRate(attempt);
+                                    const label = `${(rateValue * 100).toFixed(1)}%`;
+                                    const isLow = Number.isFinite(passRate) && passRate > 0 && rateValue < passRate;
+                                    const tabLeftCount = getTabLeftCount(attempt);
+                                    return (
+                                      <button
+                                        key={`daily-cell-${row.student.id}-${idx}-${attempt.id || attemptIdx}`}
+                                        className={`daily-score-btn ${isLow ? "low" : ""}`}
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openAttemptDetail(attempt);
+                                        }}
+                                      >
+                                        <span className="daily-score-main">
+                                          {attempt.__isRetake ? <span className="daily-retake-icon">Re</span> : null}
+                                          <span>{label}</span>
+                                        </span>
+                                        {tabLeftCount > 0 ? (
+                                          <span className="daily-score-meta daily-score-meta-alert">
+                                            Tabs left: {tabLeftCount}
+                                          </span>
+                                        ) : null}
+                                      </button>
+                                    );
+                                  })}
+                                  {extraAttempts.length ? (
+                                    <button
+                                      className="daily-more-btn"
+                                      type="button"
+                                      onClick={() => {
+                                        setExpandedResultCells((prev) => ({
+                                          ...prev,
+                                          [cellKey]: !prev[cellKey],
+                                        }));
+                                      }}
+                                    >
+                                      {expandedResultCells[cellKey]
+                                        ? "Hide extra attempts"
+                                        : `${extraAttempts.length} more attempt${extraAttempts.length > 1 ? "s" : ""}`}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+              </>
+            ) : (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <div>
+                      <div className="admin-title">Tests</div>
+                      <div className="admin-subtitle">テストを選ぶと結果を絞り込みます。</div>
+                    </div>
+                    <button className="btn" onClick={() => applyTestFilter("", resultContext.type)}>Clear Filter</button>
+                  </div>
+                  {filters.testVersion ? (
+                    <div className="admin-help" style={{ marginTop: 6 }}>
+                      Filter: <b>{filters.testVersion}</b>
+                    </div>
+                  ) : null}
+                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                    <table className="admin-table" style={{ minWidth: 860 }}>
+                      <thead>
+                        <tr>
+                          <th>Created</th>
+                          <th>SetID</th>
+                          <th>Category</th>
+                          <th>Questions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {resultContext.tests.map((t) => (
+                          <tr key={`result-test-${t.id}`} onClick={() => applyTestFilter(t.version, resultContext.type)}>
+                            <td>{formatDateTime(t.created_at)}</td>
+                            <td>{t.version ?? ""}</td>
+                            <td>{t.title ?? ""}</td>
+                            <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <form
+                  className="admin-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    runSearch(resultContext.type);
+                  }}
+                >
+                  <div className="field">
+                    <label>Student Code（部分一致）</label>
+                    <input
+                      placeholder="ID001"
+                      value={filters.code}
+                      onChange={(e) => setFilters((s) => ({ ...s, code: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Display Name（部分一致）</label>
+                    <input
+                      placeholder="Taro"
+                      value={filters.name}
+                      onChange={(e) => setFilters((s) => ({ ...s, name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>From（created_at）</label>
+                    <input
+                      type="date"
+                      value={filters.from}
+                      onChange={(e) => setFilters((s) => ({ ...s, from: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>To（created_at）</label>
+                    <input
+                      type="date"
+                      value={filters.to}
+                      onChange={(e) => setFilters((s) => ({ ...s, to: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Limit</label>
+                    <select
+                      value={filters.limit}
+                      onChange={(e) => setFilters((s) => ({ ...s, limit: Number(e.target.value) }))}
+                    >
+                      <option value={50}>50</option>
+                      <option value={200}>200</option>
+                      <option value={500}>500</option>
+                      <option value={1000}>1000</option>
+                    </select>
+                  </div>
+                  <div className="field small">
+                    <label>&nbsp;</label>
+                    <button className="btn btn-primary" type="submit">Search</button>
+                  </div>
+                </form>
+
+                <div className="admin-kpi">
+                  <div className="box">
+                    <div className="label">Attempts</div>
+                    <div className="value">{kpi.count}</div>
+                  </div>
+                  <div className="box">
+                    <div className="label">Avg rate</div>
+                    <div className="value">{(kpi.avgRate * 100).toFixed(1)}%</div>
+                  </div>
+                  <div className="box">
+                    <div className="label">Max rate</div>
+                    <div className="value">{(kpi.maxRate * 100).toFixed(1)}%</div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 12 }} className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Created</th>
+                        <th>Name</th>
+                        <th>Code</th>
+                        <th>Score</th>
+                        <th>Rate</th>
+                        <th>Test</th>
+                        <th>Attempt ID</th>
+                        <th>Detail CSV</th>
+                        <th>Delete</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {attempts.map((a) => {
+                        const score = `${a.correct}/${a.total}`;
+                        const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                        return (
+                          <tr
+                            key={a.id}
+                            onClick={() => {
+                              setSelectedId(a.id);
+                              setSelectedAttemptObj(null);
+                              setAttemptDetailOpen(true);
+                            }}
+                          >
+                            <td>{formatDateTime(a.created_at)}</td>
+                            <td>{a.display_name ?? ""}</td>
+                            <td>{a.student_code ?? ""}</td>
+                            <td>{score}</td>
+                            <td>{rate}</td>
+                            <td>{a.test_version ?? ""}</td>
+                            <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
+                            <td>
+                              <button
+                                className="btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  exportSelectedAttemptCsv(a);
+                                }}
+                              >
+                                Download
+                              </button>
+                            </td>
+                            <td>
+                              <button
+                                className="btn btn-danger"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteAttempt(a.id);
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+	                <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+	              </>
+	            )}
+	          </>
+	        )}
+	        </>
+	        ) : null}
           </div>
 
           {previewOpen ? (
@@ -8712,93 +9393,9 @@ export default function AdminConsole({
                 </div>
 
                 <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
-                  {previewQuestions.map((q, idx) => {
-                    const prompt = q.promptEn || q.promptBn || "";
-                    const choices = q.choices ?? q.choicesJa ?? [];
-                    const stemKind = q.stemKind || "";
-                    const stemText = q.stemText;
-                    const stemExtra = q.stemExtra;
-                    const stemAsset = q.stemAsset;
-                    const boxText = q.boxText;
-                    const isImageStem = ["image", "passage_image", "table_image"].includes(stemKind);
-                    const isAudioStem = stemKind === "audio";
-                    const shouldShowImage = isImageStem || (!stemKind && isImageAsset(stemAsset));
-                    const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
-                    const stemLines = splitStemLines(stemExtra);
-
-                    const renderChoices = () => (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-                        {choices.map((choice, i) => {
-                          const isCorrect = q.answerIndex === i;
-                          const isImage = isImageAsset(choice);
-                          return (
-                            <div
-                              key={`c-${i}`}
-                              className="btn"
-                              style={{
-                                border: isCorrect ? "2px solid #1a7f37" : "1px solid #ddd",
-                                background: isCorrect ? "#e7f7ee" : "#fff",
-                                padding: 8,
-                              }}
-                            >
-                              {isImage ? (
-                                <img src={choice} alt="choice" style={{ maxWidth: "100%" }} />
-                              ) : (
-                                choice
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-
-                    return (
-                      <div key={`${q.id}-${idx}`} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
-                        <div style={{ fontWeight: 700 }}>
-                          {q.id} {q.sectionKey ? `(${q.sectionKey})` : ""}
-                        </div>
-                        {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
-                        {q.type === "daily" && stemExtra ? (
-                          <div style={{ marginTop: 6, fontSize: 13, color: "#667085" }}>
-                            {stemExtra}
-                          </div>
-                        ) : null}
-                        {stemText ? (
-                          <div
-                            style={{ marginTop: 6 }}
-                            dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
-                          />
-                        ) : null}
-                        {stemLines.length && q.type !== "daily" ? (
-                          <div style={{ marginTop: 6 }}>
-                            {stemLines.map((line, i2) => (
-                              <div
-                                key={`line-${i2}`}
-                                dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(line) }}
-                              />
-                            ))}
-                          </div>
-                        ) : null}
-                        {boxText ? (
-                          <div
-                            className="boxed"
-                            style={{ marginTop: 8 }}
-                            dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(boxText) }}
-                          />
-                        ) : null}
-                        {shouldShowImage && stemAsset ? (
-                          <img src={stemAsset} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} />
-                        ) : null}
-                        {shouldShowAudio && stemAsset ? (
-                          <audio controls src={stemAsset} style={{ marginTop: 8, width: "100%" }} />
-                        ) : null}
-
-                        <div style={{ marginTop: 10 }}>
-                          {choices.length ? renderChoices() : null}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {previewQuestions.map((question, index) => (
+                    <QuestionPreviewCard key={`${question.id}-${index}`} question={question} index={index} />
+                  ))}
                 </div>
               </div>
             </div>

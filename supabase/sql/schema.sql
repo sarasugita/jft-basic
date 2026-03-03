@@ -110,6 +110,21 @@ create table if not exists public.test_sessions (
 create index if not exists test_sessions_problem_set_idx on public.test_sessions (problem_set_id);
 create index if not exists test_sessions_published_idx on public.test_sessions (is_published);
 
+create table if not exists public.test_session_attempt_overrides (
+  id uuid primary key default gen_random_uuid(),
+  test_session_id uuid not null references public.test_sessions(id) on delete cascade,
+  student_id uuid not null references public.profiles(id) on delete cascade,
+  extra_attempts integer not null default 0 check (extra_attempts >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (test_session_id, student_id)
+);
+
+create index if not exists test_session_attempt_overrides_session_idx
+  on public.test_session_attempt_overrides (test_session_id);
+create index if not exists test_session_attempt_overrides_student_idx
+  on public.test_session_attempt_overrides (student_id);
+
 -- announcements
 create table if not exists public.announcements (
   id uuid primary key default gen_random_uuid(),

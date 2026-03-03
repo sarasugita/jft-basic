@@ -510,6 +510,113 @@ body { padding: 0; }
   color: #0f172a;
 }
 
+.session-detail-page {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.session-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.session-detail-section {
+  display: grid;
+  gap: 12px;
+}
+
+.session-detail-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.session-detail-allow-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.session-detail-allow-form select {
+  min-width: 280px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  padding: 10px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+}
+
+.session-detail-kpi {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.session-detail-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.session-analysis-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.session-analysis-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.session-analysis-rate {
+  min-width: 68px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  font-weight: 900;
+  text-align: center;
+}
+
+.session-analysis-title {
+  font-weight: 900;
+  margin-bottom: 4px;
+}
+
+.session-analysis-table th,
+.session-analysis-table td {
+  text-align: center;
+}
+
+.session-analysis-table th:first-child,
+.session-analysis-table td:first-child {
+  text-align: left;
+}
+
+.session-analysis-student-code {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.session-analysis-cell {
+  font-weight: 900;
+  font-size: 16px;
+}
+
 .admin-icon-btn {
   border: 0;
   background: transparent;
@@ -767,6 +874,10 @@ body { padding: 0; }
     grid-template-columns: 1fr;
   }
 
+  .session-detail-analysis-grid {
+    grid-template-columns: 1fr;
+  }
+
   .daily-record-comment-row {
     flex-direction: column;
   }
@@ -869,6 +980,16 @@ body { padding: 0; }
 
 @media (max-width: 640px) {
   .admin-form { grid-template-columns: 1fr; }
+  .session-detail-allow-form {
+    width: 100%;
+  }
+  .session-detail-allow-form select,
+  .session-detail-allow-form .btn {
+    width: 100%;
+  }
+  .session-detail-kpi {
+    grid-template-columns: 1fr;
+  }
   .attendance-table { min-width: 680px; }
   .attendance-table { --att-code-w: 56px; --att-name-w: 130px; --att-rate-w: 78px; --att-abs-w: 88px; }
   .attendance-table th,
@@ -934,6 +1055,22 @@ body { padding: 0; }
 .daily-col-title { font-weight: 900; }
 .daily-col-subtitle { font-size: 11px; color: #6b7280; }
 .daily-col-date { font-size: 12px; color: #6b7280; }
+
+.session-column-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  width: 100%;
+  text-align: inherit;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.session-column-link:hover .daily-col-title,
+.session-column-link:focus-visible .daily-col-title {
+  text-decoration: underline;
+}
 
 .daily-name { font-weight: 800; }
 .daily-code { font-size: 12px; color: #6b7280; }
