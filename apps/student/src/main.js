@@ -63,6 +63,9 @@ let studentResultsState = {
   userId: "",
 };
 
+let pendingAttemptSave = null;
+let pendingAttemptSaveKey = "";
+
 let sessionAttemptOverrideState = {
   loaded: false,
   loading: false,
@@ -819,6 +822,32 @@ function getAttemptDateLabel(attempt) {
   return date ? formatDateShort(date) : "—";
 }
 
+function getAttemptDedupKey(attempt) {
+  const startedAt = String(attempt?.started_at || "");
+  const endedAt = String(attempt?.ended_at || "");
+  if (!startedAt && !endedAt) return `id:${attempt?.id || ""}`;
+  return JSON.stringify([
+    attempt?.test_session_id || "",
+    attempt?.test_version || "",
+    startedAt,
+    endedAt,
+    Number(attempt?.correct) || 0,
+    Number(attempt?.total) || 0,
+    Number(attempt?.tab_left_count) || 0,
+    JSON.stringify(attempt?.answers_json || {}),
+  ]);
+}
+
+function dedupeAttempts(list) {
+  const seen = new Set();
+  return (list ?? []).filter((attempt) => {
+    const key = getAttemptDedupKey(attempt);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function getScoreRateFromAttempt(attempt) {
   const rate = Number(attempt?.score_rate);
   if (Number.isFinite(rate)) return rate;
@@ -1027,14 +1056,14 @@ async function fetchStudentResults() {
   modelRankState.totalMap = {};
   let { data, error } = await supabase
     .from("attempts")
-    .select("id, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json, tab_left_count")
+    .select("id, test_version, test_session_id, correct, total, score_rate, started_at, created_at, ended_at, answers_json, tab_left_count")
     .eq("student_id", authState.session.user.id)
     .order("created_at", { ascending: false })
     .limit(200);
   if (error && isMissingTabLeftCountError(error)) {
     ({ data, error } = await supabase
       .from("attempts")
-      .select("id, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
+      .select("id, test_version, test_session_id, correct, total, score_rate, started_at, created_at, ended_at, answers_json")
       .eq("student_id", authState.session.user.id)
       .order("created_at", { ascending: false })
       .limit(200));
@@ -1043,7 +1072,7 @@ async function fetchStudentResults() {
     studentResultsState.list = [];
     studentResultsState.error = error.message || "Failed to load results.";
   } else {
-    studentResultsState.list = data ?? [];
+    studentResultsState.list = dedupeAttempts(data ?? []);
   }
   studentResultsState.loaded = true;
   studentResultsState.loading = false;
@@ -1366,8 +1395,7 @@ function eyeOffIcon() {
 
 function renderSetPassword(app) {
   app.innerHTML = `
-    <div class="app has-topbar">
-      ${topbarHTML({ rightButtonLabel: "Reset", rightButtonId: "disabledBtn" })}
+    <div class="app">
       <main class="content" style="margin:12px;">
         <div style="max-width:420px;margin:20px auto;padding:20px;border:1px solid #ddd;border-radius:12px;background:#fff;">
           <h2 style="margin:0 0 6px;">Set New Password</h2>
@@ -1395,7 +1423,6 @@ function renderSetPassword(app) {
       </main>
     </div>
   `;
-  document.querySelector("#disabledBtn").disabled = true;
   const passEl = app.querySelector("#newPass");
   const confirmEl = app.querySelector("#confirmPass");
   const msgEl = app.querySelector("#msg");
@@ -1753,12 +1780,13 @@ function downloadText(filename, text, mime = "text/plain") {
 }
 
 async function saveAttemptIfNeeded() {
-  if (state.attemptSaved) return;
   const statusEl = document.querySelector("#saveStatus");
-  if (statusEl) statusEl.textContent = "Saving...";
+  if (state.attemptSaved) {
+    if (statusEl) statusEl.textContent = "Saved";
+    return pendingAttemptSave;
+  }
 
   const { correct, total } = scoreAll();
-  const scoreRate = total === 0 ? 0 : correct / total;
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId || null;
   const tabLeftCount = Math.max(
     0,
@@ -1783,22 +1811,38 @@ async function saveAttemptIfNeeded() {
     tab_left_count: tabLeftCount,
     link_id: state.linkId,
   };
+  const saveKey = getAttemptDedupKey(payload);
 
-  let { error } = await supabase.from("attempts").insert(payload);
-  if (error && isMissingTabLeftCountError(error)) {
-    const { tab_left_count, ...legacyPayload } = payload;
-    ({ error } = await supabase.from("attempts").insert(legacyPayload));
-  }
-  if (error) {
-    console.error("saveAttempt error:", error);
-    if (statusEl) statusEl.textContent = `Save failed: ${error.message}`;
-    return;
+  if (pendingAttemptSave && pendingAttemptSaveKey === saveKey) {
+    if (statusEl) statusEl.textContent = "Saving...";
+    return pendingAttemptSave;
   }
 
-  state.attemptSaved = true;
-  studentResultsState.loaded = false;
-  saveState();
-  if (statusEl) statusEl.textContent = "Saved";
+  if (statusEl) statusEl.textContent = "Saving...";
+  pendingAttemptSaveKey = saveKey;
+  pendingAttemptSave = (async () => {
+    let { error } = await supabase.from("attempts").insert(payload);
+    if (error && isMissingTabLeftCountError(error)) {
+      const { tab_left_count, ...legacyPayload } = payload;
+      ({ error } = await supabase.from("attempts").insert(legacyPayload));
+    }
+    if (error) {
+      console.error("saveAttempt error:", error);
+      if (statusEl) statusEl.textContent = `Save failed: ${error.message}`;
+      return;
+    }
+
+    state.attemptSaved = true;
+    studentResultsState.loaded = false;
+    saveState();
+    const currentStatusEl = document.querySelector("#saveStatus");
+    if (currentStatusEl) currentStatusEl.textContent = "Saved";
+  })().finally(() => {
+    pendingAttemptSave = null;
+    pendingAttemptSaveKey = "";
+  });
+
+  return pendingAttemptSave;
 }
 
 /** ===== UI helpers ===== */

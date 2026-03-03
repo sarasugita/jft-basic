@@ -10,7 +10,7 @@ export function json(body: unknown, init: ResponseInit = {}) {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "access-control-allow-origin": "*",
-      "access-control-allow-headers": "authorization, x-client-info, apikey, content-type",
+      "access-control-allow-headers": "authorization, x-client-info, apikey, content-type, x-school-scope",
       "access-control-allow-methods": "POST, OPTIONS",
       ...(init.headers ?? {}),
     },
