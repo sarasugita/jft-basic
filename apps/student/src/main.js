@@ -49,6 +49,8 @@ let authState = {
   mustChangePassword: false,
 };
 
+let studentPanelEntryUserId = "";
+
 let testsState = {
   loaded: false,
   list: [],
@@ -512,6 +514,7 @@ async function refreshAuthState() {
   authState.recoveryMode = Boolean(isRecovery && authState.session);
 
   if (!authState.session) {
+    studentPanelEntryUserId = "";
     state.requireLogin = true;
     authState.checked = true;
     studentResultsState.userId = "";
@@ -570,6 +573,16 @@ async function refreshAuthState() {
     }
   }
   const currentUserId = authState.session.user.id;
+  if (studentPanelEntryUserId !== currentUserId) {
+    studentPanelEntryUserId = currentUserId;
+    state.studentTab = "home";
+    resultDetailState.open = false;
+    resultDetailState.mode = "";
+    resultDetailState.subTab = "score";
+    resultDetailState.sectionFilter = "";
+    resultDetailState.attempt = null;
+    saveState();
+  }
   if (studentResultsState.userId !== currentUserId) {
     studentResultsState.userId = currentUserId;
     studentResultsState.loaded = false;
@@ -1324,21 +1337,22 @@ function renderLogin(app) {
             Log in with email and password.
             ${showGuest ? `<br/>You can also take this test as a guest from this link.` : ""}
           </p>
+          <form id="studentLoginForm">
+            <label>Email</label>
+            <input id="email" type="email" style="width:100%;padding:10px;margin:6px 0 12px;" value="${escapeHtml(emailPrefill)}" />
 
-          <label>Email</label>
-          <input id="email" type="email" style="width:100%;padding:10px;margin:6px 0 12px;" value="${escapeHtml(emailPrefill)}" />
+            <label>Password</label>
+            <input id="password" type="password" style="width:100%;padding:10px;margin:6px 0 12px;" />
 
-          <label>Password</label>
-          <input id="password" type="password" style="width:100%;padding:10px;margin:6px 0 12px;" />
-
-          <div>
-            <button class="btn btn-primary" id="loginBtn" style="width:100%; min-width: 160px;">Log in</button>
-            ${
-              showGuest
-                ? `<button class="btn btn-guest" id="guestBtn" style="width:100%; min-width: 160px; margin-top:10px;">Take as Guest</button>`
-                : ""
-            }
-          </div>
+            <div>
+              <button class="btn btn-primary" id="loginBtn" type="submit" style="width:100%; min-width: 160px;">Log in</button>
+              ${
+                showGuest
+                  ? `<button class="btn btn-guest" id="guestBtn" type="button" style="width:100%; min-width: 160px; margin-top:10px;">Take as Guest</button>`
+                  : ""
+              }
+            </div>
+          </form>
 
           <p id="msg" style="color:#b00;margin-top:12px;min-height:20px;"></p>
         </div>
@@ -1350,7 +1364,8 @@ function renderLogin(app) {
   const passEl = app.querySelector("#password");
   const msgEl = app.querySelector("#msg");
 
-  app.querySelector("#loginBtn").addEventListener("click", async () => {
+  app.querySelector("#studentLoginForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
     msgEl.textContent = "";
     const email = emailEl.value.trim();
     const password = passEl.value;
@@ -2514,14 +2529,7 @@ function renderTestSelect(app) {
         <header class="student-topbar">
           <div class="student-topbar-brand" id="studentLogoHome">
             <div class="student-topbar-title">
-              <svg viewBox="0 0 24 24" class="student-topbar-icon" aria-hidden="true">
-                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
-                <path
-                  d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
-                  fill="currentColor"
-                ></path>
-              </svg>
-              <span>JFT Navi</span>
+              <img class="student-topbar-logo" src="/branding/jft-navi-white.png" alt="JFT Navi" />
             </div>
           </div>
           <div class="student-topbar-spacer"></div>

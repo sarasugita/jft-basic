@@ -1297,16 +1297,17 @@ body { overflow-x: hidden; }
 }
 
 .student-topbar-title {
-  font-size: 16px;
-  font-weight: 900;
-  letter-spacing: 0.6px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.45);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.student-topbar-logo {
+  display: block;
+  width: clamp(118px, 26vw, 164px);
+  height: auto;
 }
 
 .student-topbar-title-simple {

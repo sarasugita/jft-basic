@@ -41,6 +41,18 @@ const PERSONAL_UPLOAD_FIELDS = [
 const DAILY_RECORD_COMMENT_FIELDS =
   "id, student_id, comment, profiles:student_id(display_name, student_code)";
 
+function PasswordVisibilityIcon({ visible }) {
+  return visible ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 4.3 4.3 3 21 19.7 19.7 21l-2.4-2.4c-1.6.8-3.4 1.4-5.3 1.4-5.5 0-9.6-4.1-10.7-6.6-.2-.4-.2-.8 0-1.1.7-1.7 2.3-3.6 4.6-4.9L3 4.3zm5 5 1.7 1.7a3.9 3.9 0 0 0 4.6 4.6l1.7 1.7c-1 .5-2.1.7-3.4.7a3.9 3.9 0 0 1-3.9-3.9c0-1.3.3-2.4.8-3.4zM12 7.2c1.2 0 2.3.3 3.2.8l-1.7 1.7a3.9 3.9 0 0 0-4.6 4.6L6.2 10c1.5-1.7 3.7-2.8 5.8-2.8zm9.2 4.8c-.5 1.1-1.4 2.4-2.8 3.5l-1.4-1.4c1-.8 1.7-1.7 2.1-2.1-.8-1.6-3.1-4.1-6.1-4.6l-1.8-1.8c4.2.4 7.5 3.2 8.5 4.7.2.4.2.8 0 1.1z" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5c5.5 0 9.6 4.1 10.7 6.6.2.4.2.8 0 1.1C21.6 15.9 17.5 20 12 20S2.4 15.9 1.3 12.7c-.2-.4-.2-.8 0-1.1C2.4 9.1 6.5 5 12 5zm0 2.2c-4.1 0-7.4 2.9-8.4 4.9 1 2 4.3 4.9 8.4 4.9s7.4-2.9 8.4-4.9c-1-2-4.3-4.9-8.4-4.9zm0 1.8a3.9 3.9 0 1 1 0 7.8 3.9 3.9 0 0 1 0-7.8z" />
+    </svg>
+  );
+}
+
 function downloadText(filename, text, mime = "text/plain") {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -1491,6 +1503,7 @@ export default function AdminConsole({
   });
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [passwordChangeForm, setPasswordChangeForm] = useState({
     password: "",
     confirmPassword: "",
@@ -5821,6 +5834,12 @@ export default function AdminConsole({
     }
   }
 
+  function handleAdminLoginKeyDown(event) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    handleLogin();
+  }
+
   function handleAdminSchoolScopeChange(nextSchoolId) {
     setSchoolScopeId(nextSchoolId || null);
   }
@@ -6201,31 +6220,56 @@ export default function AdminConsole({
 
   if (!session) {
     return (
-      <div className="admin-login">
-        <h2>Admin Login</h2>
-        <div className="admin-help">メールとパスワードでログインします（admin権限のみ閲覧可）。</div>
-        <div style={{ marginTop: 12 }}>
-          <label>Email</label>
-          <input
-            type="email"
-            placeholder="admin@example.com"
-            value={loginForm.email}
-            onChange={(e) => setLoginForm((s) => ({ ...s, email: e.target.value }))}
-          />
+      <div className="admin-login-screen">
+        <div className="admin-login admin-login-card">
+          <div className="admin-login-header">
+            <img className="admin-login-logo" src="/branding/jft-navi-color.png" alt="JFT Navi" />
+            <h1 className="admin-login-title">Admin Panel Login</h1>
+          </div>
+          <div className="admin-login-divider" />
+          <form
+            className="admin-login-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleLogin();
+            }}
+          >
+            <label className="admin-login-label" htmlFor="adminLoginEmail">Username</label>
+            <input
+              id="adminLoginEmail"
+              className="admin-login-input"
+              type="email"
+              autoComplete="username"
+              placeholder="example@gmail.com"
+              value={loginForm.email}
+              onChange={(e) => setLoginForm((s) => ({ ...s, email: e.target.value }))}
+              onKeyDown={handleAdminLoginKeyDown}
+            />
+            <label className="admin-login-label" htmlFor="adminLoginPassword">Password</label>
+            <div className="admin-login-password">
+              <input
+                id="adminLoginPassword"
+                className="admin-login-input admin-login-input-password"
+                type={showLoginPassword ? "text" : "password"}
+                autoComplete="current-password"
+                placeholder="password"
+                value={loginForm.password}
+                onChange={(e) => setLoginForm((s) => ({ ...s, password: e.target.value }))}
+                onKeyDown={handleAdminLoginKeyDown}
+              />
+              <button
+                className="admin-login-toggle"
+                type="button"
+                aria-label={showLoginPassword ? "Hide password" : "Show password"}
+                onClick={() => setShowLoginPassword((current) => !current)}
+              >
+                <PasswordVisibilityIcon visible={showLoginPassword} />
+              </button>
+            </div>
+            <button className="admin-login-submit" type="submit">LOGIN</button>
+          </form>
+          <div className={`admin-login-msg ${loginMsg ? "visible" : ""}`}>{loginMsg || "\u00a0"}</div>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <label>Password</label>
-          <input
-            type="password"
-            placeholder="••••••••"
-            value={loginForm.password}
-            onChange={(e) => setLoginForm((s) => ({ ...s, password: e.target.value }))}
-          />
-        </div>
-        <div className="admin-actions" style={{ marginTop: 14 }}>
-          <button className="btn btn-primary" onClick={handleLogin}>Log in</button>
-        </div>
-        <div className="admin-msg">{loginMsg}</div>
       </div>
     );
   }
@@ -6311,14 +6355,7 @@ export default function AdminConsole({
         <div className="admin-brand">
           <div className="admin-brand-text">
             <div className="admin-brand-title">
-              <svg viewBox="0 0 24 24" className="admin-brand-icon" aria-hidden="true">
-                <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
-                <path
-                  d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z"
-                  fill="currentColor"
-                ></path>
-              </svg>
-              <span>JFT Navi</span>
+              <img className="admin-brand-logo" src="/branding/jft-navi-color.png" alt="JFT Navi" />
             </div>
             <div className="admin-brand-sub">Admin Console</div>
           </div>

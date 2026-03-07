@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="260" viewBox="0 0 1200 260" fill="none">
+  <circle cx="116" cy="130" r="92" stroke="#C24B0D" stroke-width="16"/>
+  <path d="M82 54L191 154L132 145L98 214L82 54Z" fill="#2F7730"/>
+  <text
+    x="232"
+    y="166"
+    fill="#2F7730"
+    font-family="Arial Black, Helvetica Neue, Arial, sans-serif"
+    font-size="132"
+    font-weight="900"
+    letter-spacing="1"
+  >
+    JFT Navi
+  </text>
+</svg>

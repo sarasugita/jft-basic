@@ -114,11 +114,7 @@ function Brand() {
     <div className="admin-brand">
       <div className="admin-brand-text">
         <div className="admin-brand-title">
-          <svg viewBox="0 0 24 24" className="admin-brand-icon" aria-hidden="true">
-            <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"></circle>
-            <path d="M6.3 11.1 16.8 7.4 14 17.9 11.7 12.3 6.3 11.1Z" fill="currentColor"></path>
-          </svg>
-          <span>JFT Navi</span>
+          <img className="admin-brand-logo" src="/branding/jft-navi-color.png" alt="JFT Navi" />
         </div>
         <div className="admin-brand-sub">Super Admin Console</div>
       </div>
