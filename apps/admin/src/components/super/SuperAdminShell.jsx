@@ -7,6 +7,7 @@ import { createAdminSupabaseClient } from "../../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../../lib/authCookies";
 
 const SuperAdminContext = createContext(null);
+const ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY = "jft_admin_sidebar_collapsed_v1";
 
 const superNav = [
   {
@@ -132,7 +133,7 @@ function buildOpenGroups(pathname) {
   return groups;
 }
 
-function SuperSidebar({ pathname, email, onNavigate, onSignOut }) {
+function SuperSidebar({ pathname, email, onNavigate, onSignOut, sidebarCollapsed, onToggleSidebar }) {
   const [openGroups, setOpenGroups] = useState(() => buildOpenGroups(pathname));
 
   useEffect(() => {
@@ -140,14 +141,27 @@ function SuperSidebar({ pathname, email, onNavigate, onSignOut }) {
   }, [pathname]);
 
   return (
-    <aside className="admin-sidebar">
-      <Brand />
+    <aside className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+      <div className="admin-sidebar-head">
+        <Brand />
+        <button
+          className="admin-sidebar-toggle"
+          type="button"
+          aria-label={sidebarCollapsed ? "Expand menu" : "Collapse menu"}
+          aria-expanded={!sidebarCollapsed}
+          onClick={onToggleSidebar}
+        >
+          <svg viewBox="0 0 24 24" className="admin-sidebar-toggle-icon" aria-hidden="true">
+            {sidebarCollapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
+          </svg>
+        </button>
+      </div>
       <div className="admin-nav">
         {superNav.map((item) => {
           if (item.children?.length) {
             const open = Boolean(openGroups[item.label]);
-            return (
-              <div key={item.label} className={`admin-nav-group ${open ? "active" : ""}`}>
+                return (
+                    <div key={item.label} className={`admin-nav-group ${open ? "active" : ""}`}>
                 <button
                   type="button"
                   className={`admin-nav-item admin-group-toggle ${open ? "active" : ""}`}
@@ -172,6 +186,10 @@ function SuperSidebar({ pathname, email, onNavigate, onSignOut }) {
                         key={child.href}
                         href={child.href}
                         className={`admin-subnav-item ${isActivePath(pathname, child.href) ? "active" : ""}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onNavigate(child.href);
+                        }}
                       >
                         {child.label}
                       </Link>
@@ -187,7 +205,11 @@ function SuperSidebar({ pathname, email, onNavigate, onSignOut }) {
               key={item.href}
               href={item.href}
               className={`admin-nav-item ${isActivePath(pathname, item.href) ? "active" : ""}`}
-              onClick={() => setOpenGroups(buildOpenGroups(item.href))}
+              onClick={(event) => {
+                event.preventDefault();
+                setOpenGroups(buildOpenGroups(item.href));
+                onNavigate(item.href);
+              }}
             >
               <span className="admin-nav-icon" aria-hidden="true">{item.icon}</span>
               {item.label}
@@ -220,6 +242,18 @@ export default function SuperAdminShell({ children }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY);
+    setSidebarCollapsed(stored === "1");
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
+  }, [sidebarCollapsed]);
 
   async function getAccessToken() {
     const { data: sessionData } = await supabase.auth.getSession();
@@ -387,6 +421,12 @@ export default function SuperAdminShell({ children }) {
   }
 
   const pageMeta = getPageMeta(pathname);
+  function handleSidebarNavigate(href) {
+    if (sidebarCollapsed) {
+      setSidebarCollapsed(false);
+    }
+    router.push(href);
+  }
 
   return (
     <SuperAdminContext.Provider value={{ supabase, session, profile, invokeWithAuth }}>
@@ -394,8 +434,10 @@ export default function SuperAdminShell({ children }) {
         <SuperSidebar
           pathname={pathname}
           email={session.user.email}
-          onNavigate={router.push}
+          onNavigate={handleSidebarNavigate}
           onSignOut={() => supabase.auth.signOut()}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
         />
         <div className="admin-main">
           <div className="admin-wrap">

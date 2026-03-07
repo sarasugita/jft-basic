@@ -1330,31 +1330,47 @@ function renderLogin(app) {
   const emailPrefill = authState.session?.user?.email ?? "";
   app.innerHTML = `
     <div class="app">
-      <main class="content" style="margin:12px;">
-        <div style="max-width:420px;margin:40px auto;padding:20px;border:1px solid #ddd;border-radius:12px;background:#fff;">
-          <h2 style="margin:0 0 6px;">Student Login</h2>
-          <p style="margin-top:0;line-height:1.6;">
-            Log in with email and password.
-            ${showGuest ? `<br/>You can also take this test as a guest from this link.` : ""}
-          </p>
-          <form id="studentLoginForm">
-            <label>Email</label>
-            <input id="email" type="email" style="width:100%;padding:10px;margin:6px 0 12px;" value="${escapeHtml(emailPrefill)}" />
+      <main class="student-login-screen">
+        <div class="student-login-card">
+          <div class="student-login-header">
+            <img class="student-login-logo" src="/branding/jft-navi-color.png" alt="JFT Navi" />
+          </div>
+          <div class="student-login-divider"></div>
+          <form id="studentLoginForm" class="student-login-form">
+            <label class="student-login-label" for="email">Username</label>
+            <input
+              id="email"
+              class="student-login-input"
+              type="email"
+              placeholder="example@gmail.com"
+              value="${escapeHtml(emailPrefill)}"
+            />
 
-            <label>Password</label>
-            <input id="password" type="password" style="width:100%;padding:10px;margin:6px 0 12px;" />
-
-            <div>
-              <button class="btn btn-primary" id="loginBtn" type="submit" style="width:100%; min-width: 160px;">Log in</button>
-              ${
-                showGuest
-                  ? `<button class="btn btn-guest" id="guestBtn" type="button" style="width:100%; min-width: 160px; margin-top:10px;">Take as Guest</button>`
-                  : ""
-              }
+            <label class="student-login-label" for="password">Password</label>
+            <div class="student-login-password">
+              <input
+                id="password"
+                class="student-login-input student-login-password-input"
+                type="password"
+                placeholder="password"
+              />
+              <button class="student-login-toggle" type="button" id="studentLoginToggle" aria-label="Show password">
+                ${eyeOffIcon()}
+              </button>
             </div>
+
+            <button class="student-login-submit" id="loginBtn" type="submit">LOGIN</button>
+            ${
+              showGuest
+                ? `
+                  <button class="student-login-guest" id="guestBtn" type="button">Take as Guest</button>
+                  <p class="student-login-note">You can also take this test as a guest from this link.</p>
+                `
+                : ""
+            }
           </form>
 
-          <p id="msg" style="color:#b00;margin-top:12px;min-height:20px;"></p>
+          <p id="msg" class="student-login-msg"></p>
         </div>
       </main>
     </div>
@@ -1363,6 +1379,13 @@ function renderLogin(app) {
   const emailEl = app.querySelector("#email");
   const passEl = app.querySelector("#password");
   const msgEl = app.querySelector("#msg");
+  const toggleEl = app.querySelector("#studentLoginToggle");
+
+  toggleEl?.addEventListener("click", () => {
+    const next = passEl.type === "password" ? "text" : "password";
+    passEl.type = next;
+    toggleEl.innerHTML = next === "text" ? eyeIcon() : eyeOffIcon();
+  });
 
   app.querySelector("#studentLoginForm").addEventListener("submit", async (event) => {
     event.preventDefault();

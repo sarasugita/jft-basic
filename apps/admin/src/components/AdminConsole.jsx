@@ -40,6 +40,7 @@ const PERSONAL_UPLOAD_FIELDS = [
 ];
 const DAILY_RECORD_COMMENT_FIELDS =
   "id, student_id, comment, profiles:student_id(display_name, student_code)";
+const ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY = "jft_admin_sidebar_collapsed_v1";
 
 function PasswordVisibilityIcon({ visible }) {
   return visible ? (
@@ -1458,6 +1459,7 @@ export default function AdminConsole({
   homeHref = "/",
   homeLabel = "Admin Home",
   forcedSchoolOptions = [],
+  forceLoginOnEntry = false,
 }) {
   const router = useRouter();
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
@@ -1504,6 +1506,7 @@ export default function AdminConsole({
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [passwordChangeForm, setPasswordChangeForm] = useState({
     password: "",
     confirmPassword: "",
@@ -2404,17 +2407,48 @@ export default function AdminConsole({
   }, [examLinks]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data, error }) => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY);
+    setSidebarCollapsed(stored === "1");
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function bootstrapSession() {
+      const { data, error } = await supabase.auth.getSession();
       if (error) console.error("getSession error:", error);
+
+      if (forceLoginOnEntry) {
+        if (data?.session) {
+          const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+          if (signOutError) console.error("admin force signout error:", signOutError);
+        }
+        syncAdminAuthCookie(null);
+        if (mounted) setSession(null);
+        return;
+      }
+
       syncAdminAuthCookie(data?.session ?? null);
-      setSession(data?.session ?? null);
-    });
+      if (mounted) setSession(data?.session ?? null);
+    }
+
+    bootstrapSession();
+
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       syncAdminAuthCookie(nextSession ?? null);
       setSession(nextSession ?? null);
     });
-    return () => listener.subscription.unsubscribe();
-  }, [supabase]);
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, [forceLoginOnEntry, supabase]);
 
   useEffect(() => {
     if (!session) {
@@ -6349,21 +6383,41 @@ export default function AdminConsole({
     );
   }
 
+  function handleSidebarMenuClick(action) {
+    if (sidebarCollapsed) {
+      setSidebarCollapsed(false);
+    }
+    action();
+  }
+
   return (
     <div className="admin-shell">
-      <aside className="admin-sidebar">
-        <div className="admin-brand">
-          <div className="admin-brand-text">
-            <div className="admin-brand-title">
-              <img className="admin-brand-logo" src="/branding/jft-navi-color.png" alt="JFT Navi" />
+      <aside className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+        <div className="admin-sidebar-head">
+          <div className="admin-brand">
+            <div className="admin-brand-text">
+              <div className="admin-brand-title">
+                <img className="admin-brand-logo" src="/branding/jft-navi-color.png" alt="JFT Navi" />
+              </div>
+              <div className="admin-brand-sub">Admin Console</div>
             </div>
-            <div className="admin-brand-sub">Admin Console</div>
           </div>
+          <button
+            className="admin-sidebar-toggle"
+            type="button"
+            aria-label={sidebarCollapsed ? "Expand menu" : "Collapse menu"}
+            aria-expanded={!sidebarCollapsed}
+            onClick={() => setSidebarCollapsed((current) => !current)}
+          >
+            <svg viewBox="0 0 24 24" className="admin-sidebar-toggle-icon" aria-hidden="true">
+              {sidebarCollapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
+            </svg>
+          </button>
         </div>
         <div className="admin-nav">
           <button
             className={`admin-nav-item ${activeTab === "students" ? "active" : ""}`}
-            onClick={() => setActiveTab("students")}
+            onClick={() => handleSidebarMenuClick(() => setActiveTab("students"))}
           >
             <span className="admin-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -6379,10 +6433,10 @@ export default function AdminConsole({
           <div className={`admin-nav-group ${activeTab === "attendance" ? "active" : ""}`}>
             <button
               className={`admin-nav-item admin-group-toggle ${activeTab === "attendance" ? "active" : ""}`}
-              onClick={() => {
+              onClick={() => handleSidebarMenuClick(() => {
                 setActiveTab("attendance");
                 setAttendanceSubTab("sheet");
-              }}
+              })}
             >
               <span className="admin-nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -6397,19 +6451,19 @@ export default function AdminConsole({
               <div className="admin-subnav">
                 <button
                   className={`admin-subnav-item ${attendanceSubTab === "sheet" ? "active" : ""}`}
-                  onClick={() => {
+                  onClick={() => handleSidebarMenuClick(() => {
                     setActiveTab("attendance");
                     setAttendanceSubTab("sheet");
-                  }}
+                  })}
                 >
                   Attendance Sheet
                 </button>
                 <button
                   className={`admin-subnav-item ${attendanceSubTab === "absence" ? "active" : ""}`}
-                  onClick={() => {
+                  onClick={() => handleSidebarMenuClick(() => {
                     setActiveTab("attendance");
                     setAttendanceSubTab("absence");
-                  }}
+                  })}
                 >
                   Absence Applications
                 </button>
@@ -6420,10 +6474,10 @@ export default function AdminConsole({
           <div className={`admin-nav-group ${activeTab === "model" ? "active" : ""}`}>
             <button
               className={`admin-nav-item admin-group-toggle ${activeTab === "model" ? "active" : ""}`}
-              onClick={() => {
+              onClick={() => handleSidebarMenuClick(() => {
                 setActiveTab("model");
                 setModelSubTab("conduct");
-              }}
+              })}
             >
               <span className="admin-nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -6438,28 +6492,28 @@ export default function AdminConsole({
               <div className="admin-subnav">
                 <button
                   className={`admin-subnav-item ${modelSubTab === "conduct" ? "active" : ""}`}
-                  onClick={() => {
+                  onClick={() => handleSidebarMenuClick(() => {
                     setActiveTab("model");
                     setModelSubTab("conduct");
-                  }}
+                  })}
                 >
                   Create Test Session
                 </button>
                 <button
                   className={`admin-subnav-item ${modelSubTab === "upload" ? "active" : ""}`}
-                  onClick={() => {
+                  onClick={() => handleSidebarMenuClick(() => {
                     setActiveTab("model");
                     setModelSubTab("upload");
-                  }}
+                  })}
                 >
                   Upload Question Set
                 </button>
                 <button
                   className={`admin-subnav-item ${modelSubTab === "results" ? "active" : ""}`}
-                  onClick={() => {
+                  onClick={() => handleSidebarMenuClick(() => {
                     setActiveTab("model");
                     setModelSubTab("results");
-                  }}
+                  })}
                 >
                   Results
                 </button>
@@ -6470,10 +6524,10 @@ export default function AdminConsole({
           <div className={`admin-nav-group ${activeTab === "daily" ? "active" : ""}`}>
             <button
               className={`admin-nav-item admin-group-toggle ${activeTab === "daily" ? "active" : ""}`}
-              onClick={() => {
+              onClick={() => handleSidebarMenuClick(() => {
                 setActiveTab("daily");
                 setDailySubTab("conduct");
-              }}
+              })}
             >
               <span className="admin-nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -6489,28 +6543,28 @@ export default function AdminConsole({
               <div className="admin-subnav">
                 <button
                   className={`admin-subnav-item ${dailySubTab === "conduct" ? "active" : ""}`}
-                  onClick={() => {
+                  onClick={() => handleSidebarMenuClick(() => {
                     setActiveTab("daily");
                     setDailySubTab("conduct");
-                  }}
+                  })}
                 >
                   Create Test Session
                 </button>
                 <button
                   className={`admin-subnav-item ${dailySubTab === "upload" ? "active" : ""}`}
-                  onClick={() => {
+                  onClick={() => handleSidebarMenuClick(() => {
                     setActiveTab("daily");
                     setDailySubTab("upload");
-                  }}
+                  })}
                 >
                   Upload Question Set
                 </button>
                 <button
                   className={`admin-subnav-item ${dailySubTab === "results" ? "active" : ""}`}
-                  onClick={() => {
+                  onClick={() => handleSidebarMenuClick(() => {
                     setActiveTab("daily");
                     setDailySubTab("results");
-                  }}
+                  })}
                 >
                   Results
                 </button>
@@ -6520,7 +6574,7 @@ export default function AdminConsole({
 
           <button
             className={`admin-nav-item ${activeTab === "dailyRecord" ? "active" : ""}`}
-            onClick={() => setActiveTab("dailyRecord")}
+            onClick={() => handleSidebarMenuClick(() => setActiveTab("dailyRecord"))}
           >
             <span className="admin-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -6533,7 +6587,7 @@ export default function AdminConsole({
 
           <button
             className={`admin-nav-item ${activeTab === "ranking" ? "active" : ""}`}
-            onClick={() => setActiveTab("ranking")}
+            onClick={() => handleSidebarMenuClick(() => setActiveTab("ranking"))}
           >
             <span className="admin-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -6548,7 +6602,7 @@ export default function AdminConsole({
 
           <button
             className={`admin-nav-item ${activeTab === "announcements" ? "active" : ""}`}
-            onClick={() => setActiveTab("announcements")}
+            onClick={() => handleSidebarMenuClick(() => setActiveTab("announcements"))}
           >
             <span className="admin-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" className="admin-nav-svg">

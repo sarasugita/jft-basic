@@ -19,6 +19,12 @@ body { padding: 0; }
     height: auto;
     position: static;
   }
+  .admin-sidebar.collapsed {
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    padding: 20px 16px;
+  }
   .admin-nav {
     flex-direction: row;
     gap: 6px;
@@ -27,6 +33,30 @@ body { padding: 0; }
     margin-left: auto;
     flex-direction: row;
     align-items: center;
+  }
+  .admin-sidebar-toggle {
+    display: none;
+  }
+  .admin-sidebar.collapsed .admin-brand-sub {
+    display: block;
+  }
+  .admin-sidebar.collapsed .admin-brand-logo {
+    width: min(100%, 176px);
+  }
+  .admin-sidebar.collapsed .admin-subnav {
+    display: flex;
+  }
+  .admin-sidebar.collapsed .admin-nav-item {
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    font-size: 15px;
+  }
+  .admin-sidebar.collapsed .admin-nav-arrow {
+    display: inline-flex;
+  }
+  .admin-sidebar.collapsed .admin-sidebar-footer {
+    display: flex;
   }
 }
 
@@ -70,6 +100,53 @@ body { padding: 0; }
   height: 100vh;
   color: #1f2937;
   box-shadow: 4px 0 16px rgba(17, 24, 39, 0.06);
+  transition: width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease, padding 0.2s ease;
+}
+
+.admin-sidebar.collapsed {
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
+  padding: 20px 10px;
+}
+
+.admin-sidebar-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-sidebar.collapsed .admin-sidebar-head {
+  justify-content: center;
+}
+
+.admin-sidebar-toggle {
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #526070;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.admin-sidebar.collapsed .admin-sidebar-toggle {
+  margin: 0 auto;
+}
+
+.admin-sidebar-toggle-icon {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .admin-brand {
@@ -104,10 +181,22 @@ body { padding: 0; }
   display: block;
 }
 
+.admin-sidebar.collapsed .admin-brand-logo {
+  display: none;
+}
+
 .admin-brand-sub {
   font-size: 13px;
   color: #8a94a6;
   margin-top: 2px;
+}
+
+.admin-sidebar.collapsed .admin-brand-sub {
+  display: none;
+}
+
+.admin-sidebar.collapsed .admin-brand {
+  display: none;
 }
 
 .admin-nav {
@@ -121,7 +210,7 @@ body { padding: 0; }
   flex-direction: column;
   gap: 8px;
   padding: 0;
-  border-radius: 16px;
+  border-radius: 8px;
 }
 
 .admin-nav-group.active {
@@ -141,6 +230,10 @@ body { padding: 0; }
   transition: transform 0.2s ease;
 }
 
+.admin-sidebar.collapsed .admin-nav-arrow {
+  display: none;
+}
+
 .admin-nav-arrow.open {
   transform: rotate(180deg);
 }
@@ -152,6 +245,10 @@ body { padding: 0; }
   margin-left: 10px;
 }
 
+.admin-sidebar.collapsed .admin-subnav {
+  display: none;
+}
+
 .admin-subnav-item {
   appearance: none;
   border: 1px solid transparent;
@@ -160,7 +257,7 @@ body { padding: 0; }
   font-weight: 700;
   font-size: 13px;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: 4px;
   text-align: left;
   cursor: pointer;
 }
@@ -180,13 +277,20 @@ body { padding: 0; }
   font-weight: 700;
   font-size: 15px;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
   text-align: left;
   position: relative;
+}
+
+.admin-sidebar.collapsed .admin-nav-item {
+  justify-content: center;
+  gap: 0;
+  padding: 12px 10px;
+  font-size: 0;
 }
 
 .admin-nav-dot {
@@ -231,6 +335,10 @@ body { padding: 0; }
   justify-content: flex-start;
   flex-direction: column;
   gap: 8px;
+}
+
+.admin-sidebar.collapsed .admin-sidebar-footer {
+  display: none;
 }
 
 .admin-nav-item.logout {
@@ -278,6 +386,13 @@ body { padding: 0; }
   height: 60%;
   border-radius: 999px;
   background: #1f6f2a;
+}
+
+.admin-nav-item:active,
+.admin-subnav-item:active,
+.admin-nav-item.active,
+.admin-subnav-item.active {
+  border-radius: 2px;
 }
 
 .admin-group-toggle.active::before {
