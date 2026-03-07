@@ -6390,6 +6390,30 @@ export default function AdminConsole({
     action();
   }
 
+  const displayName = profile?.display_name?.trim() || session?.user?.email || "User";
+  const adminPageTitle = (() => {
+    if (activeTab === "students") return "Students";
+    if (activeTab === "attendance") {
+      return attendanceSubTab === "absence" ? "Absence Applications" : "Attendance Sheet";
+    }
+    if (activeTab === "dailyRecord") return "Schedule & Record";
+    if (activeTab === "ranking") return "Ranking";
+    if (activeTab === "announcements") return "Announcements";
+    if (activeTab === "model") {
+      if (sessionDetail.type === "mock" && sessionDetail.sessionId) return "Test Session Detail";
+      if (modelSubTab === "results") return "Model Results";
+      if (modelSubTab === "sets") return "Sets";
+      return "Test Sessions";
+    }
+    if (activeTab === "daily") {
+      if (sessionDetail.type === "daily" && sessionDetail.sessionId) return "Daily Test Session Detail";
+      if (dailySubTab === "results") return "Daily Results";
+      if (dailySubTab === "create") return "Daily Tests";
+      return "Daily Test Sessions";
+    }
+    return "Admin Console";
+  })();
+
   return (
     <div className="admin-shell">
       <aside className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
@@ -6615,6 +6639,9 @@ export default function AdminConsole({
         </div>
         <div className="admin-sidebar-footer">
           <div className="admin-email">{session.user.email}</div>
+          {forcedSchoolId && profile?.role === "super_admin" ? (
+            <Link className="admin-nav-item" href={homeHref}>{homeLabel}</Link>
+          ) : null}
           <button className="admin-nav-item logout" onClick={() => supabase.auth.signOut()}>
             Sign out
           </button>
@@ -6623,10 +6650,11 @@ export default function AdminConsole({
 
       <div className="admin-main">
         <div className="admin-wrap">
-          {forcedSchoolId || (profile?.role === "admin" && schoolAssignments.length > 0) ? (
-            <div className="admin-scope-banner">
+          <div className="admin-page-topbar">
+            <div className="admin-page-topbar-title">{adminPageTitle}</div>
+            <div className="admin-page-topbar-meta">
               {forcedSchoolId && profile?.role === "super_admin" ? (
-                <div className="admin-school-switcher">
+                <div className="admin-school-switcher admin-topbar-school-switcher">
                   <label htmlFor="admin-school-switcher">School</label>
                   <select
                     id="admin-school-switcher"
@@ -6643,7 +6671,7 @@ export default function AdminConsole({
                 </div>
               ) : null}
               {!forcedSchoolId && profile?.role === "admin" ? (
-                <div className="admin-school-switcher">
+                <div className="admin-school-switcher admin-topbar-school-switcher">
                   <label htmlFor="admin-school-switcher">School</label>
                   <select
                     id="admin-school-switcher"
@@ -6660,15 +6688,20 @@ export default function AdminConsole({
                 </div>
               ) : null}
               {changeSchoolHref && profile?.role !== "super_admin" ? (
-                <Link className="btn" href={changeSchoolHref}>Change school</Link>
+                <Link className="btn admin-topbar-link" href={changeSchoolHref}>Change school</Link>
               ) : null}
-              {forcedSchoolId && profile?.role === "super_admin" ? (
-                <Link className="btn" href={homeHref}>{homeLabel}</Link>
-              ) : null}
+              <div className="admin-page-topbar-console">Admin Console</div>
+              <div className="admin-page-topbar-user">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z" fill="currentColor" />
+                  <path d="M4 20a8 8 0 0 1 16 0Z" fill="currentColor" />
+                </svg>
+                <span>{displayName}</span>
+              </div>
             </div>
-          ) : null}
+          </div>
 
-          <div className="admin-panel">
+          <div className="admin-panel admin-console-panel">
 
         {activeTab === "students" ? (
         <div style={{ marginBottom: 12 }}>

@@ -123,6 +123,15 @@ function Brand() {
   );
 }
 
+function UserBadgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z" fill="currentColor" />
+      <path d="M4 20a8 8 0 0 1 16 0Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 function buildOpenGroups(pathname) {
   const groups = {};
   for (const item of superNav) {
@@ -421,6 +430,7 @@ export default function SuperAdminShell({ children }) {
   }
 
   const pageMeta = getPageMeta(pathname);
+  const displayName = profile.display_name?.trim() || session.user.email || "User";
   function handleSidebarNavigate(href) {
     if (sidebarCollapsed) {
       setSidebarCollapsed(false);
@@ -441,15 +451,14 @@ export default function SuperAdminShell({ children }) {
         />
         <div className="admin-main">
           <div className="admin-wrap">
-            <div className="admin-panel super-layout-top">
-              <div>
-                <div className="admin-chip">Super Admin</div>
-                <div className="super-layout-title">{pageMeta.title}</div>
-                <div className="admin-help">{pageMeta.description}</div>
-              </div>
-              <div className="admin-meta">
-                <div className="admin-chip">Role: {profile.role}</div>
-                {profile.display_name ? <div className="admin-chip">{profile.display_name}</div> : null}
+            <div className="super-page-topbar">
+              <div className="super-page-topbar-title">{pageMeta.title}</div>
+              <div className="super-page-topbar-meta">
+                <div className="super-page-topbar-console">Superadmin Console</div>
+                <div className="super-page-topbar-user">
+                  <UserBadgeIcon />
+                  <span>{displayName}</span>
+                </div>
               </div>
             </div>
             {children}

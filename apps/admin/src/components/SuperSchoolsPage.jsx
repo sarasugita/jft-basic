@@ -214,17 +214,8 @@ export default function SuperSchoolsPage() {
 
   return (
     <div className="super-page-content">
-      <div className="admin-panel">
-        <div className="super-toolbar">
-          <div>
-            <div className="admin-title">Schools Controls</div>
-            <div className="admin-help">
-              Search schools, update status, and enter a school-scoped admin context.
-            </div>
-          </div>
-          <button className="btn btn-primary" onClick={openCreateModal}>Create School</button>
-        </div>
-        <div className="admin-form" style={{ marginTop: 12 }}>
+      <section className="super-flat-section super-search-section">
+        <div className="super-schools-filter-grid">
           <div className="field">
             <label>Search</label>
             <input
@@ -244,31 +235,33 @@ export default function SuperSchoolsPage() {
           </div>
         </div>
         {msg ? <div className="admin-msg">{msg}</div> : null}
-      </div>
+      </section>
 
-      <div className="admin-panel" style={{ marginTop: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <div className="admin-title">Schools List</div>
-            <div className="admin-help">
-              Aggregation window defaults to school `start_date` through `end_date`, or today if `end_date` is empty.
-            </div>
-          </div>
-          <div className="admin-chip">{filteredSchools.length} schools</div>
+      <section className="super-flat-section super-schools-list-section">
+        <div className="super-schools-list-head">
+          <div className="super-section-title">Schools List</div>
+          <button className="btn btn-primary super-create-school-btn" onClick={openCreateModal}>
+            <span className="super-btn-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </span>
+            Add New School
+          </button>
         </div>
 
-        <div className="admin-table-wrap" style={{ marginTop: 12 }}>
-          <table className="admin-table" style={{ minWidth: 1200 }}>
+        <div className="admin-table-wrap super-schools-table-wrap">
+          <table className="admin-table super-schools-table" style={{ minWidth: 1200 }}>
             <thead>
               <tr>
                 <th>Enter</th>
-                <th>School</th>
+                <th>School Name</th>
                 <th>Start Date</th>
                 <th>End Date</th>
                 <th style={{ width: 92 }}>Student<br />No.</th>
-                <th>Attendance<br />Rate</th>
-                <th>Model<br />Test</th>
-                <th>Daily<br />Test</th>
+                <th>Attendance</th>
+                <th>Model<br />Test Avg.</th>
+                <th>Daily<br />Test Avg.</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -299,9 +292,6 @@ export default function SuperSchoolsPage() {
                     </td>
                     <td>
                       <div className="daily-name">{school.name}</div>
-                      <div className="daily-code">
-                        {[school.academic_year, school.term].filter(Boolean).join(" / ") || school.id}
-                      </div>
                     </td>
                     <td>{formatDate(school.start_date)}</td>
                     <td>{formatDate(school.end_date)}</td>
@@ -313,13 +303,36 @@ export default function SuperSchoolsPage() {
                       <span className={`super-status ${school.status}`}>{school.status}</span>
                     </td>
                     <td>
-                      <div className="admin-actions">
-                        <Link className="btn" href={`/super/schools/${school.id}/admins`}>
+                      <div className="super-row-actions">
+                        <Link className="btn super-inline-btn" href={`/super/schools/${school.id}/admins`}>
+                          <span className="super-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z" fill="currentColor" stroke="none" />
+                              <path d="M4 20a8 8 0 0 1 16 0Z" fill="currentColor" stroke="none" />
+                            </svg>
+                          </span>
                           Admin List
                         </Link>
-                        <button className="btn" onClick={() => openEditModal(school)}>Edit</button>
-                        <button className="btn" onClick={() => toggleSchoolStatus(school)}>
-                          {school.status === "active" ? "Disable" : "Enable"}
+                        <button className="super-edit-link" onClick={() => openEditModal(school)}>
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M4 20h4l10-10-4-4L4 16v4Z"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="m12.5 7.5 4 4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                          Edit
                         </button>
                       </div>
                     </td>
@@ -334,7 +347,7 @@ export default function SuperSchoolsPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
       {modalOpen ? (
         <div className="admin-modal-overlay" onClick={() => setModalOpen(false)}>
@@ -360,8 +373,9 @@ export default function SuperSchoolsPage() {
                   onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
                 >
                   <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
+                  <option value="inactive">Inactive / Deactivated</option>
                 </select>
+                <div className="admin-help">Use this field to deactivate or reactivate the school.</div>
               </div>
               <div className="field small">
                 <label>Academic Year</label>
