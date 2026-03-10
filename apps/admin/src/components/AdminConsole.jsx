@@ -855,7 +855,7 @@ function QuestionPreviewCard({ question, index }) {
       </div>
       {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
       {question.type === "daily" && stemExtra ? (
-        <div style={{ marginTop: 6, fontSize: 13, color: "#667085" }}>
+        <div style={{ marginTop: 6, fontSize: 13, color: "#333333" }}>
           {stemExtra}
         </div>
       ) : null}

@@ -779,12 +779,12 @@ export default function SuperTestsImportPage() {
                   const stemLines = splitStemLines(stemExtra);
                   return (
                     <div key={`${question.qid}-${index}`} className="admin-panel" style={{ padding: 14 }}>
-                      <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>
+                      <div style={{ fontSize: 12, color: "#333333", fontWeight: 700 }}>
                         {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""}
                       </div>
                       {prompt ? <div style={{ marginTop: 6, fontSize: 16, fontWeight: 600 }}>{prompt}</div> : null}
                       {question.type === "daily" && stemExtra ? (
-                        <div style={{ marginTop: 6, fontSize: 13, color: "#667085" }}>
+                        <div style={{ marginTop: 6, fontSize: 13, color: "#333333" }}>
                           {stemExtra}
                         </div>
                       ) : null}
