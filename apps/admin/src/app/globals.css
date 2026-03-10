@@ -656,6 +656,28 @@ body { padding: 0; }
   background: #fff;
 }
 
+.results-matrix-table-wrap {
+  border: 1px solid var(--admin-table-outline);
+}
+
+.daily-results-table th:first-child,
+.daily-results-table td:first-child {
+  border-left: 1px solid var(--admin-table-outline);
+}
+
+.daily-results-table thead tr:first-child th {
+  border-top: 1px solid var(--admin-table-outline);
+}
+
+.daily-results-table th:last-child,
+.daily-results-table td:last-child {
+  border-right: 1px solid var(--admin-table-outline);
+}
+
+.daily-results-table tbody tr:last-child td {
+  border-bottom: 1px solid var(--admin-table-outline);
+}
+
 .admin-table {
   width: 100%;
   border-collapse: collapse;

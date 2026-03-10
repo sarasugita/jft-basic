@@ -9970,7 +9970,7 @@ export default function AdminConsole({
                   <div className="admin-msg">No test categories yet.</div>
                 )}
 
-                <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                <div className="admin-table-wrap results-matrix-table-wrap" style={{ marginTop: 10 }}>
                   <table
                     className="admin-table daily-results-table"
                     style={{
