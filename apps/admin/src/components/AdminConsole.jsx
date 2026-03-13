@@ -1710,6 +1710,7 @@ export default function AdminConsole({
   const [dailyConductMode, setDailyConductMode] = useState("normal");
   const [modelRetakeSourceId, setModelRetakeSourceId] = useState("");
   const [dailyRetakeSourceId, setDailyRetakeSourceId] = useState("");
+  const [activeModelTimePicker, setActiveModelTimePicker] = useState("");
   const [dailySetDropdownOpen, setDailySetDropdownOpen] = useState(false);
   const [activeDailyTimePicker, setActiveDailyTimePicker] = useState("");
   const dailySetDropdownRef = useRef(null);
@@ -1729,6 +1730,9 @@ export default function AdminConsole({
   const [testSessionForm, setTestSessionForm] = useState({
     problem_set_id: "",
     title: "",
+    session_date: "",
+    start_time: "",
+    close_time: "",
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
@@ -2206,6 +2210,25 @@ export default function AdminConsole({
       setDailyConductCategory(dailyCategories[0].name);
     }
   }, [dailyCategories, dailyConductCategory]);
+
+  useEffect(() => {
+    if (!activeModelTimePicker) return;
+    function handlePointerDown(event) {
+      if (event.target.closest("[data-model-time-picker]")) return;
+      setActiveModelTimePicker("");
+    }
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setActiveModelTimePicker("");
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [activeModelTimePicker]);
 
   useEffect(() => {
     if (!dailySetDropdownOpen) return;
@@ -4779,9 +4802,17 @@ export default function AdminConsole({
     setModelConductMode(mode);
     setModelConductOpen(true);
     setTestSessionsMsg("");
+    setActiveModelTimePicker("");
     if (mode !== "retake") {
       setModelRetakeSourceId("");
-      setTestSessionForm((current) => ({ ...current, retake_release_scope: "all" }));
+      setTestSessionForm((current) => ({
+        ...current,
+        title: "",
+        session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
+        start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
+        close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
+        retake_release_scope: "all",
+      }));
       return;
     }
     const source = pastModelSessions[0] ?? null;
@@ -4847,6 +4878,19 @@ export default function AdminConsole({
 
   function updateDailySessionTimePart(field, part, value) {
     setDailySessionForm((current) => {
+      const nextParts = {
+        ...getTwelveHourTimeParts(current[field]),
+        [part]: value,
+      };
+      return {
+        ...current,
+        [field]: buildTwentyFourHourTime(nextParts),
+      };
+    });
+  }
+
+  function updateModelSessionTimePart(field, part, value) {
+    setTestSessionForm((current) => {
       const nextParts = {
         ...getTwelveHourTimeParts(current[field]),
         [part]: value,
@@ -5005,7 +5049,15 @@ export default function AdminConsole({
     }
     const problemSetId = testSessionForm.problem_set_id.trim();
     const title = testSessionForm.title.trim();
-    const endsAt = testSessionForm.ends_at;
+    const sessionDate = testSessionForm.session_date;
+    const startTime = testSessionForm.start_time;
+    const closeTime = testSessionForm.close_time;
+    const startsAtInput = modelConductMode === "retake"
+      ? testSessionForm.starts_at
+      : combineBangladeshDateTime(sessionDate, startTime);
+    const endsAt = modelConductMode === "retake"
+      ? testSessionForm.ends_at
+      : combineBangladeshDateTime(sessionDate, closeTime);
     const passRate = Number(testSessionForm.pass_rate);
     if (!problemSetId) {
       setTestSessionsMsg("SetID is required.");
@@ -5013,6 +5065,14 @@ export default function AdminConsole({
     }
     if (!title) {
       setTestSessionsMsg("Test Title is required.");
+      return;
+    }
+    if (modelConductMode !== "retake" && !sessionDate) {
+      setTestSessionsMsg("Date is required.");
+      return;
+    }
+    if (modelConductMode !== "retake" && !startTime) {
+      setTestSessionsMsg("Start time is required.");
       return;
     }
     if (!endsAt) {
@@ -5035,7 +5095,7 @@ export default function AdminConsole({
     const payload = {
       problem_set_id: problemSetId,
       title,
-      starts_at: testSessionForm.starts_at ? fromBangladeshInput(testSessionForm.starts_at) : null,
+      starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,
       ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
       is_published: true,
@@ -5072,9 +5132,18 @@ export default function AdminConsole({
       return;
     }
     setTestSessionsMsg("Created (session + link).");
-    setTestSessionForm((s) => ({ ...s, title: "", retake_release_scope: "all" }));
+    setTestSessionForm((s) => ({
+      ...s,
+      title: "",
+      session_date: "",
+      start_time: "",
+      close_time: "",
+      retake_release_scope: "all"
+    }));
     setModelConductMode("normal");
     setModelRetakeSourceId("");
+    setModelConductOpen(false);
+    setActiveModelTimePicker("");
     fetchTestSessions();
     fetchExamLinks();
   }
@@ -8863,17 +8932,22 @@ export default function AdminConsole({
                 setModelConductOpen(false);
                 setModelConductMode("normal");
                 setModelRetakeSourceId("");
+                setActiveModelTimePicker("");
               }}
             >
-              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="admin-modal-header">
-                  <div className="admin-title">{modelConductMode === "retake" ? "Conduct Model Retake" : "Conduct Model Test"}</div>
+              <div
+                className={`admin-modal ${modelConductMode === "retake" ? "invite-modal" : "daily-session-create-modal"}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className={`admin-modal-header ${modelConductMode === "retake" ? "" : "daily-session-create-header"}`}>
+                  <div className="admin-title">{modelConductMode === "retake" ? "Conduct Model Retake" : "Create Model Test Session"}</div>
                   <button
                     className="admin-modal-close"
                     onClick={() => {
                       setModelConductOpen(false);
                       setModelConductMode("normal");
                       setModelRetakeSourceId("");
+                      setActiveModelTimePicker("");
                     }}
                     aria-label="Close"
                   >
@@ -8881,7 +8955,7 @@ export default function AdminConsole({
                   </button>
                 </div>
 
-                <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className={modelConductMode === "retake" ? "admin-form" : "daily-session-create-body"}>
                   {modelConductMode === "retake" ? (
                     <>
                       <div className="field">
@@ -8912,122 +8986,329 @@ export default function AdminConsole({
                         </select>
                       </div>
                     </>
+                  ) : (
+                    <div className="daily-session-create-layout">
+                      <div className="daily-session-create-field">
+                        <label>Category</label>
+                        <select
+                          value={modelConductCategory}
+                          onChange={(e) => setModelConductCategory(e.target.value)}
+                        >
+                          {modelCategories.length ? (
+                            modelCategories.map((c) => (
+                              <option key={`model-cat-${c.name}`} value={c.name}>
+                                {c.name}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">No categories</option>
+                          )}
+                        </select>
+                      </div>
+                      <div className="daily-session-create-field">
+                        <label>Set ID</label>
+                        <select
+                          value={testSessionForm.problem_set_id}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
+                        >
+                          {modelConductTests.length ? (
+                            modelConductTests.map((t) => (
+                              <option key={`ps-${t.version}`} value={t.version}>
+                                {t.version}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">No problem sets</option>
+                          )}
+                        </select>
+                      </div>
+                      <div className="daily-session-create-field">
+                        <label>Test Title</label>
+                        <input
+                          value={testSessionForm.title}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
+                          placeholder="Mock Test"
+                        />
+                      </div>
+                      <div className="daily-session-create-split-row">
+                        <div className="daily-session-create-field">
+                          <label>Date</label>
+                          <input
+                            type="date"
+                            value={testSessionForm.session_date}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, session_date: e.target.value }))}
+                          />
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Start Time</label>
+                          <div className="daily-session-create-time-picker-wrap" data-model-time-picker>
+                            {(() => {
+                              const startTimeParts = getTwelveHourTimeParts(testSessionForm.start_time);
+                              const isOpen = activeModelTimePicker === "start_time";
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="daily-session-create-time-trigger"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isOpen}
+                                    onClick={() => setActiveModelTimePicker((current) => (current === "start_time" ? "" : "start_time"))}
+                                  >
+                                    <span>{formatTwelveHourTimeDisplay(testSessionForm.start_time)}</span>
+                                    <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {isOpen ? (
+                                    <div className="daily-session-create-time-popover" role="dialog" aria-label="Select model start time">
+                                      <div className="daily-session-create-time-columns">
+                                        <div className="daily-session-create-time-column">
+                                          {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                            <button
+                                              key={`model-start-hour-${hourValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.hour === hourValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("start_time", "hour", hourValue)}
+                                            >
+                                              {hourValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                            <button
+                                              key={`model-start-minute-${minuteValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.minute === minuteValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("start_time", "minute", minuteValue)}
+                                            >
+                                              {minuteValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {MERIDIEM_OPTIONS.map((periodValue) => (
+                                            <button
+                                              key={`model-start-period-${periodValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.period === periodValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("start_time", "period", periodValue)}
+                                            >
+                                              {periodValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Close Time</label>
+                          <div className="daily-session-create-time-picker-wrap" data-model-time-picker>
+                            {(() => {
+                              const closeTimeParts = getTwelveHourTimeParts(testSessionForm.close_time);
+                              const isOpen = activeModelTimePicker === "close_time";
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="daily-session-create-time-trigger"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isOpen}
+                                    onClick={() => setActiveModelTimePicker((current) => (current === "close_time" ? "" : "close_time"))}
+                                  >
+                                    <span>{formatTwelveHourTimeDisplay(testSessionForm.close_time)}</span>
+                                    <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {isOpen ? (
+                                    <div className="daily-session-create-time-popover" role="dialog" aria-label="Select model close time">
+                                      <div className="daily-session-create-time-columns">
+                                        <div className="daily-session-create-time-column">
+                                          {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                            <button
+                                              key={`model-close-hour-${hourValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.hour === hourValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("close_time", "hour", hourValue)}
+                                            >
+                                              {hourValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                            <button
+                                              key={`model-close-minute-${minuteValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.minute === minuteValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("close_time", "minute", minuteValue)}
+                                            >
+                                              {minuteValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {MERIDIEM_OPTIONS.map((periodValue) => (
+                                            <button
+                                              key={`model-close-period-${periodValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.period === periodValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("close_time", "period", periodValue)}
+                                            >
+                                              {periodValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="daily-session-create-two-col">
+                        <div className="daily-session-create-field">
+                          <label>Time Limit (min)</label>
+                          <input
+                            value={testSessionForm.time_limit_min}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                            placeholder="60"
+                          />
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Pass Rate</label>
+                          <input
+                            value={testSessionForm.pass_rate}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                            placeholder="0.8"
+                          />
+                        </div>
+                      </div>
+                      <div className="daily-session-create-toggle-row">
+                        <span>Show Answers</span>
+                        <label className="daily-session-create-switch" aria-label="Show Answers">
+                          <input
+                            type="checkbox"
+                            checked={testSessionForm.show_answers}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, show_answers: e.target.checked }))}
+                          />
+                          <span className="daily-session-create-switch-slider" />
+                        </label>
+                      </div>
+                      <div className="daily-session-create-toggle-row">
+                        <span>Allow Multiple Attempts</span>
+                        <label className="daily-session-create-switch" aria-label="Allow Multiple Attempts">
+                          <input
+                            type="checkbox"
+                            checked={testSessionForm.allow_multiple_attempts}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.checked }))}
+                          />
+                          <span className="daily-session-create-switch-slider" />
+                        </label>
+                      </div>
+                      <div className="daily-session-create-actions">
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          onClick={createTestSession}
+                        >
+                          Create Session
+                        </button>
+                      </div>
+                      {testSessionsMsg ? <div className="admin-msg">{testSessionsMsg}</div> : null}
+                    </div>
+                  )}
+
+                  {modelConductMode === "retake" ? (
+                    <>
+                      <div className="field">
+                        <label>Test Title</label>
+                        <input
+                          value={testSessionForm.title}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
+                          placeholder="Mock Test (Retake)"
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>Starts At</label>
+                        <input
+                          type="datetime-local"
+                          step="300"
+                          value={testSessionForm.starts_at}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>Ends At</label>
+                        <input
+                          type="datetime-local"
+                          step="300"
+                          value={testSessionForm.ends_at}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>Time Limit (min)</label>
+                        <input
+                          value={testSessionForm.time_limit_min}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                          placeholder="60"
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>Show Answers</label>
+                        <select
+                          value={testSessionForm.show_answers ? "yes" : "no"}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                        >
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      </div>
+                      <div className="field small">
+                        <label>Attempts</label>
+                        <select
+                          value={testSessionForm.allow_multiple_attempts ? "multiple" : "once"}
+                          onChange={(e) =>
+                            setTestSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
+                          }
+                        >
+                          <option value="once">Only once</option>
+                          <option value="multiple">Allow multiple</option>
+                        </select>
+                      </div>
+                      <div className="field small">
+                        <label>Pass Rate</label>
+                        <input
+                          value={testSessionForm.pass_rate}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                          placeholder="0.8"
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>&nbsp;</label>
+                        <button
+                          className="btn btn-retake"
+                          type="button"
+                          onClick={createTestSession}
+                          disabled={!modelRetakeSourceId}
+                        >
+                          Create Session
+                        </button>
+                      </div>
+                    </>
                   ) : null}
-                  <div className="field">
-                    <label>Category</label>
-                    <select
-                      value={modelConductCategory}
-                      onChange={(e) => setModelConductCategory(e.target.value)}
-                    >
-                      {modelCategories.length ? (
-                        modelCategories.map((c) => (
-                          <option key={`model-cat-${c.name}`} value={c.name}>
-                            {c.name}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">No categories</option>
-                      )}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>SetID</label>
-                    <select
-                      value={testSessionForm.problem_set_id}
-                      disabled={modelConductMode === "retake"}
-                      onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
-                    >
-                      {modelConductTests.length ? (
-                        modelConductTests.map((t) => (
-                          <option key={`ps-${t.version}`} value={t.version}>
-                            {t.version}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">No problem sets</option>
-                      )}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>Test Title</label>
-                    <input
-                      value={testSessionForm.title}
-                      onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
-                      placeholder="Mock Test (Retake)"
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>Starts At</label>
-                    <input
-                      type="datetime-local"
-                      step="300"
-                      value={testSessionForm.starts_at}
-                      onChange={(e) => setTestSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>Ends At</label>
-                    <input
-                      type="datetime-local"
-                      step="300"
-                      value={testSessionForm.ends_at}
-                      onChange={(e) => setTestSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>Time Limit (min)</label>
-                    <input
-                      value={testSessionForm.time_limit_min}
-                      onChange={(e) => setTestSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                      placeholder="60"
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>Show Answers</label>
-                    <select
-                      value={testSessionForm.show_answers ? "yes" : "no"}
-                      onChange={(e) => setTestSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-                    >
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </select>
-                  </div>
-                  <div className="field small">
-                    <label>Attempts</label>
-                    <select
-                      value={testSessionForm.allow_multiple_attempts ? "multiple" : "once"}
-                      onChange={(e) =>
-                        setTestSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
-                      }
-                    >
-                      <option value="once">Only once</option>
-                      <option value="multiple">Allow multiple</option>
-                    </select>
-                  </div>
-                  <div className="field small">
-                    <label>Pass Rate</label>
-                    <input
-                      value={testSessionForm.pass_rate}
-                      onChange={(e) => setTestSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                      placeholder="0.8"
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>&nbsp;</label>
-                    <button
-                      className={`btn ${modelConductMode === "retake" ? "btn-retake" : "btn-primary"}`}
-                      type="button"
-                      onClick={createTestSession}
-                      disabled={modelConductMode === "retake" && !modelRetakeSourceId}
-                    >
-                      Create Session
-                    </button>
-                  </div>
                 </div>
 
-                <div className="admin-help" style={{ marginTop: 6 }}>
-                  Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
-                </div>
+                {modelConductMode === "retake" ? (
+                  <div className="admin-help" style={{ marginTop: 6 }}>
+                    Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -9549,7 +9830,7 @@ export default function AdminConsole({
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className={`admin-modal-header ${dailyConductMode === "retake" ? "" : "daily-session-create-header"}`}>
-                  <div className="admin-title">{dailyConductMode === "retake" ? "Conduct Daily Retake" : "Create Test Session"}</div>
+                  <div className="admin-title">{dailyConductMode === "retake" ? "Conduct Daily Retake" : "Create Daily Test Session"}</div>
                   <button
                     className="admin-modal-close"
                     onClick={() => {
@@ -9740,25 +10021,25 @@ export default function AdminConsole({
                       </div>
                       <div className="daily-session-create-field">
                         <label>Number of Questions</label>
-                        <div className="daily-session-create-count-row">
-                          <label className="daily-session-create-radio-option">
+                        <div className="daily-session-create-choice-row daily-session-create-count-row">
+                          <label className="daily-session-create-choice">
                             <input
                               type="radio"
                               name="dailySessionQuestionMode"
                               checked={dailySessionForm.question_count_mode === "all"}
                               onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "all", question_count: "" }))}
                             />
-                            <span>All Questions</span>
+                            <span className="daily-session-create-choice-copy">All Questions</span>
                           </label>
                           <div className="daily-session-create-count-option">
-                            <label className="daily-session-create-radio-option">
+                            <label className="daily-session-create-choice">
                               <input
                                 type="radio"
                                 name="dailySessionQuestionMode"
                                 checked={dailySessionForm.question_count_mode === "specify"}
                                 onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "specify" }))}
                               />
-                              <span>Specify</span>
+                              <span className="daily-session-create-choice-copy">Specify</span>
                             </label>
                             <input
                               className={`daily-session-create-count-input ${dailySessionForm.question_count_mode === "specify" ? "is-active" : ""}`}

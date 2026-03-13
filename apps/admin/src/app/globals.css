@@ -1314,19 +1314,15 @@ body { padding: 0; }
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
 }
 
-.daily-session-create-set-option {
-  display: flex;
+.daily-session-create-set-option,
+.daily-session-create-field label.daily-session-create-set-option {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   width: 100%;
-  gap: 12px;
+  column-gap: 12px;
   padding: 6px 0;
   box-sizing: border-box;
-}
-
-.daily-session-create-field label.daily-session-create-set-option {
-  display: flex;
-  align-items: center;
 }
 
 .daily-session-create-set-option-main {
