@@ -1040,7 +1040,8 @@ export async function syncLegacyTestCatalog(
   },
 ) {
   const legacyType = testType === "model" ? "mock" : "daily";
-  const categoryLabel = (testType === "daily" ? category : null) || (testType === "model" ? "Book Review" : setId);
+  const categoryLabel = category
+    || (testType === "model" ? "Book Review" : testType === "daily" ? "Vocabulary" : setId);
   const now = new Date().toISOString();
 
   const { data: existingTest, error: testLookupError } = await adminClient
@@ -1089,9 +1090,23 @@ export async function syncLegacyTestCatalog(
       : null;
     const stemKind = String(question.metadata?.stem_kind ?? "").trim()
       || (stemAudio ? "audio" : stemImage ? "image" : question.media_type ?? "");
+    const normalizedStemKind = normalizeModelStemKind(stemKind);
+    const mediaType = mediaUrl ? inferMediaType(mediaUrl) : null;
+    const resolvedStemAudio = stemAudio || (
+      mediaType === "audio"
+      && ["audio", "audio_image", "image_audio"].includes(normalizedStemKind)
+        ? mediaUrl
+        : null
+    );
+    const resolvedStemImage = stemImage || (
+      mediaType === "image"
+      && ["image", "audio_image", "image_audio", "dialog", "passage_image", "table_image"].includes(normalizedStemKind)
+        ? mediaUrl
+        : null
+    );
     const stemAsset = joinAssetValues(
-      stemKind === "audio" ? (stemAudio || mediaUrl) : (stemImage || mediaUrl),
-      stemKind === "audio" ? stemImage : null,
+      resolvedStemAudio,
+      resolvedStemImage,
     ) || null;
     const promptEn = String(question.question_text ?? "").trim() || null;
     const promptBn = String(question.metadata?.prompt_bn ?? "").trim() || null;
@@ -1120,6 +1135,8 @@ export async function syncLegacyTestCatalog(
         itemId: question.qid,
         stemKind: stemKind || null,
         stemText: stemText || null,
+        stemImage: resolvedStemImage || null,
+        stemAudio: resolvedStemAudio || null,
         stemAsset: stemAsset || null,
         stemExtra: String(question.metadata?.description ?? "").trim() || null,
         boxText: String(question.metadata?.box_text ?? "").trim() || null,

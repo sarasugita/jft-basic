@@ -36,6 +36,8 @@ const PROFILE_UPLOAD_BUCKET = "test-assets";
 const PERSONAL_UPLOAD_FIELDS = [
   { key: "passport_bio_page", label: "Bio Page Image", accept: "image/*" }
 ];
+const QUESTION_SELECT_BASE = "question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
+const QUESTION_SELECT_WITH_MEDIA = `${QUESTION_SELECT_BASE}, media_file, media_type`;
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
 const TEST_VERSION = "test_exam";
@@ -119,6 +121,10 @@ let resultDetailState = {
   mode: "",
   subTab: "score",
   sectionFilter: "",
+  wrongOnly: false,
+  popupOpen: false,
+  popupTitle: "",
+  popupRows: [],
   attempt: null,
   loading: false,
   error: "",
@@ -306,8 +312,42 @@ function shouldBlockOnQuestions() {
   return ["sectionIntro", "quiz", "result"].includes(state.phase);
 }
 
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message ?? "");
+  return message.includes(columnName) && message.toLowerCase().includes("does not exist");
+}
+
+async function fetchQuestionRowsWithFallback(version) {
+  let result = await publicSupabase
+    .from("questions")
+    .select(QUESTION_SELECT_WITH_MEDIA)
+    .eq("test_version", version)
+    .order("order_index", { ascending: true });
+  if (result.error && (isMissingColumnError(result.error, "media_file") || isMissingColumnError(result.error, "media_type"))) {
+    result = await publicSupabase
+      .from("questions")
+      .select(QUESTION_SELECT_BASE)
+      .eq("test_version", version)
+      .order("order_index", { ascending: true });
+  }
+  return result;
+}
+
 function mapDbQuestion(row, version) {
   const data = row.data ?? {};
+  const stemAsset = [
+    row.media_file,
+    data.stemAsset,
+    data.stem_asset,
+    data.stemAudio,
+    data.stem_audio,
+    data.stemImage,
+    data.stem_image,
+  ]
+    .flatMap((value) => splitAssetList(value))
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index)
+    .join("|") || null;
   const base = {
     id: data.itemId || row.question_id,
     qid: data.qid || null,
@@ -319,9 +359,11 @@ function mapDbQuestion(row, version) {
     promptBn: row.prompt_bn,
     answerIndex: row.answer_index,
     orderIndex: row.order_index ?? 0,
-    stemKind: data.stemKind || null,
+    stemKind: data.stemKind || data.stem_kind || row.media_type || null,
     stemText: data.stemText || null,
-    stemAsset: data.stemAsset || null,
+    stemAsset,
+    stemImage: data.stemImage || data.stem_image || null,
+    stemAudio: data.stemAudio || data.stem_audio || null,
     stemExtra: data.stemExtra || null,
     boxText: data.boxText || null,
     choices: data.choices || data.choicesJa || [],
@@ -388,11 +430,7 @@ async function fetchQuestionsForVersion(version, updatedAt = "") {
   questionsState.error = "";
   questionsState.version = version;
   try {
-    const { data, error } = await publicSupabase
-      .from("questions")
-      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-      .eq("test_version", version)
-      .order("order_index", { ascending: true });
+    const { data, error } = await fetchQuestionRowsWithFallback(version);
     if (error) {
       logSupabaseError("questions fetch error", error);
       questionsState.list = previousList;
@@ -715,6 +753,10 @@ async function refreshAuthState() {
         resultDetailState.mode = "";
         resultDetailState.subTab = "score";
         resultDetailState.sectionFilter = "";
+        resultDetailState.wrongOnly = false;
+        resultDetailState.popupOpen = false;
+        resultDetailState.popupTitle = "";
+        resultDetailState.popupRows = [];
         resultDetailState.attempt = null;
         saveState();
       }
@@ -1559,11 +1601,7 @@ async function fetchQuestionsForDetail(version) {
   resultDetailState.loading = true;
   resultDetailState.error = "";
   try {
-    const { data, error } = await publicSupabase
-      .from("questions")
-      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-      .eq("test_version", version)
-      .order("order_index", { ascending: true });
+    const { data, error } = await fetchQuestionRowsWithFallback(version);
     if (error) {
       logSupabaseError("result detail questions fetch error", error);
       resultDetailState.error = getErrorMessage(error, "Failed to load questions.");
@@ -1597,7 +1635,7 @@ function renderLogin(app) {
           </div>
           <div class="student-login-divider"></div>
           <form id="studentLoginForm" class="student-login-form">
-            <label class="student-login-label" for="email">Username</label>
+            <label class="student-login-label" for="email">Email</label>
             <input
               id="email"
               class="student-login-input"
@@ -1796,8 +1834,41 @@ function getSectionTitle(sectionKey) {
   return sections.find((s) => s.key === sectionKey)?.title ?? sectionKey ?? "";
 }
 
+function formatSubSectionLabel(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const normalized = raw
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[()]/g, " ")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const labelMap = {
+    word_meaning: "Word Meaning",
+    word_usage: "Word Usage",
+    kanji_reading: "Kanji Reading",
+    kanji_meaning_and_usage: "Kanji Usage",
+    kanji_usage: "Kanji Usage",
+    grammar: "Grammar",
+    expression: "Expression",
+    comprehending_content_conversation: "Conversation",
+    conversation: "Conversation",
+    comprehending_content_communicating_at_shops_and_public_places: "Shops and Public Places",
+    public_place: "Shops and Public Places",
+    shops_and_public_places: "Shops and Public Places",
+    comprehending_content_listening_to_announcements_and_instructions: "Announcements and Instructions",
+    announcement: "Announcements and Instructions",
+    announcements_and_instructions: "Announcements and Instructions",
+    comprehending_content: "Comprehension",
+    comprehension: "Comprehension",
+    info_search: "Information Search",
+    information_search: "Information Search",
+  };
+  return labelMap[normalized] || raw;
+}
+
 function getQuestionSectionLabel(question) {
-  return String(question?.sectionLabel ?? "").trim() || getSectionTitle(question?.sectionKey);
+  return formatSubSectionLabel(question?.sectionLabel) || getSectionTitle(question?.sectionKey);
 }
 
 function getQuestionPrompt(q) {
@@ -1825,12 +1896,29 @@ function splitStemLinesPreserveIndent(text) {
     .filter((s) => s.trim().length);
 }
 
+function getAssetProbeTarget(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return `${url.pathname}${url.search}`.toLowerCase();
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
 function isImageChoiceValue(value) {
-  return /\.(png|jpe?g|webp)(\?.*)?$/i.test(String(value ?? "").trim());
+  const probe = getAssetProbeTarget(value);
+  return /\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(probe)
+    || probe.includes("/images/")
+    || probe.includes("/image/");
 }
 
 function isAudioAssetValue(value) {
-  return /\.(mp3|wav|m4a|ogg)(\?.*)?$/i.test(String(value ?? "").trim());
+  const probe = getAssetProbeTarget(value);
+  return /\.(mp3|wav|m4a|ogg)(\?.*)?$/i.test(probe)
+    || probe.includes("/audio/")
+    || probe.includes("/audios/");
 }
 
 function splitAssetList(value) {
@@ -1840,6 +1928,14 @@ function splitAssetList(value) {
     return splitStemLines(raw);
   }
   return [raw];
+}
+
+function getStemMediaAssets(question) {
+  const assets = splitAssetList(question?.stemAsset);
+  return {
+    images: assets.filter((value) => isImageChoiceValue(value)),
+    audios: assets.filter((value) => isAudioAssetValue(value)),
+  };
 }
 
 function getChoiceDisplayOrder(question) {
@@ -1886,10 +1982,18 @@ function resolveAssetUrl(value, testVersion) {
 
 function normalizeQuestionAssets(q, version) {
   const next = { ...q };
-  if (next.stemAsset) {
-    const assets = splitAssetList(next.stemAsset).map((v) => resolveAssetUrl(v, version));
-    next.stemAsset = assets.join("|");
-  }
+  const mergedStemAssets = [
+    next.stemAsset,
+    next.stemAudio,
+    next.stemImage,
+  ]
+    .flatMap((value) => splitAssetList(value))
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index)
+    .map((value) => resolveAssetUrl(value, version));
+  next.stemAsset = mergedStemAssets.join("|") || null;
+  if (next.stemAudio) next.stemAudio = resolveAssetUrl(next.stemAudio, version);
+  if (next.stemImage) next.stemImage = resolveAssetUrl(next.stemImage, version);
   if (next.stemKind === "dialog") {
     const parts = splitAssetList(next.stemAsset);
     const hasImage = parts.some((p) => isImageChoiceValue(p));
@@ -1902,7 +2006,7 @@ function normalizeQuestionAssets(q, version) {
       }
     }
   }
-  if (next.stemKind === "audio") {
+  if (next.stemKind === "audio" || next.stemKind === "audio_image" || next.stemKind === "image_audio") {
     const parts = splitAssetList(next.stemAsset);
     const hasImage = parts.some((p) => isImageChoiceValue(p));
     if (!hasImage) {
@@ -2260,6 +2364,11 @@ function registerStudentMenu() {
       resultDetailState.open = false;
       resultDetailState.mode = "";
       resultDetailState.subTab = "score";
+      resultDetailState.sectionFilter = "";
+      resultDetailState.wrongOnly = false;
+      resultDetailState.popupOpen = false;
+      resultDetailState.popupTitle = "";
+      resultDetailState.popupRows = [];
       resultDetailState.attempt = null;
       saveState();
       closeStudentMenu();
@@ -2399,7 +2508,8 @@ function renderStemHTML(q, opts = {}) {
   if (opts.skipStem) return "";
   const isDaily = getActiveTestType() === "daily";
   const parts = [];
-  if (q.stemKind === "dialog") {
+  const stemKind = String(q.stemKind || "").trim().toLowerCase();
+  if (stemKind === "dialog") {
     const lines = splitStemLinesPreserveIndent(q.stemExtra || q.stemText || "");
     const dialogLines = lines.length
       ? `<div class="dialog-lines">${lines.map((l) => `<div class="dialog-line">${renderUnderlines(l)}</div>`).join("")}</div>`
@@ -2431,10 +2541,10 @@ function renderStemHTML(q, opts = {}) {
     }
   }
 
-  if (q.stemKind === "audio" && q.stemAsset) {
-    const assets = splitAssetList(q.stemAsset);
-    const audioAssets = assets.filter((src) => isAudioAssetValue(src));
-    const imageAssets = assets.filter((src) => isImageChoiceValue(src));
+  const assets = splitAssetList(q.stemAsset);
+  const audioAssets = assets.filter((src) => isAudioAssetValue(src));
+  const imageAssets = assets.filter((src) => isImageChoiceValue(src));
+  if (((stemKind === "audio" || stemKind === "audio_image" || stemKind === "image_audio") || audioAssets.length) && q.stemAsset) {
     const imgClass = isDaily
       ? "illustration illustration-daily"
       : q.sectionKey === "CE"
@@ -2445,8 +2555,8 @@ function renderStemHTML(q, opts = {}) {
     const imgWrapClass = q.sectionKey === "LC" ? "question-area left" : "question-area";
     if (audioAssets.length) {
       parts.push(`
-        <div style="margin:10px 0 12px;">
-          ${audioAssets.map((src) => `<audio controls preload="auto" src="${src}"></audio>`).join("")}
+        <div class="stem-audio-wrap">
+          ${audioAssets.map((src) => `<audio class="stem-audio-player" controls preload="auto" src="${src}"></audio>`).join("")}
         </div>
       `);
     }
@@ -2458,11 +2568,10 @@ function renderStemHTML(q, opts = {}) {
       `);
     }
   }
-  if (["image", "passage_image", "table_image"].includes(q.stemKind) && q.stemAsset) {
-    const assets = splitAssetList(q.stemAsset);
+  if ((["image", "passage_image", "table_image"].includes(stemKind) || (!stemKind && imageAssets.length && !audioAssets.length)) && q.stemAsset) {
     const cls = isDaily
       ? "illustration illustration-daily"
-      : q.stemKind === "image"
+      : stemKind === "image"
         ? q.sectionKey === "CE"
           ? "illustration illustration-wide"
           : q.sectionKey === "SV"
@@ -2477,8 +2586,8 @@ function renderStemHTML(q, opts = {}) {
   }
   if (!q.stemKind && q.stemAsset && isAudioAssetValue(q.stemAsset)) {
     parts.push(`
-      <div style="margin:10px 0 12px;">
-        <audio controls preload="auto" src="${q.stemAsset}"></audio>
+      <div class="stem-audio-wrap">
+        <audio class="stem-audio-player" controls preload="auto" src="${q.stemAsset}"></audio>
       </div>
     `);
   }
@@ -2934,11 +3043,32 @@ function renderTestSelect(app) {
                     <td class="cell-question">
                       <div class="detail-question">
                         <div class="detail-question-text">${escapeHtml(r.prompt)}</div>
-                        ${r.thumb ? `<img class="detail-question-thumb" src="${r.thumb}" alt="q" />` : ""}
+                        ${
+                          r.stemAudios?.length || r.stemImages?.length
+                            ? `
+                              <div class="detail-question-media">
+                                ${(r.stemAudios ?? [])
+                                  .map((src) => `<audio class="detail-question-audio" controls preload="none" src="${src}"></audio>`)
+                                  .join("")}
+                                ${(r.stemImages ?? [])
+                                  .map((src) => `<img class="detail-question-thumb" src="${src}" alt="q" />`)
+                                  .join("")}
+                              </div>
+                            `
+                            : ""
+                        }
                       </div>
                     </td>
-                    <td>${escapeHtml(r.chosen || "—")}</td>
-                    ${showAnswers ? `<td>${escapeHtml(r.correct || "—")}</td>` : ""}
+                    <td>${
+                      r.chosenImg
+                        ? `<img class="detail-choice-image" src="${r.chosenImg}" alt="chosen" />`
+                        : escapeHtml(r.chosen || "—")
+                    }</td>
+                    ${showAnswers ? `<td>${
+                      r.correctImg
+                        ? `<img class="detail-choice-image" src="${r.correctImg}" alt="correct" />`
+                        : escapeHtml(r.correct || "—")
+                    }</td>` : ""}
                     <td style="text-align:center;">${r.isCorrect ? "○" : "×"}</td>
                   </tr>
                 `
@@ -3088,6 +3218,8 @@ function renderTestSelect(app) {
           const detailRows = buildAttemptDetailRows(attempt, questionsList);
           const sectionOptions = getAvailableSections(detailRows);
           const summary = buildSectionSummary(detailRows);
+          const mainSummary = buildMainSectionSummary(detailRows);
+          const nestedSummary = buildNestedSectionSummary(detailRows);
           const detailRate = getScoreRateFromAttempt(attempt);
           const detailPassRate = getPassRateForVersion(attempt.test_version);
           const detailIsPass = detailRate >= detailPassRate;
@@ -3099,12 +3231,14 @@ function renderTestSelect(app) {
               : "—";
           const subTab = resultDetailState.subTab || "score";
           const sectionFilterRaw = resultDetailState.sectionFilter || "";
+          const wrongOnly = Boolean(resultDetailState.wrongOnly);
           const sectionFilter = sectionOptions.includes(sectionFilterRaw) ? sectionFilterRaw : "";
           const filteredDetailRows = sectionFilter
-            ? detailRows.filter((row) => row.section === sectionFilter)
+            ? detailRows.filter((row) => (getSectionTitle(row.sectionKey) || row.sectionKey || row.section) === sectionFilter)
             : detailRows;
+          const visibleQuestionRows = wrongOnly ? filteredDetailRows.filter((row) => !row.isCorrect) : filteredDetailRows;
           const detailFilterHtml =
-            subTab === "all" || subTab === "wrong"
+            subTab === "all"
               ? `
                 <div class="student-detail-filter">
                   <label for="modelSectionFilter">Section</label>
@@ -3117,9 +3251,32 @@ function renderTestSelect(app) {
                       )
                       .join("")}
                   </select>
+                  <label class="student-results-check student-detail-check">
+                    <input id="modelWrongOnlyToggle" type="checkbox" ${wrongOnly ? "checked" : ""} />
+                    Wrong Questions Only
+                  </label>
                 </div>
               `
               : "";
+          const popupRows = Array.isArray(resultDetailState.popupRows) ? resultDetailState.popupRows : [];
+          const popupHtml = resultDetailState.popupOpen
+            ? `
+              <div class="result-modal-overlay" id="resultDetailPopupOverlay">
+                <div class="result-modal result-detail-popup" role="dialog" aria-modal="true" aria-labelledby="resultDetailPopupTitle">
+                  <div class="result-modal-header">
+                    <div>
+                      <div class="result-modal-title" id="resultDetailPopupTitle">${escapeHtml(resultDetailState.popupTitle || "Questions")}</div>
+                      <div class="result-modal-meta">${popupRows.length} question${popupRows.length === 1 ? "" : "s"}</div>
+                    </div>
+                    <button class="student-modal-close" type="button" id="resultDetailPopupClose" aria-label="Close">×</button>
+                  </div>
+                  <div class="detail-section">
+                    ${renderDetailTable(popupRows, showAnswers)}
+                  </div>
+                </div>
+              </div>
+            `
+            : "";
           let detailBody = "";
           if (resultDetailState.loading) {
             detailBody = `<div class="text-muted">Loading details...</div>`;
@@ -3129,14 +3286,11 @@ function renderTestSelect(app) {
             const totalCorrect = attempt.correct ?? summary.reduce((acc, s) => acc + (s.correct || 0), 0);
             const totalQuestions = attempt.total ?? summary.reduce((acc, s) => acc + (s.total || 0), 0);
             const totalRate = totalQuestions ? ((totalCorrect / totalQuestions) * 100).toFixed(1) : "0.0";
-            const sectionOrder = (sections ?? []).map((s) => s.title).filter(Boolean);
-            const radarSections = sectionOrder.length ? sectionOrder : summary.map((s) => s.section);
-            const radarData = radarSections.slice(0, 4).map((label) => {
-              const row = summary.find((s) => s.section === label);
-              const rate = row?.total ? row.correct / row.total : 0;
-              return { label, value: rate };
-            });
-            detailBody = summary.length
+            const radarData = mainSummary.map((row) => ({
+              label: row.section,
+              value: row.total ? row.correct / row.total : 0,
+            }));
+            detailBody = mainSummary.length
               ? `
                 <div class="student-score-summary">
                   <div class="student-score-line">
@@ -3160,43 +3314,63 @@ function renderTestSelect(app) {
                   <table class="detail-table score-detail-table">
                     <thead>
                       <tr>
-                        <th>Section</th>
+                        <th>Area</th>
+                        <th>Unit</th>
                         <th>Correct</th>
                         <th>Total</th>
                         <th>%</th>
                       </tr>
                     </thead>
                     <tbody>
-                      ${summary
-                        .map(
-                          (s) => `
-                            <tr>
-                              <td>
-                                <span class="score-section-label">
-                                  ${getSectionLabelLines(s.section)
-                                    .map((line) => `<span>${escapeHtml(line)}</span>`)
-                                    .join("")}
-                                </span>
-                              </td>
-                              <td>${s.correct}</td>
-                              <td>${s.total}</td>
-                              <td>${(s.rate * 100).toFixed(1)}%</td>
+                      ${nestedSummary
+                        .map((group) => {
+                          const rowSpan = 1 + group.subSections.length;
+                          const mainLabel = `
+                            <button class="score-detail-link" type="button" data-score-drilldown-kind="section" data-score-drilldown-value="${escapeHtml(group.mainSection)}">
+                              <span class="score-section-label">
+                              ${getSectionLabelLines(group.mainSection)
+                                .map((line) => `<span>${escapeHtml(line)}</span>`)
+                                .join("")}
+                              </span>
+                            </button>
+                          `;
+                          const totalRow = `
+                            <tr class="score-section-total-row">
+                              <td rowspan="${rowSpan}" class="score-section-group-cell">${mainLabel}</td>
+                              <td><b>Total</b></td>
+                              <td>${group.correct}</td>
+                              <td>${group.total}</td>
+                              <td>${(group.rate * 100).toFixed(1)}%</td>
                             </tr>
-                          `
-                        )
+                          `;
+                          const subRows = group.subSections
+                            .map(
+                              (subSection) => `
+                                <tr>
+                                  <td>
+                                    <button class="score-detail-link" type="button" data-score-drilldown-kind="subSection" data-score-drilldown-value="${escapeHtml(subSection.section)}">
+                                      ${escapeHtml(subSection.section)}
+                                    </button>
+                                  </td>
+                                  <td>${subSection.correct}</td>
+                                  <td>${subSection.total}</td>
+                                  <td>${(subSection.rate * 100).toFixed(1)}%</td>
+                                </tr>
+                              `
+                            )
+                            .join("");
+                          return `${totalRow}${subRows}`;
+                        })
                         .join("")}
                     </tbody>
                   </table>
                 </div>
               `
               : `<div class="text-muted">No score data.</div>`;
-          } else if (subTab === "wrong") {
-            const wrongRows = filteredDetailRows.filter((r) => !r.isCorrect);
-            detailBody = wrongRows.length
-              ? renderDetailTable(wrongRows, showAnswers)
-              : `<div class="text-muted">No wrong questions.</div>`;
           } else {
-            detailBody = renderDetailTable(filteredDetailRows, showAnswers);
+            detailBody = visibleQuestionRows.length
+              ? renderDetailTable(visibleQuestionRows, showAnswers)
+              : `<div class="text-muted">${wrongOnly ? "No wrong questions." : "No questions available."}</div>`;
           }
           return `
             <div class="student-detail-topbar">
@@ -3207,12 +3381,12 @@ function renderTestSelect(app) {
             <div class="student-detail-tabs">
               <button class="student-detail-tab ${subTab === "score" ? "active" : ""}" data-model-detail-tab="score">Score Details</button>
               <button class="student-detail-tab ${subTab === "all" ? "active" : ""}" data-model-detail-tab="all">All Questions</button>
-              <button class="student-detail-tab ${subTab === "wrong" ? "active" : ""}" data-model-detail-tab="wrong">Wrong Questions</button>
             </div>
             <div class="student-detail-body">
               ${detailFilterHtml}
               ${detailBody}
             </div>
+            ${popupHtml}
           `;
         }
 
@@ -4395,6 +4569,10 @@ function renderTestSelect(app) {
         resultDetailState.mode = "daily";
         resultDetailState.subTab = "score";
         resultDetailState.sectionFilter = "";
+        resultDetailState.wrongOnly = false;
+        resultDetailState.popupOpen = false;
+        resultDetailState.popupTitle = "";
+        resultDetailState.popupRows = [];
         resultDetailState.attempt = attempt;
         resultDetailState.error = "";
         if (attempt.test_version) {
@@ -4415,6 +4593,10 @@ function renderTestSelect(app) {
         resultDetailState.mode = "model";
         resultDetailState.subTab = "score";
         resultDetailState.sectionFilter = "";
+        resultDetailState.wrongOnly = false;
+        resultDetailState.popupOpen = false;
+        resultDetailState.popupTitle = "";
+        resultDetailState.popupRows = [];
         resultDetailState.attempt = attempt;
         resultDetailState.error = "";
         if (attempt.test_version) {
@@ -4428,7 +4610,13 @@ function renderTestSelect(app) {
       btn.addEventListener("click", () => {
         const next = btn.dataset.modelDetailTab || "score";
         resultDetailState.subTab = next;
-        if (next === "score") resultDetailState.sectionFilter = "";
+        resultDetailState.popupOpen = false;
+        resultDetailState.popupTitle = "";
+        resultDetailState.popupRows = [];
+        if (next === "score") {
+          resultDetailState.sectionFilter = "";
+          resultDetailState.wrongOnly = false;
+        }
         render();
       });
     });
@@ -4438,12 +4626,51 @@ function renderTestSelect(app) {
       resultDetailState.sectionFilter = event.target.value;
       render();
     });
+    app.querySelector("#modelWrongOnlyToggle")?.addEventListener("change", (event) => {
+      if (!(event.target instanceof HTMLInputElement)) return;
+      resultDetailState.wrongOnly = event.target.checked;
+      render();
+    });
+    app.querySelectorAll("[data-score-drilldown-kind]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const kind = button.dataset.scoreDrilldownKind || "";
+        const value = button.dataset.scoreDrilldownValue || "";
+        const attempt = resultDetailState.attempt;
+        if (!attempt) return;
+        const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
+        const rows = buildAttemptDetailRows(attempt, questionsList);
+        const filteredRows = kind === "section"
+          ? rows.filter((row) => (getSectionTitle(row.sectionKey) || row.sectionKey || row.section) === value)
+          : rows.filter((row) => row.section === value);
+        resultDetailState.popupOpen = true;
+        resultDetailState.popupTitle = kind === "section" ? `Section: ${value}` : `Sub-Section: ${value}`;
+        resultDetailState.popupRows = filteredRows;
+        render();
+      });
+    });
+    app.querySelector("#resultDetailPopupClose")?.addEventListener("click", () => {
+      resultDetailState.popupOpen = false;
+      resultDetailState.popupTitle = "";
+      resultDetailState.popupRows = [];
+      render();
+    });
+    app.querySelector("#resultDetailPopupOverlay")?.addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget) return;
+      resultDetailState.popupOpen = false;
+      resultDetailState.popupTitle = "";
+      resultDetailState.popupRows = [];
+      render();
+    });
   }
 
   app.querySelector("#dailyResultBack")?.addEventListener("click", () => {
     resultDetailState.open = false;
     resultDetailState.mode = "";
     resultDetailState.sectionFilter = "";
+    resultDetailState.wrongOnly = false;
+    resultDetailState.popupOpen = false;
+    resultDetailState.popupTitle = "";
+    resultDetailState.popupRows = [];
     resultDetailState.attempt = null;
     render();
   });
@@ -4452,6 +4679,10 @@ function renderTestSelect(app) {
     resultDetailState.open = false;
     resultDetailState.mode = "";
     resultDetailState.sectionFilter = "";
+    resultDetailState.wrongOnly = false;
+    resultDetailState.popupOpen = false;
+    resultDetailState.popupTitle = "";
+    resultDetailState.popupRows = [];
     resultDetailState.attempt = null;
     render();
   });
@@ -4462,6 +4693,10 @@ function renderTestSelect(app) {
     resultDetailState.mode = "";
     resultDetailState.subTab = "score";
     resultDetailState.sectionFilter = "";
+    resultDetailState.wrongOnly = false;
+    resultDetailState.popupOpen = false;
+    resultDetailState.popupTitle = "";
+    resultDetailState.popupRows = [];
     resultDetailState.attempt = null;
     saveState();
     render();
@@ -4472,6 +4707,10 @@ function renderTestSelect(app) {
     resultDetailState.mode = "";
     resultDetailState.subTab = "score";
     resultDetailState.sectionFilter = "";
+    resultDetailState.wrongOnly = false;
+    resultDetailState.popupOpen = false;
+    resultDetailState.popupTitle = "";
+    resultDetailState.popupRows = [];
     resultDetailState.attempt = null;
     supabase.auth.signOut();
     state.requireLogin = true;
@@ -4737,6 +4976,7 @@ function buildResultRows() {
   for (const q of getQuestions()) {
     const chosenIdx = state.answers[q.id];
     const correctIdx = q.answerIndex;
+    const stemMedia = getStemMediaAssets(q);
 
     // 問題文の表示テキスト（最低限）
     const promptText =
@@ -4744,9 +4984,10 @@ function buildResultRows() {
 
     rows.push({
       id: String(q.id),
-      thumb: q.stemKind && q.stemKind !== "audio" ? (q.stemAsset || "") : "",
       prompt: promptText,
       isCorrect: chosenIdx === correctIdx,
+      stemImages: stemMedia.images,
+      stemAudios: stemMedia.audios,
 
       chosen: getChoiceText(q, chosenIdx),
       correct: getChoiceText(q, correctIdx),
@@ -4764,13 +5005,18 @@ function buildAttemptDetailRows(attempt, questionsList) {
   return (questionsList ?? []).map((q) => {
     const chosenIdx = answers[q.id];
     const correctIdx = q.answerIndex;
+    const stemMedia = getStemMediaAssets(q);
     return {
       qid: String(q.id),
+      sectionKey: q.sectionKey || "",
       section: getQuestionSectionLabel(q),
       prompt: getQuestionPrompt(q),
-      thumb: q.stemKind && q.stemKind !== "audio" ? (q.stemAsset || "") : "",
+      stemImages: stemMedia.images,
+      stemAudios: stemMedia.audios,
       chosen: getChoiceText(q, chosenIdx),
+      chosenImg: pickChoiceImage(q, chosenIdx),
       correct: getChoiceText(q, correctIdx),
+      correctImg: pickChoiceImage(q, correctIdx),
       isCorrect: chosenIdx === correctIdx,
     };
   });
@@ -4791,6 +5037,68 @@ function buildSectionSummary(rows) {
   }));
 }
 
+function buildMainSectionSummary(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = getSectionTitle(row.sectionKey) || row.sectionKey || "Unknown";
+    const cur = map.get(key) || { section: key, total: 0, correct: 0 };
+    cur.total += 1;
+    if (row.isCorrect) cur.correct += 1;
+    map.set(key, cur);
+  });
+  return (sections ?? [])
+    .map((section) => getSectionTitle(section.key))
+    .filter(Boolean)
+    .map((label) => map.get(label))
+    .filter(Boolean)
+    .map((s) => ({
+      ...s,
+      rate: s.total ? s.correct / s.total : 0,
+    }));
+}
+
+function buildNestedSectionSummary(rows) {
+  const subSectionSummary = buildSectionSummary(rows);
+  const subSectionMap = new Map(subSectionSummary.map((row) => [row.section, row]));
+  const mainSectionMap = new Map();
+  rows.forEach((row) => {
+    const mainSection = getSectionTitle(row.sectionKey) || row.sectionKey || "Unknown";
+    if (!mainSectionMap.has(mainSection)) {
+      mainSectionMap.set(mainSection, {
+        mainSection,
+        total: 0,
+        correct: 0,
+        subSections: [],
+      });
+    }
+    const group = mainSectionMap.get(mainSection);
+    group.total += 1;
+    if (row.isCorrect) group.correct += 1;
+  });
+  subSectionSummary.forEach((subSection) => {
+    const sourceRow = (rows ?? []).find((row) => row.section === subSection.section);
+    const mainSection = getSectionTitle(sourceRow?.sectionKey) || sourceRow?.sectionKey || "Unknown";
+    const group = mainSectionMap.get(mainSection);
+    if (!group) return;
+    group.subSections.push(subSectionMap.get(subSection.section) || subSection);
+  });
+  return (sections ?? [])
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => getSectionTitle(section.key))
+    .filter((title) => mainSectionMap.has(title))
+    .map((title) => {
+      const group = mainSectionMap.get(title);
+      return {
+        ...group,
+        rate: group.total ? group.correct / group.total : 0,
+        subSections: group.subSections.map((subSection) => ({
+          ...subSection,
+          rate: subSection.total ? subSection.correct / subSection.total : 0,
+        })),
+      };
+    });
+}
+
 function getSectionLabelLines(label) {
   if (label === "Script and Vocabulary") return ["Script and", "Vocabulary"];
   if (label === "Reading Comprehension") return ["Reading", "Comprehension"];
@@ -4802,7 +5110,15 @@ function getSectionLabelLines(label) {
 }
 
 function getAvailableSections(rows) {
-  return Array.from(new Set((rows ?? []).map((row) => String(row.section || "").trim()).filter(Boolean)));
+  const grouped = new Set();
+  (rows ?? []).forEach((row) => {
+    const label = getSectionTitle(row.sectionKey) || row.sectionKey || "";
+    if (label) grouped.add(String(label).trim());
+  });
+  return (sections ?? [])
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => getSectionTitle(section.key))
+    .filter((label) => grouped.has(label));
 }
 
 function buildRadarSvg(data) {
@@ -4931,7 +5247,20 @@ function renderResult(app) {
                   <td class="cell-id">${escapeHtml(r.id)}</td>
 
                   <td class="cell-prompt">
-                    ${r.thumb ? `<img class="result-thumb" src="${r.thumb}" alt="q" />` : ""}
+                    ${
+                      r.stemAudios?.length || r.stemImages?.length
+                        ? `
+                          <div class="result-stem-media">
+                            ${(r.stemAudios ?? [])
+                              .map((src) => `<audio class="result-stem-audio" controls preload="none" src="${src}"></audio>`)
+                              .join("")}
+                            ${(r.stemImages ?? [])
+                              .map((src) => `<img class="result-thumb" src="${src}" alt="q" />`)
+                              .join("")}
+                          </div>
+                        `
+                        : ""
+                    }
                     <div class="prompt-text">${escapeHtml(r.prompt ?? "")}</div>
                   </td>
 

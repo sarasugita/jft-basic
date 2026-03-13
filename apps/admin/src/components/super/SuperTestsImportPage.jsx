@@ -6,6 +6,8 @@ import { getAdminSupabaseConfig } from "../../lib/adminSupabase";
 
 const DEFAULT_DAILY_CATEGORY = "Vocabulary";
 const DEFAULT_MODEL_CATEGORY = "Book Review";
+const QUESTION_SELECT_BASE = "question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
+const QUESTION_SELECT_WITH_MEDIA = `${QUESTION_SELECT_BASE}, media_file, media_type`;
 
 function getDefaultCategoryForTestType(testType) {
   return testType === "model" ? DEFAULT_MODEL_CATEGORY : DEFAULT_DAILY_CATEGORY;
@@ -110,12 +112,50 @@ function formatDateTimeParts(value) {
   };
 }
 
+function getAssetProbeTarget(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return `${url.pathname}${url.search}`.toLowerCase();
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message ?? "");
+  return message.includes(columnName) && message.toLowerCase().includes("does not exist");
+}
+
+async function fetchQuestionsForVersionWithFallback(supabase, version) {
+  let result = await supabase
+    .from("questions")
+    .select(QUESTION_SELECT_WITH_MEDIA)
+    .eq("test_version", version)
+    .order("order_index", { ascending: true });
+  if (result.error && (isMissingColumnError(result.error, "media_file") || isMissingColumnError(result.error, "media_type"))) {
+    result = await supabase
+      .from("questions")
+      .select(QUESTION_SELECT_BASE)
+      .eq("test_version", version)
+      .order("order_index", { ascending: true });
+  }
+  return result;
+}
+
 function isImageAsset(value) {
-  return /\.(png|jpe?g|webp|gif|svg)$/i.test(String(value ?? "").trim());
+  const probe = getAssetProbeTarget(value);
+  return /\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(probe)
+    || probe.includes("/images/")
+    || probe.includes("/image/");
 }
 
 function isAudioAsset(value) {
-  return /\.(mp3|wav|m4a|ogg)$/i.test(String(value ?? "").trim());
+  const probe = getAssetProbeTarget(value);
+  return /\.(mp3|wav|m4a|ogg)(\?.*)?$/i.test(probe)
+    || probe.includes("/audio/")
+    || probe.includes("/audios/");
 }
 
 function escapeHtml(str) {
@@ -141,6 +181,19 @@ function splitStemLines(text) {
 
 function mapDbQuestion(row) {
   const data = row.data ?? {};
+  const stemAsset = [
+    row.media_file,
+    data.stemAsset,
+    data.stem_asset,
+    data.stemAudio,
+    data.stem_audio,
+    data.stemImage,
+    data.stem_image,
+  ]
+    .flatMap((value) => splitStemLines(value))
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index)
+    .join("|") || null;
   return {
     id: row.question_id,
     sectionKey: row.section_key,
@@ -150,7 +203,18 @@ function mapDbQuestion(row) {
     answerIndex: row.answer_index,
     orderIndex: row.order_index ?? 0,
     ...data,
+    stemKind: data.stemKind ?? data.stem_kind ?? row.media_type ?? null,
+    stemAsset,
   };
+}
+
+function getPreviewSectionTitle(question) {
+  const sectionKey = String(question?.sectionKey ?? "").trim().toUpperCase();
+  if (sectionKey === "SV") return "Script and Vocabulary";
+  if (sectionKey === "CE") return "Conversation and Expression";
+  if (sectionKey === "LC") return "Listening Comprehension";
+  if (sectionKey === "RC") return "Reading Comprehension";
+  return sectionKey || "Unknown";
 }
 
 function resolveMediaUrl(value) {
@@ -252,6 +316,7 @@ export default function SuperTestsImportPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const assetFolderInputRef = useRef(null);
   const metaAssetFolderInputRef = useRef(null);
+  const previewSectionRefs = useRef({});
 
   const categoryOptionsByTestType = useMemo(() => {
     const next = {
@@ -359,6 +424,19 @@ export default function SuperTestsImportPage() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([category, items]) => ({ category, items }));
   }, [filteredQuestionSets]);
+  const previewSectionBreaks = useMemo(() => {
+    let previousSectionTitle = "";
+    return previewQuestions.map((question, index) => {
+      const sectionTitle = getPreviewSectionTitle(question);
+      const showHeader = index === 0 || sectionTitle !== previousSectionTitle;
+      previousSectionTitle = sectionTitle;
+      return { question, index, sectionTitle, showHeader };
+    });
+  }, [previewQuestions]);
+  const previewSectionTitles = useMemo(
+    () => previewSectionBreaks.filter((item) => item.showHeader).map((item) => item.sectionTitle),
+    [previewSectionBreaks]
+  );
 
   async function invokeJsonFunction(name, payload) {
     const { data, error } = await invokeWithAuth(name, payload);
@@ -626,11 +704,7 @@ export default function SuperTestsImportPage() {
     setPreviewQuestions([]);
     setPreviewMsg("Loading...");
     setPreviewOpen(true);
-    const { data, error } = await supabase
-      .from("questions")
-      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-      .eq("test_version", questionSet.title)
-      .order("order_index", { ascending: true });
+    const { data, error } = await fetchQuestionsForVersionWithFallback(supabase, questionSet.title);
     if (error) {
       setPreviewMsg(`Load failed: ${error.message}`);
       return;
@@ -1084,7 +1158,21 @@ export default function SuperTestsImportPage() {
 
             {!previewMsg ? (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14, maxHeight: "70vh", overflow: "auto" }}>
-                {previewQuestions.map((question, index) => {
+                {previewSet?.test_type === "model" && previewSectionTitles.length ? (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {previewSectionTitles.map((sectionTitle) => (
+                      <button
+                        key={`super-preview-jump-${sectionTitle}`}
+                        className="btn"
+                        type="button"
+                        onClick={() => previewSectionRefs.current[sectionTitle]?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      >
+                        {sectionTitle}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {previewSectionBreaks.map(({ question, index, sectionTitle, showHeader }) => {
                   const prompt = question.promptEn || question.promptBn || "";
                   const choices = question.choices ?? question.choicesJa ?? [];
                   const stemKind = question.stemKind || "";
@@ -1107,7 +1195,19 @@ export default function SuperTestsImportPage() {
                   const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
                   const stemLines = splitStemLines(stemExtra);
                   return (
-                    <div key={`${question.qid}-${index}`} className="admin-panel" style={{ padding: 14 }}>
+                    <div key={`${question.qid}-${index}`}>
+                      {previewSet?.test_type === "model" && showHeader ? (
+                        <div
+                          ref={(node) => {
+                            if (node) previewSectionRefs.current[sectionTitle] = node;
+                          }}
+                          className="admin-title"
+                          style={{ fontSize: 22, marginTop: index === 0 ? 0 : 6 }}
+                        >
+                          {sectionTitle}
+                        </div>
+                      ) : null}
+                      <div className="admin-panel" style={{ padding: 14, marginTop: previewSet?.test_type === "model" && showHeader ? 8 : 0 }}>
                       <div style={{ fontSize: 12, color: "#333333", fontWeight: 700 }}>
                         {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""}
                       </div>
@@ -1182,6 +1282,7 @@ export default function SuperTestsImportPage() {
                           })}
                         </div>
                       ) : null}
+                      </div>
                     </div>
                   );
                 })}

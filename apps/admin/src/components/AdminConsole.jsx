@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { questions, sections } from "../../../../packages/shared/questions.js";
-import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
+import { createAdminSupabaseClient, getAdminSupabaseConfig, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 
@@ -39,6 +39,8 @@ const PROFILE_UPLOAD_BUCKET = "test-assets";
 const PERSONAL_UPLOAD_FIELDS = [
   { key: "passport_bio_page", label: "Bio Page Image", accept: "image/*" }
 ];
+const QUESTION_SELECT_BASE = "id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
+const QUESTION_SELECT_WITH_MEDIA = `${QUESTION_SELECT_BASE}, media_file, media_type`;
 const DAILY_RECORD_COMMENT_FIELDS =
   "id, student_id, comment, profiles:student_id(display_name, student_code)";
 const ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY = "jft_admin_sidebar_collapsed_v1";
@@ -87,6 +89,82 @@ function formatYearsOfExperience(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return String(value);
   return Number.isInteger(num) ? `${num}` : `${num.toFixed(1)}`;
+}
+
+function sanitizeStoragePathSegment(value, fallback = "file") {
+  const normalized = String(value ?? "")
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const sanitized = normalized
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return sanitized || fallback;
+}
+
+function buildStorageObjectPath(testType, testVersion, assetType, relativePath) {
+  const baseSegments = [
+    sanitizeStoragePathSegment(testType, "test"),
+    sanitizeStoragePathSegment(testVersion, "set"),
+    sanitizeStoragePathSegment(assetType, "file"),
+  ];
+  const relativeSegments = String(relativePath ?? "")
+    .split("/")
+    .map((segment) => sanitizeStoragePathSegment(segment))
+    .filter(Boolean);
+  return [...baseSegments, ...(relativeSegments.length ? relativeSegments : ["file"])].join("/");
+}
+
+function resolveAdminAssetUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  const { supabaseUrl: baseUrl } = getAdminSupabaseConfig();
+  if (!baseUrl) return raw;
+  const encodedPath = raw
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${baseUrl}/storage/v1/object/public/test-assets/${encodedPath}`;
+}
+
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message ?? "");
+  return message.includes(columnName) && message.toLowerCase().includes("does not exist");
+}
+
+async function fetchQuestionsForVersionWithFallback(client, version) {
+  let result = await client
+    .from("questions")
+    .select(QUESTION_SELECT_WITH_MEDIA)
+    .eq("test_version", version)
+    .order("order_index", { ascending: true });
+  if (result.error && (isMissingColumnError(result.error, "media_file") || isMissingColumnError(result.error, "media_type"))) {
+    result = await client
+      .from("questions")
+      .select(QUESTION_SELECT_BASE)
+      .eq("test_version", version)
+      .order("order_index", { ascending: true });
+  }
+  return result;
+}
+
+async function fetchQuestionsForVersionsWithFallback(client, versions) {
+  let result = await client
+    .from("questions")
+    .select(QUESTION_SELECT_WITH_MEDIA)
+    .in("test_version", versions)
+    .order("test_version", { ascending: true })
+    .order("order_index", { ascending: true });
+  if (result.error && (isMissingColumnError(result.error, "media_file") || isMissingColumnError(result.error, "media_type"))) {
+    result = await client
+      .from("questions")
+      .select(QUESTION_SELECT_BASE)
+      .in("test_version", versions)
+      .order("test_version", { ascending: true })
+      .order("order_index", { ascending: true });
+  }
+  return result;
 }
 
 function getProfileUploads(value) {
@@ -388,8 +466,41 @@ function getSectionTitle(sectionKey) {
   return sections.find((s) => s.key === sectionKey)?.title ?? sectionKey ?? "";
 }
 
+function formatSubSectionLabel(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const normalized = raw
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[()]/g, " ")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const labelMap = {
+    word_meaning: "Word Meaning",
+    word_usage: "Word Usage",
+    kanji_reading: "Kanji Reading",
+    kanji_meaning_and_usage: "Kanji Usage",
+    kanji_usage: "Kanji Usage",
+    grammar: "Grammar",
+    expression: "Expression",
+    comprehending_content_conversation: "Conversation",
+    conversation: "Conversation",
+    comprehending_content_communicating_at_shops_and_public_places: "Shops and Public Places",
+    public_place: "Shops and Public Places",
+    shops_and_public_places: "Shops and Public Places",
+    comprehending_content_listening_to_announcements_and_instructions: "Announcements and Instructions",
+    announcement: "Announcements and Instructions",
+    announcements_and_instructions: "Announcements and Instructions",
+    comprehending_content: "Comprehension",
+    comprehension: "Comprehension",
+    info_search: "Information Search",
+    information_search: "Information Search",
+  };
+  return labelMap[normalized] || raw;
+}
+
 function getQuestionSectionLabel(question) {
-  return String(question?.sectionLabel ?? "").trim() || getSectionTitle(question?.sectionKey);
+  return formatSubSectionLabel(question?.sectionLabel) || getSectionTitle(question?.sectionKey);
 }
 
 function getProblemSetTitle(problemSetId, testsList) {
@@ -456,10 +567,31 @@ function getChoiceText(q, idx) {
   return `#${Number(idx) + 1}`;
 }
 
+function getChoiceImage(q, idx) {
+  if (idx == null) return "";
+  if (Array.isArray(q.choiceImages) && q.choiceImages[idx]) return q.choiceImages[idx];
+  const value =
+    (Array.isArray(q.choices) && q.choices[idx] != null ? q.choices[idx] : null)
+    ?? (Array.isArray(q.choicesJa) && q.choicesJa[idx] != null ? q.choicesJa[idx] : null)
+    ?? (Array.isArray(q.choicesEn) && q.choicesEn[idx] != null ? q.choicesEn[idx] : null)
+    ?? "";
+  return isImageAsset(value) ? value : "";
+}
+
 function getPartChoiceText(part, idx) {
   if (idx == null) return "";
   if (Array.isArray(part.choicesJa) && part.choicesJa[idx] != null) return part.choicesJa[idx];
   return `#${Number(idx) + 1}`;
+}
+
+function getPartChoiceImage(part, idx) {
+  if (idx == null) return "";
+  if (Array.isArray(part.choiceImages) && part.choiceImages[idx]) return part.choiceImages[idx];
+  const value =
+    (Array.isArray(part.choices) && part.choices[idx] != null ? part.choices[idx] : null)
+    ?? (Array.isArray(part.choicesJa) && part.choicesJa[idx] != null ? part.choicesJa[idx] : null)
+    ?? "";
+  return isImageAsset(value) ? value : "";
 }
 
 function getPromptText(q) {
@@ -602,6 +734,17 @@ function normalizeModelCsvKind(value) {
     .replace(/[\s/+]+/g, "_");
 }
 
+function getAssetProbeTarget(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return `${url.pathname}${url.search}`.toLowerCase();
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
 function resolveModelStemAssets(stemKindInput, stemImageInput, stemAudioInput) {
   const stemImage = normalizeCsvValue(stemImageInput) || null;
   const stemAudio = normalizeCsvValue(stemAudioInput) || null;
@@ -628,11 +771,17 @@ function isModelOptionImageType(optionType) {
 }
 
 function isImageAsset(value) {
-  return /\.(png|jpe?g|webp)$/i.test(String(value ?? "").trim());
+  const probe = getAssetProbeTarget(value);
+  return /\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(probe)
+    || probe.includes("/images/")
+    || probe.includes("/image/");
 }
 
 function isAudioAsset(value) {
-  return /\.(mp3|wav|m4a|ogg)$/i.test(String(value ?? "").trim());
+  const probe = getAssetProbeTarget(value);
+  return /\.(mp3|wav|m4a|ogg)(\?.*)?$/i.test(probe)
+    || probe.includes("/audio/")
+    || probe.includes("/audios/");
 }
 
 function getQuestionIllustration(question) {
@@ -651,8 +800,35 @@ function getQuestionIllustration(question) {
   return null;
 }
 
+function getQuestionStemMedia(question) {
+  const stemValues = joinAssetValues(
+    question?.stemAsset,
+    question?.image,
+    question?.stemImage,
+    question?.stemAudio,
+    question?.passageImage,
+    question?.tableImage,
+    question?.stem_image,
+    question?.stem_image_url
+  );
+  const assets = splitAssetValues(stemValues);
+  return {
+    images: assets.filter((value) => isImageAsset(value)),
+    audios: assets.filter((value) => isAudioAsset(value)),
+  };
+}
+
 function mapDbQuestion(row) {
   const data = row.data ?? {};
+  const stemAsset = joinAssetValues(
+    row.media_file,
+    data.stemAsset,
+    data.stem_asset,
+    data.stemAudio,
+    data.stem_audio,
+    data.stemImage,
+    data.stem_image
+  ) || null;
   return {
     dbId: row.id ?? null,
     id: row.question_id,
@@ -669,6 +845,8 @@ function mapDbQuestion(row) {
     sourceVersion: data.sourceVersion ?? null,
     sourceQuestionId: data.sourceQuestionId ?? null,
     ...data,
+    stemKind: data.stemKind ?? data.stem_kind ?? row.media_type ?? null,
+    stemAsset,
   };
 }
 
@@ -677,6 +855,7 @@ function buildAttemptDetailRows(answersJson) {
   const rows = [];
 
   for (const q of questions) {
+    const stemMedia = getQuestionStemMedia(q);
     if (q.parts?.length) {
       const ans = answers[q.id];
       q.parts.forEach((part, i) => {
@@ -684,11 +863,16 @@ function buildAttemptDetailRows(answersJson) {
         const correctIdx = part.answerIndex;
         rows.push({
           qid: `${q.id}-${i + 1}`,
+          sectionKey: q.sectionKey || "",
           section: getQuestionSectionLabel(q),
           prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
           image: getQuestionIllustration(q),
+          stemImages: stemMedia.images,
+          stemAudios: stemMedia.audios,
           chosen: getPartChoiceText(part, chosenIdx),
+          chosenImage: getPartChoiceImage(part, chosenIdx),
           correct: getPartChoiceText(part, correctIdx),
+          correctImage: getPartChoiceImage(part, correctIdx),
           isCorrect: chosenIdx === correctIdx
         });
       });
@@ -699,11 +883,16 @@ function buildAttemptDetailRows(answersJson) {
     const correctIdx = q.answerIndex;
     rows.push({
       qid: String(q.id),
+      sectionKey: q.sectionKey || "",
       section: getQuestionSectionLabel(q),
       prompt: getPromptText(q),
       image: getQuestionIllustration(q),
+      stemImages: stemMedia.images,
+      stemAudios: stemMedia.audios,
       chosen: getChoiceText(q, chosenIdx),
+      chosenImage: getChoiceImage(q, chosenIdx),
       correct: getChoiceText(q, correctIdx),
+      correctImage: getChoiceImage(q, correctIdx),
       isCorrect: chosenIdx === correctIdx
     });
   }
@@ -715,6 +904,7 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
   const answers = answersJson ?? {};
   const rows = [];
   for (const q of questionsList ?? []) {
+    const stemMedia = getQuestionStemMedia(q);
     if (q.parts?.length) {
       const ans = answers[q.id];
       q.parts.forEach((part, i) => {
@@ -722,11 +912,16 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
         const correctIdx = part.answerIndex;
       rows.push({
         qid: `${q.id}-${i + 1}`,
+        sectionKey: q.sectionKey || "",
         section: getQuestionSectionLabel(q),
         prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
         image: getQuestionIllustration(q),
+        stemImages: stemMedia.images,
+        stemAudios: stemMedia.audios,
         chosen: getPartChoiceText(part, chosenIdx),
+        chosenImage: getPartChoiceImage(part, chosenIdx),
         correct: getPartChoiceText(part, correctIdx),
+        correctImage: getPartChoiceImage(part, correctIdx),
         isCorrect: chosenIdx === correctIdx
       });
       });
@@ -737,11 +932,16 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
     const correctIdx = q.answerIndex;
     rows.push({
       qid: String(q.id),
+      sectionKey: q.sectionKey || "",
       section: getQuestionSectionLabel(q),
       prompt: getPromptText(q),
       image: getQuestionIllustration(q),
+      stemImages: stemMedia.images,
+      stemAudios: stemMedia.audios,
       chosen: getChoiceText(q, chosenIdx),
+      chosenImage: getChoiceImage(q, chosenIdx),
       correct: getChoiceText(q, correctIdx),
+      correctImage: getChoiceImage(q, correctIdx),
       isCorrect: chosenIdx === correctIdx
     });
   }
@@ -760,6 +960,66 @@ function buildSectionSummary(rows) {
   return Array.from(summaryMap.values()).map((s) => ({
     ...s,
     rate: s.total ? s.correct / s.total : 0
+  }));
+}
+
+function buildMainSectionSummary(rows) {
+  const summaryMap = new Map();
+  for (const row of rows ?? []) {
+    const key = getSectionTitle(row.sectionKey) || row.sectionKey || row.section || "Unknown";
+    const current = summaryMap.get(key) || { section: key, total: 0, correct: 0 };
+    current.total += 1;
+    if (row.isCorrect) current.correct += 1;
+    summaryMap.set(key, current);
+  }
+  return sections
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => getSectionTitle(section.key))
+    .filter(Boolean)
+    .map((label) => summaryMap.get(label))
+    .filter(Boolean)
+    .map((row) => ({
+      ...row,
+      rate: row.total ? row.correct / row.total : 0,
+    }));
+}
+
+function buildNestedSectionSummary(rows) {
+  const mainSectionMap = new Map();
+  for (const row of rows ?? []) {
+    const mainSection = getSectionTitle(row.sectionKey) || row.sectionKey || row.section || "Unknown";
+    const current = mainSectionMap.get(mainSection) || {
+      mainSection,
+      total: 0,
+      correct: 0,
+      subSections: new Map(),
+    };
+    current.total += 1;
+    if (row.isCorrect) current.correct += 1;
+    const subKey = row.section || "Unknown";
+    const currentSub = current.subSections.get(subKey) || { section: subKey, total: 0, correct: 0 };
+    currentSub.total += 1;
+    if (row.isCorrect) currentSub.correct += 1;
+    current.subSections.set(subKey, currentSub);
+    mainSectionMap.set(mainSection, current);
+  }
+  const ordered = sections
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => getSectionTitle(section.key))
+    .filter((title) => mainSectionMap.has(title))
+    .map((title) => mainSectionMap.get(title));
+  for (const [title, group] of mainSectionMap.entries()) {
+    if (!ordered.some((item) => item.mainSection === title)) ordered.push(group);
+  }
+  return ordered.map((group) => ({
+    mainSection: group.mainSection,
+    total: group.total,
+    correct: group.correct,
+    rate: group.total ? group.correct / group.total : 0,
+    subSections: Array.from(group.subSections.values()).map((subSection) => ({
+      ...subSection,
+      rate: subSection.total ? subSection.correct / subSection.total : 0,
+    })),
   }));
 }
 
@@ -982,7 +1242,7 @@ function QuestionPreviewCard({ question, index, children }) {
   const shouldShowImage = imageAssets.length > 0 || (isImageStem && stemAsset);
   const shouldShowAudio = audioAssets.length > 0 || (isAudioStem && stemAsset);
   const stemLines = splitStemLines(stemExtra);
-  const sectionLabel = question.sectionLabel || question.sectionKey;
+  const sectionLabel = getQuestionSectionLabel(question) || question.sectionKey;
 
   const renderChoices = () => (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
@@ -1205,6 +1465,17 @@ function normalizeAdminLoginErrorMessage(message) {
     return "This account is missing an admin profile. Please contact the system administrator.";
   }
   return text;
+}
+
+function normalizeLegacyTestErrorMessage(error, action = "update") {
+  const text = String(error?.message ?? "").trim();
+  if (
+    error?.code === "23505"
+    && /tests_version_key|duplicate key value/i.test(text)
+  ) {
+    return "This SetID already exists. Use a different SetID.";
+  }
+  return `Test ${action} failed: ${text || "Unknown error"}`;
 }
 
 function formatDateFull(value) {
@@ -1902,6 +2173,9 @@ export default function AdminConsole({
   const [selectedId, setSelectedId] = useState(null);
   const [selectedAttemptObj, setSelectedAttemptObj] = useState(null);
   const [attemptDetailOpen, setAttemptDetailOpen] = useState(false);
+  const [attemptDetailTab, setAttemptDetailTab] = useState("overview");
+  const [attemptDetailWrongOnly, setAttemptDetailWrongOnly] = useState(false);
+  const attemptDetailSectionRefs = useRef({});
   const [expandedResultCells, setExpandedResultCells] = useState({});
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
@@ -2047,8 +2321,8 @@ export default function AdminConsole({
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
-    show_answers: true,
-    allow_multiple_attempts: true,
+    show_answers: false,
+    allow_multiple_attempts: false,
     pass_rate: "0.8",
     retake_release_scope: "all"
   });
@@ -2102,7 +2376,7 @@ export default function AdminConsole({
     ends_at: "",
     time_limit_min: "",
     show_answers: false,
-    allow_multiple_attempts: true,
+    allow_multiple_attempts: false,
     pass_rate: "0.8",
     retake_release_scope: "all"
   });
@@ -2291,6 +2565,11 @@ export default function AdminConsole({
       };
     });
   }, [isModelPreview, previewDisplayQuestions]);
+  const previewSectionTitles = useMemo(
+    () => previewSectionBreaks.filter((item) => item.showHeader).map((item) => item.sectionTitle),
+    [previewSectionBreaks]
+  );
+  const previewSectionRefs = useRef({});
 
   const testPassRateByVersion = useMemo(() => {
     const map = {};
@@ -2707,6 +2986,58 @@ export default function AdminConsole({
     () => buildSectionSummary(selectedAttemptRows),
     [selectedAttemptRows]
   );
+
+  const selectedAttemptIsModel = useMemo(
+    () => testMetaByVersion[selectedAttempt?.test_version]?.type === "mock",
+    [selectedAttempt, testMetaByVersion]
+  );
+
+  const selectedAttemptMainSectionSummary = useMemo(
+    () => buildMainSectionSummary(selectedAttemptRows),
+    [selectedAttemptRows]
+  );
+
+  const selectedAttemptNestedSectionSummary = useMemo(
+    () => buildNestedSectionSummary(selectedAttemptRows),
+    [selectedAttemptRows]
+  );
+
+  const selectedAttemptPassRate = useMemo(() => {
+    const value = Number(testPassRateByVersion[selectedAttempt?.test_version] ?? 0.8);
+    return Number.isFinite(value) && value > 0 ? value : 0.8;
+  }, [selectedAttempt, testPassRateByVersion]);
+
+  const selectedAttemptQuestionSections = useMemo(() => {
+    const groups = new Map();
+    (selectedAttemptRows ?? []).forEach((row) => {
+      const key = getSectionTitle(row.sectionKey) || row.sectionKey || row.section || "Unknown";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+    const ordered = sections
+      .filter((section) => section.key !== "DAILY")
+      .map((section) => getSectionTitle(section.key))
+      .filter((title) => groups.has(title))
+      .map((title) => ({ title, rows: groups.get(title) ?? [] }));
+    for (const [title, rows] of groups.entries()) {
+      if (!ordered.some((section) => section.title === title)) {
+        ordered.push({ title, rows });
+      }
+    }
+    return ordered;
+  }, [selectedAttemptRows]);
+
+  const selectedAttemptQuestionSectionsFiltered = useMemo(() => {
+    return selectedAttemptQuestionSections
+      .map((section) => ({
+        ...section,
+        rows: attemptDetailWrongOnly ? section.rows.filter((row) => !row.isCorrect) : section.rows,
+      }))
+      .filter((section) => section.rows.length > 0);
+  }, [selectedAttemptQuestionSections, attemptDetailWrongOnly]);
+
+  const selectedAttemptScoreRate = selectedAttempt ? getScoreRate(selectedAttempt) : 0;
+  const selectedAttemptIsPass = selectedAttemptScoreRate >= selectedAttemptPassRate;
 
   const attendanceSummary = useMemo(() => {
     const list = studentAttendance ?? [];
@@ -3405,12 +3736,7 @@ export default function AdminConsole({
     let mounted = true;
     setAttemptQuestionsLoading(true);
     setAttemptQuestionsError("");
-    supabase
-      .from("questions")
-      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-      .eq("test_version", version)
-      .order("order_index", { ascending: true })
-      .then(({ data, error }) => {
+    fetchQuestionsForVersionWithFallback(supabase, version).then(({ data, error }) => {
         if (!mounted) return;
         if (error) {
           console.error("attempt questions fetch error:", error);
@@ -3426,6 +3752,13 @@ export default function AdminConsole({
       mounted = false;
     };
   }, [attemptDetailOpen, selectedAttempt, attemptQuestionsByVersion]);
+
+  useEffect(() => {
+    if (!attemptDetailOpen) return;
+    setAttemptDetailTab("overview");
+    setAttemptDetailWrongOnly(false);
+    attemptDetailSectionRefs.current = {};
+  }, [attemptDetailOpen, selectedAttempt?.id]);
 
   async function runSearch(testType = "") {
     setLoading(true);
@@ -3528,11 +3861,7 @@ export default function AdminConsole({
     setSessionDetailAllowMsg("");
 
     const [{ data: questionsData, error: questionsError }, attemptsResult, allowancesResult] = await Promise.all([
-      supabase
-        .from("questions")
-        .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-        .eq("test_version", session.problem_set_id)
-        .order("order_index", { ascending: true }),
+      fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id),
       (async () => {
         const buildAttemptsQuery = (fields) =>
           supabase
@@ -5266,7 +5595,6 @@ export default function AdminConsole({
 
   function applySourceSessionToForm(session, setForm) {
     if (!session) return;
-    const passRate = testPassRateByVersion[session.problem_set_id];
     setForm((current) => ({
       ...current,
       problem_set_id: session.problem_set_id ?? current.problem_set_id,
@@ -5274,10 +5602,10 @@ export default function AdminConsole({
       starts_at: "",
       ends_at: "",
       time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
-      show_answers: Boolean(session.show_answers),
-      allow_multiple_attempts: Boolean(session.allow_multiple_attempts),
+      show_answers: false,
+      allow_multiple_attempts: false,
       retake_release_scope: current.retake_release_scope || "all",
-      pass_rate: passRate != null ? String(passRate) : current.pass_rate,
+      pass_rate: "0.8",
     }));
   }
 
@@ -5294,6 +5622,9 @@ export default function AdminConsole({
         session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
         start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
         close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
+        show_answers: false,
+        allow_multiple_attempts: false,
+        pass_rate: "0.8",
         retake_release_scope: "all",
       }));
       return;
@@ -5321,6 +5652,9 @@ export default function AdminConsole({
         close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
         question_count_mode: "all",
         question_count: "",
+        show_answers: false,
+        allow_multiple_attempts: false,
+        pass_rate: "0.8",
         retake_release_scope: "all",
       }));
       return;
@@ -5415,12 +5749,10 @@ export default function AdminConsole({
       return normalizedSetIds[0];
     }
 
-    const { data: sourceQuestions, error: sourceQuestionsError } = await supabase
-      .from("questions")
-      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-      .in("test_version", normalizedSetIds)
-      .order("test_version", { ascending: true })
-      .order("order_index", { ascending: true });
+    const { data: sourceQuestions, error: sourceQuestionsError } = await fetchQuestionsForVersionsWithFallback(
+      supabase,
+      normalizedSetIds
+    );
     if (sourceQuestionsError) {
       throw new Error(`Question lookup failed: ${sourceQuestionsError.message}`);
     }
@@ -5456,7 +5788,13 @@ export default function AdminConsole({
     }
 
     const generatedVersion = `daily_session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const ensure = await ensureTestRecord(generatedVersion, category || generatedVersion, "daily", passRate);
+    const ensure = await ensureTestRecord(
+      generatedVersion,
+      category || generatedVersion,
+      "daily",
+      passRate,
+      activeSchoolId,
+    );
     if (!ensure.ok) {
       throw new Error(ensure.message);
     }
@@ -5466,6 +5804,7 @@ export default function AdminConsole({
       const nextQuestionId = `${row.test_version || "daily"}__${row.question_id || index + 1}__${index + 1}`;
       questionKeyBySourceId.set(row.id, nextQuestionId);
       return {
+        school_id: activeSchoolId,
         test_version: generatedVersion,
         question_id: nextQuestionId,
         section_key: row.section_key,
@@ -5621,6 +5960,9 @@ export default function AdminConsole({
       session_date: "",
       start_time: "",
       close_time: "",
+      show_answers: false,
+      allow_multiple_attempts: false,
+      pass_rate: "0.8",
       retake_release_scope: "all"
     }));
     setModelConductMode("normal");
@@ -5757,6 +6099,9 @@ export default function AdminConsole({
       question_count_mode: "all",
       question_count: "",
       problem_set_ids: s.problem_set_id ? [s.problem_set_id] : [],
+      show_answers: false,
+      allow_multiple_attempts: false,
+      pass_rate: "0.8",
       retake_release_scope: "all",
     }));
     setDailyConductMode("normal");
@@ -5890,7 +6235,10 @@ export default function AdminConsole({
     fetchTestSessions();
   }
 
-  async function ensureTestRecord(testVersion, title, type, passRate) {
+  async function ensureTestRecord(testVersion, title, type, passRate, schoolId = activeSchoolId) {
+    if (!schoolId) {
+      return { ok: false, message: "School scope is required." };
+    }
     const { data, error } = await supabase
       .from("tests")
       .select("id, title")
@@ -5903,6 +6251,7 @@ export default function AdminConsole({
     const existing = (data ?? [])[0] ?? null;
     if (existing) {
       const updatePayload = {
+        school_id: schoolId,
         type,
         updated_at: new Date().toISOString()
       };
@@ -5914,23 +6263,25 @@ export default function AdminConsole({
         .eq("version", testVersion);
       if (updateError) {
         console.error("tests update error:", updateError);
-        return { ok: false, message: `Test update failed: ${updateError.message}` };
+        return { ok: false, message: normalizeLegacyTestErrorMessage(updateError, "update") };
       }
       return { ok: true, existing: true };
     }
 
     const effectiveTitle = title || testVersion;
-    const { error: insertError } = await supabase.from("tests").insert({
+    const insertPayload = {
+      school_id: schoolId,
       version: testVersion,
       title: effectiveTitle,
       type,
-      pass_rate: Number.isFinite(passRate) ? passRate : null,
       is_public: true,
       updated_at: new Date().toISOString()
-    });
+    };
+    if (Number.isFinite(passRate)) insertPayload.pass_rate = passRate;
+    const { error: insertError } = await supabase.from("tests").insert(insertPayload);
     if (insertError) {
       console.error("tests insert error:", insertError);
-      return { ok: false, message: `Test create failed: ${insertError.message}` };
+      return { ok: false, message: normalizeLegacyTestErrorMessage(insertError, "create") };
     }
     return { ok: true, existing: false };
   }
@@ -5974,11 +6325,7 @@ export default function AdminConsole({
     setPreviewReplacementMsg("");
     setPreviewAnswers({});
     setPreviewMsg("Loading...");
-    const { data, error } = await supabase
-      .from("questions")
-      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-      .eq("test_version", testVersion)
-      .order("order_index", { ascending: true });
+    const { data, error } = await fetchQuestionsForVersionWithFallback(supabase, testVersion);
     if (error) {
       console.error("preview questions error:", error);
       setPreviewQuestions([]);
@@ -6002,11 +6349,7 @@ export default function AdminConsole({
     setPreviewAnswers({});
     setPreviewMsg("Loading...");
 
-    const { data, error } = await supabase
-      .from("questions")
-      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-      .eq("test_version", session.problem_set_id)
-      .order("order_index", { ascending: true });
+    const { data, error } = await fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id);
     if (error) {
       console.error("session preview questions error:", error);
       setPreviewQuestions([]);
@@ -6027,12 +6370,10 @@ export default function AdminConsole({
     );
     if (!sourceSetIds.length) return;
 
-    const { data: sourceData, error: sourceError } = await supabase
-      .from("questions")
-      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-      .in("test_version", sourceSetIds)
-      .order("test_version", { ascending: true })
-      .order("order_index", { ascending: true });
+    const { data: sourceData, error: sourceError } = await fetchQuestionsForVersionsWithFallback(
+      supabase,
+      sourceSetIds
+    );
     if (sourceError) {
       console.error("session preview source questions error:", sourceError);
       setPreviewReplacementMsg(`Replacement load failed: ${sourceError.message}`);
@@ -6412,16 +6753,20 @@ export default function AdminConsole({
     return "file";
   }
 
-  async function uploadSingleAsset(file, testVersion, type) {
+  async function uploadSingleAsset(file, testVersion, type, schoolId = activeSchoolId) {
+    if (!schoolId) {
+      return { error: new Error("School scope is required.") };
+    }
     const assetType = getAssetTypeByExt(file.name);
     const relPath = file.webkitRelativePath || file.name;
-    const filePath = `${type}/${testVersion}/${assetType}/${relPath}`;
+    const filePath = buildStorageObjectPath(type, testVersion, assetType, relPath);
     const { error: uploadError } = await supabase.storage
       .from("test-assets")
       .upload(filePath, file, { upsert: true, contentType: file.type || undefined });
     if (uploadError) return { error: uploadError };
 
     const { error: assetError } = await supabase.from("test_assets").insert({
+      school_id: schoolId,
       test_version: testVersion,
       test_type: type,
       asset_type: assetType,
@@ -6435,6 +6780,10 @@ export default function AdminConsole({
 
   async function uploadAssets() {
     setAssetUploadMsg("");
+    if (!activeSchoolId) {
+      setAssetUploadMsg("School scope is required.");
+      return;
+    }
     const singleFile = assetFile;
     const folderFiles = assetFiles || [];
     let testVersion = assetForm.test_version.trim();
@@ -6477,7 +6826,7 @@ export default function AdminConsole({
 
     setAssetUploadMsg("Uploading...");
 
-    const ensure = await ensureTestRecord(testVersion, title, type, null);
+    const ensure = await ensureTestRecord(testVersion, title, type, null, activeSchoolId);
     if (!ensure.ok) {
       setAssetUploadMsg(ensure.message);
       return;
@@ -6486,7 +6835,7 @@ export default function AdminConsole({
     let ok = 0;
     let ng = 0;
     for (const file of files) {
-      const { error } = await uploadSingleAsset(file, testVersion, type);
+      const { error } = await uploadSingleAsset(file, testVersion, type, activeSchoolId);
       if (error) {
         ng += 1;
         console.error("asset upload error:", error);
@@ -6508,6 +6857,10 @@ export default function AdminConsole({
 
   async function importQuestionsFromCsv() {
     setAssetImportMsg("");
+    if (!activeSchoolId) {
+      setAssetImportMsg("School scope is required.");
+      return;
+    }
     const file = assetCsvFile || assetFile;
     const testVersion = assetForm.test_version.trim();
     const type = "mock";
@@ -6562,10 +6915,9 @@ export default function AdminConsole({
       return;
     }
     const assetMap = {};
-    const baseUrl = `${supabaseUrl}/storage/v1/object/public/test-assets/`;
     for (const row of assetRows ?? []) {
       const name = row.original_name || row.path?.split("/").pop();
-      if (name) assetMap[name] = `${baseUrl}${row.path}`;
+      if (name) assetMap[name] = resolveAdminAssetUrl(row.path);
     }
     const { missing, invalid } = validateAssetRefs(questions, choices, assetMap);
     if (invalid.length) {
@@ -6579,7 +6931,7 @@ export default function AdminConsole({
     applyAssetMap(questions, choices, assetMap);
 
     setAssetImportMsg("Upserting tests...");
-    const ensure = await ensureTestRecord(resolvedVersion, resolvedTitle, type, null);
+    const ensure = await ensureTestRecord(resolvedVersion, resolvedTitle, type, null, activeSchoolId);
     if (!ensure.ok) {
       setAssetImportMsg(ensure.message);
       return;
@@ -6611,7 +6963,12 @@ export default function AdminConsole({
     }
 
     setAssetImportMsg("Upserting questions...");
-    const { error: qError } = await supabase.from("questions").upsert(questions, {
+    const scopedQuestions = questions.map((question) => ({
+      ...question,
+      school_id: activeSchoolId,
+    }));
+
+    const { error: qError } = await supabase.from("questions").upsert(scopedQuestions, {
       onConflict: "test_version,question_id"
     });
     if (qError) {
@@ -6671,6 +7028,10 @@ export default function AdminConsole({
 
   async function uploadDailyAssets() {
     setDailyUploadMsg("");
+    if (!activeSchoolId) {
+      setDailyUploadMsg("School scope is required.");
+      return;
+    }
     const singleFile = dailyFile;
     const folderFiles = dailyFiles || [];
     let testVersion = dailyForm.test_version.trim();
@@ -6716,7 +7077,7 @@ export default function AdminConsole({
     }
 
     setDailyUploadMsg("Uploading...");
-    const ensure = await ensureTestRecord(testVersion, category || testVersion, type, null);
+    const ensure = await ensureTestRecord(testVersion, category || testVersion, type, null, activeSchoolId);
     if (!ensure.ok) {
       setDailyUploadMsg(ensure.message);
       return;
@@ -6725,7 +7086,7 @@ export default function AdminConsole({
     let ok = 0;
     let ng = 0;
     for (const file of files) {
-      const { error } = await uploadSingleAsset(file, testVersion, type);
+      const { error } = await uploadSingleAsset(file, testVersion, type, activeSchoolId);
       if (error) {
         ng += 1;
         console.error("daily asset upload error:", error);
@@ -6747,6 +7108,10 @@ export default function AdminConsole({
 
   async function importDailyQuestionsFromCsv() {
     setDailyImportMsg("");
+    if (!activeSchoolId) {
+      setDailyImportMsg("School scope is required.");
+      return;
+    }
     const file = dailyCsvFile || dailyFile;
     const testVersion = dailyForm.test_version.trim();
     const category = dailyForm.category.trim();
@@ -6801,10 +7166,9 @@ export default function AdminConsole({
       return;
     }
     const assetMap = {};
-    const baseUrl = `${supabaseUrl}/storage/v1/object/public/test-assets/`;
     for (const row of assetRows ?? []) {
       const name = row.original_name || row.path?.split("/").pop();
-      if (name) assetMap[name] = `${baseUrl}${row.path}`;
+      if (name) assetMap[name] = resolveAdminAssetUrl(row.path);
     }
     const { missing, invalid } = validateAssetRefs(questions, choices, assetMap);
     if (invalid.length) {
@@ -6818,7 +7182,7 @@ export default function AdminConsole({
     applyAssetMap(questions, choices, assetMap);
 
     setDailyImportMsg("Upserting tests...");
-    const ensure = await ensureTestRecord(resolvedVersion, category || resolvedVersion, type, null);
+    const ensure = await ensureTestRecord(resolvedVersion, category || resolvedVersion, type, null, activeSchoolId);
     if (!ensure.ok) {
       setDailyImportMsg(ensure.message);
       return;
@@ -6850,7 +7214,12 @@ export default function AdminConsole({
     }
 
     setDailyImportMsg("Upserting questions...");
-    const { error: qError } = await supabase.from("questions").upsert(questions, {
+    const scopedQuestions = questions.map((question) => ({
+      ...question,
+      school_id: activeSchoolId,
+    }));
+
+    const { error: qError } = await supabase.from("questions").upsert(scopedQuestions, {
       onConflict: "test_version,question_id"
     });
     if (qError) {
@@ -7006,10 +7375,7 @@ export default function AdminConsole({
     const versions = Array.from(new Set((list ?? []).map((a) => a.test_version).filter(Boolean)));
     let questionsByVersion = {};
     if (versions.length) {
-      const { data, error } = await supabase
-        .from("questions")
-        .select("test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-        .in("test_version", versions);
+      const { data, error } = await fetchQuestionsForVersionsWithFallback(supabase, versions);
       if (error) {
         console.error("export detail questions fetch error:", error);
       } else {
@@ -12199,11 +12565,31 @@ export default function AdminConsole({
                 </div>
 
                 <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
+                  {isModelPreview && previewSectionTitles.length ? (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {previewSectionTitles.map((sectionTitle) => (
+                        <button
+                          key={`preview-jump-${sectionTitle}`}
+                          className="btn"
+                          type="button"
+                          onClick={() => previewSectionRefs.current[sectionTitle]?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        >
+                          {sectionTitle}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   {isModelPreview ? (
                     previewSectionBreaks.map(({ question, index, sectionTitle, showHeader }) => (
                       <Fragment key={`preview-section-row-${question.id}-${index}`}>
                         {showHeader ? (
-                          <div className="admin-title" style={{ fontSize: 22, marginTop: index === 0 ? 0 : 6 }}>
+                          <div
+                            ref={(node) => {
+                              if (node) previewSectionRefs.current[sectionTitle] = node;
+                            }}
+                            className="admin-title"
+                            style={{ fontSize: 22, marginTop: index === 0 ? 0 : 6 }}
+                          >
                             {sectionTitle}
                           </div>
                         ) : null}
@@ -12218,126 +12604,307 @@ export default function AdminConsole({
             </div>
           ) : null}
 
-          {attemptDetailOpen && selectedAttempt ? (
-            <div
-              className="admin-modal-overlay"
-              onClick={() => {
-                setAttemptDetailOpen(false);
-                setSelectedAttemptObj(null);
-              }}
-            >
+          {attemptDetailOpen && selectedAttempt ? (() => {
+            const totalCorrect = Number(selectedAttempt.correct ?? selectedAttemptRows.filter((row) => row.isCorrect).length);
+            const totalQuestions = Number(selectedAttempt.total ?? selectedAttemptRows.length);
+            const scorePercent = (selectedAttemptScoreRate * 100).toFixed(1);
+            const radarData = selectedAttemptMainSectionSummary.map((row) => ({
+              label: row.section,
+              value: row.total ? row.correct / row.total : 0,
+            }));
+
+            return (
               <div
-                className="admin-modal admin-modal-wide"
-                onClick={(e) => e.stopPropagation()}
+                className="admin-modal-overlay"
+                onClick={() => {
+                  setAttemptDetailOpen(false);
+                  setSelectedAttemptObj(null);
+                }}
               >
-                <div className="admin-modal-header">
-                  <div>
-                    <div className="admin-title">Attempt Detail</div>
-                    <div className="admin-help">
-                      <b>{selectedAttempt.display_name ?? ""}</b> ({selectedAttempt.student_code ?? ""})
-                      <br />
-                      created: {formatDateTime(selectedAttempt.created_at)}
-                      <br />
-                      score: <b>{selectedAttempt.correct}/{selectedAttempt.total}</b> (
-                      {(getScoreRate(selectedAttempt) * 100).toFixed(1)}%)
-                      <br />
-                      tab left count: <b>{getTabLeftCount(selectedAttempt)}</b>
+                <div
+                  className="admin-modal admin-modal-wide"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="admin-modal-header">
+                    <div>
+                      <div className="admin-title">Attempt Detail</div>
+                      <div className="admin-help">
+                        <b>{selectedAttempt.display_name ?? ""}</b> ({selectedAttempt.student_code ?? ""})
+                        <br />
+                        test: <b>{selectedAttempt.test_version ?? ""}</b>
+                        <br />
+                        created: {formatDateTime(selectedAttempt.created_at)}
+                        <br />
+                        tab left count: <b>{getTabLeftCount(selectedAttempt)}</b>
+                      </div>
                     </div>
+                    <button
+                      className="admin-modal-close"
+                      onClick={() => {
+                        setAttemptDetailOpen(false);
+                        setSelectedAttemptObj(null);
+                      }}
+                      aria-label="Close"
+                    >
+                      ×
+                    </button>
                   </div>
-                  <button
-                    className="admin-modal-close"
-                    onClick={() => {
-                      setAttemptDetailOpen(false);
-                      setSelectedAttemptObj(null);
-                    }}
-                    aria-label="Close"
-                  >
-                    ×
-                  </button>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                  <button
-                    className="btn"
-                    type="button"
-                    onClick={() => exportSelectedAttemptCsv(selectedAttempt)}
-                  >
-                    Export CSV
-                  </button>
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      setAttemptDetailOpen(false);
-                      setSelectedAttemptObj(null);
-                    }}
-                  >
-                    Close
-                  </button>
-                </div>
-                {attemptQuestionsLoading ? <div className="admin-help">Loading questions...</div> : null}
-                {attemptQuestionsError ? <div className="admin-msg">{attemptQuestionsError}</div> : null}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => exportSelectedAttemptCsv(selectedAttempt)}
+                    >
+                      Export CSV
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setAttemptDetailOpen(false);
+                        setSelectedAttemptObj(null);
+                      }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  {attemptQuestionsLoading ? <div className="admin-help">Loading questions...</div> : null}
+                  {attemptQuestionsError ? <div className="admin-msg">{attemptQuestionsError}</div> : null}
 
-                <div className="admin-title" style={{ marginTop: 12 }}>Overview</div>
-                <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                  <table className="admin-table" style={{ minWidth: 520 }}>
-                    <thead>
-                      <tr>
-                        <th>Section</th>
-                        <th>Correct</th>
-                        <th>Total</th>
-                        <th>Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedAttemptSectionSummary.map((s) => (
-                        <tr key={`sum-${s.section}`}>
-                          <td>{s.section}</td>
-                          <td>{s.correct}</td>
-                          <td>{s.total}</td>
-                          <td>{(s.rate * 100).toFixed(1)}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                  <div className="admin-top-tabs" style={{ marginBottom: 12 }}>
+                    <button
+                      className={`admin-top-tab ${attemptDetailTab === "overview" ? "active" : ""}`}
+                      type="button"
+                      onClick={() => setAttemptDetailTab("overview")}
+                    >
+                      Overview
+                    </button>
+                    <button
+                      className={`admin-top-tab ${attemptDetailTab === "questions" ? "active" : ""}`}
+                      type="button"
+                      onClick={() => setAttemptDetailTab("questions")}
+                    >
+                      Individual Questions
+                    </button>
+                  </div>
 
-                <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                  <table className="admin-table" style={{ minWidth: 860 }}>
-                    <thead>
-                      <tr>
-                        <th>QID</th>
-                        <th>Section</th>
-                        <th>Prompt</th>
-                        <th>Chosen</th>
-                        <th>Correct</th>
-                        <th>OK</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedAttemptRows.map((r) => (
-                        <tr key={r.qid}>
-                          <td style={{ whiteSpace: "nowrap" }}>{r.qid}</td>
-                          <td style={{ whiteSpace: "nowrap" }}>{r.section}</td>
-                          <td>
-                            <div>{r.prompt}</div>
-                            {r.image ? (
-                              <img
-                                src={r.image}
-                                alt="illustration"
-                                style={{ marginTop: 6, maxWidth: 220, width: "100%", height: "auto", display: "block" }}
-                              />
-                            ) : null}
-                          </td>
-                          <td>{r.chosen}</td>
-                          <td>{r.correct}</td>
-                          <td style={{ textAlign: "center" }}>{r.isCorrect ? "○" : "×"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  {attemptDetailTab === "overview" ? (
+                    <div className="attempt-detail-pane">
+                      <div className="attempt-detail-stat-grid">
+                        <div className="attempt-detail-stat-card">
+                          <div className="attempt-detail-stat-label">Total Score</div>
+                          <div className="attempt-detail-stat-value">{totalCorrect} / {totalQuestions}</div>
+                          <div className="attempt-detail-stat-meta">{scorePercent}%</div>
+                        </div>
+                        <div className="attempt-detail-stat-card">
+                          <div className="attempt-detail-stat-label">Result</div>
+                          <div className="attempt-detail-stat-value">{selectedAttemptIsPass ? "Pass" : "Fail"}</div>
+                          <div className="attempt-detail-stat-meta">Threshold {(selectedAttemptPassRate * 100).toFixed(0)}%</div>
+                        </div>
+                        <div className="attempt-detail-stat-card">
+                          <div className="attempt-detail-stat-label">Created</div>
+                          <div className="attempt-detail-stat-value">{formatDateTime(selectedAttempt.created_at)}</div>
+                          <div className="attempt-detail-stat-meta">Attempt ID {selectedAttempt.id}</div>
+                        </div>
+                      </div>
+
+                      {selectedAttemptIsModel && selectedAttemptMainSectionSummary.length ? (
+                        <>
+                          <div className="session-overview-grid">
+                            <div className="session-radar-wrap">
+                              {buildSectionRadarSvg(radarData)}
+                            </div>
+                            <div className="admin-table-wrap">
+                              <table className="admin-table" style={{ minWidth: 460 }}>
+                                <thead>
+                                  <tr>
+                                    <th>Area</th>
+                                    <th>Unit</th>
+                                    <th>Correct</th>
+                                    <th>Total</th>
+                                    <th>Rate</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {selectedAttemptNestedSectionSummary.map((group) => {
+                                    const rowSpan = 1 + group.subSections.length;
+                                    return (
+                                      <Fragment key={`attempt-group-${group.mainSection}`}>
+                                        <tr className="attempt-overview-total-row">
+                                          <td rowSpan={rowSpan} className="attempt-overview-area-cell">
+                                            <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
+                                          </td>
+                                          <td><b>Total</b></td>
+                                          <td>{group.correct}</td>
+                                          <td>{group.total}</td>
+                                          <td>{(group.rate * 100).toFixed(1)}%</td>
+                                        </tr>
+                                        {group.subSections.map((subSection) => (
+                                          <tr key={`attempt-sub-${group.mainSection}-${subSection.section}`}>
+                                            <td>{subSection.section}</td>
+                                            <td>{subSection.correct}</td>
+                                            <td>{subSection.total}</td>
+                                            <td>{(subSection.rate * 100).toFixed(1)}%</td>
+                                          </tr>
+                                        ))}
+                                      </Fragment>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                          <div className="admin-help">
+                            Main section totals are shown with their sub-section breakdown underneath.
+                          </div>
+                        </>
+                      ) : (
+                        <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                          <table className="admin-table" style={{ minWidth: 520 }}>
+                            <thead>
+                              <tr>
+                                <th>Section</th>
+                                <th>Correct</th>
+                                <th>Total</th>
+                                <th>Rate</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedAttemptSectionSummary.map((section) => (
+                                <tr key={`attempt-overview-${section.section}`}>
+                                  <td>{section.section}</td>
+                                  <td>{section.correct}</td>
+                                  <td>{section.total}</td>
+                                  <td>{(section.rate * 100).toFixed(1)}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="attempt-detail-pane">
+                      <div className="student-detail-tab-row" style={{ marginBottom: 2 }}>
+                        <label className="attempt-detail-toggle">
+                          <input
+                            type="checkbox"
+                            checked={attemptDetailWrongOnly}
+                            onChange={(e) => setAttemptDetailWrongOnly(e.target.checked)}
+                          />
+                          Wrong questions only
+                        </label>
+                        {selectedAttemptQuestionSectionsFiltered.length ? (
+                          <div className="attempt-detail-jumps">
+                            {selectedAttemptQuestionSectionsFiltered.map((section) => (
+                              <button
+                                key={`attempt-jump-${section.title}`}
+                                className="btn"
+                                type="button"
+                                onClick={() =>
+                                  attemptDetailSectionRefs.current[section.title]?.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "start",
+                                  })
+                                }
+                              >
+                                {section.title}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+            
+                      {selectedAttemptQuestionSectionsFiltered.length ? (
+                        <div className="attempt-question-sections">
+                          {selectedAttemptQuestionSectionsFiltered.map((section) => (
+                            <div key={`attempt-question-section-${section.title}`} className="attempt-question-section">
+                              <div
+                                ref={(node) => {
+                                  if (node) attemptDetailSectionRefs.current[section.title] = node;
+                                }}
+                                className="admin-title"
+                                style={{ fontSize: 22, marginTop: 6 }}
+                              >
+                                {section.title}
+                              </div>
+                              <div className="attempt-question-list">
+                                {section.rows.map((row, rowIndex) => (
+                                  <div
+                                    key={`attempt-question-row-${section.title}-${row.qid}-${rowIndex}`}
+                                    className={`attempt-question-card ${row.isCorrect ? "correct" : "wrong"}`}
+                                  >
+                                    <div className="attempt-question-card-head">
+                                      <div className="attempt-question-card-title">
+                                        {row.qid} {row.section ? `(${row.section})` : ""}
+                                      </div>
+                                      <span className={`attempt-question-pill ${row.isCorrect ? "correct" : "wrong"}`}>
+                                        {row.isCorrect ? "Correct" : "Wrong"}
+                                      </span>
+                                    </div>
+                                    <div
+                                      className="attempt-question-card-prompt"
+                                      dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "") }}
+                                    />
+                                    {row.stemAudios?.length || row.stemImages?.length ? (
+                                      <div className="attempt-question-card-media">
+                                        {(row.stemAudios ?? []).map((asset, assetIndex) => (
+                                          <audio
+                                            key={`attempt-audio-${row.qid}-${assetIndex}`}
+                                            controls
+                                            preload="none"
+                                            src={asset}
+                                            className="attempt-question-card-audio"
+                                          />
+                                        ))}
+                                        {(row.stemImages ?? []).map((asset, assetIndex) => (
+                                          <img
+                                            key={`attempt-image-${row.qid}-${assetIndex}`}
+                                            src={asset}
+                                            alt="stem"
+                                            className="attempt-question-card-image"
+                                          />
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                    <div className="attempt-question-card-answer-grid">
+                                      <div className="attempt-question-card-answer">
+                                        <div className="attempt-question-card-answer-label">Chosen</div>
+                                        <div className="attempt-question-card-answer-value">
+                                          {row.chosenImage ? (
+                                            <img src={row.chosenImage} alt="chosen" className="attempt-question-card-choice-image" />
+                                          ) : (
+                                            row.chosen || "—"
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="attempt-question-card-answer">
+                                        <div className="attempt-question-card-answer-label">Correct</div>
+                                        <div className="attempt-question-card-answer-value">
+                                          {row.correctImage ? (
+                                            <img src={row.correctImage} alt="correct" className="attempt-question-card-choice-image" />
+                                          ) : (
+                                            row.correct || "—"
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="admin-help" style={{ marginTop: 6 }}>
+                          {attemptDetailWrongOnly ? "No wrong questions in this attempt." : "No questions available."}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          ) : null}
+            );
+          })() : null}
         </div>
       </div>
     </div>
