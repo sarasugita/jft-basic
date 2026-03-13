@@ -1355,9 +1355,9 @@ function parseDailyCsv(text, defaultTestVersion = "") {
     return -1;
   };
   const idxTest = findIdx(["testid", "test_id", "test id"]);
-  const idxNo = findIdx(["number", "no.", "no"]);
+  const idxNo = findIdx(["qid", "q_id", "q id", "no", "no.", "number"]);
   const idxQuestion = findIdx(["question"]);
-  const idxCorrect = findIdx(["correct_answer", "correct answer", "correct"]);
+  const idxCorrect = findIdx(["correct_option", "correct option", "correct_answer", "correct answer", "correct"]);
   const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1", "wrong1", "wrong option1"]);
   const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2", "wrong2", "wrong option2"]);
   const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3", "wrong3", "wrong option3"]);
@@ -1367,7 +1367,7 @@ function parseDailyCsv(text, defaultTestVersion = "") {
   const idxDescription = findIdx(["description"]);
 
   if (idxQuestion === -1 || idxCorrect === -1) {
-    return { questions: [], choices: [], errors: ["CSV must include Question and Correct Answer."] };
+    return { questions: [], choices: [], errors: ["CSV must include question and correct_option."] };
   }
 
   const questions = [];
@@ -2715,7 +2715,11 @@ export default function AdminConsole({
           if (signOutError) console.error("admin force signout error:", signOutError);
         }
         syncAdminAuthCookie(null);
-        if (mounted) setSession(null);
+        if (mounted) {
+          setSession(null);
+          setProfile(null);
+          setLoginMsg("");
+        }
         return;
       }
 
@@ -2736,29 +2740,41 @@ export default function AdminConsole({
   }, [forceLoginOnEntry, supabase]);
 
   useEffect(() => {
+    let cancelled = false;
+
     if (supabaseConfigError) {
       setSession(null);
       setProfile(null);
       setLoginMsg(supabaseConfigError);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
     if (!session) {
       setProfile(null);
+      setLoginMsg("");
       setAttempts([]);
       setSelectedId(null);
       setSelectedAttemptObj(null);
       setSelectedStudentId("");
       setStudentAttempts([]);
       setStudentAttemptsMsg("");
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
-    if (!supabase) return;
+    if (!supabase) {
+      return () => {
+        cancelled = true;
+      };
+    }
     supabase
       .from("profiles")
       .select("id, role, display_name, school_id, account_status, force_password_change")
       .eq("id", session.user.id)
       .maybeSingle()
       .then(({ data, error }) => {
+        if (cancelled) return;
         if (error) {
           console.error("fetch profile error:", error);
           setProfile(null);
@@ -2773,6 +2789,10 @@ export default function AdminConsole({
         setLoginMsg("");
         setProfile(data);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [session, supabase, supabaseConfigError]);
 
   useEffect(() => {
@@ -10773,7 +10793,7 @@ export default function AdminConsole({
                   Bucket: <b>test-assets</b> / CSV, PNG
                 </div>
                 <div className="admin-help" style={{ marginTop: 4 }}>
-                  Daily CSV headers used: <code>number</code>, <code>question</code>, <code>correct_answer</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>illustration</code>, <code>description</code>. Extra headers are ignored.
+                  Daily CSV headers used: <code>qid</code>, <code>question</code>, <code>correct_option</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>description</code>, <code>illustration</code>. Extra headers are ignored.
                 </div>
               </div>
             </div>
@@ -11724,30 +11744,27 @@ export default function AdminConsole({
 
           {previewOpen ? (
             <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.35)",
-                zIndex: 1000,
-                padding: 16,
-                overflow: "auto",
-              }}
+              className="admin-modal-overlay"
+              onClick={closePreview}
             >
-              <div className="admin-panel" style={{ padding: 12, maxWidth: 1100, margin: "0 auto" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div className="admin-modal admin-modal-wide" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
                   <div>
                     <div className="admin-title">Preview: {previewTest}</div>
                     <div className="admin-help">正解の選択肢を色で表示します。</div>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <button className="admin-modal-close" onClick={closePreview} aria-label="Close">
+                    ×
+                  </button>
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                     <button className="btn" onClick={closePreview}>Exit Preview</button>
                     {!previewSession ? (
                       <button className="btn" onClick={() => deleteTest(previewTest)}>Delete Test</button>
                     ) : null}
                   </div>
-                </div>
-
-                <div style={{ marginTop: 10 }}>
                   <div className="admin-help">
                     Total: <b>{previewQuestions.length}</b>
                   </div>
@@ -11787,25 +11804,17 @@ export default function AdminConsole({
 
           {attemptDetailOpen && selectedAttempt ? (
             <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.35)",
-                zIndex: 1000,
-                padding: 16,
-                overflow: "auto",
-              }}
+              className="admin-modal-overlay"
               onClick={() => {
                 setAttemptDetailOpen(false);
                 setSelectedAttemptObj(null);
               }}
             >
               <div
-                className="admin-panel"
-                style={{ padding: 12, maxWidth: 1100, margin: "0 auto", background: "#fff" }}
+                className="admin-modal admin-modal-wide"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div className="admin-modal-header">
                   <div>
                     <div className="admin-title">Attempt Detail</div>
                     <div className="admin-help">
@@ -11819,24 +11828,34 @@ export default function AdminConsole({
                       tab left count: <b>{getTabLeftCount(selectedAttempt)}</b>
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      className="btn"
-                      type="button"
-                      onClick={() => exportSelectedAttemptCsv(selectedAttempt)}
-                    >
-                      Export CSV
-                    </button>
-                    <button
-                      className="btn"
-                      onClick={() => {
-                        setAttemptDetailOpen(false);
-                        setSelectedAttemptObj(null);
-                      }}
-                    >
-                      Close
-                    </button>
-                  </div>
+                  <button
+                    className="admin-modal-close"
+                    onClick={() => {
+                      setAttemptDetailOpen(false);
+                      setSelectedAttemptObj(null);
+                    }}
+                    aria-label="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => exportSelectedAttemptCsv(selectedAttempt)}
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setAttemptDetailOpen(false);
+                      setSelectedAttemptObj(null);
+                    }}
+                  >
+                    Close
+                  </button>
                 </div>
                 {attemptQuestionsLoading ? <div className="admin-help">Loading questions...</div> : null}
                 {attemptQuestionsError ? <div className="admin-msg">{attemptQuestionsError}</div> : null}

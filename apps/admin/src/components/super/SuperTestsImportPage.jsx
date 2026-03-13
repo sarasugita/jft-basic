@@ -105,7 +105,7 @@ function CsvGuideline({ testType }) {
     return (
       <div className="admin-help" style={{ marginTop: 12 }}>
         Daily test CSV headers used:
-        <code> number </code>, <code>question</code>, <code>correct_answer</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>illustration</code>, <code>description</code>.
+        <code> qid </code>, <code>question</code>, <code>correct_option</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>description</code>, <code>illustration</code>.
         Extra headers are ignored. If <code>description</code> is present, it will appear under the question in the daily preview.
       </div>
     );

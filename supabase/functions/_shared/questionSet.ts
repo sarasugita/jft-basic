@@ -333,9 +333,9 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Vali
     }
     return -1;
   };
-  const idxNo = findIdx(["number", "no", "no."]);
+  const idxNo = findIdx(["qid", "q_id", "q id", "no", "no.", "number"]);
   const idxQuestion = findIdx(["question"]);
-  const idxCorrect = findIdx(["correct_answer", "correct answer", "correct"]);
+  const idxCorrect = findIdx(["correct_option", "correct option", "correct_answer", "correct answer", "correct"]);
   const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1", "wrong1", "wrong option1"]);
   const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2", "wrong2", "wrong option2"]);
   const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3", "wrong3", "wrong option3"]);
@@ -349,7 +349,7 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Vali
   let assetReferenceCount = 0;
 
   if (idxQuestion === -1 || idxCorrect === -1) {
-    errors.push("Daily CSV must include question and correct_answer columns.");
+    errors.push("Daily CSV must include question and correct_option columns.");
   }
 
   for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
@@ -368,7 +368,7 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Vali
       continue;
     }
     if (!correct) {
-      errors.push(`Row ${rowIndex + 1}: correct_answer is required.`);
+      errors.push(`Row ${rowIndex + 1}: correct_option is required.`);
       continue;
     }
 
