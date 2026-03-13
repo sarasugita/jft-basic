@@ -392,6 +392,14 @@ function getProblemSetTitle(problemSetId, testsList) {
   return item?.title || problemSetId || "";
 }
 
+function getProblemSetDisplayId(problemSetId, testsList) {
+  const item = (testsList ?? []).find((t) => t.version === problemSetId);
+  if (Array.isArray(item?.source_set_ids) && item.source_set_ids.length) {
+    return item.source_set_ids.join(", ");
+  }
+  return problemSetId || "";
+}
+
 function isRetakeSessionTitle(title) {
   return String(title ?? "").trim().startsWith("[Retake]");
 }
@@ -996,6 +1004,19 @@ function formatTwelveHourTimeDisplay(value) {
   const parts = getTwelveHourTimeParts(value);
   if (!parts.hour) return "--:-- --";
   return `${parts.hour}:${parts.minute} ${parts.period}`;
+}
+
+function shuffleList(items) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
+function isGeneratedDailySessionVersion(version) {
+  return String(version ?? "").startsWith("daily_session_");
 }
 
 const TWELVE_HOUR_TIME_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
@@ -1858,6 +1879,10 @@ export default function AdminConsole({
 
   const modelTests = useMemo(() => tests.filter((t) => t.type === "mock"), [tests]);
   const dailyTests = useMemo(() => tests.filter((t) => t.type === "daily"), [tests]);
+  const dailyQuestionSets = useMemo(
+    () => dailyTests.filter((t) => !isGeneratedDailySessionVersion(t.version)),
+    [dailyTests]
+  );
   const modelSessions = useMemo(
     () => testSessions.filter((s) => modelTests.some((t) => t.version === s.problem_set_id)),
     [testSessions, modelTests]
@@ -1902,7 +1927,7 @@ export default function AdminConsole({
     return categories;
   };
 
-  const dailyCategories = useMemo(() => buildCategories(dailyTests), [dailyTests]);
+  const dailyCategories = useMemo(() => buildCategories(dailyQuestionSets), [dailyQuestionSets]);
   const modelCategories = useMemo(() => buildCategories(modelTests, DEFAULT_MODEL_CATEGORY), [modelTests]);
 
   const testMetaByVersion = useMemo(() => {
@@ -2088,9 +2113,9 @@ export default function AdminConsole({
   }, [modelTests, modelUploadCategory]);
 
   const filteredDailyUploadTests = useMemo(() => {
-    if (!dailyUploadCategory) return dailyTests;
-    return dailyTests.filter((t) => String(t.title ?? "").trim() === dailyUploadCategory);
-  }, [dailyTests, dailyUploadCategory]);
+    if (!dailyUploadCategory) return dailyQuestionSets;
+    return dailyQuestionSets.filter((t) => String(t.title ?? "").trim() === dailyUploadCategory);
+  }, [dailyQuestionSets, dailyUploadCategory]);
 
   const selectedDailyCategory = useMemo(() => {
     if (!dailyCategories.length) return null;
@@ -4394,6 +4419,44 @@ export default function AdminConsole({
     return list.map((t) => (t.type === "mock" ? { ...t, title: DEFAULT_MODEL_CATEGORY } : t));
   }
 
+  async function attachGeneratedDailySourceSetIds(list) {
+    const generatedVersions = (list ?? [])
+      .filter((test) => test.type === "daily" && isGeneratedDailySessionVersion(test.version))
+      .map((test) => test.version)
+      .filter(Boolean);
+    if (!generatedVersions.length) return list;
+
+    const { data, error } = await supabase
+      .from("questions")
+      .select("test_version, order_index, data")
+      .in("test_version", generatedVersions)
+      .order("test_version", { ascending: true })
+      .order("order_index", { ascending: true });
+
+    if (error) {
+      console.error("generated daily source lookup error:", error);
+      return list;
+    }
+
+    const sourceMap = {};
+    (data ?? []).forEach((row) => {
+      const sourceVersion = String(row.data?.sourceVersion ?? "").trim();
+      if (!sourceVersion) return;
+      if (!Array.isArray(sourceMap[row.test_version])) {
+        sourceMap[row.test_version] = [];
+      }
+      if (!sourceMap[row.test_version].includes(sourceVersion)) {
+        sourceMap[row.test_version].push(sourceVersion);
+      }
+    });
+
+    return (list ?? []).map((test) => (
+      sourceMap[test.version]?.length
+        ? { ...test, source_set_ids: sourceMap[test.version] }
+        : test
+    ));
+  }
+
   async function fetchTests() {
     setTestsMsg("Loading...");
     const { data, error } = await supabase
@@ -4424,9 +4487,14 @@ export default function AdminConsole({
           question_count: counts[t.version] ?? 0
         }));
         const seeded = await seedModelCategory(withCounts);
-        setTests(seeded);
-        if (seeded.length && !testSessionForm.problem_set_id) {
-          setTestSessionForm((s) => ({ ...s, problem_set_id: seeded[0].version }));
+        const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+        setTests(hydrated);
+        if (hydrated.length && !testSessionForm.problem_set_id) {
+          setTestSessionForm((s) => ({ ...s, problem_set_id: hydrated[0].version }));
+        }
+        const firstDaily = hydrated.find((t) => t.type === "daily" && !isGeneratedDailySessionVersion(t.version));
+        if (firstDaily && !dailySessionForm.problem_set_id) {
+          setDailySessionForm((s) => ({ ...s, problem_set_id: firstDaily.version }));
         }
         setTestsMsg(list.length ? "" : "No tests.");
         return;
@@ -4445,9 +4513,10 @@ export default function AdminConsole({
         question_count: counts[t.version] ?? 0
       }));
       const seeded = await seedModelCategory(withCounts);
-      setTests(seeded);
-      const firstModel = seeded.find((t) => t.type === "mock");
-      const firstDaily = seeded.find((t) => t.type === "daily");
+      const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+      setTests(hydrated);
+      const firstModel = hydrated.find((t) => t.type === "mock");
+      const firstDaily = hydrated.find((t) => t.type === "daily" && !isGeneratedDailySessionVersion(t.version));
       if (firstModel && !testSessionForm.problem_set_id) {
         setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
       }
@@ -4462,9 +4531,10 @@ export default function AdminConsole({
       question_count: t.questions?.[0]?.count ?? 0
     }));
     const seeded = await seedModelCategory(withCounts);
-    setTests(seeded);
-    const firstModel = seeded.find((t) => t.type === "mock");
-    const firstDaily = seeded.find((t) => t.type === "daily");
+    const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+    setTests(hydrated);
+    const firstModel = hydrated.find((t) => t.type === "mock");
+    const firstDaily = hydrated.find((t) => t.type === "daily" && !isGeneratedDailySessionVersion(t.version));
     if (firstModel && !testSessionForm.problem_set_id) {
       setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
     }
@@ -4713,6 +4783,7 @@ export default function AdminConsole({
         ...current,
         selection_mode: "single",
         problem_set_ids: current.problem_set_id ? [current.problem_set_id] : [],
+        title: "",
         session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
         start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
         close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
@@ -4827,7 +4898,7 @@ export default function AdminConsole({
       throw new Error(`Only ${orderedQuestions.length} questions are available for the selected SetID.`);
     }
 
-    const selectedQuestions = orderedQuestions.slice(0, requestedQuestionCount);
+    const selectedQuestions = shuffleList(orderedQuestions).slice(0, requestedQuestionCount);
     const sourceQuestionIds = selectedQuestions.map((row) => row.id).filter(Boolean);
     const { data: sourceChoices, error: sourceChoicesError } = sourceQuestionIds.length
       ? await supabase
@@ -5009,14 +5080,7 @@ export default function AdminConsole({
     const endsAtInput = dailyConductMode === "retake"
       ? dailySessionForm.ends_at
       : combineBangladeshDateTime(sessionDate, closeTime);
-    const title = dailyConductMode === "retake"
-      ? dailySessionForm.title.trim()
-      : buildGeneratedDailySessionTitle({
-          category: dailyConductCategory,
-          setIds: selectedSetIds,
-          sessionDate,
-          startTime,
-        });
+    const title = dailySessionForm.title.trim();
     const endsAt = endsAtInput;
     const passRate = Number(dailySessionForm.pass_rate);
     if (!selectedSetIds.length) {
@@ -5112,6 +5176,7 @@ export default function AdminConsole({
     if (linkError) {
       console.error("daily exam_links insert error:", linkError);
       setDailySessionsMsg(`Session created but link failed: ${linkError.message}`);
+      fetchTests();
       fetchTestSessions();
       return;
     }
@@ -5126,6 +5191,10 @@ export default function AdminConsole({
     }));
     setDailyConductMode("normal");
     setDailyRetakeSourceId("");
+    setDailyConductOpen(false);
+    setDailySetDropdownOpen(false);
+    setActiveDailyTimePicker("");
+    fetchTests();
     fetchTestSessions();
     fetchExamLinks();
   }
@@ -8473,7 +8542,7 @@ export default function AdminConsole({
                             t.title ?? ""
                           )}
                         </td>
-                        <td>{t.problem_set_id ?? ""}</td>
+                        <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
                         <td>
                           {editingSessionId === t.id ? (
                             <select
@@ -9458,6 +9527,14 @@ export default function AdminConsole({
                         )}
                       </div>
                       <div className="daily-session-create-field">
+                        <label>Test Title</label>
+                        <input
+                          value={dailySessionForm.title}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                          placeholder="Test Title"
+                        />
+                      </div>
+                      <div className="daily-session-create-field">
                         <label>Number of Questions</label>
                         <div className="daily-session-create-choice-row daily-session-create-count-row">
                           <label className="daily-session-create-choice">
@@ -9467,7 +9544,7 @@ export default function AdminConsole({
                               checked={dailySessionForm.question_count_mode === "all"}
                               onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "all", question_count: "" }))}
                             />
-                            All Questions
+                            <span className="daily-session-create-choice-copy">All Questions</span>
                           </label>
                           <div className="daily-session-create-count-option">
                             <label className="daily-session-create-choice">
@@ -9477,10 +9554,10 @@ export default function AdminConsole({
                                 checked={dailySessionForm.question_count_mode === "specify"}
                                 onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "specify" }))}
                               />
-                              Specify
+                              <span className="daily-session-create-choice-copy">Specify</span>
                             </label>
                             <input
-                              className="daily-session-create-count-input"
+                              className={`daily-session-create-count-input ${dailySessionForm.question_count_mode === "specify" ? "is-active" : ""}`}
                               value={dailySessionForm.question_count}
                               disabled={dailySessionForm.question_count_mode !== "specify"}
                               onChange={(e) => setDailySessionForm((s) => ({ ...s, question_count: e.target.value }))}
@@ -9687,6 +9764,7 @@ export default function AdminConsole({
                           Create Session
                         </button>
                       </div>
+                      {dailySessionsMsg ? <div className="admin-msg">{dailySessionsMsg}</div> : null}
                     </div>
                   )}
                   {dailyConductMode === "retake" ? (
