@@ -1925,6 +1925,61 @@ export default function AdminConsole({
     () => dailySessions.filter((session) => !isRetakeSessionTitle(session.title) && isPastSession(session)),
     [dailySessions]
   );
+  const isModelPreview = useMemo(() => {
+    if (previewSession?.problem_set_id) {
+      return modelTests.some((test) => test.version === previewSession.problem_set_id);
+    }
+    if (previewTest) {
+      return modelTests.some((test) => test.version === previewTest);
+    }
+    return false;
+  }, [modelTests, previewSession, previewTest]);
+  const previewReplacementOrderMap = useMemo(() => {
+    const map = new Map();
+    previewReplacementPool.forEach((question, index) => {
+      const key = buildSourceQuestionKey(
+        question.sourceVersion || question.testVersion,
+        question.sourceQuestionId || question.questionId
+      );
+      map.set(key, Number.isFinite(question.orderIndex) ? question.orderIndex : index);
+    });
+    return map;
+  }, [previewReplacementPool]);
+  const previewDisplayQuestions = useMemo(() => {
+    const list = [...previewQuestions];
+    const shouldUseSingleSetSourceOrder = Boolean(
+      previewSession
+      && isGeneratedDailySessionVersion(previewSession.problem_set_id)
+      && new Set(list.map((question) => question.sourceVersion).filter(Boolean)).size === 1
+      && previewReplacementOrderMap.size
+    );
+    if (!shouldUseSingleSetSourceOrder) return list;
+    return list.sort((left, right) => {
+      const leftKey = buildSourceQuestionKey(left.sourceVersion, left.sourceQuestionId);
+      const rightKey = buildSourceQuestionKey(right.sourceVersion, right.sourceQuestionId);
+      const leftOrder = previewReplacementOrderMap.get(leftKey);
+      const rightOrder = previewReplacementOrderMap.get(rightKey);
+      if (leftOrder != null && rightOrder != null && leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+      return (left.orderIndex ?? 0) - (right.orderIndex ?? 0);
+    });
+  }, [previewQuestions, previewReplacementOrderMap, previewSession]);
+  const previewSectionBreaks = useMemo(() => {
+    if (!isModelPreview) return [];
+    let previousSectionTitle = "";
+    return previewDisplayQuestions.map((question, index) => {
+      const sectionTitle = getSectionTitle(question.sectionKey) || "Unknown";
+      const showHeader = index === 0 || sectionTitle !== previousSectionTitle;
+      previousSectionTitle = sectionTitle;
+      return {
+        question,
+        index,
+        sectionTitle,
+        showHeader,
+      };
+    });
+  }, [isModelPreview, previewDisplayQuestions]);
 
   const testPassRateByVersion = useMemo(() => {
     const map = {};
@@ -5580,6 +5635,69 @@ export default function AdminConsole({
     setPreviewReplacementMsg("");
   }
 
+  function renderPreviewQuestionCard(question, index) {
+    const activeSourceKeys = new Set(
+      previewQuestions
+        .map((item) => buildSourceQuestionKey(item.sourceVersion, item.sourceQuestionId))
+        .filter((key) => key !== "::")
+    );
+    const currentSourceKey = buildSourceQuestionKey(question.sourceVersion, question.sourceQuestionId);
+    activeSourceKeys.delete(currentSourceKey);
+    const replacementOptions = previewReplacementPool.filter((candidate) => {
+      const candidateKey = buildSourceQuestionKey(
+        candidate.sourceVersion || candidate.testVersion,
+        candidate.sourceQuestionId || candidate.questionId
+      );
+      return candidateKey !== currentSourceKey && !activeSourceKeys.has(candidateKey);
+    });
+    const canReplace = Boolean(
+      previewSession
+      && isGeneratedDailySessionVersion(previewSession.problem_set_id)
+      && replacementOptions.length
+      && question.dbId
+    );
+
+    return (
+      <QuestionPreviewCard key={`${question.id}-${index}`} question={question} index={index}>
+        {canReplace ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <select
+              value={previewReplacementDrafts[question.dbId] ?? ""}
+              onChange={(e) =>
+                setPreviewReplacementDrafts((current) => ({
+                  ...current,
+                  [question.dbId]: e.target.value,
+                }))
+              }
+              style={{ minWidth: 260 }}
+            >
+              <option value="">Replace with...</option>
+              {replacementOptions.map((candidate) => {
+                const candidateKey = buildSourceQuestionKey(
+                  candidate.sourceVersion || candidate.testVersion,
+                  candidate.sourceQuestionId || candidate.questionId
+                );
+                return (
+                  <option key={`${question.dbId}-${candidateKey}`} value={candidateKey}>
+                    {(candidate.sourceVersion || candidate.testVersion)} / {(candidate.sourceQuestionId || candidate.questionId)}
+                  </option>
+                );
+              })}
+            </select>
+            <button
+              className="btn"
+              type="button"
+              disabled={previewReplacementSavingId === question.dbId}
+              onClick={() => replacePreviewQuestion(question.dbId)}
+            >
+              {previewReplacementSavingId === question.dbId ? "Replacing..." : "Replace Question"}
+            </button>
+          </div>
+        ) : null}
+      </QuestionPreviewCard>
+    );
+  }
+
   async function replacePreviewQuestion(targetDbId) {
     if (!previewSession?.problem_set_id || !targetDbId) return;
     const nextKey = previewReplacementDrafts[targetDbId];
@@ -8776,17 +8894,16 @@ export default function AdminConsole({
                       <th>Created</th>
                       <th>Test Title</th>
                       <th>SetID</th>
-                      <th>Preview</th>
                       <th>Show Answers</th>
                       <th>Attempts</th>
                       <th>Start</th>
                       <th>End</th>
                       <th>Time (min)</th>
                       <th>Pass Rate</th>
-                      <th>Action</th>
-                      <th>Preview</th>
-                      <th>Edit</th>
-                      <th>Delete</th>
+                      <th style={{ textAlign: "center" }}>Action</th>
+                      <th style={{ textAlign: "center" }}>Preview</th>
+                      <th style={{ textAlign: "center" }}>Edit</th>
+                      <th style={{ textAlign: "center" }}>Delete</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -8878,7 +8995,7 @@ export default function AdminConsole({
                               : ""
                           )}
                         </td>
-                        <td>
+                        <td style={{ textAlign: "center" }}>
                           {linkBySession[t.id]?.id ? (
                             <button
                               className="btn"
@@ -8893,7 +9010,18 @@ export default function AdminConsole({
                             ""
                           )}
                         </td>
-                        <td>
+                        <td style={{ textAlign: "center" }}>
+                          <button
+                            className="btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSessionPreview(t);
+                            }}
+                          >
+                            Preview
+                          </button>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
                           {editingSessionId === t.id ? (
                             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                               <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); saveSessionEdits(); }}>
@@ -8909,7 +9037,7 @@ export default function AdminConsole({
                             </button>
                           )}
                         </td>
-                        <td>
+                        <td style={{ textAlign: "center" }}>
                           <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
                             Delete
                           </button>
@@ -11638,67 +11766,20 @@ export default function AdminConsole({
                 </div>
 
                 <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
-                  {previewQuestions.map((question, index) => {
-                    const activeSourceKeys = new Set(
-                      previewQuestions
-                        .map((item) => buildSourceQuestionKey(item.sourceVersion, item.sourceQuestionId))
-                        .filter((key) => key !== "::")
-                    );
-                    const currentSourceKey = buildSourceQuestionKey(question.sourceVersion, question.sourceQuestionId);
-                    activeSourceKeys.delete(currentSourceKey);
-                    const replacementOptions = previewReplacementPool.filter((candidate) => {
-                      const candidateKey = buildSourceQuestionKey(
-                        candidate.sourceVersion || candidate.testVersion,
-                        candidate.sourceQuestionId || candidate.questionId
-                      );
-                      return candidateKey !== currentSourceKey && !activeSourceKeys.has(candidateKey);
-                    });
-                    const canReplace = Boolean(
-                      previewSession
-                      && isGeneratedDailySessionVersion(previewSession.problem_set_id)
-                      && replacementOptions.length
-                      && question.dbId
-                    );
-                    return (
-                      <QuestionPreviewCard key={`${question.id}-${index}`} question={question} index={index}>
-                        {canReplace ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                            <select
-                              value={previewReplacementDrafts[question.dbId] ?? ""}
-                              onChange={(e) =>
-                                setPreviewReplacementDrafts((current) => ({
-                                  ...current,
-                                  [question.dbId]: e.target.value,
-                                }))
-                              }
-                              style={{ minWidth: 260 }}
-                            >
-                              <option value="">Replace with...</option>
-                              {replacementOptions.map((candidate) => {
-                                const candidateKey = buildSourceQuestionKey(
-                                  candidate.sourceVersion || candidate.testVersion,
-                                  candidate.sourceQuestionId || candidate.questionId
-                                );
-                                return (
-                                  <option key={`${question.dbId}-${candidateKey}`} value={candidateKey}>
-                                    {(candidate.sourceVersion || candidate.testVersion)} / {(candidate.sourceQuestionId || candidate.questionId)}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                            <button
-                              className="btn"
-                              type="button"
-                              disabled={previewReplacementSavingId === question.dbId}
-                              onClick={() => replacePreviewQuestion(question.dbId)}
-                            >
-                              {previewReplacementSavingId === question.dbId ? "Replacing..." : "Replace Question"}
-                            </button>
+                  {isModelPreview ? (
+                    previewSectionBreaks.map(({ question, index, sectionTitle, showHeader }) => (
+                      <Fragment key={`preview-section-row-${question.id}-${index}`}>
+                        {showHeader ? (
+                          <div className="admin-title" style={{ fontSize: 22, marginTop: index === 0 ? 0 : 6 }}>
+                            {sectionTitle}
                           </div>
                         ) : null}
-                      </QuestionPreviewCard>
-                    );
-                  })}
+                        {renderPreviewQuestionCard(question, index)}
+                      </Fragment>
+                    ))
+                  ) : (
+                    previewDisplayQuestions.map((question, index) => renderPreviewQuestionCard(question, index))
+                  )}
                 </div>
               </div>
             </div>

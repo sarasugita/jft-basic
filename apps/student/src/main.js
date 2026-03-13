@@ -330,6 +330,42 @@ function mapDbQuestion(row, version) {
   return normalizeQuestionAssets(base, version);
 }
 
+function hashString(value) {
+  let hash = 2166136261;
+  const text = String(value ?? "");
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function orderQuestionsForSession(list, version) {
+  const session = getActiveTestSession();
+  if (!session?.id || getSessionTestType(session) !== "mock") return list;
+
+  const sectionOrder = [];
+  const grouped = new Map();
+  list.forEach((question) => {
+    const sectionKey = String(question.sectionKey ?? "");
+    if (!grouped.has(sectionKey)) {
+      grouped.set(sectionKey, []);
+      sectionOrder.push(sectionKey);
+    }
+    grouped.get(sectionKey).push(question);
+  });
+
+  return sectionOrder.flatMap((sectionKey) => {
+    const sectionQuestions = [...(grouped.get(sectionKey) ?? [])];
+    return sectionQuestions.sort((left, right) => {
+      const leftRank = hashString(`${session.id}:${version}:${sectionKey}:${left.id}:${left.orderIndex ?? 0}`);
+      const rightRank = hashString(`${session.id}:${version}:${sectionKey}:${right.id}:${right.orderIndex ?? 0}`);
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return (left.orderIndex ?? 0) - (right.orderIndex ?? 0);
+    });
+  });
+}
+
 async function fetchQuestionsForVersion(version, updatedAt = "") {
   if (!version) return;
   if (questionsState.loading && questionsState.version === version) return;
@@ -353,7 +389,8 @@ async function fetchQuestionsForVersion(version, updatedAt = "") {
       questionsState.updatedAt = previousUpdatedAt;
       return;
     }
-    questionsState.list = (data ?? []).map((row) => mapDbQuestion(row, version));
+    const mappedQuestions = (data ?? []).map((row) => mapDbQuestion(row, version));
+    questionsState.list = orderQuestionsForSession(mappedQuestions, version);
     questionsState.loaded = true;
     questionsState.updatedAt = updatedAt || "";
   } catch (error) {
