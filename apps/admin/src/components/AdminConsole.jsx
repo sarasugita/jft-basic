@@ -387,6 +387,10 @@ function getSectionTitle(sectionKey) {
   return sections.find((s) => s.key === sectionKey)?.title ?? sectionKey ?? "";
 }
 
+function getQuestionSectionLabel(question) {
+  return String(question?.sectionLabel ?? "").trim() || getSectionTitle(question?.sectionKey);
+}
+
 function getProblemSetTitle(problemSetId, testsList) {
   const item = (testsList ?? []).find((t) => t.version === problemSetId);
   return item?.title || problemSetId || "";
@@ -488,6 +492,100 @@ function splitStemLines(text) {
     .filter(Boolean);
 }
 
+function splitAssetValues(value) {
+  return String(value ?? "")
+    .split(/\r?\n|\|/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function joinAssetValues(...values) {
+  const unique = [];
+  for (const value of values.flatMap((item) => splitAssetValues(item))) {
+    if (!unique.includes(value)) unique.push(value);
+  }
+  return unique.join("|");
+}
+
+function parseModelQuestionId(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  const match = value.match(/^([A-Za-z]+)-(\d+)(?:-(\d+))?$/);
+  if (!match) {
+    return {
+      questionId: value,
+      groupQid: value,
+      subId: null,
+      sectionPrefix: "",
+      mainNumber: null,
+      subNumber: null,
+    };
+  }
+  return {
+    questionId: value,
+    groupQid: match[3] ? `${match[1]}-${match[2]}` : value,
+    subId: match[3] ?? null,
+    sectionPrefix: match[1].toUpperCase(),
+    mainNumber: Number(match[2]),
+    subNumber: match[3] ? Number(match[3]) : null,
+  };
+}
+
+const MODEL_SUB_SECTION_TO_SECTION_KEY = {
+  "word meaning": "SV",
+  "word usage": "SV",
+  "kanji reading": "SV",
+  "kanji meaning and usage": "SV",
+  grammar: "SV",
+  expression: "CE",
+  "comprehending content (conversation)": "CE",
+  "comprehending content (communicating at shops and public places)": "CE",
+  "comprehending content (listening to announcements and instructions)": "LC",
+  "comprehending content": "LC",
+  "information search": "RC",
+};
+
+function resolveModelSectionKey(qid, subSection) {
+  const parsed = parseModelQuestionId(qid);
+  if (sections.some((section) => section.key === parsed.sectionPrefix)) {
+    return parsed.sectionPrefix;
+  }
+  return MODEL_SUB_SECTION_TO_SECTION_KEY[String(subSection ?? "").trim().toLowerCase()] || "SV";
+}
+
+function computeModelOrderIndex(qid, fallbackIndex) {
+  const parsed = parseModelQuestionId(qid);
+  if (Number.isFinite(parsed.mainNumber)) {
+    return parsed.mainNumber * 100 + (Number.isFinite(parsed.subNumber) ? parsed.subNumber : 0);
+  }
+  return fallbackIndex;
+}
+
+function inferModelQuestionType({ sectionKey, stemKind, stemText, stemImage, stemAudio, subQuestion, optionType }) {
+  const normalizedStemKind = String(stemKind ?? "").trim().toLowerCase();
+  const normalizedOptionType = String(optionType ?? "").trim().toLowerCase();
+  const hasImageStem = Boolean(stemImage);
+  const hasAudioStem = Boolean(stemAudio);
+  const hasSubQuestion = Boolean(subQuestion);
+  const hasImageChoices = normalizedOptionType === "image";
+
+  if (hasAudioStem || normalizedStemKind === "audio") {
+    if (hasImageChoices) return "mcq_listening_image_choices";
+    if (hasSubQuestion) return "mcq_listening_two_part";
+    return "mcq_audio";
+  }
+  if (normalizedStemKind === "dialog") {
+    return hasImageStem ? "mcq_dialog_with_image" : "mcq_dialog";
+  }
+  if (hasImageStem || normalizedStemKind === "image" || normalizedStemKind === "passage_image" || normalizedStemKind === "table_image") {
+    return hasSubQuestion ? "mcq_grouped_image" : "mcq_image";
+  }
+  if (sectionKey === "SV" && /【.+?】/.test(String(stemText ?? ""))) {
+    return "mcq_kanji_reading";
+  }
+  if (hasSubQuestion) return "mcq_grouped_text";
+  return "mcq_text";
+}
+
 function isImageAsset(value) {
   return /\.(png|jpe?g|webp)$/i.test(String(value ?? "").trim());
 }
@@ -507,7 +605,8 @@ function getQuestionIllustration(question) {
     question.stem_image ||
     question.stem_image_url ||
     null;
-  if (stemAsset && isImageAsset(stemAsset)) return stemAsset;
+  const imageAsset = splitAssetValues(stemAsset).find((value) => isImageAsset(value));
+  if (imageAsset) return imageAsset;
   return null;
 }
 
@@ -519,6 +618,7 @@ function mapDbQuestion(row) {
     questionId: row.question_id,
     testVersion: row.test_version ?? "",
     sectionKey: row.section_key,
+    sectionLabel: data.sectionLabel ?? data.section_label ?? null,
     type: row.type,
     promptEn: row.prompt_en,
     promptBn: row.prompt_bn,
@@ -543,7 +643,7 @@ function buildAttemptDetailRows(answersJson) {
         const correctIdx = part.answerIndex;
         rows.push({
           qid: `${q.id}-${i + 1}`,
-          section: getSectionTitle(q.sectionKey),
+          section: getQuestionSectionLabel(q),
           prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
           image: getQuestionIllustration(q),
           chosen: getPartChoiceText(part, chosenIdx),
@@ -558,7 +658,7 @@ function buildAttemptDetailRows(answersJson) {
     const correctIdx = q.answerIndex;
     rows.push({
       qid: String(q.id),
-      section: getSectionTitle(q.sectionKey),
+      section: getQuestionSectionLabel(q),
       prompt: getPromptText(q),
       image: getQuestionIllustration(q),
       chosen: getChoiceText(q, chosenIdx),
@@ -581,7 +681,7 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
         const correctIdx = part.answerIndex;
       rows.push({
         qid: `${q.id}-${i + 1}`,
-        section: getSectionTitle(q.sectionKey),
+        section: getQuestionSectionLabel(q),
         prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
         image: getQuestionIllustration(q),
         chosen: getPartChoiceText(part, chosenIdx),
@@ -596,7 +696,7 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
     const correctIdx = q.answerIndex;
     rows.push({
       qid: String(q.id),
-      section: getSectionTitle(q.sectionKey),
+      section: getQuestionSectionLabel(q),
       prompt: getPromptText(q),
       image: getQuestionIllustration(q),
       chosen: getChoiceText(q, chosenIdx),
@@ -627,21 +727,20 @@ function getSectionLabelLines(label) {
   if (label === "Reading Comprehension") return ["Reading", "Comprehension"];
   if (label === "Listening Comprehension") return ["Listening", "Comprehension"];
   if (label === "Conversation and Expression") return ["Conversation and", "Expression"];
-  return [String(label ?? "")];
+  return String(label ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
 function getOrderedSectionTitles(questionsList, extraTitles = []) {
-  const titles = Array.from(
-    new Set([
-      ...(questionsList ?? []).map((q) => getSectionTitle(q.sectionKey)).filter(Boolean),
-      ...(extraTitles ?? []).filter(Boolean),
-    ])
-  );
-  const ordered = (sections ?? [])
-    .map((section) => section?.title)
-    .filter((title) => titles.includes(title));
-  const leftovers = titles.filter((title) => !ordered.includes(title)).sort((a, b) => a.localeCompare(b));
-  return [...ordered, ...leftovers];
+  const ordered = [];
+  for (const title of [
+    ...(questionsList ?? []).map((q) => getQuestionSectionLabel(q)).filter(Boolean),
+    ...(extraTitles ?? []).filter(Boolean),
+  ]) {
+    if (!ordered.includes(title)) ordered.push(title);
+  }
+  return ordered;
 }
 
 function buildSectionAverageRows(attemptsList, questionsList) {
@@ -833,12 +932,16 @@ function QuestionPreviewCard({ question, index, children }) {
   const stemText = question.stemText;
   const stemExtra = question.stemExtra;
   const stemAsset = question.stemAsset;
+  const stemAssets = splitAssetValues(stemAsset);
+  const imageAssets = stemAssets.filter((value) => isImageAsset(value));
+  const audioAssets = stemAssets.filter((value) => isAudioAsset(value));
   const boxText = question.boxText;
   const isImageStem = ["image", "passage_image", "table_image"].includes(stemKind);
   const isAudioStem = stemKind === "audio";
-  const shouldShowImage = isImageStem || (!stemKind && isImageAsset(stemAsset));
-  const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
+  const shouldShowImage = imageAssets.length > 0 || (isImageStem && stemAsset);
+  const shouldShowAudio = audioAssets.length > 0 || (isAudioStem && stemAsset);
   const stemLines = splitStemLines(stemExtra);
+  const sectionLabel = question.sectionLabel || question.sectionKey;
 
   const renderChoices = () => (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
@@ -870,7 +973,7 @@ function QuestionPreviewCard({ question, index, children }) {
     <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 700 }}>
-          {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""} {index != null ? `#${index + 1}` : ""}
+          {question.id} {sectionLabel ? `(${sectionLabel})` : ""} {index != null ? `#${index + 1}` : ""}
         </div>
         {children ? <div style={{ display: "flex", justifyContent: "flex-end" }}>{children}</div> : null}
       </div>
@@ -903,11 +1006,15 @@ function QuestionPreviewCard({ question, index, children }) {
           dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(boxText) }}
         />
       ) : null}
-      {shouldShowImage && stemAsset ? (
-        <img src={stemAsset} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} />
+      {shouldShowImage ? (
+        imageAssets.map((asset, assetIndex) => (
+          <img key={`preview-image-${question.id}-${assetIndex}`} src={asset} alt="stem" style={{ marginTop: 8, maxWidth: "100%" }} />
+        ))
       ) : null}
-      {shouldShowAudio && stemAsset ? (
-        <audio controls src={stemAsset} style={{ marginTop: 8, width: "100%" }} />
+      {shouldShowAudio ? (
+        audioAssets.map((asset, assetIndex) => (
+          <audio key={`preview-audio-${question.id}-${assetIndex}`} controls src={asset} style={{ marginTop: 8, width: "100%" }} />
+        ))
       ) : null}
 
       <div style={{ marginTop: 10 }}>
@@ -1243,9 +1350,11 @@ function parseAnswerIndex(value) {
 }
 
 function parseQuestionCsv(text, defaultTestVersion = "") {
-  const rows = parseCsvRows(text);
+  const delimiter = detectDelimiter(text);
+  const rows = parseSeparatedRows(text, delimiter);
   if (rows.length === 0) return { questions: [], choices: [], errors: ["CSV is empty."] };
   const header = rows[0].map((h) => String(h ?? "").trim().replace(/^\uFEFF/, ""));
+  const normalizedHeader = header.map(normalizeHeaderName);
   const idx = (name) => header.indexOf(name);
   const getCell = (row, name) => {
     const i = idx(name);
@@ -1257,6 +1366,157 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
+
+  if (
+    normalizedHeader.includes("qid")
+    && normalizedHeader.includes("sub_section")
+    && normalizedHeader.includes("correct_option")
+  ) {
+    const findIdx = (names) => {
+      for (const name of names) {
+        const found = normalizedHeader.indexOf(normalizeHeaderName(name));
+        if (found !== -1) return found;
+      }
+      return -1;
+    };
+    const cell = (row, index) => (index === -1 ? "" : normalizeCsvValue(row[index]));
+    const idxSetId = findIdx(["set_id", "set id", "test_version"]);
+    const idxQid = findIdx(["qid"]);
+    const idxSubSection = findIdx(["sub_section", "sub section"]);
+    const idxPromptEn = findIdx(["prompt_en", "prompt en"]);
+    const idxPromptBn = findIdx(["prompt_bn", "prompt bn"]);
+    const idxStemKind = findIdx(["stem_kind", "stem kind"]);
+    const idxStemText = findIdx(["stem_text", "stem text"]);
+    const idxStemImage = findIdx(["stem_image", "stem image"]);
+    const idxStemAudio = findIdx(["stem_audio", "stem audio"]);
+    const idxSubQuestion = findIdx(["sub_question", "sub question"]);
+    const idxOptionType = findIdx(["option_type", "option type"]);
+    const idxCorrect = findIdx(["correct_option", "correct option"]);
+    const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1"]);
+    const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2"]);
+    const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3"]);
+
+    if (idxQid === -1 || idxSubSection === -1 || idxCorrect === -1) {
+      return { questions: [], choices: [], errors: ["CSV must include qid, sub_section, and correct_option."] };
+    }
+
+    const questions = [];
+    const choices = [];
+    const errors = [];
+    const seenQuestionIds = new Set();
+
+    for (let r = 1; r < rows.length; r += 1) {
+      const row = rows[r];
+      const testVersion = defaultTestVersion || cell(row, idxSetId);
+      const rawQid = cell(row, idxQid);
+      const subSection = cell(row, idxSubSection);
+      const promptEn = cell(row, idxPromptEn) || null;
+      const promptBn = cell(row, idxPromptBn) || null;
+      const stemKindInput = cell(row, idxStemKind);
+      const stemText = cell(row, idxStemText) || null;
+      const stemImage = cell(row, idxStemImage) || null;
+      const stemAudio = cell(row, idxStemAudio) || null;
+      const subQuestion = cell(row, idxSubQuestion) || null;
+      const optionType = cell(row, idxOptionType) || null;
+      const correct = cell(row, idxCorrect);
+      const wrongs = [cell(row, idxWrong1), cell(row, idxWrong2), cell(row, idxWrong3)].filter(Boolean);
+
+      if (!rawQid && !subSection && !promptEn && !promptBn && !stemText && !stemImage && !stemAudio && !subQuestion && !correct) {
+        continue;
+      }
+      if (!testVersion) {
+        errors.push(`Row ${r + 1}: set_id is required when no SetID is entered in the form.`);
+        continue;
+      }
+      if (!rawQid) {
+        errors.push(`Row ${r + 1}: qid is required.`);
+        continue;
+      }
+      if (seenQuestionIds.has(rawQid)) {
+        errors.push(`Row ${r + 1}: duplicate qid "${rawQid}".`);
+        continue;
+      }
+      seenQuestionIds.add(rawQid);
+      if (!subSection) {
+        errors.push(`Row ${r + 1} (${rawQid}): sub_section is required.`);
+        continue;
+      }
+      if (!correct) {
+        errors.push(`Row ${r + 1} (${rawQid}): correct_option is required.`);
+        continue;
+      }
+
+      const parsedId = parseModelQuestionId(rawQid);
+      const sectionKey = resolveModelSectionKey(rawQid, subSection);
+      const stemKind = (() => {
+        const normalized = normalizeHeaderName(stemKindInput);
+        if (stemAudio) return "audio";
+        if (normalized === "audio") return "audio";
+        if (normalized === "dialog") return "dialog";
+        if (normalized === "passage_image" || normalized === "table_image") return normalized;
+        if (stemImage || normalized === "image") return "image";
+        return normalized || null;
+      })();
+      const stemAsset = joinAssetValues(
+        stemKind === "audio" ? stemAudio : stemImage,
+        stemKind === "audio" ? stemImage : null
+      ) || null;
+      const choicesList = [correct, ...wrongs].filter(Boolean);
+      if (!choicesList.length) {
+        errors.push(`Row ${r + 1} (${rawQid}): choices are required.`);
+        continue;
+      }
+
+      const type = inferModelQuestionType({
+        sectionKey,
+        stemKind,
+        stemText,
+        stemImage,
+        stemAudio,
+        subQuestion,
+        optionType,
+      });
+      const orderIndex = computeModelOrderIndex(rawQid, r);
+      const data = {
+        qid: parsedId.groupQid,
+        subId: parsedId.subId,
+        itemId: rawQid,
+        stemKind,
+        stemText,
+        stemAsset,
+        stemExtra: null,
+        boxText: subQuestion,
+        choices: choicesList,
+        sectionLabel: subSection,
+        optionType,
+      };
+
+      questions.push({
+        test_version: testVersion,
+        question_id: rawQid,
+        section_key: sectionKey,
+        type,
+        prompt_en: promptEn,
+        prompt_bn: promptBn,
+        answer_index: 0,
+        order_index: orderIndex,
+        data,
+      });
+      choicesList.forEach((value, choiceIndex) => {
+        const isImage = isImageAsset(value);
+        choices.push({
+          test_version: testVersion,
+          question_key: rawQid,
+          part_index: null,
+          choice_index: choiceIndex,
+          label: isImage ? null : value,
+          choice_image: isImage ? value : null,
+        });
+      });
+    }
+
+    return { questions, choices, errors };
+  }
 
   if (idx("item_id") === -1 || idx("section_key") === -1 || idx("type") === -1) {
     return { questions: [], choices: [], errors: ["CSV must include item_id, section_key, type."] };
@@ -1461,10 +1721,15 @@ function parseDailyCsv(text, defaultTestVersion = "") {
 }
 
 function detectTestVersionFromCsvText(text) {
-  const rows = parseCsvRows(text);
+  const delimiter = detectDelimiter(text);
+  const rows = parseSeparatedRows(text, delimiter);
   if (rows.length < 2) return "";
-  const header = rows[0].map((h) => String(h ?? "").trim().replace(/^\uFEFF/, ""));
-  const idx = header.indexOf("test_version");
+  const header = rows[0].map(normalizeHeaderName);
+  const idx = (() => {
+    const testVersionIdx = header.indexOf("test_version");
+    if (testVersionIdx !== -1) return testVersionIdx;
+    return header.indexOf("set_id");
+  })();
   if (idx === -1) return "";
   for (let i = 1; i < rows.length; i += 1) {
     const value = String(rows[i]?.[idx] ?? "").trim();
@@ -1497,7 +1762,11 @@ function resolveAssetValue(value, assetMap) {
 function applyAssetMap(questions, choices, assetMap) {
   for (const q of questions) {
     const data = q.data ?? {};
-    if (data.stemAsset) data.stemAsset = resolveAssetValue(data.stemAsset, assetMap);
+    if (data.stemAsset) {
+      data.stemAsset = splitAssetValues(data.stemAsset)
+        .map((value) => resolveAssetValue(value, assetMap))
+        .join("|");
+    }
     if (Array.isArray(data.choices)) {
       data.choices = data.choices.map((v) => {
         const raw = String(v ?? "").trim();
@@ -1532,7 +1801,7 @@ function validateAssetRefs(questions, choices, assetMap) {
 
   for (const q of questions) {
     const data = q.data ?? {};
-    checkValue(data.stemAsset);
+    splitAssetValues(data.stemAsset).forEach(checkValue);
     if (Array.isArray(data.choices)) data.choices.forEach(checkValue);
   }
   for (const c of choices) checkValue(c.choice_image);
@@ -9760,6 +10029,9 @@ export default function AdminConsole({
                 </div>
                 <div className="admin-help" style={{ marginTop: 4 }}>
                   ※ `/images/...` や `/audio/...` などのパスは無効です。
+                </div>
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  Model CSV headers used: <code>set_id</code>, <code>qid</code>, <code>sub_section</code>, <code>prompt_en</code>, <code>prompt_bn</code>, <code>stem_kind</code>, <code>stem_text</code>, <code>stem_image</code>, <code>stem_audio</code>, <code>sub_question</code>, <code>option_type</code>, <code>correct_option</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>.
                 </div>
                 <div className="admin-help" style={{ marginTop: 4 }}>
                   CSV format: <code>docs/question_csv.md</code>

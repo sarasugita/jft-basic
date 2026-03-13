@@ -313,6 +313,7 @@ function mapDbQuestion(row, version) {
     qid: data.qid || null,
     subId: data.subId || null,
     sectionKey: row.section_key,
+    sectionLabel: data.sectionLabel || data.section_label || null,
     type: row.type,
     promptEn: row.prompt_en,
     promptBn: row.prompt_bn,
@@ -338,6 +339,17 @@ function hashString(value) {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
+}
+
+function shuffleWithSeed(items, seedValue) {
+  const next = [...items];
+  let seed = hashString(seedValue);
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    seed = Math.imul(seed ^ 0x9e3779b9, 16777619) >>> 0;
+    const swapIndex = seed % (index + 1);
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
 }
 
 function orderQuestionsForSession(list, version) {
@@ -1784,6 +1796,10 @@ function getSectionTitle(sectionKey) {
   return sections.find((s) => s.key === sectionKey)?.title ?? sectionKey ?? "";
 }
 
+function getQuestionSectionLabel(question) {
+  return String(question?.sectionLabel ?? "").trim() || getSectionTitle(question?.sectionKey);
+}
+
 function getQuestionPrompt(q) {
   return q.boxText || q.stemText || q.stemExtra || q.promptEn || "";
 }
@@ -1824,6 +1840,29 @@ function splitAssetList(value) {
     return splitStemLines(raw);
   }
   return [raw];
+}
+
+function getChoiceDisplayOrder(question) {
+  const choices = Array.isArray(question?.choices) ? question.choices : [];
+  if (getActiveTestType() !== "mock" || choices.length <= 1) {
+    return choices.map((_, index) => index);
+  }
+  const sessionId = state.linkTestSessionId || state.selectedTestSessionId || "";
+  if (!sessionId) return choices.map((_, index) => index);
+  return shuffleWithSeed(
+    choices.map((_, index) => index),
+    `${sessionId}:${question.sectionKey}:${question.id}:choices`,
+  );
+}
+
+function getDisplayedChoices(question) {
+  const choices = Array.isArray(question?.choices) ? question.choices : [];
+  const order = getChoiceDisplayOrder(question);
+  return order.map((choiceIndex, displayIndex) => ({
+    displayIndex,
+    canonicalIndex: choiceIndex,
+    value: choices[choiceIndex],
+  }));
 }
 
 function getAssetBaseUrl(testVersion, assetType) {
@@ -1980,7 +2019,10 @@ function toggleBangla() {
 
 /** ===== Answer setters ===== */
 function setSingleAnswer(questionId, choiceIndex) {
-  state.answers = { ...state.answers, [questionId]: choiceIndex };
+  const question = getQuestions().find((item) => item.id === questionId);
+  const displayOrder = question ? getChoiceDisplayOrder(question) : [];
+  const canonicalIndex = displayOrder[choiceIndex] ?? choiceIndex;
+  state.answers = { ...state.answers, [questionId]: canonicalIndex };
   saveState();
   render();
 }
@@ -2324,12 +2366,13 @@ function isJapaneseText(value) {
 
 function renderChoicesText(q, choices) {
   const chosen = state.answers[q.id];
+  const displayChoices = getDisplayedChoices({ ...q, choices });
   return `
     <div class="choices">
-      ${choices.map((c, i) => {
-        const sel = chosen === i ? "selected" : "";
-        const jp = isJapaneseText(c) ? "jp" : "";
-        return `<button class="choice ${sel} ${jp}" data-choice="${i}" data-qid="${q.id}">${escapeHtml(c)}</button>`;
+      ${displayChoices.map(({ displayIndex, canonicalIndex, value }) => {
+        const sel = chosen === canonicalIndex ? "selected" : "";
+        const jp = isJapaneseText(value) ? "jp" : "";
+        return `<button class="choice ${sel} ${jp}" data-choice="${displayIndex}" data-qid="${q.id}">${escapeHtml(value)}</button>`;
       }).join("")}
     </div>
   `;
@@ -2337,13 +2380,14 @@ function renderChoicesText(q, choices) {
 
 function renderChoicesImages(q, choices) {
   const chosen = state.answers[q.id];
+  const displayChoices = getDisplayedChoices({ ...q, choices });
   return `
     <div class="img-choice-grid">
-      ${choices.map((src, i) => {
-        const sel = chosen === i ? "selected" : "";
+      ${displayChoices.map(({ displayIndex, canonicalIndex, value }) => {
+        const sel = chosen === canonicalIndex ? "selected" : "";
         return `
-          <button class="img-choice ${sel}" data-choice="${i}" data-qid="${q.id}">
-            <img src="${src}" alt="choice ${i + 1}" />
+          <button class="img-choice ${sel}" data-choice="${displayIndex}" data-qid="${q.id}">
+            <img src="${value}" alt="choice ${displayIndex + 1}" />
           </button>
         `;
       }).join("")}
@@ -4722,7 +4766,7 @@ function buildAttemptDetailRows(attempt, questionsList) {
     const correctIdx = q.answerIndex;
     return {
       qid: String(q.id),
-      section: getSectionTitle(q.sectionKey),
+      section: getQuestionSectionLabel(q),
       prompt: getQuestionPrompt(q),
       thumb: q.stemKind && q.stemKind !== "audio" ? (q.stemAsset || "") : "",
       chosen: getChoiceText(q, chosenIdx),

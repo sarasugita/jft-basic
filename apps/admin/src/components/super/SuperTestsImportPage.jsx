@@ -114,9 +114,9 @@ function CsvGuideline({ testType }) {
   return (
     <div className="admin-help" style={{ marginTop: 12 }}>
       Model test CSV:
-      Required columns: <code>qid</code>, <code>question_text</code>, <code>question_type</code>, <code>correct_answer</code>.
-      Optional columns: <code>options</code>, <code>media_file</code>, <code>media_type</code>, <code>order_index</code>, <code>metadata</code>.
-      Use this for full model-test uploads, including mixed question types and any referenced assets.
+      Headers used: <code>set_id</code>, <code>qid</code>, <code>sub_section</code>, <code>prompt_en</code>, <code>prompt_bn</code>, <code>stem_kind</code>, <code>stem_text</code>, <code>stem_image</code>, <code>stem_audio</code>, <code>sub_question</code>, <code>option_type</code>, <code>correct_option</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>.
+      <br />
+      <code>set_id</code> is optional for parsing. Extra headers are ignored.
     </div>
   );
 }

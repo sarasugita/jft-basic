@@ -288,6 +288,118 @@ function shuffleWithSeed<T>(items: T[], seedStr: string) {
   return out;
 }
 
+function splitAssetValues(value: unknown) {
+  return String(value ?? "")
+    .split(/\r?\n|\|/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function joinAssetValues(...values: unknown[]) {
+  const unique: string[] = [];
+  for (const value of values.flatMap((item) => splitAssetValues(item))) {
+    if (!unique.includes(value)) unique.push(value);
+  }
+  return unique.join("|");
+}
+
+function parseModelQuestionId(rawValue: unknown) {
+  const value = String(rawValue ?? "").trim();
+  const match = value.match(/^([A-Za-z]+)-(\d+)(?:-(\d+))?$/);
+  if (!match) {
+    return {
+      questionId: value,
+      groupQid: value,
+      subId: null,
+      sectionPrefix: "",
+      mainNumber: null,
+      subNumber: null,
+    };
+  }
+  return {
+    questionId: value,
+    groupQid: match[3] ? `${match[1]}-${match[2]}` : value,
+    subId: match[3] ?? null,
+    sectionPrefix: match[1].toUpperCase(),
+    mainNumber: Number(match[2]),
+    subNumber: match[3] ? Number(match[3]) : null,
+  };
+}
+
+const MODEL_SUB_SECTION_TO_SECTION_KEY: Record<string, string> = {
+  "word meaning": "SV",
+  "word usage": "SV",
+  "kanji reading": "SV",
+  "kanji meaning and usage": "SV",
+  grammar: "SV",
+  expression: "CE",
+  "comprehending content (conversation)": "CE",
+  "comprehending content (communicating at shops and public places)": "CE",
+  "comprehending content (listening to announcements and instructions)": "LC",
+  "comprehending content": "LC",
+  "information search": "RC",
+};
+
+function resolveModelSectionKey(qid: string, subSection: string) {
+  const parsed = parseModelQuestionId(qid);
+  if (["SV", "CE", "LC", "RC"].includes(parsed.sectionPrefix)) {
+    return parsed.sectionPrefix;
+  }
+  return MODEL_SUB_SECTION_TO_SECTION_KEY[String(subSection ?? "").trim().toLowerCase()] || "SV";
+}
+
+function computeModelOrderIndex(qid: string, fallbackIndex: number) {
+  const parsed = parseModelQuestionId(qid);
+  if (Number.isFinite(parsed.mainNumber)) {
+    return parsed.mainNumber * 100 + (Number.isFinite(parsed.subNumber) ? parsed.subNumber : 0);
+  }
+  return fallbackIndex;
+}
+
+function inferModelQuestionType(
+  {
+    sectionKey,
+    stemKind,
+    stemText,
+    stemImage,
+    stemAudio,
+    subQuestion,
+    optionType,
+  }: {
+    sectionKey: string;
+    stemKind: string | null;
+    stemText: string | null;
+    stemImage: string | null;
+    stemAudio: string | null;
+    subQuestion: string | null;
+    optionType: string | null;
+  },
+) {
+  const normalizedStemKind = String(stemKind ?? "").trim().toLowerCase();
+  const normalizedOptionType = String(optionType ?? "").trim().toLowerCase();
+  const hasImageStem = Boolean(stemImage);
+  const hasAudioStem = Boolean(stemAudio);
+  const hasSubQuestion = Boolean(subQuestion);
+  const hasImageChoices = normalizedOptionType === "image";
+
+  if (hasAudioStem || normalizedStemKind === "audio") {
+    if (hasImageChoices) return "mcq_listening_image_choices";
+    if (hasSubQuestion) return "mcq_listening_two_part";
+    return "mcq_audio";
+  }
+  if (normalizedStemKind === "dialog") {
+    return hasImageStem ? "mcq_dialog_with_image" : "mcq_dialog";
+  }
+  if (hasImageStem || normalizedStemKind === "image" || normalizedStemKind === "passage_image" || normalizedStemKind === "table_image") {
+    return hasSubQuestion ? "mcq_grouped_image" : "mcq_image";
+  }
+  if (sectionKey === "SV" && /【.+?】/.test(String(stemText ?? ""))) {
+    return "mcq_kanji_reading";
+  }
+  if (hasSubQuestion) return "mcq_grouped_text";
+  return "mcq_text";
+}
+
 function inferMediaType(fileName: string) {
   const lower = fileName.toLowerCase();
   if (/\.(png|jpe?g|webp|gif|svg)$/.test(lower)) return "image";
@@ -427,6 +539,165 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Vali
   };
 }
 
+function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): ValidationResult {
+  const header = rows[0].map(normalizeHeader);
+  const findIdx = (names: string[]) => {
+    for (const name of names) {
+      const idx = header.indexOf(normalizeHeader(name));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+
+  const idxQid = findIdx(["qid"]);
+  const idxSubSection = findIdx(["sub_section", "sub section"]);
+  const idxPromptEn = findIdx(["prompt_en", "prompt en"]);
+  const idxPromptBn = findIdx(["prompt_bn", "prompt bn"]);
+  const idxStemKind = findIdx(["stem_kind", "stem kind"]);
+  const idxStemText = findIdx(["stem_text", "stem text"]);
+  const idxStemImage = findIdx(["stem_image", "stem image"]);
+  const idxStemAudio = findIdx(["stem_audio", "stem audio"]);
+  const idxSubQuestion = findIdx(["sub_question", "sub question"]);
+  const idxOptionType = findIdx(["option_type", "option type"]);
+  const idxCorrect = findIdx(["correct_option", "correct option"]);
+  const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1"]);
+  const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2"]);
+  const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3"]);
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const assetNames = new Set(assetFiles.map((file) => normalizeAssetName(file.name)));
+  const seenQids = new Set<string>();
+  const questions: ValidationResult["questions"] = [];
+  let assetReferenceCount = 0;
+
+  if (idxQid === -1 || idxSubSection === -1 || idxCorrect === -1) {
+    const missing = [
+      idxQid === -1 ? "qid" : null,
+      idxSubSection === -1 ? "sub_section" : null,
+      idxCorrect === -1 ? "correct_option" : null,
+    ].filter(Boolean);
+    errors.push(`Missing required columns: ${missing.join(", ")}`);
+  }
+
+  for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    const cell = (idx: number) => (idx === -1 ? "" : String(row[idx] ?? "").trim());
+
+    const rawQid = cell(idxQid);
+    const subSection = cell(idxSubSection);
+    const promptEn = cell(idxPromptEn);
+    const promptBn = cell(idxPromptBn);
+    const stemKindInput = cell(idxStemKind);
+    const stemText = cell(idxStemText);
+    const stemImage = cell(idxStemImage) || null;
+    const stemAudio = cell(idxStemAudio) || null;
+    const subQuestion = cell(idxSubQuestion) || null;
+    const optionType = cell(idxOptionType) || null;
+    const correct = cell(idxCorrect);
+    const wrongs = [cell(idxWrong1), cell(idxWrong2), cell(idxWrong3)].filter(Boolean);
+
+    if (!rawQid && !subSection && !promptEn && !promptBn && !stemText && !stemImage && !stemAudio && !subQuestion && !correct) {
+      continue;
+    }
+
+    if (!rawQid) {
+      errors.push(`Row ${rowIndex + 1}: qid is required.`);
+      continue;
+    }
+    if (seenQids.has(rawQid)) {
+      errors.push(`Row ${rowIndex + 1}: duplicate qid "${rawQid}".`);
+      continue;
+    }
+    seenQids.add(rawQid);
+
+    if (!subSection) {
+      errors.push(`Row ${rowIndex + 1} (${rawQid}): sub_section is required.`);
+      continue;
+    }
+    if (!correct) {
+      errors.push(`Row ${rowIndex + 1} (${rawQid}): correct_option is required.`);
+      continue;
+    }
+
+    const options = [correct, ...wrongs].filter(Boolean);
+    if (!options.length) {
+      errors.push(`Row ${rowIndex + 1} (${rawQid}): choices are required.`);
+      continue;
+    }
+
+    const parsedId = parseModelQuestionId(rawQid);
+    const sectionKey = resolveModelSectionKey(rawQid, subSection);
+    const stemKind = (() => {
+      const normalized = normalizeHeader(stemKindInput);
+      if (stemAudio) return "audio";
+      if (normalized === "audio") return "audio";
+      if (normalized === "dialog") return "dialog";
+      if (normalized === "passage_image" || normalized === "table_image") return normalized;
+      if (stemImage || normalized === "image") return "image";
+      return normalized || null;
+    })();
+    const mediaFile = stemAudio || stemImage || null;
+    const mediaType = stemAudio ? "audio" : stemImage ? "image" : null;
+    const stemAsset = joinAssetValues(
+      stemKind === "audio" ? stemAudio : stemImage,
+      stemKind === "audio" ? stemImage : null,
+    ) || null;
+
+    for (const asset of [stemImage, stemAudio].filter(Boolean)) {
+      assetReferenceCount += 1;
+      if (!assetNames.has(normalizeAssetName(asset))) {
+        errors.push(`Row ${rowIndex + 1} (${rawQid}): referenced asset "${asset}" was not uploaded.`);
+      }
+    }
+
+    questions.push({
+      qid: rawQid,
+      question_text: promptEn || subQuestion || stemText || rawQid,
+      question_type: inferModelQuestionType({
+        sectionKey,
+        stemKind,
+        stemText: stemText || null,
+        stemImage,
+        stemAudio,
+        subQuestion,
+        optionType,
+      }),
+      correct_answer: correct,
+      options,
+      media_type: mediaType,
+      media_file: mediaFile,
+      order_index: computeModelOrderIndex(rawQid, rowIndex),
+      metadata: {
+        source_format: "flat_model_csv",
+        section_key: sectionKey,
+        section_label: subSection,
+        prompt_bn: promptBn || null,
+        stem_kind: stemKind,
+        stem_text: stemText || null,
+        stem_image: stemImage,
+        stem_audio: stemAudio,
+        stem_asset: stemAsset,
+        box_text: subQuestion,
+        option_type: optionType,
+        sub_id: parsedId.subId,
+        group_qid: parsedId.groupQid,
+      },
+    });
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    summary: {
+      question_count: questions.length,
+      asset_reference_count: assetReferenceCount,
+    },
+    questions,
+  };
+}
+
 export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[], testType?: string | null): Promise<ValidationResult> {
   const text = await csvFile.text();
   const rows = parseCsvRows(text);
@@ -443,6 +714,11 @@ export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[], 
 
   if (testType === "daily") {
     return validateDailyQuestionSetCsv(rows, assetFiles);
+  }
+
+  const normalizedHeader = rows[0].map(normalizeHeader);
+  if (normalizedHeader.includes("sub_section") && normalizedHeader.includes("correct_option")) {
+    return validateFlatModelQuestionSetCsv(rows, assetFiles);
   }
 
   const errors: string[] = [];
@@ -734,9 +1010,21 @@ export async function syncLegacyTestCatalog(
     const resolvedOptions = Array.isArray(question.options)
       ? question.options.map((option) => normalizeLegacyOptionValue(option, uploadedAssets)).filter(Boolean)
       : [];
+    const stemImage = normalizeLegacyOptionValue(question.metadata?.stem_image, uploadedAssets);
+    const stemAudio = normalizeLegacyOptionValue(question.metadata?.stem_audio, uploadedAssets);
     const mediaUrl = question.media_file
       ? normalizeLegacyOptionValue(question.media_file, uploadedAssets)
       : null;
+    const stemKind = String(question.metadata?.stem_kind ?? "").trim()
+      || (stemAudio ? "audio" : stemImage ? "image" : question.media_type ?? "");
+    const stemAsset = joinAssetValues(
+      stemKind === "audio" ? (stemAudio || mediaUrl) : (stemImage || mediaUrl),
+      stemKind === "audio" ? stemImage : null,
+    ) || null;
+    const promptEn = String(question.question_text ?? "").trim() || null;
+    const promptBn = String(question.metadata?.prompt_bn ?? "").trim() || null;
+    const stemText = String(question.metadata?.stem_text ?? "").trim()
+      || (testType === "daily" ? "" : (!question.metadata?.source_format ? String(question.question_text ?? "").trim() : ""));
     const answerIndex = resolveLegacyAnswerIndex(resolvedOptions, question.correct_answer);
     if (answerIndex == null) {
       throw new Error(`Legacy answer mapping failed for question "${question.qid}"`);
@@ -750,20 +1038,24 @@ export async function syncLegacyTestCatalog(
         ? "DAILY"
         : String(question.metadata?.section_key ?? question.metadata?.section ?? "SUPER").trim() || "SUPER",
       type: testType === "daily" ? "daily" : String(question.question_type ?? "super_question"),
-      prompt_en: question.question_text,
-      prompt_bn: null,
+      prompt_en: promptEn,
+      prompt_bn: promptBn,
       answer_index: answerIndex,
       order_index: Number.isFinite(Number(question.order_index)) ? Number(question.order_index) : index + 1,
       data: {
+        qid: String(question.metadata?.group_qid ?? question.qid).trim() || question.qid,
+        subId: String(question.metadata?.sub_id ?? "").trim() || null,
         itemId: question.qid,
-        stemKind: question.media_type ?? null,
-        stemText: testType === "daily" ? null : question.question_text,
-        stemAsset: mediaUrl || null,
+        stemKind: stemKind || null,
+        stemText: stemText || null,
+        stemAsset: stemAsset || null,
         stemExtra: String(question.metadata?.description ?? "").trim() || null,
-        boxText: null,
+        boxText: String(question.metadata?.box_text ?? "").trim() || null,
         choices: resolvedOptions,
         target: String(question.metadata?.target ?? "").trim() || null,
         canDo: String(question.metadata?.canDo ?? question.metadata?.can_do ?? "").trim() || null,
+        sectionLabel: String(question.metadata?.section_label ?? "").trim() || null,
+        optionType: String(question.metadata?.option_type ?? "").trim() || null,
       },
     };
   });

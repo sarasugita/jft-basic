@@ -15,54 +15,63 @@ Available actions:
 
 ## Required CSV Columns
 
-Each CSV row represents one question.
+Each CSV row represents one question or one sub-question.
 
-Required columns:
+Headers used:
 
+- `set_id`
 - `qid`
-- `question_text`
-- `question_type`
-- `correct_answer`
-
-Optional columns:
-
-- `options`
-- `media_file`
-- `media_type`
-- `order_index`
-- `metadata`
+- `sub_section`
+- `prompt_en`
+- `prompt_bn`
+- `stem_kind`
+- `stem_text`
+- `stem_image`
+- `stem_audio`
+- `sub_question`
+- `option_type`
+- `correct_option`
+- `wrong_option_1`
+- `wrong_option_2`
+- `wrong_option_3`
 
 ## Column Rules
 
 `qid`
 
 - unique inside the uploaded CSV
-- used as the stable question identifier for that question-set version
+- values like `SV-1-1` are treated as sub-questions
+- the base group becomes `SV-1` and the last number becomes the sub-question number
 
-`options`
+`sub_section`
 
-- either a JSON array like `["A","B","C"]`
-- or pipe-separated text like `A|B|C`
+- used as the section/category label in results and detailed results
+- broad section behavior still follows the `qid` prefix such as `SV`, `CE`, `LC`, `RC`
 
-`correct_answer`
+`prompt_en` / `prompt_bn`
 
-- plain text is allowed
-- JSON is also allowed for structured answers
+- shared prompt text for the question group
+- if multiple rows share the same base `qid`, the prompt is shown once in the student test when the prompt values match
 
-`media_file`
+`stem_text`
 
-- optional asset filename referenced by the CSV
-- must match one of the uploaded asset filenames exactly
+- supports underline markup using `【...】`
 
-`media_type`
+`stem_image` / `stem_audio`
 
-- optional
-- allowed values: `image`, `audio`
-- if omitted, the system tries to infer it from the asset file extension
+- optional asset filenames referenced by the CSV
+- each referenced asset must match one of the uploaded filenames exactly
 
-`metadata`
+`sub_question`
 
-- optional JSON object per question
+- optional per-sub-question prompt/body
+- mapped into the grouped question display under the shared prompt
+
+`correct_option` and `wrong_option_1..3`
+
+- define the answer choices
+- preview/import keeps this order
+- student test delivery shuffles choice order while still storing the canonical answer correctly
 
 ## Asset Referencing
 
@@ -73,7 +82,7 @@ Supported asset types:
 - images: `png`, `jpg`, `jpeg`, `webp`, `gif`, `svg`
 - audio: `mp3`, `wav`, `m4a`, `ogg`
 
-If a row references `media_file = listening1.mp3`, that exact file must be included in the upload.
+If a row references `stem_image = q1.png` or `stem_audio = lc3.mp3`, that exact file must be included in the upload.
 
 Assets are stored in the `test-assets` bucket under:
 
@@ -86,9 +95,9 @@ The validation step blocks saving if:
 - required columns are missing
 - `qid` values are duplicated
 - a referenced asset filename is missing from the upload
-- JSON fields are malformed
+- duplicate `qid` values are uploaded
 
-Warnings may still appear for non-blocking issues, such as media type inference fallback.
+Warnings may still appear for non-blocking issues.
 
 ## Versioning
 
