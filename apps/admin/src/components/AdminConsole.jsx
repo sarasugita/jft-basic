@@ -553,12 +553,20 @@ function resolveModelSectionKey(qid, subSection) {
   return MODEL_SUB_SECTION_TO_SECTION_KEY[String(subSection ?? "").trim().toLowerCase()] || "SV";
 }
 
-function computeModelOrderIndex(qid, fallbackIndex) {
+const MODEL_SECTION_ORDER = {
+  SV: 1,
+  CE: 2,
+  LC: 3,
+  RC: 4,
+};
+
+function computeModelOrderIndex(qid, fallbackIndex, sectionKey = "SV") {
   const parsed = parseModelQuestionId(qid);
+  const sectionOffset = (MODEL_SECTION_ORDER[String(sectionKey ?? "").trim().toUpperCase()] ?? 9) * 100000;
   if (Number.isFinite(parsed.mainNumber)) {
-    return parsed.mainNumber * 100 + (Number.isFinite(parsed.subNumber) ? parsed.subNumber : 0);
+    return sectionOffset + parsed.mainNumber * 100 + (Number.isFinite(parsed.subNumber) ? parsed.subNumber : 0);
   }
-  return fallbackIndex;
+  return sectionOffset + fallbackIndex;
 }
 
 function inferModelQuestionType({ sectionKey, stemKind, stemText, stemImage, stemAudio, subQuestion, optionType }) {
@@ -585,6 +593,38 @@ function inferModelQuestionType({ sectionKey, stemKind, stemText, stemImage, ste
   }
   if (hasSubQuestion) return "mcq_grouped_text";
   return "mcq_text";
+}
+
+function normalizeModelCsvKind(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s/+]+/g, "_");
+}
+
+function resolveModelStemAssets(stemKindInput, stemImageInput, stemAudioInput) {
+  const stemImage = normalizeCsvValue(stemImageInput) || null;
+  const stemAudio = normalizeCsvValue(stemAudioInput) || null;
+  const normalizedStemKind = normalizeModelCsvKind(stemKindInput);
+
+  const includeImage = (() => {
+    if (!normalizedStemKind) return Boolean(stemImage);
+    return ["image", "audio_image", "image_audio", "dialog", "passage_image", "table_image"].includes(normalizedStemKind);
+  })();
+  const includeAudio = (() => {
+    if (!normalizedStemKind) return Boolean(stemAudio);
+    return ["audio", "audio_image", "image_audio"].includes(normalizedStemKind);
+  })();
+
+  return {
+    stemKind: normalizedStemKind || (stemAudio ? "audio" : stemImage ? "image" : null),
+    stemImage: includeImage ? stemImage : null,
+    stemAudio: includeAudio ? stemAudio : null,
+  };
+}
+
+function isModelOptionImageType(optionType) {
+  return normalizeModelCsvKind(optionType) === "image";
 }
 
 function isImageAsset(value) {
@@ -1415,8 +1455,11 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
       const promptBn = cell(row, idxPromptBn) || null;
       const stemKindInput = cell(row, idxStemKind);
       const stemText = cell(row, idxStemText) || null;
-      const stemImage = cell(row, idxStemImage) || null;
-      const stemAudio = cell(row, idxStemAudio) || null;
+      const { stemKind, stemImage, stemAudio } = resolveModelStemAssets(
+        stemKindInput,
+        cell(row, idxStemImage) || null,
+        cell(row, idxStemAudio) || null
+      );
       const subQuestion = cell(row, idxSubQuestion) || null;
       const optionType = cell(row, idxOptionType) || null;
       const correct = cell(row, idxCorrect);
@@ -1449,18 +1492,9 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
 
       const parsedId = parseModelQuestionId(rawQid);
       const sectionKey = resolveModelSectionKey(rawQid, subSection);
-      const stemKind = (() => {
-        const normalized = normalizeHeaderName(stemKindInput);
-        if (stemAudio) return "audio";
-        if (normalized === "audio") return "audio";
-        if (normalized === "dialog") return "dialog";
-        if (normalized === "passage_image" || normalized === "table_image") return normalized;
-        if (stemImage || normalized === "image") return "image";
-        return normalized || null;
-      })();
       const stemAsset = joinAssetValues(
-        stemKind === "audio" ? stemAudio : stemImage,
-        stemKind === "audio" ? stemImage : null
+        stemAudio,
+        stemImage
       ) || null;
       const choicesList = [correct, ...wrongs].filter(Boolean);
       if (!choicesList.length) {
@@ -1477,7 +1511,7 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
         subQuestion,
         optionType,
       });
-      const orderIndex = computeModelOrderIndex(rawQid, r);
+      const orderIndex = computeModelOrderIndex(rawQid, r, sectionKey);
       const data = {
         qid: parsedId.groupQid,
         subId: parsedId.subId,
@@ -1503,15 +1537,15 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
         order_index: orderIndex,
         data,
       });
+      const useImageChoices = isModelOptionImageType(optionType);
       choicesList.forEach((value, choiceIndex) => {
-        const isImage = isImageAsset(value);
         choices.push({
           test_version: testVersion,
           question_key: rawQid,
           part_index: null,
           choice_index: choiceIndex,
-          label: isImage ? null : value,
-          choice_image: isImage ? value : null,
+          label: useImageChoices ? null : value,
+          choice_image: useImageChoices ? value : null,
         });
       });
     }
@@ -1989,6 +2023,8 @@ export default function AdminConsole({
   const [dailySetDropdownOpen, setDailySetDropdownOpen] = useState(false);
   const [activeDailyTimePicker, setActiveDailyTimePicker] = useState("");
   const dailySetDropdownRef = useRef(null);
+  const assetFolderInputRef = useRef(null);
+  const dailyFolderInputRef = useRef(null);
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingSessionMsg, setEditingSessionMsg] = useState("");
   const [editingSessionForm, setEditingSessionForm] = useState({
@@ -10028,7 +10064,7 @@ export default function AdminConsole({
 
           {modelUploadOpen ? (
             <div className="admin-modal-overlay" onClick={() => setModelUploadOpen(false)}>
-              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal upload-question-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="admin-modal-header">
                   <div className="admin-title">Upload Model Questions</div>
                   <button className="admin-modal-close" onClick={() => setModelUploadOpen(false)} aria-label="Close">
@@ -10036,7 +10072,7 @@ export default function AdminConsole({
                   </button>
                 </div>
 
-                <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className="admin-form upload-question-form" style={{ marginTop: 10 }}>
                   <div className="field">
                     <label>SetID</label>
                     <input
@@ -10100,63 +10136,50 @@ export default function AdminConsole({
                   </div>
                   <div className="field">
                     <label>Folder (PNG/MP3)</label>
-                    <input
-                      type="file"
-                      multiple
-                      webkitdirectory="true"
-                      directory="true"
-                      accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files ?? []);
-                        setAssetFiles(files);
-                        const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv"));
-                        if (csvFile) {
-                          setAssetCsvFile(csvFile);
-                          if (!assetForm.test_version) {
-                            csvFile.text().then((text) => {
-                              const detected = detectTestVersionFromCsvText(text);
-                              if (detected) {
-                                setAssetForm((s) => ({ ...s, test_version: detected }));
-                              }
-                            });
+                    <div className="upload-question-picker">
+                      <input
+                        ref={assetFolderInputRef}
+                        className="upload-question-picker-input"
+                        type="file"
+                        multiple
+                        webkitdirectory="true"
+                        directory="true"
+                        accept=".csv,.png,.jpg,.jpeg,.webp,.mp3,.wav,.m4a,.ogg"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files ?? []);
+                          setAssetFiles(files);
+                          const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv"));
+                          if (csvFile) {
+                            setAssetCsvFile(csvFile);
+                            if (!assetForm.test_version) {
+                              csvFile.text().then((text) => {
+                                const detected = detectTestVersionFromCsvText(text);
+                                if (detected) {
+                                  setAssetForm((s) => ({ ...s, test_version: detected }));
+                                }
+                              });
+                            }
                           }
-                        }
-                      }}
-                    />
+                        }}
+                      />
+                      <button className="btn upload-question-picker-button" type="button" onClick={() => assetFolderInputRef.current?.click()}>
+                        Choose Folder
+                      </button>
+                    </div>
                     {assetFiles.length ? (
                       <div className="admin-help" style={{ marginTop: 4 }}>
                         Selected: {assetFiles.length} files
                       </div>
                     ) : null}
                   </div>
-                  <div className="field small">
-                    <label>&nbsp;</label>
+                  <div className="upload-question-actions">
                     <button className="btn btn-primary" type="button" onClick={uploadAssets}>
                       Upload & Register Set
                     </button>
                   </div>
                 </div>
-
-                <div className="admin-help" style={{ marginTop: 6 }}>
-                  Bucket: <b>test-assets</b> / CSV, PNG, MP3 (他拡張子もOK)
-                </div>
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  Upload &amp; Register SetでCSV/PNG/MP3をアップロードします。
-                </div>
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  CSVにはファイル名のみ記載してください。
-                </div>
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  ※ `/images/...` や `/audio/...` などのパスは無効です。
-                </div>
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  Model CSV headers used: <code>set_id</code>, <code>qid</code>, <code>sub_section</code>, <code>prompt_en</code>, <code>prompt_bn</code>, <code>stem_kind</code>, <code>stem_text</code>, <code>stem_image</code>, <code>stem_audio</code>, <code>sub_question</code>, <code>option_type</code>, <code>correct_option</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>.
-                </div>
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  CSV format: <code>docs/question_csv.md</code>
-                </div>
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  Template: <a href="/question_csv_template.csv" download>question_csv_template.csv</a>
+                <div className="admin-help" style={{ marginTop: 8 }}>
+                  Template: <a href="/question_csv_template.csv" download>Model CSV template</a>
                 </div>
               </div>
             </div>
@@ -11061,7 +11084,7 @@ export default function AdminConsole({
 
           {dailyUploadOpen ? (
             <div className="admin-modal-overlay" onClick={() => setDailyUploadOpen(false)}>
-              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal upload-question-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="admin-modal-header">
                   <div className="admin-title">Upload Daily Questions</div>
                   <button className="admin-modal-close" onClick={() => setDailyUploadOpen(false)} aria-label="Close">
@@ -11069,7 +11092,7 @@ export default function AdminConsole({
                   </button>
                 </div>
 
-                <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className="admin-form upload-question-form" style={{ marginTop: 10 }}>
                   <div className="field">
                     <label>SetID</label>
                     <input
@@ -11142,49 +11165,51 @@ export default function AdminConsole({
                     ) : null}
                   </div>
                   <div className="field">
-                    <label>Folder (PNG)</label>
-                    <input
-                      type="file"
-                      multiple
-                      webkitdirectory="true"
-                      directory="true"
-                      accept=".csv,.tsv,.png,.jpg,.jpeg,.webp"
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files ?? []);
-                        setDailyFiles(files);
-                        const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv") || f.name.toLowerCase().endsWith(".tsv"));
-                        if (csvFile) {
-                          setDailyCsvFile(csvFile);
-                          if (!dailyForm.test_version) {
-                            csvFile.text().then((text) => {
-                              const detected = detectDailyTestIdFromCsvText(text);
-                              if (detected) {
-                                setDailyForm((s) => ({ ...s, test_version: detected }));
-                              }
-                            });
+                    <label>Folder (PNG/MP3)</label>
+                    <div className="upload-question-picker">
+                      <input
+                        ref={dailyFolderInputRef}
+                        className="upload-question-picker-input"
+                        type="file"
+                        multiple
+                        webkitdirectory="true"
+                        directory="true"
+                        accept=".csv,.tsv,.png,.jpg,.jpeg,.webp"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files ?? []);
+                          setDailyFiles(files);
+                          const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv") || f.name.toLowerCase().endsWith(".tsv"));
+                          if (csvFile) {
+                            setDailyCsvFile(csvFile);
+                            if (!dailyForm.test_version) {
+                              csvFile.text().then((text) => {
+                                const detected = detectDailyTestIdFromCsvText(text);
+                                if (detected) {
+                                  setDailyForm((s) => ({ ...s, test_version: detected }));
+                                }
+                              });
+                            }
                           }
-                        }
-                      }}
-                    />
+                        }}
+                      />
+                      <button className="btn upload-question-picker-button" type="button" onClick={() => dailyFolderInputRef.current?.click()}>
+                        Choose Folder
+                      </button>
+                    </div>
                     {dailyFiles.length ? (
                       <div className="admin-help" style={{ marginTop: 4 }}>
                         Selected: {dailyFiles.length} files
                       </div>
                     ) : null}
                   </div>
-                  <div className="field small">
-                    <label>&nbsp;</label>
+                  <div className="upload-question-actions">
                     <button className="btn btn-primary" type="button" onClick={uploadDailyAssets}>
                       Upload & Register Daily Test
                     </button>
                   </div>
                 </div>
-
-                <div className="admin-help" style={{ marginTop: 6 }}>
-                  Bucket: <b>test-assets</b> / CSV, PNG
-                </div>
-                <div className="admin-help" style={{ marginTop: 4 }}>
-                  Daily CSV headers used: <code>qid</code>, <code>question</code>, <code>correct_option</code>, <code>wrong_option_1</code>, <code>wrong_option_2</code>, <code>wrong_option_3</code>, <code>description</code>, <code>illustration</code>. Extra headers are ignored.
+                <div className="admin-help" style={{ marginTop: 8 }}>
+                  Template: <a href="/daily_question_csv_template.csv" download>Daily CSV template</a>
                 </div>
               </div>
             </div>

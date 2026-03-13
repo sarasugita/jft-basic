@@ -299,8 +299,44 @@ export default function SuperAdminShell({ children }) {
     return accessToken;
   }
 
-  async function invokeEdgeFunction(functionName, body, accessToken) {
+  async function invokeEdgeFunction(functionName, body, accessToken, options = {}) {
     const isFormData = body instanceof FormData;
+    if (isFormData && typeof options.onUploadProgress === "function") {
+      const response = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${supabaseUrl}/functions/v1/${functionName}`);
+        xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+        xhr.setRequestHeader("apikey", supabaseAnonKey);
+        xhr.upload.onprogress = (event) => {
+          options.onUploadProgress({
+            loaded: event.loaded,
+            total: event.total,
+            lengthComputable: event.lengthComputable,
+          });
+        };
+        xhr.onerror = () => reject(new Error(`Failed to call ${functionName}`));
+        xhr.onload = () => {
+          const text = xhr.responseText ?? "";
+          let data = null;
+          try {
+            data = text ? JSON.parse(text) : null;
+          } catch {
+            data = text;
+          }
+          resolve({
+            response: {
+              ok: xhr.status >= 200 && xhr.status < 300,
+              status: xhr.status,
+            },
+            data,
+            text,
+          });
+        };
+        xhr.send(body);
+      });
+      return response;
+    }
+
     const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
       method: "POST",
       headers: {
@@ -322,7 +358,7 @@ export default function SuperAdminShell({ children }) {
     return { response, data, text };
   }
 
-  async function invokeWithAuth(functionName, body) {
+  async function invokeWithAuth(functionName, body, options = {}) {
     if (supabaseConfigError) {
       return { data: null, error: { message: supabaseConfigError } };
     }
@@ -330,7 +366,7 @@ export default function SuperAdminShell({ children }) {
     const execute = async (forceRefresh = false) => {
       const accessToken = await getAccessToken(forceRefresh);
       console.log("[EdgeInvoke]", functionName, "token?", !!accessToken, "forceRefresh?", forceRefresh);
-      return invokeEdgeFunction(functionName, body, accessToken);
+      return invokeEdgeFunction(functionName, body, accessToken, options);
     };
 
     let result = await execute(false);

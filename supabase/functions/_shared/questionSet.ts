@@ -267,6 +267,13 @@ function normalizeHeader(value: string) {
   return String(value ?? "").trim().toLowerCase().replace(/^\uFEFF/, "");
 }
 
+function normalizeCsvCellValue(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.toUpperCase() === "N/A") return "";
+  return raw;
+}
+
 function hashSeed(str: string) {
   let h = 0;
   for (let i = 0; i < str.length; i += 1) {
@@ -348,12 +355,20 @@ function resolveModelSectionKey(qid: string, subSection: string) {
   return MODEL_SUB_SECTION_TO_SECTION_KEY[String(subSection ?? "").trim().toLowerCase()] || "SV";
 }
 
-function computeModelOrderIndex(qid: string, fallbackIndex: number) {
+const MODEL_SECTION_ORDER: Record<string, number> = {
+  SV: 1,
+  CE: 2,
+  LC: 3,
+  RC: 4,
+};
+
+function computeModelOrderIndex(qid: string, fallbackIndex: number, sectionKey = "SV") {
   const parsed = parseModelQuestionId(qid);
+  const sectionOffset = (MODEL_SECTION_ORDER[String(sectionKey ?? "").trim().toUpperCase()] ?? 9) * 100000;
   if (Number.isFinite(parsed.mainNumber)) {
-    return parsed.mainNumber * 100 + (Number.isFinite(parsed.subNumber) ? parsed.subNumber : 0);
+    return sectionOffset + parsed.mainNumber * 100 + (Number.isFinite(parsed.subNumber) ? parsed.subNumber : 0);
   }
-  return fallbackIndex;
+  return sectionOffset + fallbackIndex;
 }
 
 function inferModelQuestionType(
@@ -398,6 +413,42 @@ function inferModelQuestionType(
   }
   if (hasSubQuestion) return "mcq_grouped_text";
   return "mcq_text";
+}
+
+function normalizeModelStemKind(value: string | null) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s/+]+/g, "_");
+}
+
+function resolveModelStemAssets(
+  stemKindInput: string | null,
+  stemImageInput: string | null,
+  stemAudioInput: string | null,
+) {
+  const stemImage = normalizeCsvCellValue(stemImageInput) || null;
+  const stemAudio = normalizeCsvCellValue(stemAudioInput) || null;
+  const normalizedStemKind = normalizeModelStemKind(stemKindInput);
+
+  const includeImage = (() => {
+    if (!normalizedStemKind) return Boolean(stemImage);
+    return ["image", "audio_image", "image_audio", "dialog", "passage_image", "table_image"].includes(normalizedStemKind);
+  })();
+  const includeAudio = (() => {
+    if (!normalizedStemKind) return Boolean(stemAudio);
+    return ["audio", "audio_image", "image_audio"].includes(normalizedStemKind);
+  })();
+
+  return {
+    stemKind: normalizedStemKind || (stemAudio ? "audio" : stemImage ? "image" : null),
+    stemImage: includeImage ? stemImage : null,
+    stemAudio: includeAudio ? stemAudio : null,
+  };
+}
+
+function isModelOptionAsset(optionType: string | null) {
+  return normalizeModelStemKind(optionType) === "image";
 }
 
 function inferMediaType(fileName: string) {
@@ -582,7 +633,7 @@ function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): 
 
   for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex];
-    const cell = (idx: number) => (idx === -1 ? "" : String(row[idx] ?? "").trim());
+    const cell = (idx: number) => (idx === -1 ? "" : normalizeCsvCellValue(row[idx]));
 
     const rawQid = cell(idxQid);
     const subSection = cell(idxSubSection);
@@ -590,8 +641,11 @@ function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): 
     const promptBn = cell(idxPromptBn);
     const stemKindInput = cell(idxStemKind);
     const stemText = cell(idxStemText);
-    const stemImage = cell(idxStemImage) || null;
-    const stemAudio = cell(idxStemAudio) || null;
+    const { stemKind, stemImage, stemAudio } = resolveModelStemAssets(
+      stemKindInput,
+      cell(idxStemImage) || null,
+      cell(idxStemAudio) || null,
+    );
     const subQuestion = cell(idxSubQuestion) || null;
     const optionType = cell(idxOptionType) || null;
     const correct = cell(idxCorrect);
@@ -628,26 +682,25 @@ function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): 
 
     const parsedId = parseModelQuestionId(rawQid);
     const sectionKey = resolveModelSectionKey(rawQid, subSection);
-    const stemKind = (() => {
-      const normalized = normalizeHeader(stemKindInput);
-      if (stemAudio) return "audio";
-      if (normalized === "audio") return "audio";
-      if (normalized === "dialog") return "dialog";
-      if (normalized === "passage_image" || normalized === "table_image") return normalized;
-      if (stemImage || normalized === "image") return "image";
-      return normalized || null;
-    })();
     const mediaFile = stemAudio || stemImage || null;
     const mediaType = stemAudio ? "audio" : stemImage ? "image" : null;
     const stemAsset = joinAssetValues(
-      stemKind === "audio" ? stemAudio : stemImage,
-      stemKind === "audio" ? stemImage : null,
+      stemAudio,
+      stemImage,
     ) || null;
 
     for (const asset of [stemImage, stemAudio].filter(Boolean)) {
       assetReferenceCount += 1;
       if (!assetNames.has(normalizeAssetName(asset))) {
         errors.push(`Row ${rowIndex + 1} (${rawQid}): referenced asset "${asset}" was not uploaded.`);
+      }
+    }
+    if (isModelOptionAsset(optionType)) {
+      for (const asset of options) {
+        assetReferenceCount += 1;
+        if (!assetNames.has(normalizeAssetName(asset))) {
+          errors.push(`Row ${rowIndex + 1} (${rawQid}): referenced asset "${asset}" was not uploaded.`);
+        }
       }
     }
 
@@ -667,7 +720,7 @@ function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): 
       options,
       media_type: mediaType,
       media_file: mediaFile,
-      order_index: computeModelOrderIndex(rawQid, rowIndex),
+      order_index: computeModelOrderIndex(rawQid, rowIndex, sectionKey),
       metadata: {
         source_format: "flat_model_csv",
         section_key: sectionKey,
@@ -717,7 +770,22 @@ export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[], 
   }
 
   const normalizedHeader = rows[0].map(normalizeHeader);
-  if (normalizedHeader.includes("sub_section") && normalizedHeader.includes("correct_option")) {
+  const hasFlatModelColumns = (() => {
+    const findIdx = (names: string[]) => {
+      for (const name of names) {
+        const idx = normalizedHeader.indexOf(normalizeHeader(name));
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+    return (
+      findIdx(["qid"]) !== -1
+      && findIdx(["sub_section", "sub section"]) !== -1
+      && findIdx(["correct_option", "correct option"]) !== -1
+    );
+  })();
+
+  if (hasFlatModelColumns) {
     return validateFlatModelQuestionSetCsv(rows, assetFiles);
   }
 
@@ -932,12 +1000,16 @@ function normalizeLegacyOptionValue(
   return matchedPath ? buildPublicAssetUrl(matchedPath) : text;
 }
 
-function resolveLegacyAnswerIndex(options: unknown[], correctAnswer: unknown) {
+function resolveLegacyAnswerIndex(
+  options: unknown[],
+  correctAnswer: unknown,
+  uploadedAssets: Map<string, string>,
+) {
   if (typeof correctAnswer === "number" && Number.isFinite(correctAnswer)) {
     return Number(correctAnswer);
   }
 
-  const correctText = String(correctAnswer ?? "").trim();
+  const correctText = normalizeLegacyOptionValue(correctAnswer, uploadedAssets);
   if (!correctText) return null;
 
   const exactIndex = options.findIndex((option) => String(option ?? "").trim() === correctText);
@@ -1025,7 +1097,7 @@ export async function syncLegacyTestCatalog(
     const promptBn = String(question.metadata?.prompt_bn ?? "").trim() || null;
     const stemText = String(question.metadata?.stem_text ?? "").trim()
       || (testType === "daily" ? "" : (!question.metadata?.source_format ? String(question.question_text ?? "").trim() : ""));
-    const answerIndex = resolveLegacyAnswerIndex(resolvedOptions, question.correct_answer);
+    const answerIndex = resolveLegacyAnswerIndex(resolvedOptions, question.correct_answer, uploadedAssets);
     if (answerIndex == null) {
       throw new Error(`Legacy answer mapping failed for question "${question.qid}"`);
     }
@@ -1102,10 +1174,11 @@ export async function syncLegacyTestCatalog(
   const choiceRows = legacyQuestions.flatMap((question) => {
     const questionUuid = questionIdMap.get(question.question_id);
     const choiceValues = Array.isArray(question.data?.choices) ? question.data.choices : [];
+    const useImageChoices = isModelOptionAsset(String(question.data?.optionType ?? question.data?.option_type ?? "").trim() || null);
     if (!questionUuid) return [];
     return choiceValues.map((value, choiceIndex) => {
       const textValue = String(value ?? "").trim();
-      const isImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(textValue) || textValue.includes("/storage/v1/object/public/");
+      const isImage = useImageChoices || /\.(png|jpe?g|webp|gif|svg)$/i.test(textValue) || textValue.includes("/storage/v1/object/public/");
       return {
         question_id: questionUuid,
         part_index: null,
