@@ -400,6 +400,10 @@ function getProblemSetDisplayId(problemSetId, testsList) {
   return problemSetId || "";
 }
 
+function buildSourceQuestionKey(sourceVersion, sourceQuestionId) {
+  return `${String(sourceVersion ?? "").trim()}::${String(sourceQuestionId ?? "").trim()}`;
+}
+
 function isRetakeSessionTitle(title) {
   return String(title ?? "").trim().startsWith("[Retake]");
 }
@@ -510,13 +514,19 @@ function getQuestionIllustration(question) {
 function mapDbQuestion(row) {
   const data = row.data ?? {};
   return {
+    dbId: row.id ?? null,
     id: row.question_id,
+    questionId: row.question_id,
+    testVersion: row.test_version ?? "",
     sectionKey: row.section_key,
     type: row.type,
     promptEn: row.prompt_en,
     promptBn: row.prompt_bn,
     answerIndex: row.answer_index,
     orderIndex: row.order_index ?? 0,
+    rawData: data,
+    sourceVersion: data.sourceVersion ?? null,
+    sourceQuestionId: data.sourceQuestionId ?? null,
     ...data,
   };
 }
@@ -816,7 +826,7 @@ function formatOrdinal(value) {
   return `${num}${suffix}`;
 }
 
-function QuestionPreviewCard({ question, index }) {
+function QuestionPreviewCard({ question, index, children }) {
   const prompt = question.promptEn || question.promptBn || "";
   const choices = question.choices ?? question.choicesJa ?? [];
   const stemKind = question.stemKind || "";
@@ -858,8 +868,11 @@ function QuestionPreviewCard({ question, index }) {
 
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
-      <div style={{ fontWeight: 700 }}>
-        {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""} {index != null ? `#${index + 1}` : ""}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 700 }}>
+          {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""} {index != null ? `#${index + 1}` : ""}
+        </div>
+        {children ? <div style={{ display: "flex", justifyContent: "flex-end" }}>{children}</div> : null}
       </div>
       {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
       {question.type === "daily" && stemExtra ? (
@@ -1732,6 +1745,11 @@ export default function AdminConsole({
   const [previewQuestions, setPreviewQuestions] = useState([]);
   const [previewAnswers, setPreviewAnswers] = useState({});
   const [previewMsg, setPreviewMsg] = useState("");
+  const [previewSession, setPreviewSession] = useState(null);
+  const [previewReplacementPool, setPreviewReplacementPool] = useState([]);
+  const [previewReplacementDrafts, setPreviewReplacementDrafts] = useState({});
+  const [previewReplacementSavingId, setPreviewReplacementSavingId] = useState("");
+  const [previewReplacementMsg, setPreviewReplacementMsg] = useState("");
   const [attemptQuestionsByVersion, setAttemptQuestionsByVersion] = useState({});
   const [attemptQuestionsLoading, setAttemptQuestionsLoading] = useState(false);
   const [attemptQuestionsError, setAttemptQuestionsError] = useState("");
@@ -5397,11 +5415,16 @@ export default function AdminConsole({
   async function openPreview(testVersion) {
     setPreviewOpen(true);
     setPreviewTest(testVersion);
+    setPreviewSession(null);
+    setPreviewReplacementPool([]);
+    setPreviewReplacementDrafts({});
+    setPreviewReplacementSavingId("");
+    setPreviewReplacementMsg("");
     setPreviewAnswers({});
     setPreviewMsg("Loading...");
     const { data, error } = await supabase
       .from("questions")
-      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
       .eq("test_version", testVersion)
       .order("order_index", { ascending: true });
     if (error) {
@@ -5415,12 +5438,179 @@ export default function AdminConsole({
     setPreviewMsg(list.length ? "" : "No questions.");
   }
 
+  async function openSessionPreview(session) {
+    if (!session?.problem_set_id) return;
+    setPreviewOpen(true);
+    setPreviewSession(session);
+    setPreviewTest(session.title || session.problem_set_id);
+    setPreviewReplacementPool([]);
+    setPreviewReplacementDrafts({});
+    setPreviewReplacementSavingId("");
+    setPreviewReplacementMsg("");
+    setPreviewAnswers({});
+    setPreviewMsg("Loading...");
+
+    const { data, error } = await supabase
+      .from("questions")
+      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .eq("test_version", session.problem_set_id)
+      .order("order_index", { ascending: true });
+    if (error) {
+      console.error("session preview questions error:", error);
+      setPreviewQuestions([]);
+      setPreviewMsg(`Load failed: ${error.message}`);
+      return;
+    }
+
+    const list = (data ?? []).map(mapDbQuestion);
+    setPreviewQuestions(list);
+    setPreviewMsg(list.length ? "" : "No questions.");
+
+    if (!isGeneratedDailySessionVersion(session.problem_set_id)) {
+      return;
+    }
+
+    const sourceSetIds = Array.from(
+      new Set(list.map((question) => question.sourceVersion).filter(Boolean))
+    );
+    if (!sourceSetIds.length) return;
+
+    const { data: sourceData, error: sourceError } = await supabase
+      .from("questions")
+      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .in("test_version", sourceSetIds)
+      .order("test_version", { ascending: true })
+      .order("order_index", { ascending: true });
+    if (sourceError) {
+      console.error("session preview source questions error:", sourceError);
+      setPreviewReplacementMsg(`Replacement load failed: ${sourceError.message}`);
+      return;
+    }
+
+    const replacementPool = (sourceData ?? []).map((row) => {
+      const mapped = mapDbQuestion(row);
+      return {
+        ...mapped,
+        sourceVersion: row.test_version,
+        sourceQuestionId: row.question_id,
+      };
+    });
+    setPreviewReplacementPool(replacementPool);
+  }
+
   function closePreview() {
     setPreviewOpen(false);
     setPreviewTest("");
+    setPreviewSession(null);
     setPreviewQuestions([]);
     setPreviewAnswers({});
     setPreviewMsg("");
+    setPreviewReplacementPool([]);
+    setPreviewReplacementDrafts({});
+    setPreviewReplacementSavingId("");
+    setPreviewReplacementMsg("");
+  }
+
+  async function replacePreviewQuestion(targetDbId) {
+    if (!previewSession?.problem_set_id || !targetDbId) return;
+    const nextKey = previewReplacementDrafts[targetDbId];
+    if (!nextKey) {
+      setPreviewReplacementMsg("Choose a replacement question first.");
+      return;
+    }
+
+    const targetQuestion = previewQuestions.find((question) => question.dbId === targetDbId);
+    const sourceQuestion = previewReplacementPool.find((question) =>
+      buildSourceQuestionKey(question.sourceVersion || question.testVersion, question.sourceQuestionId || question.questionId) === nextKey
+    );
+    if (!targetQuestion || !sourceQuestion?.dbId) {
+      setPreviewReplacementMsg("Replacement question was not found.");
+      return;
+    }
+
+    setPreviewReplacementSavingId(targetDbId);
+    setPreviewReplacementMsg("");
+
+    const { data: sourceChoices, error: sourceChoicesError } = await supabase
+      .from("choices")
+      .select("part_index, choice_index, label, choice_image")
+      .eq("question_id", sourceQuestion.dbId);
+    if (sourceChoicesError) {
+      console.error("replacement choices fetch error:", sourceChoicesError);
+      setPreviewReplacementMsg(`Replacement load failed: ${sourceChoicesError.message}`);
+      setPreviewReplacementSavingId("");
+      return;
+    }
+
+    const nextData = {
+      ...(sourceQuestion.rawData ?? {}),
+      itemId: targetQuestion.id,
+      sourceVersion: sourceQuestion.sourceVersion || sourceQuestion.testVersion || null,
+      sourceQuestionId: sourceQuestion.sourceQuestionId || sourceQuestion.questionId || null,
+    };
+
+    const { error: updateQuestionError } = await supabase
+      .from("questions")
+      .update({
+        section_key: sourceQuestion.sectionKey,
+        type: sourceQuestion.type,
+        prompt_en: sourceQuestion.promptEn ?? null,
+        prompt_bn: sourceQuestion.promptBn ?? null,
+        answer_index: sourceQuestion.answerIndex,
+        data: nextData,
+      })
+      .eq("id", targetDbId);
+    if (updateQuestionError) {
+      console.error("replacement question update error:", updateQuestionError);
+      setPreviewReplacementMsg(`Replace failed: ${updateQuestionError.message}`);
+      setPreviewReplacementSavingId("");
+      return;
+    }
+
+    const { error: deleteChoicesError } = await supabase
+      .from("choices")
+      .delete()
+      .eq("question_id", targetDbId);
+    if (deleteChoicesError) {
+      console.error("replacement delete choices error:", deleteChoicesError);
+      setPreviewReplacementMsg(`Replace failed: ${deleteChoicesError.message}`);
+      setPreviewReplacementSavingId("");
+      return;
+    }
+
+    const nextChoices = (sourceChoices ?? []).map((choice) => ({
+      question_id: targetDbId,
+      part_index: choice.part_index ?? null,
+      choice_index: choice.choice_index,
+      label: choice.label,
+      choice_image: choice.choice_image,
+    }));
+    if (nextChoices.length) {
+      const { error: insertChoicesError } = await supabase.from("choices").insert(nextChoices);
+      if (insertChoicesError) {
+        console.error("replacement insert choices error:", insertChoicesError);
+        setPreviewReplacementMsg(`Replace failed: ${insertChoicesError.message}`);
+        setPreviewReplacementSavingId("");
+        return;
+      }
+    }
+
+    setPreviewQuestions((current) => current.map((question) => {
+      if (question.dbId !== targetDbId) return question;
+      return {
+        ...sourceQuestion,
+        dbId: question.dbId,
+        id: question.id,
+        questionId: question.questionId,
+        orderIndex: question.orderIndex,
+        rawData: nextData,
+        sourceVersion: sourceQuestion.sourceVersion || sourceQuestion.testVersion || null,
+        sourceQuestionId: sourceQuestion.sourceQuestionId || sourceQuestion.questionId || null,
+      };
+    }));
+    setPreviewReplacementDrafts((current) => ({ ...current, [targetDbId]: "" }));
+    setPreviewReplacementSavingId("");
+    setPreviewReplacementMsg("Question replaced.");
   }
 
   async function deleteTest(testVersion) {
@@ -8517,6 +8707,7 @@ export default function AdminConsole({
                       <th>Created</th>
                       <th>Test Title</th>
                       <th>SetID</th>
+                      <th>Preview</th>
                       <th>Show Answers</th>
                       <th>Attempts</th>
                       <th>Start</th>
@@ -8524,6 +8715,7 @@ export default function AdminConsole({
                       <th>Time (min)</th>
                       <th>Pass Rate</th>
                       <th>Action</th>
+                      <th>Preview</th>
                       <th>Edit</th>
                       <th>Delete</th>
                     </tr>
@@ -9203,9 +9395,10 @@ export default function AdminConsole({
                       <th>End</th>
                       <th>Time (min)</th>
                       <th>Pass Rate</th>
-                      <th>Action</th>
-                      <th>Edit</th>
-                      <th>Delete</th>
+                      <th style={{ textAlign: "center" }}>Action</th>
+                      <th style={{ textAlign: "center" }}>Preview</th>
+                      <th style={{ textAlign: "center" }}>Edit</th>
+                      <th style={{ textAlign: "center" }}>Delete</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -9222,7 +9415,7 @@ export default function AdminConsole({
                             t.title ?? ""
                           )}
                         </td>
-                        <td>{t.problem_set_id ?? ""}</td>
+                        <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
                         <td>
                           {editingSessionId === t.id ? (
                             <select
@@ -9282,7 +9475,7 @@ export default function AdminConsole({
                               : ""
                           )}
                         </td>
-                        <td>
+                        <td style={{ textAlign: "center" }}>
                           {linkBySession[t.id]?.id ? (
                             <button
                               className="btn"
@@ -9297,7 +9490,18 @@ export default function AdminConsole({
                             ""
                           )}
                         </td>
-                        <td>
+                        <td style={{ textAlign: "center" }}>
+                          <button
+                            className="btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSessionPreview(t);
+                            }}
+                          >
+                            Preview
+                          </button>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
                           {editingSessionId === t.id ? (
                             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                               <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); saveSessionEdits(); }}>
@@ -9313,7 +9517,7 @@ export default function AdminConsole({
                             </button>
                           )}
                         </td>
-                        <td>
+                        <td style={{ textAlign: "center" }}>
                           <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
                             Delete
                           </button>
@@ -9536,25 +9740,25 @@ export default function AdminConsole({
                       </div>
                       <div className="daily-session-create-field">
                         <label>Number of Questions</label>
-                        <div className="daily-session-create-choice-row daily-session-create-count-row">
-                          <label className="daily-session-create-choice">
+                        <div className="daily-session-create-count-row">
+                          <label className="daily-session-create-radio-option">
                             <input
                               type="radio"
                               name="dailySessionQuestionMode"
                               checked={dailySessionForm.question_count_mode === "all"}
                               onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "all", question_count: "" }))}
                             />
-                            <span className="daily-session-create-choice-copy">All Questions</span>
+                            <span>All Questions</span>
                           </label>
                           <div className="daily-session-create-count-option">
-                            <label className="daily-session-create-choice">
+                            <label className="daily-session-create-radio-option">
                               <input
                                 type="radio"
                                 name="dailySessionQuestionMode"
                                 checked={dailySessionForm.question_count_mode === "specify"}
                                 onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "specify" }))}
                               />
-                              <span className="daily-session-create-choice-copy">Specify</span>
+                              <span>Specify</span>
                             </label>
                             <input
                               className={`daily-session-create-count-input ${dailySessionForm.question_count_mode === "specify" ? "is-active" : ""}`}
@@ -11128,7 +11332,9 @@ export default function AdminConsole({
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn" onClick={closePreview}>Exit Preview</button>
-                    <button className="btn" onClick={() => deleteTest(previewTest)}>Delete Test</button>
+                    {!previewSession ? (
+                      <button className="btn" onClick={() => deleteTest(previewTest)}>Delete Test</button>
+                    ) : null}
                   </div>
                 </div>
 
@@ -11136,7 +11342,13 @@ export default function AdminConsole({
                   <div className="admin-help">
                     Total: <b>{previewQuestions.length}</b>
                   </div>
+                  {previewSession ? (
+                    <div className="admin-help">
+                      Session preview for: <b>{previewSession.title || previewSession.problem_set_id}</b>
+                    </div>
+                  ) : null}
                   {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
+                  {previewReplacementMsg ? <div className="admin-msg">{previewReplacementMsg}</div> : null}
                   {!previewMsg && previewQuestions.length === 0 ? (
                     <div className="admin-help" style={{ marginTop: 6 }}>
                       No questions. Upload & Register SetでCSVを取り込むか、CSVの`test_version`がこのセットと一致しているか確認してください。
@@ -11145,9 +11357,67 @@ export default function AdminConsole({
                 </div>
 
                 <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
-                  {previewQuestions.map((question, index) => (
-                    <QuestionPreviewCard key={`${question.id}-${index}`} question={question} index={index} />
-                  ))}
+                  {previewQuestions.map((question, index) => {
+                    const activeSourceKeys = new Set(
+                      previewQuestions
+                        .map((item) => buildSourceQuestionKey(item.sourceVersion, item.sourceQuestionId))
+                        .filter((key) => key !== "::")
+                    );
+                    const currentSourceKey = buildSourceQuestionKey(question.sourceVersion, question.sourceQuestionId);
+                    activeSourceKeys.delete(currentSourceKey);
+                    const replacementOptions = previewReplacementPool.filter((candidate) => {
+                      const candidateKey = buildSourceQuestionKey(
+                        candidate.sourceVersion || candidate.testVersion,
+                        candidate.sourceQuestionId || candidate.questionId
+                      );
+                      return candidateKey !== currentSourceKey && !activeSourceKeys.has(candidateKey);
+                    });
+                    const canReplace = Boolean(
+                      previewSession
+                      && isGeneratedDailySessionVersion(previewSession.problem_set_id)
+                      && replacementOptions.length
+                      && question.dbId
+                    );
+                    return (
+                      <QuestionPreviewCard key={`${question.id}-${index}`} question={question} index={index}>
+                        {canReplace ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <select
+                              value={previewReplacementDrafts[question.dbId] ?? ""}
+                              onChange={(e) =>
+                                setPreviewReplacementDrafts((current) => ({
+                                  ...current,
+                                  [question.dbId]: e.target.value,
+                                }))
+                              }
+                              style={{ minWidth: 260 }}
+                            >
+                              <option value="">Replace with...</option>
+                              {replacementOptions.map((candidate) => {
+                                const candidateKey = buildSourceQuestionKey(
+                                  candidate.sourceVersion || candidate.testVersion,
+                                  candidate.sourceQuestionId || candidate.questionId
+                                );
+                                return (
+                                  <option key={`${question.dbId}-${candidateKey}`} value={candidateKey}>
+                                    {(candidate.sourceVersion || candidate.testVersion)} / {(candidate.sourceQuestionId || candidate.questionId)}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <button
+                              className="btn"
+                              type="button"
+                              disabled={previewReplacementSavingId === question.dbId}
+                              onClick={() => replacePreviewQuestion(question.dbId)}
+                            >
+                              {previewReplacementSavingId === question.dbId ? "Replacing..." : "Replace Question"}
+                            </button>
+                          </div>
+                        ) : null}
+                      </QuestionPreviewCard>
+                    );
+                  })}
                 </div>
               </div>
             </div>

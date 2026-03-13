@@ -1317,8 +1317,16 @@ body { padding: 0; }
 .daily-session-create-set-option {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
   gap: 12px;
   padding: 6px 0;
+  box-sizing: border-box;
+}
+
+.daily-session-create-field label.daily-session-create-set-option {
+  display: flex;
+  align-items: center;
 }
 
 .daily-session-create-set-option-main {
@@ -1326,8 +1334,8 @@ body { padding: 0; }
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
-  align-items: center;
   gap: 8px;
+  white-space: nowrap;
 }
 
 .daily-session-create-set-option-check {
@@ -1349,10 +1357,14 @@ body { padding: 0; }
 }
 
 .daily-session-create-set-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   flex: 0 0 auto;
   margin-left: auto;
   white-space: nowrap;
   align-self: center;
+  text-align: right;
 }
 
 .daily-session-create-selected-list {
@@ -1387,11 +1399,27 @@ body { padding: 0; }
 }
 
 .daily-session-create-count-row .daily-session-create-choice {
-  min-height: 34px;
+  gap: 22px;
+  min-height: 30px;
+  align-items: center;
+}
+
+.daily-session-create-count-row .daily-session-create-choice input {
+  margin-right: 0;
 }
 
 .daily-session-create-count-row .daily-session-create-choice-copy {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+}
+
+.daily-session-create-field .daily-session-create-count-row .daily-session-create-count-input {
+  min-height: 28px;
+  height: 28px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-left: 8px;
+  padding-right: 8px;
+  align-self: center;
 }
 
 .daily-session-create-time-picker-wrap {
