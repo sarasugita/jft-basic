@@ -9,11 +9,93 @@ function emptyForm() {
     id: "",
     name: "",
     status: "active",
-    academic_year: "",
-    term: "",
     start_date: "",
     end_date: "",
   };
+}
+
+function parseSeparatedRows(text, delimiter) {
+  const rows = [];
+  let row = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (inQuotes) {
+      if (char === '"' && next === '"') {
+        current += '"';
+        index += 1;
+        continue;
+      }
+      if (char === '"') {
+        inQuotes = false;
+        continue;
+      }
+      current += char;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (char === delimiter) {
+      row.push(current);
+      current = "";
+      continue;
+    }
+    if (char === "\n") {
+      row.push(current);
+      rows.push(row);
+      row = [];
+      current = "";
+      continue;
+    }
+    if (char === "\r") continue;
+    current += char;
+  }
+
+  row.push(current);
+  rows.push(row);
+
+  return rows.filter((cells) => cells.some((cell) => String(cell ?? "").trim().length));
+}
+
+function detectDelimiter(text) {
+  const firstLine = String(text ?? "").split(/\r?\n/)[0] ?? "";
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  return tabCount > commaCount ? "\t" : ",";
+}
+
+function parseStudentCsv(text) {
+  const rows = parseSeparatedRows(text, detectDelimiter(text));
+  if (rows.length === 0) return [];
+
+  const headers = rows[0].map((value) => String(value ?? "").trim().replace(/^\uFEFF/, "").toLowerCase());
+  const emailIndex = headers.indexOf("email");
+  const nameIndex = headers.indexOf("display_name");
+  const studentCodeIndex = headers.indexOf("student_code");
+  const tempPasswordIndex = headers.indexOf("temp_password");
+
+  if (emailIndex === -1) {
+    throw new Error("CSV must include 'email' header.");
+  }
+
+  const readCell = (row, index) => (index === -1 ? "" : String(row[index] ?? "").trim());
+
+  return rows
+    .slice(1)
+    .map((row) => ({
+      email: readCell(row, emailIndex).toLowerCase(),
+      display_name: readCell(row, nameIndex),
+      student_code: readCell(row, studentCodeIndex),
+      temp_password: readCell(row, tempPasswordIndex),
+    }))
+    .filter((student) => student.email);
 }
 
 function formatPercent(value) {
@@ -52,6 +134,11 @@ export default function SuperSchoolsPage() {
   });
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
+  const [studentCsvFile, setStudentCsvFile] = useState(null);
+  const [studentCsvInputKey, setStudentCsvInputKey] = useState(0);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,8 +206,21 @@ export default function SuperSchoolsPage() {
     });
   }, [schools, search, statusFilter]);
 
-  function openCreateModal() {
+  function resetModalState() {
     setForm(emptyForm());
+    setStudentCsvFile(null);
+    setStudentCsvInputKey((value) => value + 1);
+    setDeleteConfirmText("");
+    setDeleteConfirmOpen(false);
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    resetModalState();
+  }
+
+  function openCreateModal() {
+    resetModalState();
     setModalOpen(true);
     setMsg("");
   }
@@ -130,11 +230,13 @@ export default function SuperSchoolsPage() {
       id: school.id,
       name: school.name ?? "",
       status: school.status ?? "active",
-      academic_year: school.academic_year ?? "",
-      term: school.term ?? "",
       start_date: school.start_date ?? "",
       end_date: school.end_date ?? "",
     });
+    setStudentCsvFile(null);
+    setStudentCsvInputKey((value) => value + 1);
+    setDeleteConfirmText("");
+    setDeleteConfirmOpen(false);
     setModalOpen(true);
     setMsg("");
   }
@@ -179,8 +281,6 @@ export default function SuperSchoolsPage() {
       school_id: form.id || undefined,
       name: form.name.trim(),
       status: form.status,
-      academic_year: form.academic_year.trim() || null,
-      term: form.term.trim() || null,
       start_date: form.start_date || null,
       end_date: form.end_date || null,
       updated_at: new Date().toISOString(),
@@ -189,26 +289,106 @@ export default function SuperSchoolsPage() {
       setMsg("School name is required.");
       return;
     }
+    if (payload.start_date && payload.end_date && payload.end_date < payload.start_date) {
+      setMsg("End date must be the same as or after the start date.");
+      return;
+    }
 
     setSaving(true);
     setMsg("");
     const data = await invokeManageSchools(payload);
+    if (!data) {
+      setSaving(false);
+      return;
+    }
+
+    let nextMessage = form.id ? "School updated." : "School created.";
+
+    if (!form.id && studentCsvFile) {
+      if (payload.status !== "active") {
+        nextMessage = "School created. Student import was skipped because the school is inactive.";
+      } else {
+        let students = [];
+        try {
+          students = parseStudentCsv(await studentCsvFile.text());
+        } catch (csvError) {
+          students = null;
+          nextMessage = `School created, but the student CSV could not be read: ${String(csvError?.message ?? csvError)}`;
+        }
+
+        if (students) {
+          if (students.length === 0) {
+            nextMessage = "School created. No students were imported because the CSV had no data rows.";
+          } else {
+            let inviteData;
+            let inviteError;
+            try {
+              ({ data: inviteData, error: inviteError } = await invokeWithAuth("invite-students", {
+                school_id: data.school?.id,
+                students,
+              }));
+            } catch (invokeError) {
+              inviteError = invokeError;
+            }
+
+            if (inviteError) {
+              let inviteMessage = String(inviteError?.message ?? inviteError);
+              try {
+                if (inviteError?.context) {
+                  const errorBody = await inviteError.context.json();
+                  inviteMessage = errorBody?.detail
+                    ? `${errorBody.error}: ${errorBody.detail}`
+                    : errorBody?.error ?? inviteMessage;
+                }
+              } catch {
+                inviteMessage = String(inviteError?.message ?? inviteError);
+              }
+              nextMessage = `School created, but student import failed: ${inviteMessage}`;
+            } else if (inviteData?.error) {
+              nextMessage = `School created, but student import failed: ${inviteData.error}`;
+            } else {
+              const results = Array.isArray(inviteData?.results) ? inviteData.results : [];
+              const successCount = results.filter((result) => result?.ok).length;
+              const failedResults = results.filter((result) => !result?.ok);
+              if (failedResults.length > 0) {
+                const firstError = failedResults[0]?.error ? ` First error: ${failedResults[0].error}` : "";
+                nextMessage = `School created. Imported ${successCount} students; ${failedResults.length} failed.${firstError}`;
+              } else {
+                nextMessage = `School created. Imported ${successCount} students.`;
+              }
+            }
+          }
+        }
+      }
+    }
+
     setSaving(false);
-    if (!data) return;
-    setModalOpen(false);
-    setForm(emptyForm());
+    closeModal();
+    setMsg(nextMessage);
     setRefreshNonce((value) => value + 1);
   }
 
-  async function toggleSchoolStatus(school) {
+  async function deleteSchool() {
+    if (!form.id) return;
+    if (deleteConfirmText !== "DELETE") {
+      setMsg("Type DELETE to permanently remove this school.");
+      return;
+    }
+
+    setDeleting(true);
     setMsg("");
-    const nextStatus = school.status === "active" ? "inactive" : "active";
     const data = await invokeManageSchools({
-      action: "set_status",
-      school_id: school.id,
-      status: nextStatus,
+      action: "delete",
+      school_id: form.id,
+      confirm_text: deleteConfirmText,
     });
+    setDeleting(false);
     if (!data) return;
+
+    closeModal();
+    const deletedUsers = Number(data?.summary?.deletedUserCount ?? 0);
+    const preservedAdmins = Number(data?.summary?.preservedAdminCount ?? 0);
+    setMsg(`School deleted permanently. Removed ${deletedUsers} users and preserved ${preservedAdmins} shared admins.`);
     setRefreshNonce((value) => value + 1);
   }
 
@@ -313,25 +493,13 @@ export default function SuperSchoolsPage() {
                           </span>
                           Admin List
                         </Link>
-                        <button className="super-edit-link" onClick={() => openEditModal(school)}>
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path
-                              d="M4 20h4l10-10-4-4L4 16v4Z"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                            <path
-                              d="m12.5 7.5 4 4"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
+                        <button className="btn super-inline-btn" onClick={() => openEditModal(school)}>
+                          <span className="super-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <path d="M4 20h4l10-10-4-4L4 16v4Z" />
+                              <path d="m12.5 7.5 4 4" />
+                            </svg>
+                          </span>
                           Edit
                         </button>
                       </div>
@@ -350,71 +518,131 @@ export default function SuperSchoolsPage() {
       </section>
 
       {modalOpen ? (
-        <div className="admin-modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="admin-modal-header">
+        <div className="admin-modal-overlay" onClick={closeModal}>
+          <div className="admin-modal super-school-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal-header super-school-modal-header">
               <div className="admin-title">{form.id ? "Edit School" : "Create School"}</div>
-              <button className="admin-modal-close" onClick={() => setModalOpen(false)} aria-label="Close">
-                ×
+              <button className="admin-modal-close super-school-modal-close" onClick={closeModal} aria-label="Close">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
               </button>
             </div>
-            <div className="admin-form" style={{ marginTop: 12 }}>
-              <div className="field">
+            <div className="super-school-modal-body">
+              <div className="super-school-modal-field">
                 <label>School Name</label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                 />
               </div>
-              <div className="field small">
+
+              <div className="super-school-modal-grid">
+                <div className="super-school-modal-field">
+                  <label>Start Date</label>
+                  <input
+                    type="date"
+                    value={form.start_date}
+                    onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))}
+                  />
+                </div>
+                <div className="super-school-modal-field">
+                  <label>End Date</label>
+                  <input
+                    type="date"
+                    value={form.end_date}
+                    onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {!form.id ? (
+                <div className="super-school-modal-field">
+                  <label>Add Students</label>
+                  <div className="super-school-upload-row">
+                    <label className="super-school-upload-trigger">
+                      <input
+                        key={studentCsvInputKey}
+                        className="super-school-upload-input"
+                        type="file"
+                        accept=".csv,text/csv"
+                        onChange={(event) => setStudentCsvFile(event.target.files?.[0] ?? null)}
+                      />
+                      <span>{studentCsvFile ? "Replace csv file" : "Select csv file"}</span>
+                    </label>
+                    {studentCsvFile ? <div className="super-school-upload-name">{studentCsvFile.name}</div> : null}
+                  </div>
+                  <div className="super-school-upload-note">
+                    required: email, display_name, student_code, temp_password
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="super-school-modal-field super-school-status-field">
                 <label>Status</label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive / Deactivated</option>
-                </select>
-                <div className="admin-help">Use this field to deactivate or reactivate the school.</div>
+                <div className={`super-school-status-wrap ${form.status === "inactive" ? "inactive" : "active"}`}>
+                  <select
+                    value={form.status}
+                    onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
               </div>
-              <div className="field small">
-                <label>Academic Year</label>
-                <input
-                  value={form.academic_year}
-                  onChange={(e) => setForm((prev) => ({ ...prev, academic_year: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label>Term</label>
-                <input
-                  value={form.term}
-                  onChange={(e) => setForm((prev) => ({ ...prev, term: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label>Start Date</label>
-                <input
-                  type="date"
-                  value={form.start_date}
-                  onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))}
-                />
-                <div className="admin-help">Optional.</div>
-              </div>
-              <div className="field small">
-                <label>End Date</label>
-                <input
-                  type="date"
-                  value={form.end_date}
-                  onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))}
-                />
-                <div className="admin-help">Optional.</div>
-              </div>
-            </div>
-            <div className="admin-actions" style={{ marginTop: 16 }}>
-              <button className="btn btn-primary" disabled={saving} onClick={saveSchool}>
-                {saving ? "Saving..." : (form.id ? "Save Changes" : "Create School")}
-              </button>
-              <button className="btn" onClick={() => setModalOpen(false)}>Cancel</button>
+
+              {form.id ? (
+                <>
+                  <div className="super-school-action-row">
+                    <button
+                      className="btn btn-danger super-school-action-btn super-school-secondary-action"
+                      disabled={saving || deleting}
+                      onClick={() => setDeleteConfirmOpen((value) => !value)}
+                    >
+                      Delete School
+                    </button>
+                    <button className="btn btn-primary super-school-action-btn super-school-submit" disabled={saving || deleting} onClick={saveSchool}>
+                      {saving ? "Saving..." : "Save School"}
+                    </button>
+                  </div>
+
+                  {deleteConfirmOpen ? (
+                    <div className="super-school-delete-panel">
+                      <label>Type DELETE to permanently delete this school and its records</label>
+                      <input
+                        value={deleteConfirmText}
+                        onChange={(e) => setDeleteConfirmText(e.target.value)}
+                        placeholder="DELETE"
+                      />
+                      <div className="super-school-delete-actions">
+                        <button
+                          className="btn btn-danger super-school-action-btn super-school-delete-btn"
+                          disabled={deleting || deleteConfirmText !== "DELETE"}
+                          onClick={deleteSchool}
+                        >
+                          {deleting ? "Deleting..." : "Confirm Delete"}
+                        </button>
+                        <button
+                          className="btn super-school-action-btn super-school-delete-cancel"
+                          disabled={deleting}
+                          onClick={() => {
+                            setDeleteConfirmOpen(false);
+                            setDeleteConfirmText("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+
+              {!form.id ? (
+                <button className="btn btn-primary super-school-submit" disabled={saving || deleting} onClick={saveSchool}>
+                  {saving ? "Saving..." : "Create School"}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

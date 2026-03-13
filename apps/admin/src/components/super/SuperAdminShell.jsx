@@ -8,6 +8,7 @@ import {
   getAdminSupabaseConfig,
   getAdminSupabaseConfigError,
 } from "../../lib/adminSupabase";
+import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../../lib/adminDiagnostics";
 import { syncAdminAuthCookie } from "../../lib/authCookies";
 
 const SuperAdminContext = createContext(null);
@@ -251,6 +252,7 @@ export function useSuperAdmin() {
 export default function SuperAdminShell({ children }) {
   const pathname = usePathname();
   const router = useRouter();
+  const bypassShellAuth = isScopedAdminConsolePath(pathname);
   const supabaseConfigError = getAdminSupabaseConfigError();
   const { supabaseUrl, supabaseAnonKey } = getAdminSupabaseConfig();
   const supabase = useMemo(() => (supabaseConfigError ? null : createAdminSupabaseClient()), [supabaseConfigError]);
@@ -271,7 +273,7 @@ export default function SuperAdminShell({ children }) {
     window.localStorage.setItem(ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
   }, [sidebarCollapsed]);
 
-  async function getAccessToken() {
+  async function getAccessToken(forceRefresh = false) {
     if (!supabase) {
       throw new Error(supabaseConfigError || "Admin client is unavailable.");
     }
@@ -279,9 +281,12 @@ export default function SuperAdminShell({ children }) {
     let accessToken = sessionData?.session?.access_token ?? null;
     const expiresAt = sessionData?.session?.expires_at ?? 0;
 
-    if (!accessToken || expiresAt * 1000 < Date.now() + 60_000) {
+    if (forceRefresh || !accessToken || expiresAt * 1000 < Date.now() + 60_000) {
       const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
       if (refreshError) {
+        logAdminRequestFailure("Super shell refreshSession failed", refreshError, {
+          pathname,
+        });
         throw new Error(refreshError.message || "Failed to refresh session");
       }
       accessToken = refreshed?.session?.access_token ?? null;
@@ -294,54 +299,71 @@ export default function SuperAdminShell({ children }) {
     return accessToken;
   }
 
+  async function invokeEdgeFunction(functionName, body, accessToken) {
+    const isFormData = body instanceof FormData;
+    const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        apikey: supabaseAnonKey,
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
+      },
+      body: isFormData ? body : JSON.stringify(body ?? {}),
+    });
+
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text;
+    }
+
+    return { response, data, text };
+  }
+
   async function invokeWithAuth(functionName, body) {
     if (supabaseConfigError) {
       return { data: null, error: { message: supabaseConfigError } };
     }
-    const accessToken = await getAccessToken();
 
-    console.log("[EdgeInvoke]", functionName, "token?", !!accessToken);
+    const execute = async (forceRefresh = false) => {
+      const accessToken = await getAccessToken(forceRefresh);
+      console.log("[EdgeInvoke]", functionName, "token?", !!accessToken, "forceRefresh?", forceRefresh);
+      return invokeEdgeFunction(functionName, body, accessToken);
+    };
 
-    if (body instanceof FormData) {
-      const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          apikey: supabaseAnonKey,
-        },
-        body,
-      });
+    let result = await execute(false);
+    const failureText = `${result.data?.error ?? result.data?.message ?? result.text ?? ""}`;
+    const shouldRetry = result.response.status === 401 || /invalid jwt/i.test(failureText);
 
-      const text = await response.text();
-      let data = null;
-      try {
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        data = text;
-      }
-
-      if (!response.ok) {
-        return {
-          data: null,
-          error: {
-            message: data?.error || data?.message || text || `Failed to call ${functionName}`,
-          },
-        };
-      }
-
-      return { data, error: null };
+    if (shouldRetry) {
+      result = await execute(true);
     }
 
-    const { data, error } = await supabase.functions.invoke(functionName, {
-      body: body ?? {},
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-    return { data, error };
+    if (!result.response.ok) {
+      logAdminRequestFailure("Super shell edge function invoke failed", result.data, {
+        functionName,
+        status: result.response.status,
+      });
+      return {
+        data: null,
+        error: {
+          message: result.data?.error || result.data?.message || result.text || `Failed to call ${functionName}`,
+          status: result.response.status,
+        },
+      };
+    }
+
+    return { data: result.data, error: null };
   }
 
   useEffect(() => {
+    if (bypassShellAuth) {
+      setLoading(false);
+      setStartupError("");
+      return;
+    }
     if (supabaseConfigError) {
       setSession(null);
       setProfile(null);
@@ -351,8 +373,23 @@ export default function SuperAdminShell({ children }) {
     }
     if (!supabase) return;
     let mounted = true;
+    let profileAbortController = null;
 
-    async function loadProfile(nextSession) {
+    function redirectToLogin(reason, extra = {}) {
+      logAdminEvent("Super shell redirecting to login", {
+        reason,
+        pathname,
+        ...extra,
+      });
+      router.replace("/");
+    }
+
+    async function loadProfile(nextSession, reason) {
+      if (profileAbortController) {
+        profileAbortController.abort();
+      }
+      profileAbortController = new AbortController();
+
       try {
         if (!nextSession) {
           if (mounted) {
@@ -361,7 +398,7 @@ export default function SuperAdminShell({ children }) {
             setStartupError("");
             setLoading(false);
           }
-          router.replace("/");
+          redirectToLogin("no-session", { source: reason });
           return;
         }
 
@@ -369,60 +406,126 @@ export default function SuperAdminShell({ children }) {
           .from("profiles")
           .select("id, role, display_name, account_status")
           .eq("id", nextSession.user.id)
-          .single();
+          .single()
+          .abortSignal(profileAbortController.signal);
 
         if (!mounted) return;
 
-        if (error || !nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
+        if (error) {
+          logAdminRequestFailure("Super shell profile lookup failed", error, {
+            pathname,
+            reason,
+            userId: nextSession.user.id,
+          });
+          setSession(nextSession);
+          setProfile(null);
+          setStartupError(error.message || "Failed to load admin profile.");
+          setLoading(false);
+          return;
+        }
+
+        if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
           setSession(null);
           setProfile(null);
           syncAdminAuthCookie(null);
           setStartupError("Super admin access is required.");
           setLoading(false);
-          router.replace("/");
+          redirectToLogin("super-admin-profile-required", {
+            source: reason,
+            userId: nextSession.user.id,
+            role: nextProfile?.role ?? null,
+            accountStatus: nextProfile?.account_status ?? null,
+          });
           return;
         }
 
+        setSession(nextSession);
         setProfile(nextProfile);
         setStartupError("");
         setLoading(false);
       } catch (error) {
         if (!mounted) return;
-        console.error("super shell loadProfile error:", error);
+        if (isAbortLikeError(error)) {
+          logAdminRequestFailure("Super shell profile lookup aborted", error, {
+            pathname,
+            reason,
+            userId: nextSession?.user?.id ?? null,
+          });
+          setStartupError("Session restore was interrupted. Please open the page again.");
+          setLoading(false);
+          return;
+        }
+        logAdminRequestFailure("Super shell profile lookup threw", error, {
+          pathname,
+          reason,
+          userId: nextSession?.user?.id ?? null,
+        });
         setStartupError(error instanceof Error ? error.message : "Failed to load admin profile.");
         setLoading(false);
       }
     }
 
-    async function bootstrap() {
+    async function bootstrap(reason) {
+      setLoading(true);
       try {
         const { data, error } = await supabase.auth.getSession();
-        if (error) console.error("super shell getSession error:", error);
+        if (error) {
+          logAdminRequestFailure("Super shell getSession failed", error, {
+            pathname,
+            reason,
+          });
+        }
         syncAdminAuthCookie(data?.session ?? null);
         if (!mounted) return;
         const nextSession = data?.session ?? null;
         setSession(nextSession);
-        await loadProfile(nextSession);
+        await loadProfile(nextSession, reason);
       } catch (error) {
         if (!mounted) return;
-        console.error("super shell bootstrap error:", error);
+        if (isAbortLikeError(error)) {
+          logAdminRequestFailure("Super shell bootstrap aborted", error, {
+            pathname,
+            reason,
+          });
+          setStartupError("Session restore was interrupted. Please open the page again.");
+          setLoading(false);
+          return;
+        }
+        logAdminRequestFailure("Super shell bootstrap failed", error, {
+          pathname,
+          reason,
+        });
         setStartupError(error instanceof Error ? error.message : "Failed to bootstrap admin session.");
         setLoading(false);
       }
     }
 
-    bootstrap();
+    bootstrap("initial");
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      logAdminEvent("Super shell auth event", {
+        event,
+        pathname,
+        hasSession: Boolean(nextSession),
+        userId: nextSession?.user?.id ?? null,
+      });
       syncAdminAuthCookie(nextSession ?? null);
       if (!mounted) return;
+      if (event === "INITIAL_SESSION") {
+        return;
+      }
+      if (event === "TOKEN_REFRESHED") {
+        setSession(nextSession ?? null);
+        setLoading(false);
+        return;
+      }
       setSession(nextSession ?? null);
-      await loadProfile(nextSession ?? null);
+      await loadProfile(nextSession ?? null, `auth:${event}`);
     });
 
     function handleVisibilityChange() {
       if (document.visibilityState === "visible") {
-        bootstrap();
+        bootstrap("visibilitychange");
       }
     }
 
@@ -432,14 +535,17 @@ export default function SuperAdminShell({ children }) {
 
     return () => {
       mounted = false;
+      if (profileAbortController) {
+        profileAbortController.abort();
+      }
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", handleVisibilityChange);
       }
       listener.subscription.unsubscribe();
     };
-  }, [router, supabase, supabaseConfigError]);
+  }, [bypassShellAuth, pathname, router, supabase, supabaseConfigError]);
 
-  if (isScopedAdminConsolePath(pathname)) {
+  if (bypassShellAuth) {
     return children;
   }
 

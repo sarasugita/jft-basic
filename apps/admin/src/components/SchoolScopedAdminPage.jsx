@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import AdminConsole from "./AdminConsole";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
+import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 
 export default function SchoolScopedAdminPage({ schoolId }) {
   const router = useRouter();
@@ -25,51 +26,120 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     }
     if (!supabase) return;
     let mounted = true;
+    let loadAbortController = null;
 
-    async function load() {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) console.error("school scoped session error:", error);
-      syncAdminAuthCookie(data?.session ?? null);
-      const nextSession = data?.session ?? null;
-      if (!mounted) return;
-      setSession(nextSession);
-      if (!nextSession) {
-        router.replace("/");
-        return;
+    function redirect(target, reason, extra = {}) {
+      logAdminEvent("School scoped page redirect", {
+        target,
+        reason,
+        schoolId,
+        ...extra,
+      });
+      router.replace(target);
+    }
+
+    async function load(reason) {
+      if (loadAbortController) {
+        loadAbortController.abort();
       }
+      loadAbortController = new AbortController();
+      setLoading(true);
 
-      const { data: nextProfile } = await supabase
-        .from("profiles")
-        .select("id, role, account_status")
-        .eq("id", nextSession.user.id)
-        .single();
-      if (!mounted) return;
-      setProfile(nextProfile ?? null);
-      if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
-        router.replace("/");
-        return;
-      }
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          logAdminRequestFailure("School scoped getSession failed", error, {
+            schoolId,
+            reason,
+          });
+        }
+        syncAdminAuthCookie(data?.session ?? null);
 
-      const { data: schoolRow, error: schoolError } = await supabase
-        .from("schools")
-        .select("id, name, status")
-        .eq("id", schoolId)
-        .single();
-      if (!mounted) return;
-      if (schoolError || !schoolRow) {
-        router.replace("/super/schools");
-        return;
-      }
-      setSchool(schoolRow);
+        const nextSession = data?.session ?? null;
+        if (!mounted) return;
+        setSession(nextSession);
+        setStartupError("");
 
-      const { data: schoolsData, error: schoolsError } = await supabase
-        .from("schools")
-        .select("id, name, status")
-        .order("created_at", { ascending: true });
-      if (!mounted) return;
-      if (schoolsError) {
-        console.error("school options load error:", schoolsError);
-      } else {
+        if (!nextSession) {
+          setProfile(null);
+          setSchool(null);
+          setSchoolOptions([]);
+          redirect("/", "no-session", { source: reason });
+          return;
+        }
+
+        const { data: nextProfile, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, role, account_status")
+          .eq("id", nextSession.user.id)
+          .single()
+          .abortSignal(loadAbortController.signal);
+
+        if (!mounted) return;
+        if (profileError) {
+          logAdminRequestFailure("School scoped profile lookup failed", profileError, {
+            schoolId,
+            reason,
+            userId: nextSession.user.id,
+          });
+          setProfile(null);
+          setStartupError(profileError.message || "Failed to load admin profile.");
+          return;
+        }
+
+        setProfile(nextProfile ?? null);
+        if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
+          redirect("/", "super-admin-profile-required", {
+            source: reason,
+            userId: nextSession.user.id,
+            role: nextProfile?.role ?? null,
+            accountStatus: nextProfile?.account_status ?? null,
+          });
+          return;
+        }
+
+        const { data: schoolRow, error: schoolError } = await supabase
+          .from("schools")
+          .select("id, name, status")
+          .eq("id", schoolId)
+          .single()
+          .abortSignal(loadAbortController.signal);
+
+        if (!mounted) return;
+        if (schoolError || !schoolRow) {
+          if (schoolError) {
+            logAdminRequestFailure("School scoped school lookup failed", schoolError, {
+              schoolId,
+              reason,
+              userId: nextSession.user.id,
+            });
+          }
+          setSchool(null);
+          redirect("/super/schools", "school-not-found", {
+            source: reason,
+            userId: nextSession.user.id,
+          });
+          return;
+        }
+        setSchool(schoolRow);
+
+        const { data: schoolsData, error: schoolsError } = await supabase
+          .from("schools")
+          .select("id, name, status")
+          .order("created_at", { ascending: true })
+          .abortSignal(loadAbortController.signal);
+
+        if (!mounted) return;
+        if (schoolsError) {
+          logAdminRequestFailure("School scoped school options lookup failed", schoolsError, {
+            schoolId,
+            reason,
+            userId: nextSession.user.id,
+          });
+          setSchoolOptions([]);
+          return;
+        }
+
         setSchoolOptions(
           (schoolsData ?? []).map((row) => ({
             school_id: row.id,
@@ -77,14 +147,67 @@ export default function SchoolScopedAdminPage({ schoolId }) {
             school_status: row.status ?? null,
           })),
         );
+      } catch (error) {
+        if (!mounted) return;
+        if (isAbortLikeError(error)) {
+          logAdminRequestFailure("School scoped bootstrap aborted", error, {
+            schoolId,
+            reason,
+          });
+          setStartupError("Session restore was interrupted. Please open the admin page again.");
+          return;
+        }
+        logAdminRequestFailure("School scoped bootstrap failed", error, {
+          schoolId,
+          reason,
+        });
+        setStartupError(error instanceof Error ? error.message : "Failed to load school admin page.");
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-
-      setLoading(false);
     }
 
-    load();
+    load("initial");
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      logAdminEvent("School scoped auth event", {
+        event,
+        schoolId,
+        hasSession: Boolean(nextSession),
+        userId: nextSession?.user?.id ?? null,
+      });
+      syncAdminAuthCookie(nextSession ?? null);
+      if (!mounted || event === "INITIAL_SESSION") {
+        return;
+      }
+      if (event === "TOKEN_REFRESHED") {
+        setSession(nextSession ?? null);
+        return;
+      }
+      await load(`auth:${event}`);
+    });
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        load("visibilitychange");
+      }
+    }
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
     return () => {
       mounted = false;
+      if (loadAbortController) {
+        loadAbortController.abort();
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+      listener.subscription.unsubscribe();
     };
   }, [router, schoolId, supabase, supabaseConfigError]);
 
@@ -112,6 +235,8 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       homeHref="/super/schools"
       homeLabel="SuperAdmin Home"
       forcedSchoolOptions={schoolOptions}
+      managedSession={session}
+      managedProfile={profile}
     />
   );
 }

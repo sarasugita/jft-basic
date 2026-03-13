@@ -6,6 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
+import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 
 const DEFAULT_MODEL_CATEGORY = "Book Review";
 const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
@@ -1849,12 +1850,17 @@ export default function AdminConsole({
   homeLabel = "Admin Home",
   forcedSchoolOptions = [],
   forceLoginOnEntry = false,
+  managedSession = undefined,
+  managedProfile = undefined,
 }) {
   const router = useRouter();
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
   const forcedSchoolName = forcedSchoolScope?.name ?? forcedSchoolId ?? "";
+  const isManagedAuth = managedSession !== undefined || managedProfile !== undefined;
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [authReady, setAuthReady] = useState(isManagedAuth);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [schoolAssignments, setSchoolAssignments] = useState([]);
   const [schoolScopeId, setSchoolScopeId] = useState(null);
   const [attempts, setAttempts] = useState([]);
@@ -2971,56 +2977,118 @@ export default function AdminConsole({
   }, [sidebarCollapsed]);
 
   useEffect(() => {
+    if (!isManagedAuth) return;
+    setSession(managedSession ?? null);
+    setProfile(managedProfile ?? null);
+    setAuthReady(true);
+    setProfileLoading(false);
+    setLoginMsg("");
+  }, [isManagedAuth, managedProfile, managedSession]);
+
+  useEffect(() => {
+    if (isManagedAuth) {
+      return;
+    }
     if (!supabase) return;
     let mounted = true;
 
     async function bootstrapSession() {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) console.error("getSession error:", error);
+      setAuthReady(false);
 
-      if (forceLoginOnEntry) {
-        if (data?.session) {
-          const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
-          if (signOutError) console.error("admin force signout error:", signOutError);
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          logAdminRequestFailure("Admin console getSession failed", error, {
+            forceLoginOnEntry,
+          });
         }
-        syncAdminAuthCookie(null);
+
+        if (forceLoginOnEntry) {
+          if (data?.session) {
+            const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+            if (signOutError) {
+              logAdminRequestFailure("Admin console forced signout failed", signOutError, {
+                forceLoginOnEntry,
+              });
+            }
+          }
+          syncAdminAuthCookie(null);
+          if (mounted) {
+            setSession(null);
+            setProfile(null);
+            setLoginMsg("");
+          }
+          return;
+        }
+
+        syncAdminAuthCookie(data?.session ?? null);
         if (mounted) {
-          setSession(null);
-          setProfile(null);
-          setLoginMsg("");
+          setSession(data?.session ?? null);
         }
-        return;
+      } catch (error) {
+        if (!mounted) return;
+        if (isAbortLikeError(error)) {
+          logAdminRequestFailure("Admin console session bootstrap aborted", error, {
+            forceLoginOnEntry,
+          });
+          setLoginMsg("Session restore was interrupted. Please try again.");
+          return;
+        }
+        logAdminRequestFailure("Admin console session bootstrap failed", error, {
+          forceLoginOnEntry,
+        });
+        setLoginMsg(error instanceof Error ? error.message : "Failed to restore admin session.");
+      } finally {
+        if (mounted) {
+          setAuthReady(true);
+        }
       }
-
-      syncAdminAuthCookie(data?.session ?? null);
-      if (mounted) setSession(data?.session ?? null);
     }
 
     bootstrapSession();
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      logAdminEvent("Admin console auth event", {
+        event,
+        hasSession: Boolean(nextSession),
+        userId: nextSession?.user?.id ?? null,
+        forceLoginOnEntry,
+      });
       syncAdminAuthCookie(nextSession ?? null);
+      if (!mounted || event === "INITIAL_SESSION") {
+        return;
+      }
       setSession(nextSession ?? null);
+      setAuthReady(true);
     });
     return () => {
       mounted = false;
       listener.subscription.unsubscribe();
     };
-  }, [forceLoginOnEntry, supabase]);
+  }, [forceLoginOnEntry, isManagedAuth, supabase]);
 
   useEffect(() => {
+    if (isManagedAuth) {
+      return;
+    }
+
     let cancelled = false;
+    const profileAbortController = new AbortController();
 
     if (supabaseConfigError) {
       setSession(null);
       setProfile(null);
+      setAuthReady(true);
+      setProfileLoading(false);
       setLoginMsg(supabaseConfigError);
       return () => {
         cancelled = true;
+        profileAbortController.abort();
       };
     }
     if (!session) {
       setProfile(null);
+      setProfileLoading(false);
       setLoginMsg("");
       setAttempts([]);
       setSelectedId(null);
@@ -3030,39 +3098,74 @@ export default function AdminConsole({
       setStudentAttemptsMsg("");
       return () => {
         cancelled = true;
+        profileAbortController.abort();
       };
     }
     if (!supabase) {
       return () => {
         cancelled = true;
+        profileAbortController.abort();
       };
     }
-    supabase
-      .from("profiles")
-      .select("id, role, display_name, school_id, account_status, force_password_change")
-      .eq("id", session.user.id)
-      .maybeSingle()
-      .then(({ data, error }) => {
+
+    async function loadProfile() {
+      setProfileLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, role, display_name, school_id, account_status, force_password_change")
+          .eq("id", session.user.id)
+          .maybeSingle()
+          .abortSignal(profileAbortController.signal);
+
         if (cancelled) return;
         if (error) {
-          console.error("fetch profile error:", error);
+          logAdminRequestFailure("Admin console profile lookup failed", error, {
+            userId: session.user.id,
+          });
           setProfile(null);
           setLoginMsg(normalizeAdminLoginErrorMessage(error.message));
           return;
         }
         if (!data) {
+          logAdminEvent("Admin console profile missing", {
+            userId: session.user.id,
+          });
           setProfile(null);
           setLoginMsg("This account is missing an admin profile. Please contact the system administrator.");
           return;
         }
         setLoginMsg("");
         setProfile(data);
-      });
+      } catch (error) {
+        if (cancelled) return;
+        if (isAbortLikeError(error)) {
+          logAdminRequestFailure("Admin console profile lookup aborted", error, {
+            userId: session.user.id,
+          });
+          setProfile(null);
+          setLoginMsg("Profile loading was interrupted. Please try again.");
+          return;
+        }
+        logAdminRequestFailure("Admin console profile lookup threw", error, {
+          userId: session.user.id,
+        });
+        setProfile(null);
+        setLoginMsg(error instanceof Error ? error.message : "Failed to load admin profile.");
+      } finally {
+        if (!cancelled) {
+          setProfileLoading(false);
+        }
+      }
+    }
+
+    loadProfile();
 
     return () => {
       cancelled = true;
+      profileAbortController.abort();
     };
-  }, [session, supabase, supabaseConfigError]);
+  }, [isManagedAuth, session, supabase, supabaseConfigError]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -7409,6 +7512,14 @@ export default function AdminConsole({
     );
   }
 
+  if (!authReady) {
+    return (
+      <div className="admin-login">
+        <h2>Loading...</h2>
+      </div>
+    );
+  }
+
   if (!session) {
     return (
       <div className="admin-login-screen">
@@ -7461,6 +7572,14 @@ export default function AdminConsole({
           </form>
           <div className={`admin-login-msg ${loginMsg ? "visible" : ""}`}>{loginMsg || "\u00a0"}</div>
         </div>
+      </div>
+    );
+  }
+
+  if (profileLoading) {
+    return (
+      <div className="admin-login">
+        <h2>Loading...</h2>
       </div>
     );
   }

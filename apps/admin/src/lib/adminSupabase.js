@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { logAdminRequestFailure } from "./adminDiagnostics";
 import { SUPER_ADMIN_SCOPE_HEADER } from "./schoolScope";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -13,6 +14,97 @@ if (adminSupabaseConfigError) {
 
 let defaultClient;
 const scopedClients = new Map();
+
+const nativeFetch = (...args) => fetch(...args);
+
+async function instrumentedAdminFetch(input, init) {
+  const url = typeof input === "string" ? input : input?.url ?? "";
+  const method = init?.method || (typeof input === "string" ? "GET" : input?.method) || "GET";
+  const headers = new Headers(init?.headers || (typeof input === "string" ? undefined : input?.headers));
+  const schoolScopeId = headers.get(SUPER_ADMIN_SCOPE_HEADER) || null;
+
+  try {
+    const response = await nativeFetch(input, init);
+    if (response.ok) {
+      return response;
+    }
+
+    let payload = null;
+    try {
+      const text = await response.clone().text();
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = { message: text };
+        }
+      }
+    } catch {
+      payload = null;
+    }
+
+    logAdminRequestFailure("Supabase HTTP request failed", payload, {
+      url,
+      method,
+      schoolScopeId,
+      status: response.status,
+    });
+    return response;
+  } catch (error) {
+    logAdminRequestFailure("Supabase network request failed", error, {
+      url,
+      method,
+      schoolScopeId,
+    });
+    throw error;
+  }
+}
+
+function applySchoolScopeHeader(builder, schoolScopeId) {
+  if (!schoolScopeId || !builder || typeof builder.setHeader !== "function") {
+    return builder;
+  }
+  return builder.setHeader(SUPER_ADMIN_SCOPE_HEADER, schoolScopeId);
+}
+
+function mergeScopedHeaders(headers, schoolScopeId) {
+  if (!schoolScopeId) return headers;
+  return {
+    ...(headers ?? {}),
+    [SUPER_ADMIN_SCOPE_HEADER]: schoolScopeId,
+  };
+}
+
+function createScopedFacade(baseClient, schoolScopeId) {
+  return {
+    ...baseClient,
+    auth: baseClient.auth,
+    realtime: baseClient.realtime,
+    functions: {
+      ...baseClient.functions,
+      invoke(functionName, options = {}) {
+        return baseClient.functions.invoke(functionName, {
+          ...options,
+          headers: mergeScopedHeaders(options.headers, schoolScopeId),
+        });
+      },
+    },
+    storage: {
+      ...baseClient.storage,
+      from(bucketId) {
+        const bucket = baseClient.storage.from(bucketId);
+        bucket.headers = mergeScopedHeaders(bucket.headers, schoolScopeId);
+        return bucket;
+      },
+    },
+    from(relation) {
+      return applySchoolScopeHeader(baseClient.from(relation), schoolScopeId);
+    },
+    rpc(fn, args = {}, options = {}) {
+      return applySchoolScopeHeader(baseClient.rpc(fn, args, options), schoolScopeId);
+    },
+  };
+}
 
 export function getAdminSupabaseConfig() {
   return {
@@ -30,23 +122,21 @@ export function createAdminSupabaseClient({ schoolScopeId } = {}) {
     throw new Error(adminSupabaseConfigError);
   }
 
+  if (!defaultClient) {
+    defaultClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        fetch: instrumentedAdminFetch,
+      },
+    });
+  }
+
   if (!schoolScopeId) {
-    if (!defaultClient) {
-      defaultClient = createClient(supabaseUrl, supabaseAnonKey);
-    }
     return defaultClient;
   }
 
-  if (scopedClients.has(schoolScopeId)) {
-    return scopedClients.get(schoolScopeId);
+  if (!scopedClients.has(schoolScopeId)) {
+    scopedClients.set(schoolScopeId, createScopedFacade(defaultClient, schoolScopeId));
   }
 
-  const headers = schoolScopeId
-    ? { [SUPER_ADMIN_SCOPE_HEADER]: schoolScopeId }
-    : undefined;
-  const client = createClient(supabaseUrl, supabaseAnonKey, {
-    global: headers ? { headers } : undefined,
-  });
-  scopedClients.set(schoolScopeId, client);
-  return client;
+  return scopedClients.get(schoolScopeId);
 }

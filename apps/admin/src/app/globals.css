@@ -2566,6 +2566,258 @@ body { padding: 0; }
   gap: 6px;
 }
 
+.super-school-modal {
+  width: min(446px, calc(100vw - 28px));
+  max-width: 446px;
+  padding: 0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.super-school-modal-header {
+  margin: 0 !important;
+  padding: 12px 20px !important;
+  background: #dce8d8 !important;
+  border-bottom: 1px solid #cfddca !important;
+}
+
+.super-school-modal-header .admin-title {
+  font-size: 18px !important;
+  font-weight: 800;
+}
+
+.super-school-modal-close {
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.super-school-modal-close svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.super-school-modal-body {
+  padding: 10px 20px 20px;
+}
+
+.super-school-modal-body > .super-school-modal-field + .super-school-modal-field,
+.super-school-modal-grid,
+.super-school-submit {
+  margin-top: 14px;
+}
+
+.super-school-modal-grid + .super-school-modal-field {
+  margin-top: 14px;
+}
+
+.super-school-modal-field label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333333;
+}
+
+.super-school-modal-field input,
+.super-school-modal-field select {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid #bcbcbc;
+  border-radius: 2px;
+  background: #ffffff;
+  color: #333333;
+  font: inherit;
+  padding: 4px 10px;
+  box-shadow: none;
+}
+
+.super-school-modal-field input[type="date"] {
+  min-width: 0;
+}
+
+.super-school-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 28px;
+}
+
+.super-school-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.super-school-upload-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid #c9c9c9;
+  border-radius: 2px;
+  background: #ececec;
+  color: #666666;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.super-school-upload-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.super-school-upload-name {
+  font-size: 12px;
+  color: #666666;
+  word-break: break-word;
+}
+
+.super-school-upload-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #7a7a7a;
+}
+
+.super-school-status-field {
+  max-width: 184px;
+}
+
+.super-school-status-wrap {
+  position: relative;
+}
+
+.super-school-status-wrap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid #666666;
+  border-bottom: 1.5px solid #666666;
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
+}
+
+.super-school-status-wrap select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  font-weight: 700;
+  color: #2d6c30;
+  background:
+    linear-gradient(90deg, #d6e4d5 0, #d6e4d5 calc(100% - 46px), #ffffff calc(100% - 46px), #ffffff 100%);
+}
+
+.super-school-status-wrap.inactive::after {
+  border-right-color: #b42318;
+  border-bottom-color: #b42318;
+}
+
+.super-school-status-wrap.inactive select {
+  color: #b42318;
+  background:
+    linear-gradient(90deg, #f7d6d6 0, #f7d6d6 calc(100% - 46px), #ffffff calc(100% - 46px), #ffffff 100%);
+}
+
+.super-school-delete-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #f0b4b4;
+  border-radius: 4px;
+  background: #fff4f4;
+}
+
+.super-school-action-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.super-school-action-row > .btn {
+  flex: 1 1 0;
+}
+
+.super-school-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  min-width: 0;
+}
+
+.super-school-action-row .super-school-submit,
+.super-school-action-row .super-school-secondary-action {
+  width: auto;
+  margin-top: 0;
+}
+
+.super-school-delete-panel label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8f1d1d;
+}
+
+.super-school-delete-panel input {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid #d7a3a3;
+  border-radius: 2px;
+  background: #ffffff;
+  color: #333333;
+  font: inherit;
+  padding: 4px 10px;
+}
+
+.super-school-delete-btn {
+  width: auto;
+}
+
+.super-school-delete-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.super-school-delete-actions > .btn {
+  flex: 1 1 0;
+}
+
+.super-school-delete-cancel {
+  background: #ffffff;
+  border-color: #d0d5dd;
+  color: #344054;
+}
+
+.super-school-submit {
+  width: 100%;
+  min-height: 31px;
+  justify-content: center;
+  border-radius: 4px;
+  background: #2f7a2f;
+  border-color: #2f7a2f;
+  font-size: 16px;
+  font-weight: 800;
+}
+
 .super-schools-table-wrap {
   margin-top: 0;
   background: #fff;
@@ -2578,7 +2830,7 @@ body { padding: 0; }
 }
 
 .super-schools-table tbody tr:hover {
-  background: #f8fbf3;
+  background: transparent;
   cursor: default;
 }
 
@@ -2603,6 +2855,12 @@ body { padding: 0; }
   font-size: 13px;
 }
 
+.super-enter-btn:hover,
+.super-inline-btn:hover,
+.super-edit-link:hover {
+  background: #f1f7ea;
+}
+
 .super-btn-icon {
   display: inline-flex;
   align-items: center;
@@ -2618,26 +2876,6 @@ body { padding: 0; }
   stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-
-.super-edit-link {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--admin-text);
-  padding: 0;
-  min-width: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.super-edit-link svg {
-  width: 14px;
-  height: 14px;
 }
 
 @media (max-width: 900px) {
@@ -2656,6 +2894,23 @@ body { padding: 0; }
 
   .super-schools-filter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .super-school-modal-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .super-school-status-field {
+    max-width: none;
+  }
+
+  .super-school-action-row {
+    flex-direction: column;
+  }
+
+  .super-school-delete-actions {
+    flex-direction: column;
   }
 }
 

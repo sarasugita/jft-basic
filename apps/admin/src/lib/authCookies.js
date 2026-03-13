@@ -7,5 +7,9 @@ export function syncAdminAuthCookie(session) {
     document.cookie = `${ADMIN_AUTH_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
     return;
   }
-  document.cookie = `${ADMIN_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=3600; SameSite=Lax`;
+  const expiresAtMs = Number(session?.expires_at ?? 0) * 1000;
+  const maxAgeSeconds = Number.isFinite(expiresAtMs)
+    ? Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000))
+    : 3600;
+  document.cookie = `${ADMIN_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax`;
 }
