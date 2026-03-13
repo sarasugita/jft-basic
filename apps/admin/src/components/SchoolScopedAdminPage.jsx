@@ -3,19 +3,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminConsole from "./AdminConsole";
-import { createAdminSupabaseClient } from "../lib/adminSupabase";
+import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 
 export default function SchoolScopedAdminPage({ schoolId }) {
   const router = useRouter();
-  const supabase = useMemo(() => createAdminSupabaseClient(), []);
+  const supabaseConfigError = getAdminSupabaseConfigError();
+  const supabase = useMemo(() => (supabaseConfigError ? null : createAdminSupabaseClient()), [supabaseConfigError]);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [school, setSchool] = useState(null);
   const [schoolOptions, setSchoolOptions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [startupError, setStartupError] = useState("");
 
   useEffect(() => {
+    if (supabaseConfigError) {
+      setStartupError(supabaseConfigError);
+      setLoading(false);
+      return;
+    }
+    if (!supabase) return;
     let mounted = true;
 
     async function load() {
@@ -78,7 +86,16 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     return () => {
       mounted = false;
     };
-  }, [router, schoolId, supabase]);
+  }, [router, schoolId, supabase, supabaseConfigError]);
+
+  if (startupError) {
+    return (
+      <div className="admin-login">
+        <h2>Startup Error</h2>
+        <div className="admin-msg">{startupError}</div>
+      </div>
+    );
+  }
 
   if (loading || !session || !profile || !school) {
     return (

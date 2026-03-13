@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { questions, sections } from "../../../../packages/shared/questions.js";
-import { createAdminSupabaseClient } from "../lib/adminSupabase";
+import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 
 const DEFAULT_MODEL_CATEGORY = "Book Review";
@@ -928,6 +928,80 @@ function formatDateTimeInput(iso) {
   return toBangladeshInput(iso);
 }
 
+function getBangladeshDateInput(value) {
+  if (!value) return "";
+  const input = toBangladeshInput(value);
+  return input ? input.slice(0, 10) : "";
+}
+
+function getBangladeshTimeInput(value) {
+  if (!value) return "";
+  const input = toBangladeshInput(value);
+  return input ? input.slice(11, 16) : "";
+}
+
+function combineBangladeshDateTime(dateValue, timeValue) {
+  if (!dateValue || !timeValue) return "";
+  return `${dateValue}T${timeValue}`;
+}
+
+function normalizeTimeToFiveMinuteStep(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return text;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return text;
+  const totalMinutes = Math.max(0, Math.min((hours * 60) + minutes, (23 * 60) + 59));
+  const roundedMinutes = Math.round(totalMinutes / 5) * 5;
+  const normalizedTotal = Math.min(roundedMinutes, 23 * 60 + 55);
+  const nextHours = Math.floor(normalizedTotal / 60);
+  const nextMinutes = normalizedTotal % 60;
+  return `${String(nextHours).padStart(2, "0")}:${String(nextMinutes).padStart(2, "0")}`;
+}
+
+function getTwelveHourTimeParts(value) {
+  const normalized = normalizeTimeToFiveMinuteStep(value);
+  const match = normalized.match(/^(\d{2}):(\d{2})$/);
+  if (!match) {
+    return {
+      hour: "",
+      minute: "00",
+      period: "AM",
+    };
+  }
+  const hours = Number(match[1]);
+  const period = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+  return {
+    hour: String(hour12).padStart(2, "0"),
+    minute: match[2],
+    period,
+  };
+}
+
+function buildTwentyFourHourTime(parts) {
+  const hourText = String(parts?.hour ?? "").trim();
+  if (!hourText) return "";
+  const minuteText = String(parts?.minute ?? "00").padStart(2, "0");
+  const period = parts?.period === "PM" ? "PM" : "AM";
+  const hourNumber = Number(hourText);
+  if (!Number.isFinite(hourNumber)) return "";
+  let normalizedHour = hourNumber % 12;
+  if (period === "PM") normalizedHour += 12;
+  return `${String(normalizedHour).padStart(2, "0")}:${minuteText}`;
+}
+
+function formatTwelveHourTimeDisplay(value) {
+  const parts = getTwelveHourTimeParts(value);
+  if (!parts.hour) return "--:-- --";
+  return `${parts.hour}:${parts.minute} ${parts.period}`;
+}
+
+const TWELVE_HOUR_TIME_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
+const FIVE_MINUTE_MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"));
+const MERIDIEM_OPTIONS = ["AM", "PM"];
+
 function formatDateShort(value) {
   if (!value) return "";
   if (typeof value === "string") {
@@ -937,6 +1011,18 @@ function formatDateShort(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "2-digit", day: "2-digit" });
+}
+
+function normalizeAdminLoginErrorMessage(message) {
+  const text = String(message ?? "").trim();
+  if (!text) return "Login failed.";
+  if (
+    /cannot coerce the result to a single json object/i.test(text)
+    || /json object requested.*multiple \(or no\) rows/i.test(text)
+  ) {
+    return "This account is missing an admin profile. Please contact the system administrator.";
+  }
+  return text;
 }
 
 function formatDateFull(value) {
@@ -1590,6 +1676,9 @@ export default function AdminConsole({
   const [dailyConductMode, setDailyConductMode] = useState("normal");
   const [modelRetakeSourceId, setModelRetakeSourceId] = useState("");
   const [dailyRetakeSourceId, setDailyRetakeSourceId] = useState("");
+  const [dailySetDropdownOpen, setDailySetDropdownOpen] = useState(false);
+  const [activeDailyTimePicker, setActiveDailyTimePicker] = useState("");
+  const dailySetDropdownRef = useRef(null);
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingSessionMsg, setEditingSessionMsg] = useState("");
   const [editingSessionForm, setEditingSessionForm] = useState({
@@ -1646,8 +1735,15 @@ export default function AdminConsole({
   const [dailyUploadMsg, setDailyUploadMsg] = useState("");
   const [dailyImportMsg, setDailyImportMsg] = useState("");
   const [dailySessionForm, setDailySessionForm] = useState({
+    selection_mode: "single",
     problem_set_id: "",
+    problem_set_ids: [],
     title: "",
+    session_date: "",
+    start_time: "",
+    close_time: "",
+    question_count_mode: "all",
+    question_count: "",
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
@@ -1714,9 +1810,10 @@ export default function AdminConsole({
     || schoolAssignments.find((assignment) => assignment.school_id === activeSchoolId)?.school_name
     || activeSchoolId
     || "";
+  const supabaseConfigError = getAdminSupabaseConfigError();
   const supabase = useMemo(
-    () => createAdminSupabaseClient({ schoolScopeId: activeSchoolId }),
-    [activeSchoolId]
+    () => (supabaseConfigError ? null : createAdminSupabaseClient({ schoolScopeId: activeSchoolId })),
+    [activeSchoolId, supabaseConfigError]
   );
 
   function generateTempPassword(length = 10) {
@@ -1970,6 +2067,20 @@ export default function AdminConsole({
 
   const modelConductTests = selectedModelConductCategory?.tests ?? [];
   const dailyConductTests = selectedDailyConductCategory?.tests ?? [];
+  const selectedDailyProblemSetIds = useMemo(() => {
+    const availableIds = new Set(dailyConductTests.map((test) => test.version).filter(Boolean));
+    const selectedIds = dailySessionForm.selection_mode === "multiple"
+      ? (dailySessionForm.problem_set_ids ?? []).filter((id) => availableIds.has(id))
+      : [dailySessionForm.problem_set_id].filter((id) => availableIds.has(id));
+    return Array.from(new Set(selectedIds));
+  }, [dailyConductTests, dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
+  const selectedDailyQuestionCount = useMemo(
+    () => selectedDailyProblemSetIds.reduce((total, version) => {
+      const test = dailyConductTests.find((item) => item.version === version);
+      return total + Number(test?.question_count ?? 0);
+    }, 0),
+    [dailyConductTests, selectedDailyProblemSetIds]
+  );
 
   const filteredModelUploadTests = useMemo(() => {
     if (!modelUploadCategory) return modelTests;
@@ -2054,6 +2165,40 @@ export default function AdminConsole({
   }, [dailyCategories, dailyConductCategory]);
 
   useEffect(() => {
+    if (!dailySetDropdownOpen) return;
+    function handleClickOutside(event) {
+      const root = dailySetDropdownRef.current;
+      if (!root) return;
+      if (!root.contains(event.target)) {
+        setDailySetDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [dailySetDropdownOpen]);
+
+  useEffect(() => {
+    if (!activeDailyTimePicker) return;
+    function handlePointerDown(event) {
+      if (event.target.closest("[data-daily-time-picker]")) return;
+      setActiveDailyTimePicker("");
+    }
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setActiveDailyTimePicker("");
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [activeDailyTimePicker]);
+
+  useEffect(() => {
     if (!modelConductTests.length) return;
     if (!modelConductTests.some((t) => t.version === testSessionForm.problem_set_id)) {
       setTestSessionForm((s) => ({ ...s, problem_set_id: modelConductTests[0].version }));
@@ -2062,10 +2207,28 @@ export default function AdminConsole({
 
   useEffect(() => {
     if (!dailyConductTests.length) return;
-    if (!dailyConductTests.some((t) => t.version === dailySessionForm.problem_set_id)) {
-      setDailySessionForm((s) => ({ ...s, problem_set_id: dailyConductTests[0].version }));
-    }
-  }, [dailyConductTests, dailySessionForm.problem_set_id]);
+    const availableIds = dailyConductTests.map((t) => t.version).filter(Boolean);
+    const firstVersion = availableIds[0] ?? "";
+    setDailySessionForm((current) => {
+      const nextIds = (current.problem_set_ids ?? []).filter((id) => availableIds.includes(id));
+      const nextProblemSetId = availableIds.includes(current.problem_set_id) ? current.problem_set_id : firstVersion;
+      const normalizedIds = current.selection_mode === "multiple"
+        ? (nextIds.length ? nextIds : (nextProblemSetId ? [nextProblemSetId] : []))
+        : nextIds;
+      if (
+        nextProblemSetId === current.problem_set_id
+        && normalizedIds.length === (current.problem_set_ids ?? []).length
+        && normalizedIds.every((id, index) => id === (current.problem_set_ids ?? [])[index])
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        problem_set_id: nextProblemSetId,
+        problem_set_ids: normalizedIds,
+      };
+    });
+  }, [dailyConductTests, dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
 
   useEffect(() => {
     const version = testSessionForm.problem_set_id;
@@ -2077,13 +2240,13 @@ export default function AdminConsole({
   }, [testSessionForm.problem_set_id, testPassRateByVersion]);
 
   useEffect(() => {
-    const version = dailySessionForm.problem_set_id;
+    const version = selectedDailyProblemSetIds[0] || dailySessionForm.problem_set_id;
     if (!version) return;
     const passRate = testPassRateByVersion[version];
     if (passRate != null) {
       setDailySessionForm((s) => ({ ...s, pass_rate: String(passRate) }));
     }
-  }, [dailySessionForm.problem_set_id, testPassRateByVersion]);
+  }, [dailySessionForm.problem_set_id, selectedDailyProblemSetIds, testPassRateByVersion]);
 
   const resultContext = useMemo(() => {
     if (activeTab === "model" && modelSubTab === "results") {
@@ -2418,6 +2581,7 @@ export default function AdminConsole({
   }, [sidebarCollapsed]);
 
   useEffect(() => {
+    if (!supabase) return;
     let mounted = true;
 
     async function bootstrapSession() {
@@ -2451,6 +2615,12 @@ export default function AdminConsole({
   }, [forceLoginOnEntry, supabase]);
 
   useEffect(() => {
+    if (supabaseConfigError) {
+      setSession(null);
+      setProfile(null);
+      setLoginMsg(supabaseConfigError);
+      return;
+    }
     if (!session) {
       setProfile(null);
       setAttempts([]);
@@ -2461,22 +2631,31 @@ export default function AdminConsole({
       setStudentAttemptsMsg("");
       return;
     }
+    if (!supabase) return;
     supabase
       .from("profiles")
       .select("id, role, display_name, school_id, account_status, force_password_change")
       .eq("id", session.user.id)
-      .single()
+      .maybeSingle()
       .then(({ data, error }) => {
         if (error) {
           console.error("fetch profile error:", error);
           setProfile(null);
+          setLoginMsg(normalizeAdminLoginErrorMessage(error.message));
           return;
         }
+        if (!data) {
+          setProfile(null);
+          setLoginMsg("This account is missing an admin profile. Please contact the system administrator.");
+          return;
+        }
+        setLoginMsg("");
         setProfile(data);
       });
-  }, [session, supabase]);
+  }, [session, supabase, supabaseConfigError]);
 
   useEffect(() => {
+    if (!supabase) return;
     if (!session || !profile || profile.role !== "admin") {
       setSchoolAssignments([]);
       if (!forcedSchoolId) setSchoolScopeId(null);
@@ -4526,9 +4705,21 @@ export default function AdminConsole({
     setDailyConductMode(mode);
     setDailyConductOpen(true);
     setDailySessionsMsg("");
+    setDailySetDropdownOpen(false);
+    setActiveDailyTimePicker("");
     if (mode !== "retake") {
       setDailyRetakeSourceId("");
-      setDailySessionForm((current) => ({ ...current, retake_release_scope: "all" }));
+      setDailySessionForm((current) => ({
+        ...current,
+        selection_mode: "single",
+        problem_set_ids: current.problem_set_id ? [current.problem_set_id] : [],
+        session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
+        start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
+        close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
+        question_count_mode: "all",
+        question_count: "",
+        retake_release_scope: "all",
+      }));
       return;
     }
     const source = pastDailySessions[0] ?? null;
@@ -4543,9 +4734,178 @@ export default function AdminConsole({
   }
 
   function selectDailyRetakeSource(sessionId) {
+    setDailySetDropdownOpen(false);
+    setActiveDailyTimePicker("");
     setDailyRetakeSourceId(sessionId);
     const source = pastDailySessions.find((session) => session.id === sessionId);
     if (source) applySourceSessionToForm(source, setDailySessionForm);
+  }
+
+  function toggleDailyProblemSetSelection(problemSetId) {
+    setDailySessionForm((current) => {
+      const nextIds = new Set(current.problem_set_ids ?? []);
+      if (nextIds.has(problemSetId)) {
+        nextIds.delete(problemSetId);
+      } else {
+        nextIds.add(problemSetId);
+      }
+      return {
+        ...current,
+        problem_set_ids: Array.from(nextIds),
+      };
+    });
+  }
+
+  function updateDailySessionTimePart(field, part, value) {
+    setDailySessionForm((current) => {
+      const nextParts = {
+        ...getTwelveHourTimeParts(current[field]),
+        [part]: value,
+      };
+      return {
+        ...current,
+        [field]: buildTwentyFourHourTime(nextParts),
+      };
+    });
+  }
+
+  function buildGeneratedDailySessionTitle({ category, setIds, sessionDate, startTime }) {
+    const normalizedCategory = String(category ?? "").trim() || "Daily Test";
+    const normalizedDate = String(sessionDate ?? "").trim() || new Date().toISOString().slice(0, 10);
+    const normalizedTime = String(startTime ?? "").trim() || "00:00";
+    if ((setIds ?? []).length <= 1) {
+      return `${normalizedCategory} ${setIds[0] ?? "Session"} ${normalizedDate} ${normalizedTime}`;
+    }
+    return `${normalizedCategory} ${setIds.length} Sets ${normalizedDate} ${normalizedTime}`;
+  }
+
+  async function materializeDailyProblemSet({
+    sourceSetIds,
+    category,
+    questionCountMode,
+    questionCount,
+    passRate,
+  }) {
+    const normalizedSetIds = Array.from(new Set((sourceSetIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean)));
+    if (!normalizedSetIds.length) {
+      throw new Error("Choose at least one SetID.");
+    }
+
+    const shouldCreateDerivedSet =
+      normalizedSetIds.length > 1
+      || questionCountMode === "specify";
+
+    if (!shouldCreateDerivedSet) {
+      return normalizedSetIds[0];
+    }
+
+    const { data: sourceQuestions, error: sourceQuestionsError } = await supabase
+      .from("questions")
+      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .in("test_version", normalizedSetIds)
+      .order("test_version", { ascending: true })
+      .order("order_index", { ascending: true });
+    if (sourceQuestionsError) {
+      throw new Error(`Question lookup failed: ${sourceQuestionsError.message}`);
+    }
+
+    const orderedQuestions = normalizedSetIds.flatMap((version) =>
+      (sourceQuestions ?? []).filter((row) => row.test_version === version)
+    );
+    if (!orderedQuestions.length) {
+      throw new Error("No questions found for the selected SetID.");
+    }
+
+    const requestedQuestionCount =
+      questionCountMode === "specify"
+        ? Number(questionCount)
+        : orderedQuestions.length;
+    if (!Number.isFinite(requestedQuestionCount) || requestedQuestionCount <= 0) {
+      throw new Error("Specify a valid number of questions.");
+    }
+    if (requestedQuestionCount > orderedQuestions.length) {
+      throw new Error(`Only ${orderedQuestions.length} questions are available for the selected SetID.`);
+    }
+
+    const selectedQuestions = orderedQuestions.slice(0, requestedQuestionCount);
+    const sourceQuestionIds = selectedQuestions.map((row) => row.id).filter(Boolean);
+    const { data: sourceChoices, error: sourceChoicesError } = sourceQuestionIds.length
+      ? await supabase
+          .from("choices")
+          .select("question_id, part_index, choice_index, label, choice_image")
+          .in("question_id", sourceQuestionIds)
+      : { data: [], error: null };
+    if (sourceChoicesError) {
+      throw new Error(`Choice lookup failed: ${sourceChoicesError.message}`);
+    }
+
+    const generatedVersion = `daily_session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const ensure = await ensureTestRecord(generatedVersion, category || generatedVersion, "daily", passRate);
+    if (!ensure.ok) {
+      throw new Error(ensure.message);
+    }
+
+    const questionKeyBySourceId = new Map();
+    const nextQuestions = selectedQuestions.map((row, index) => {
+      const nextQuestionId = `${row.test_version || "daily"}__${row.question_id || index + 1}__${index + 1}`;
+      questionKeyBySourceId.set(row.id, nextQuestionId);
+      return {
+        test_version: generatedVersion,
+        question_id: nextQuestionId,
+        section_key: row.section_key,
+        type: row.type,
+        prompt_en: row.prompt_en,
+        prompt_bn: row.prompt_bn,
+        answer_index: row.answer_index,
+        order_index: index + 1,
+        data: {
+          ...(row.data ?? {}),
+          itemId: nextQuestionId,
+          sourceVersion: row.test_version ?? null,
+          sourceQuestionId: row.question_id ?? null,
+        },
+      };
+    });
+
+    const { error: insertQuestionsError } = await supabase.from("questions").insert(nextQuestions);
+    if (insertQuestionsError) {
+      throw new Error(`Question clone failed: ${insertQuestionsError.message}`);
+    }
+
+    const insertedQuestionIds = nextQuestions.map((row) => row.question_id);
+    const { data: insertedRows, error: insertedRowsError } = await supabase
+      .from("questions")
+      .select("id, question_id")
+      .eq("test_version", generatedVersion)
+      .in("question_id", insertedQuestionIds);
+    if (insertedRowsError) {
+      throw new Error(`Question verification failed: ${insertedRowsError.message}`);
+    }
+
+    const insertedIdByQuestionKey = new Map((insertedRows ?? []).map((row) => [row.question_id, row.id]));
+    const nextChoices = (sourceChoices ?? [])
+      .map((row) => {
+        const questionKey = questionKeyBySourceId.get(row.question_id);
+        const nextQuestionId = questionKey ? insertedIdByQuestionKey.get(questionKey) : null;
+        if (!nextQuestionId) return null;
+        return {
+          question_id: nextQuestionId,
+          part_index: row.part_index ?? null,
+          choice_index: row.choice_index,
+          label: row.label,
+          choice_image: row.choice_image,
+        };
+      })
+      .filter(Boolean);
+
+    if (nextChoices.length) {
+      const { error: insertChoicesError } = await supabase.from("choices").insert(nextChoices);
+      if (insertChoicesError) {
+        throw new Error(`Choice clone failed: ${insertChoicesError.message}`);
+      }
+    }
+
+    return generatedVersion;
   }
 
   async function createTestSession() {
@@ -4636,21 +4996,59 @@ export default function AdminConsole({
       setDailySessionsMsg("Please choose a past session to retake.");
       return;
     }
-    const problemSetId = dailySessionForm.problem_set_id.trim();
-    const title = dailySessionForm.title.trim();
-    const endsAt = dailySessionForm.ends_at;
+    const isMultipleSelection = dailySessionForm.selection_mode === "multiple";
+    const selectedSetIds = dailyConductMode === "retake"
+      ? [dailySessionForm.problem_set_id].filter(Boolean)
+      : selectedDailyProblemSetIds;
+    const sessionDate = dailySessionForm.session_date;
+    const startTime = dailySessionForm.start_time;
+    const closeTime = dailySessionForm.close_time;
+    const startsAtInput = dailyConductMode === "retake"
+      ? dailySessionForm.starts_at
+      : combineBangladeshDateTime(sessionDate, startTime);
+    const endsAtInput = dailyConductMode === "retake"
+      ? dailySessionForm.ends_at
+      : combineBangladeshDateTime(sessionDate, closeTime);
+    const title = dailyConductMode === "retake"
+      ? dailySessionForm.title.trim()
+      : buildGeneratedDailySessionTitle({
+          category: dailyConductCategory,
+          setIds: selectedSetIds,
+          sessionDate,
+          startTime,
+        });
+    const endsAt = endsAtInput;
     const passRate = Number(dailySessionForm.pass_rate);
-    if (!problemSetId) {
-      setDailySessionsMsg("SetID is required.");
+    if (!selectedSetIds.length) {
+      setDailySessionsMsg(isMultipleSelection ? "Choose one or more SetID values." : "SetID is required.");
       return;
     }
     if (!title) {
       setDailySessionsMsg("Test Title is required.");
       return;
     }
+    if (dailyConductMode !== "retake" && !sessionDate) {
+      setDailySessionsMsg("Date is required.");
+      return;
+    }
     if (!endsAt) {
       setDailySessionsMsg("End time is required.");
       return;
+    }
+    if (dailyConductMode !== "retake" && !closeTime) {
+      setDailySessionsMsg("Close time is required.");
+      return;
+    }
+    if (dailySessionForm.question_count_mode === "specify") {
+      const requestedQuestionCount = Number(dailySessionForm.question_count);
+      if (!Number.isFinite(requestedQuestionCount) || requestedQuestionCount <= 0) {
+        setDailySessionsMsg("Specify a valid number of questions.");
+        return;
+      }
+      if (requestedQuestionCount > selectedDailyQuestionCount) {
+        setDailySessionsMsg(`Only ${selectedDailyQuestionCount} questions are available for the selected SetID.`);
+        return;
+      }
     }
     if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
       setDailySessionsMsg("Pass rate must be between 0 and 1.");
@@ -4665,10 +5063,23 @@ export default function AdminConsole({
       setDailySessionsMsg(`Check failed: ${error.message}`);
       return;
     }
+    let problemSetId = selectedSetIds[0] ?? "";
+    try {
+      problemSetId = await materializeDailyProblemSet({
+        sourceSetIds: selectedSetIds,
+        category: dailyConductCategory,
+        questionCountMode: dailySessionForm.question_count_mode,
+        questionCount: dailySessionForm.question_count,
+        passRate,
+      });
+    } catch (error) {
+      setDailySessionsMsg(error.message);
+      return;
+    }
     const payload = {
       problem_set_id: problemSetId,
       title,
-      starts_at: dailySessionForm.starts_at ? fromBangladeshInput(dailySessionForm.starts_at) : null,
+      starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,
       ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
       is_published: true,
@@ -4705,7 +5116,14 @@ export default function AdminConsole({
       return;
     }
     setDailySessionsMsg("Created (session + link).");
-    setDailySessionForm((s) => ({ ...s, title: "", retake_release_scope: "all" }));
+    setDailySessionForm((s) => ({
+      ...s,
+      title: "",
+      question_count_mode: "all",
+      question_count: "",
+      problem_set_ids: s.problem_set_id ? [s.problem_set_id] : [],
+      retake_release_scope: "all",
+    }));
     setDailyConductMode("normal");
     setDailyRetakeSourceId("");
     fetchTestSessions();
@@ -5855,6 +6273,10 @@ export default function AdminConsole({
   }
 
   async function handleLogin() {
+    if (!supabase) {
+      setLoginMsg(supabaseConfigError || "Admin client is unavailable.");
+      return;
+    }
     setLoginMsg("");
     const { email, password } = loginForm;
     if (!email || !password) {
@@ -5863,7 +6285,7 @@ export default function AdminConsole({
     }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      setLoginMsg(error.message);
+      setLoginMsg(normalizeAdminLoginErrorMessage(error.message));
       return;
     }
   }
@@ -6311,7 +6733,8 @@ export default function AdminConsole({
   if (!profile) {
     return (
       <div className="admin-login">
-        <h2>Loading...</h2>
+        <h2>{loginMsg ? "Startup Error" : "Loading..."}</h2>
+        {loginMsg ? <div className="admin-msg">{loginMsg}</div> : null}
       </div>
     );
   }
@@ -8844,17 +9267,24 @@ export default function AdminConsole({
                 setDailyConductOpen(false);
                 setDailyConductMode("normal");
                 setDailyRetakeSourceId("");
+                setDailySetDropdownOpen(false);
+                setActiveDailyTimePicker("");
               }}
             >
-              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="admin-modal-header">
-                  <div className="admin-title">{dailyConductMode === "retake" ? "Conduct Daily Retake" : "Conduct Daily Test"}</div>
+              <div
+                className={`admin-modal ${dailyConductMode === "retake" ? "invite-modal" : "daily-session-create-modal"}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className={`admin-modal-header ${dailyConductMode === "retake" ? "" : "daily-session-create-header"}`}>
+                  <div className="admin-title">{dailyConductMode === "retake" ? "Conduct Daily Retake" : "Create Test Session"}</div>
                   <button
                     className="admin-modal-close"
                     onClick={() => {
                       setDailyConductOpen(false);
                       setDailyConductMode("normal");
                       setDailyRetakeSourceId("");
+                      setDailySetDropdownOpen(false);
+                      setActiveDailyTimePicker("");
                     }}
                     aria-label="Close"
                   >
@@ -8862,7 +9292,7 @@ export default function AdminConsole({
                   </button>
                 </div>
 
-                <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className={dailyConductMode === "retake" ? "admin-form" : "daily-session-create-body"}>
                   {dailyConductMode === "retake" ? (
                     <>
                       <div className="field">
@@ -8893,122 +9323,460 @@ export default function AdminConsole({
                         </select>
                       </div>
                     </>
+                  ) : (
+                    <div className="daily-session-create-layout">
+                      <div className="daily-session-create-choice-row">
+                        <label className="daily-session-create-choice">
+                          <input
+                            type="radio"
+                            name="dailySessionSelectionMode"
+                            checked={dailySessionForm.selection_mode === "single"}
+                            onChange={() => {
+                              setDailySetDropdownOpen(false);
+                              setDailySessionForm((s) => ({
+                                ...s,
+                                selection_mode: "single",
+                                problem_set_ids: s.problem_set_id ? [s.problem_set_id] : [],
+                              }));
+                            }}
+                          />
+                          Single Question Set
+                        </label>
+                        <label className="daily-session-create-choice">
+                          <input
+                            type="radio"
+                            name="dailySessionSelectionMode"
+                            checked={dailySessionForm.selection_mode === "multiple"}
+                            onChange={() => {
+                              setDailySessionForm((s) => ({
+                                ...s,
+                                selection_mode: "multiple",
+                                problem_set_ids: s.problem_set_id
+                                  ? Array.from(new Set([...(s.problem_set_ids ?? []), s.problem_set_id]))
+                                  : s.problem_set_ids ?? [],
+                              }));
+                            }}
+                          />
+                          Multiple Question Sets
+                        </label>
+                      </div>
+                      <div className="daily-session-create-field">
+                        <label>Category</label>
+                        <select
+                          value={dailyConductCategory}
+                          onChange={(e) => setDailyConductCategory(e.target.value)}
+                        >
+                          {dailyCategories.length ? (
+                            dailyCategories.map((c) => (
+                              <option key={`daily-cat-${c.name}`} value={c.name}>
+                                {c.name}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">No categories</option>
+                          )}
+                        </select>
+                      </div>
+                      <div className="daily-session-create-field">
+                        <label>Set ID</label>
+                        {dailySessionForm.selection_mode === "multiple" ? (
+                          <div className="daily-session-create-multi-select" ref={dailySetDropdownRef}>
+                            <button
+                              className="daily-session-create-multi-trigger"
+                              type="button"
+                              onClick={() => {
+                                setActiveDailyTimePicker("");
+                                setDailySetDropdownOpen((open) => !open);
+                              }}
+                              disabled={!dailyConductTests.length}
+                            >
+                              <span className="daily-session-create-multi-trigger-value">
+                                {selectedDailyProblemSetIds.length
+                                  ? (
+                                    <span className="daily-session-create-trigger-chip-list">
+                                      {selectedDailyProblemSetIds.map((setId) => (
+                                        <span key={`selected-set-inline-${setId}`} className="daily-session-create-selected-chip">
+                                          {setId}
+                                        </span>
+                                      ))}
+                                    </span>
+                                  )
+                                  : "Select Set ID"}
+                              </span>
+                              <span className={`daily-session-create-multi-arrow ${dailySetDropdownOpen ? "open" : ""}`}>▾</span>
+                            </button>
+                            {dailySetDropdownOpen ? (
+                              <div className="daily-session-create-set-list">
+                                {dailyConductTests.length ? (
+                                  dailyConductTests.map((test) => {
+                                    const checked = selectedDailyProblemSetIds.includes(test.version);
+                                    return (
+                                      <label
+                                        key={`daily-ps-multi-${test.version}`}
+                                        className="daily-session-create-set-option"
+                                      >
+                                        <span className="daily-session-create-set-option-main">
+                                          <input
+                                            className="daily-session-create-set-option-check"
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => toggleDailyProblemSetSelection(test.version)}
+                                          />
+                                          <span className="daily-session-create-set-option-id">{test.version}</span>
+                                        </span>
+                                        <span className="daily-session-create-set-meta">{Number(test.question_count ?? 0)}Q</span>
+                                      </label>
+                                    );
+                                  })
+                                ) : (
+                                  <div className="daily-session-create-help">No daily tests in this category.</div>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <select
+                            value={dailySessionForm.problem_set_id}
+                            onChange={(e) =>
+                              setDailySessionForm((s) => ({
+                                ...s,
+                                problem_set_id: e.target.value,
+                                problem_set_ids: e.target.value ? [e.target.value] : [],
+                              }))
+                            }
+                          >
+                            {dailyConductTests.length ? (
+                              dailyConductTests.map((t) => (
+                                <option key={`daily-ps-${t.version}`} value={t.version}>
+                                  {t.version}
+                                </option>
+                              ))
+                            ) : (
+                              <option value="">No daily tests</option>
+                            )}
+                          </select>
+                        )}
+                      </div>
+                      <div className="daily-session-create-field">
+                        <label>Number of Questions</label>
+                        <div className="daily-session-create-choice-row daily-session-create-count-row">
+                          <label className="daily-session-create-choice">
+                            <input
+                              type="radio"
+                              name="dailySessionQuestionMode"
+                              checked={dailySessionForm.question_count_mode === "all"}
+                              onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "all", question_count: "" }))}
+                            />
+                            All Questions
+                          </label>
+                          <div className="daily-session-create-count-option">
+                            <label className="daily-session-create-choice">
+                              <input
+                                type="radio"
+                                name="dailySessionQuestionMode"
+                                checked={dailySessionForm.question_count_mode === "specify"}
+                                onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "specify" }))}
+                              />
+                              Specify
+                            </label>
+                            <input
+                              className="daily-session-create-count-input"
+                              value={dailySessionForm.question_count}
+                              disabled={dailySessionForm.question_count_mode !== "specify"}
+                              onChange={(e) => setDailySessionForm((s) => ({ ...s, question_count: e.target.value }))}
+                              placeholder=""
+                            />
+                          </div>
+                        </div>
+                        <div className="daily-session-create-help">
+                          Available questions: {selectedDailyQuestionCount || 0}
+                        </div>
+                      </div>
+                      <div className="daily-session-create-split-row">
+                        <div className="daily-session-create-field">
+                          <label>Date</label>
+                          <input
+                            type="date"
+                            value={dailySessionForm.session_date}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, session_date: e.target.value }))}
+                          />
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Start Time</label>
+                          <div className="daily-session-create-time-picker-wrap" data-daily-time-picker>
+                            {(() => {
+                              const startTimeParts = getTwelveHourTimeParts(dailySessionForm.start_time);
+                              const isOpen = activeDailyTimePicker === "start_time";
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="daily-session-create-time-trigger"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isOpen}
+                                    onClick={() => {
+                                      setDailySetDropdownOpen(false);
+                                      setActiveDailyTimePicker((current) => (current === "start_time" ? "" : "start_time"));
+                                    }}
+                                  >
+                                    <span>{formatTwelveHourTimeDisplay(dailySessionForm.start_time)}</span>
+                                    <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {isOpen ? (
+                                    <div className="daily-session-create-time-popover" role="dialog" aria-label="Select start time">
+                                      <div className="daily-session-create-time-columns">
+                                        <div className="daily-session-create-time-column">
+                                          {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                            <button
+                                              key={`daily-start-hour-${hourValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.hour === hourValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("start_time", "hour", hourValue)}
+                                            >
+                                              {hourValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                            <button
+                                              key={`daily-start-minute-${minuteValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.minute === minuteValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("start_time", "minute", minuteValue)}
+                                            >
+                                              {minuteValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {MERIDIEM_OPTIONS.map((periodValue) => (
+                                            <button
+                                              key={`daily-start-period-${periodValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.period === periodValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("start_time", "period", periodValue)}
+                                            >
+                                              {periodValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Close Time</label>
+                          <div className="daily-session-create-time-picker-wrap" data-daily-time-picker>
+                            {(() => {
+                              const closeTimeParts = getTwelveHourTimeParts(dailySessionForm.close_time);
+                              const isOpen = activeDailyTimePicker === "close_time";
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="daily-session-create-time-trigger"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isOpen}
+                                    onClick={() => {
+                                      setDailySetDropdownOpen(false);
+                                      setActiveDailyTimePicker((current) => (current === "close_time" ? "" : "close_time"));
+                                    }}
+                                  >
+                                    <span>{formatTwelveHourTimeDisplay(dailySessionForm.close_time)}</span>
+                                    <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {isOpen ? (
+                                    <div className="daily-session-create-time-popover" role="dialog" aria-label="Select close time">
+                                      <div className="daily-session-create-time-columns">
+                                        <div className="daily-session-create-time-column">
+                                          {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                            <button
+                                              key={`daily-close-hour-${hourValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.hour === hourValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("close_time", "hour", hourValue)}
+                                            >
+                                              {hourValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                            <button
+                                              key={`daily-close-minute-${minuteValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.minute === minuteValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("close_time", "minute", minuteValue)}
+                                            >
+                                              {minuteValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {MERIDIEM_OPTIONS.map((periodValue) => (
+                                            <button
+                                              key={`daily-close-period-${periodValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.period === periodValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("close_time", "period", periodValue)}
+                                            >
+                                              {periodValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="daily-session-create-two-col">
+                        <div className="daily-session-create-field">
+                          <label>Time Limit (min)</label>
+                          <input
+                            value={dailySessionForm.time_limit_min}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                            placeholder=""
+                          />
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Pass Rate</label>
+                          <input
+                            value={dailySessionForm.pass_rate}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                            placeholder=""
+                          />
+                        </div>
+                      </div>
+                      <div className="daily-session-create-toggle-row">
+                        <span>Show Answers After Attempt</span>
+                        <label className="daily-session-create-switch" aria-label="Show Answers After Attempt">
+                          <input
+                            type="checkbox"
+                            checked={dailySessionForm.show_answers}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.checked }))}
+                          />
+                          <span className="daily-session-create-switch-slider" />
+                        </label>
+                      </div>
+                      <div className="daily-session-create-toggle-row">
+                        <span>Allow Multiple Attempts</span>
+                        <label className="daily-session-create-switch" aria-label="Allow Multiple Attempts">
+                          <input
+                            type="checkbox"
+                            checked={dailySessionForm.allow_multiple_attempts}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.checked }))}
+                          />
+                          <span className="daily-session-create-switch-slider" />
+                        </label>
+                      </div>
+                      <div className="daily-session-create-actions">
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          onClick={createDailySession}
+                        >
+                          Create Session
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {dailyConductMode === "retake" ? (
+                    <>
+                      <div className="field">
+                        <label>Test Title</label>
+                        <input
+                          value={dailySessionForm.title}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                          placeholder="Daily Test"
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>Starts At</label>
+                        <input
+                          type="datetime-local"
+                          step="300"
+                          value={dailySessionForm.starts_at}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>Ends At</label>
+                        <input
+                          type="datetime-local"
+                          step="300"
+                          value={dailySessionForm.ends_at}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>Time Limit (min)</label>
+                        <input
+                          value={dailySessionForm.time_limit_min}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                          placeholder="10"
+                        />
+                      </div>
+                      <div className="field small">
+                        <label>Show Answers</label>
+                        <select
+                          value={dailySessionForm.show_answers ? "yes" : "no"}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                        >
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      </div>
+                      <div className="field small">
+                        <label>Attempts</label>
+                        <select
+                          value={dailySessionForm.allow_multiple_attempts ? "multiple" : "once"}
+                          onChange={(e) =>
+                            setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
+                          }
+                        >
+                          <option value="once">Only once</option>
+                          <option value="multiple">Allow multiple</option>
+                        </select>
+                      </div>
+                      <div className="field small">
+                        <label>Pass Rate</label>
+                        <input
+                          value={dailySessionForm.pass_rate}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                          placeholder="0.8"
+                        />
+                      </div>
+                    </>
                   ) : null}
-                  <div className="field">
-                    <label>Category</label>
-                    <select
-                      value={dailyConductCategory}
-                      onChange={(e) => setDailyConductCategory(e.target.value)}
-                    >
-                      {dailyCategories.length ? (
-                        dailyCategories.map((c) => (
-                          <option key={`daily-cat-${c.name}`} value={c.name}>
-                            {c.name}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">No categories</option>
-                      )}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>SetID</label>
-                    <select
-                      value={dailySessionForm.problem_set_id}
-                      disabled={dailyConductMode === "retake"}
-                      onChange={(e) => setDailySessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
-                    >
-                      {dailyConductTests.length ? (
-                        dailyConductTests.map((t) => (
-                          <option key={`daily-ps-${t.version}`} value={t.version}>
-                            {t.version}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">No daily tests</option>
-                      )}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>Test Title</label>
-                    <input
-                      value={dailySessionForm.title}
-                      onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
-                      placeholder="Daily Test"
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>Starts At</label>
-                    <input
-                      type="datetime-local"
-                      step="300"
-                      value={dailySessionForm.starts_at}
-                      onChange={(e) => setDailySessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>Ends At</label>
-                    <input
-                      type="datetime-local"
-                      step="300"
-                      value={dailySessionForm.ends_at}
-                      onChange={(e) => setDailySessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>Time Limit (min)</label>
-                    <input
-                      value={dailySessionForm.time_limit_min}
-                      onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                      placeholder="10"
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>Show Answers</label>
-                    <select
-                      value={dailySessionForm.show_answers ? "yes" : "no"}
-                      onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-                    >
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </select>
-                  </div>
-                  <div className="field small">
-                    <label>Attempts</label>
-                    <select
-                      value={dailySessionForm.allow_multiple_attempts ? "multiple" : "once"}
-                      onChange={(e) =>
-                        setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
-                      }
-                    >
-                      <option value="once">Only once</option>
-                      <option value="multiple">Allow multiple</option>
-                    </select>
-                  </div>
-                  <div className="field small">
-                    <label>Pass Rate</label>
-                    <input
-                      value={dailySessionForm.pass_rate}
-                      onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                      placeholder="0.8"
-                    />
-                  </div>
-                  <div className="field small">
-                    <label>&nbsp;</label>
-                    <button
-                      className={`btn ${dailyConductMode === "retake" ? "btn-retake" : "btn-primary"}`}
-                      type="button"
-                      onClick={createDailySession}
-                      disabled={dailyConductMode === "retake" && !dailyRetakeSourceId}
-                    >
-                      Create Session
-                    </button>
-                  </div>
+                  {dailyConductMode === "retake" ? (
+                    <div className="field small">
+                      <label>&nbsp;</label>
+                      <button
+                        className="btn btn-retake"
+                        type="button"
+                        onClick={createDailySession}
+                        disabled={!dailyRetakeSourceId}
+                      >
+                        Create Session
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="admin-help" style={{ marginTop: 6 }}>
-                  Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
-                </div>
+                {dailyConductMode === "retake" ? (
+                  <div className="admin-help" style={{ marginTop: 6 }}>
+                    Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}

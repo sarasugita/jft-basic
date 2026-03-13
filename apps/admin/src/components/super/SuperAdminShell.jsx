@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { createAdminSupabaseClient } from "../../lib/adminSupabase";
+import {
+  createAdminSupabaseClient,
+  getAdminSupabaseConfig,
+  getAdminSupabaseConfigError,
+} from "../../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../../lib/authCookies";
 
 const SuperAdminContext = createContext(null);
@@ -247,10 +251,13 @@ export function useSuperAdmin() {
 export default function SuperAdminShell({ children }) {
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = useMemo(() => createAdminSupabaseClient(), []);
+  const supabaseConfigError = getAdminSupabaseConfigError();
+  const { supabaseUrl, supabaseAnonKey } = getAdminSupabaseConfig();
+  const supabase = useMemo(() => (supabaseConfigError ? null : createAdminSupabaseClient()), [supabaseConfigError]);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [startupError, setStartupError] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -265,6 +272,9 @@ export default function SuperAdminShell({ children }) {
   }, [sidebarCollapsed]);
 
   async function getAccessToken() {
+    if (!supabase) {
+      throw new Error(supabaseConfigError || "Admin client is unavailable.");
+    }
     const { data: sessionData } = await supabase.auth.getSession();
     let accessToken = sessionData?.session?.access_token ?? null;
     const expiresAt = sessionData?.session?.expires_at ?? 0;
@@ -285,16 +295,19 @@ export default function SuperAdminShell({ children }) {
   }
 
   async function invokeWithAuth(functionName, body) {
+    if (supabaseConfigError) {
+      return { data: null, error: { message: supabaseConfigError } };
+    }
     const accessToken = await getAccessToken();
 
     console.log("[EdgeInvoke]", functionName, "token?", !!accessToken);
 
     if (body instanceof FormData) {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/${functionName}`, {
+      const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+          apikey: supabaseAnonKey,
         },
         body,
       });
@@ -329,6 +342,14 @@ export default function SuperAdminShell({ children }) {
   }
 
   useEffect(() => {
+    if (supabaseConfigError) {
+      setSession(null);
+      setProfile(null);
+      setStartupError(supabaseConfigError);
+      setLoading(false);
+      return;
+    }
+    if (!supabase) return;
     let mounted = true;
 
     async function loadProfile(nextSession) {
@@ -337,6 +358,7 @@ export default function SuperAdminShell({ children }) {
           if (mounted) {
             setSession(null);
             setProfile(null);
+            setStartupError("");
             setLoading(false);
           }
           router.replace("/");
@@ -355,16 +377,19 @@ export default function SuperAdminShell({ children }) {
           setSession(null);
           setProfile(null);
           syncAdminAuthCookie(null);
+          setStartupError("Super admin access is required.");
           setLoading(false);
           router.replace("/");
           return;
         }
 
         setProfile(nextProfile);
+        setStartupError("");
         setLoading(false);
       } catch (error) {
         if (!mounted) return;
         console.error("super shell loadProfile error:", error);
+        setStartupError(error instanceof Error ? error.message : "Failed to load admin profile.");
         setLoading(false);
       }
     }
@@ -381,6 +406,7 @@ export default function SuperAdminShell({ children }) {
       } catch (error) {
         if (!mounted) return;
         console.error("super shell bootstrap error:", error);
+        setStartupError(error instanceof Error ? error.message : "Failed to bootstrap admin session.");
         setLoading(false);
       }
     }
@@ -411,7 +437,7 @@ export default function SuperAdminShell({ children }) {
       }
       listener.subscription.unsubscribe();
     };
-  }, [router, supabase]);
+  }, [router, supabase, supabaseConfigError]);
 
   if (isScopedAdminConsolePath(pathname)) {
     return children;
@@ -421,6 +447,15 @@ export default function SuperAdminShell({ children }) {
     return (
       <div className="admin-login">
         <h2>Loading...</h2>
+      </div>
+    );
+  }
+
+  if (startupError) {
+    return (
+      <div className="admin-login">
+        <h2>Startup Error</h2>
+        <div className="admin-msg">{startupError}</div>
       </div>
     );
   }

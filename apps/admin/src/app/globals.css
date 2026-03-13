@@ -1079,6 +1079,401 @@ body { padding: 0; }
   width: min(820px, 96vw);
 }
 
+.daily-session-create-modal {
+  max-width: 680px;
+  width: min(680px, calc(100vw - 28px));
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.daily-session-create-header {
+  background: #d9e7d7;
+  padding: 12px 14px;
+  border-bottom: 1px solid #d1dbcf;
+}
+
+.daily-session-create-header .admin-title {
+  font-size: 16px;
+}
+
+.daily-session-create-body {
+  padding: 12px 16px 16px;
+}
+
+.daily-session-create-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-session-create-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.daily-session-create-field label,
+.daily-session-create-time-group label {
+  display: block;
+  font-weight: 500;
+  margin: 0;
+  color: var(--admin-text);
+}
+
+.daily-session-create-field input:not([type="radio"]):not([type="checkbox"]),
+.daily-session-create-field select {
+  width: 100%;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 2px;
+  padding: 7px 10px;
+  min-height: 40px;
+  background: #fff;
+  color: var(--admin-text);
+  box-sizing: border-box;
+}
+
+.daily-session-create-choice-row {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+
+.daily-session-create-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  line-height: 1;
+  min-height: 18px;
+}
+
+.daily-session-create-choice input {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  flex: 0 0 16px;
+  accent-color: #3f6b0f;
+}
+
+.daily-session-create-count-input {
+  width: 108px;
+  min-width: 108px;
+  margin-left: 0;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 2px;
+  background: #fff;
+  color: var(--admin-text);
+}
+
+.daily-session-create-count-input:disabled {
+  background: #f6f8f4;
+  color: #a2aba4;
+  border-color: #dde3d9;
+  cursor: not-allowed;
+}
+
+.daily-session-create-split-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: end;
+}
+
+.daily-session-create-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.daily-session-create-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.daily-session-create-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  display: inline-block;
+}
+
+.daily-session-create-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.daily-session-create-switch-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 1px solid #7d837b;
+  background: #f4f5f3;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.daily-session-create-switch-slider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #7d837b;
+  transform: translateY(-50%);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.daily-session-create-switch input:checked + .daily-session-create-switch-slider {
+  background: #3f6b0f;
+  border-color: #2f520b;
+}
+
+.daily-session-create-switch input:checked + .daily-session-create-switch-slider::after {
+  transform: translate(16px, -50%);
+  border-color: #2f520b;
+}
+
+.daily-session-create-multi-select {
+  position: relative;
+}
+
+.daily-session-create-multi-trigger {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 2px;
+  padding: 7px 10px;
+  background: #fff;
+  color: var(--admin-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.daily-session-create-multi-trigger-value {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  overflow: hidden;
+}
+
+.daily-session-create-trigger-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.daily-session-create-multi-arrow {
+  color: #5f6b63;
+  font-size: 13px;
+  transform: rotate(0deg);
+  transition: transform 0.2s ease;
+}
+
+.daily-session-create-multi-arrow.open {
+  transform: rotate(180deg);
+}
+
+.daily-session-create-set-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 80px));
+  z-index: 4;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 2px;
+  background: #fff;
+  padding: 6px 10px;
+  max-height: 124px;
+  overflow-y: auto;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.daily-session-create-set-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.daily-session-create-set-option-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 220px;
+  align-items: center;
+  gap: 8px;
+}
+
+.daily-session-create-set-option-check {
+  accent-color: #3f6b0f;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  align-self: center;
+}
+
+.daily-session-create-set-option-id {
+  white-space: nowrap;
+}
+
+.daily-session-create-set-meta,
+.daily-session-create-help {
+  color: #5f6b63;
+  font-size: 12px;
+}
+
+.daily-session-create-set-meta {
+  white-space: nowrap;
+  align-self: center;
+}
+
+.daily-session-create-selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.daily-session-create-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #c7cec4;
+  background: #f6f9f5;
+  color: #384338;
+  font-size: 12px;
+}
+
+.daily-session-create-count-row {
+  flex-wrap: nowrap;
+  gap: 22px;
+  align-items: center;
+}
+
+.daily-session-create-count-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.daily-session-create-time-picker-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.daily-session-create-time-trigger {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 2px;
+  background: #fff;
+  color: var(--admin-text);
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.daily-session-create-time-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.daily-session-create-time-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+}
+
+.daily-session-create-time-column {
+  max-height: 180px;
+  overflow-y: auto;
+  border-right: 1px solid #e2e8df;
+}
+
+.daily-session-create-time-column:last-child {
+  border-right: 0;
+}
+
+.daily-session-create-time-option {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--admin-text);
+  text-align: center;
+  padding: 6px 8px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.daily-session-create-time-option:hover {
+  background: #f2f6ef;
+}
+
+.daily-session-create-time-option.active {
+  background: #3f6b0f;
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .daily-session-create-split-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .daily-session-create-count-row {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+}
+
+@media (max-width: 560px) {
+  .daily-session-create-split-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.daily-session-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.daily-session-create-actions .btn {
+  min-width: 164px;
+}
+
 .attendance-modal {
   max-width: 980px;
   width: min(980px, 95vw);

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSuperAdmin } from "./SuperAdminShell";
+import { getAdminSupabaseConfig } from "../../lib/adminSupabase";
 
 function emptyUploadForm() {
   return {
@@ -90,7 +91,7 @@ function resolveMediaUrl(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
   if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
-  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const { supabaseUrl: baseUrl } = getAdminSupabaseConfig();
   if (!baseUrl) return raw;
   const encodedPath = raw
     .split("/")

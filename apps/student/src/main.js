@@ -45,14 +45,22 @@ let authState = {
   checked: false,
   session: null,
   profile: null,
+  profileError: "",
   recoveryMode: false,
   mustChangePassword: false,
 };
+
+let appBootstrapState = {
+  loading: true,
+};
+
+let authRefreshPromise = null;
 
 let studentPanelEntryUserId = "";
 
 let testsState = {
   loaded: false,
+  loading: false,
   list: [],
   error: "",
 };
@@ -126,6 +134,7 @@ let modelRankState = {
 
 let testSessionsState = {
   loaded: false,
+  loading: false,
   list: [],
   error: "",
 };
@@ -234,6 +243,69 @@ function hasLinkParam() {
   }
 }
 
+function getSupabaseErrorInfo(error) {
+  return {
+    message: error?.message ?? "Unknown error",
+    code: error?.code ?? "",
+    details: error?.details ?? "",
+    hint: error?.hint ?? "",
+    status: error?.status ?? "",
+  };
+}
+
+function getErrorMessage(error, fallback) {
+  return getSupabaseErrorInfo(error).message || fallback;
+}
+
+function logSupabaseError(context, error) {
+  if (!error) return;
+  console.error(`${context}:`, getSupabaseErrorInfo(error));
+}
+
+function logUnexpectedError(context, error) {
+  if (error?.message || error?.code || error?.details || error?.hint || error?.status) {
+    logSupabaseError(context, error);
+    return;
+  }
+  console.error(`${context}:`, error);
+}
+
+function resetSessionScopedState() {
+  studentPanelEntryUserId = "";
+  studentResultsState.userId = "";
+  studentResultsState.loaded = false;
+  studentResultsState.loading = false;
+  studentResultsState.list = [];
+  studentResultsState.error = "";
+  studentAttendanceState.userId = "";
+  studentAttendanceState.loaded = false;
+  studentAttendanceState.loading = false;
+  studentAttendanceState.list = [];
+  studentAttendanceState.error = "";
+  rankingState.userId = "";
+  rankingState.loaded = false;
+  rankingState.loading = false;
+  rankingState.list = [];
+  rankingState.error = "";
+  sessionAttemptOverrideState.userId = "";
+  sessionAttemptOverrideState.loaded = false;
+  sessionAttemptOverrideState.loading = false;
+  sessionAttemptOverrideState.map = {};
+  sessionAttemptOverrideState.error = "";
+  absenceApplicationsState.loaded = false;
+  absenceApplicationsState.loading = false;
+  absenceApplicationsState.list = [];
+  absenceApplicationsState.error = "";
+  modelRankState.loading = false;
+  modelRankState.loaded = false;
+  modelRankState.map = {};
+  modelRankState.totalMap = {};
+}
+
+function shouldBlockOnQuestions() {
+  return ["sectionIntro", "quiz", "result"].includes(state.phase);
+}
+
 function mapDbQuestion(row, version) {
   const data = row.data ?? {};
   const base = {
@@ -261,23 +333,38 @@ function mapDbQuestion(row, version) {
 async function fetchQuestionsForVersion(version, updatedAt = "") {
   if (!version) return;
   if (questionsState.loading && questionsState.version === version) return;
+  const hadCachedVersion = questionsState.loaded && questionsState.version === version && questionsState.list.length > 0;
+  const previousList = hadCachedVersion ? questionsState.list : [];
+  const previousUpdatedAt = hadCachedVersion ? questionsState.updatedAt : "";
   questionsState.loading = true;
   questionsState.error = "";
   questionsState.version = version;
-  const { data, error } = await publicSupabase
-    .from("questions")
-    .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-    .eq("test_version", version)
-    .order("order_index", { ascending: true });
-  if (error) {
-    questionsState.list = [];
-    questionsState.error = error.message || "Failed to load questions.";
-  } else {
+  try {
+    const { data, error } = await publicSupabase
+      .from("questions")
+      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .eq("test_version", version)
+      .order("order_index", { ascending: true });
+    if (error) {
+      logSupabaseError("questions fetch error", error);
+      questionsState.list = previousList;
+      questionsState.error = getErrorMessage(error, "Failed to load questions.");
+      questionsState.loaded = hadCachedVersion;
+      questionsState.updatedAt = previousUpdatedAt;
+      return;
+    }
     questionsState.list = (data ?? []).map((row) => mapDbQuestion(row, version));
+    questionsState.loaded = true;
+    questionsState.updatedAt = updatedAt || "";
+  } catch (error) {
+    logUnexpectedError("questions fetch failed", error);
+    questionsState.list = previousList;
+    questionsState.error = getErrorMessage(error, "Failed to load questions.");
+    questionsState.loaded = hadCachedVersion;
+    questionsState.updatedAt = previousUpdatedAt;
+  } finally {
+    questionsState.loading = false;
   }
-  questionsState.loaded = true;
-  questionsState.loading = false;
-  questionsState.updatedAt = updatedAt || "";
 }
 
 function ensureQuestionsLoaded() {
@@ -286,9 +373,6 @@ function ensureQuestionsLoaded() {
   const problemSet = testsState.list.find((t) => t.version === version);
   const updatedAt = problemSet?.updated_at ?? "";
   if ((questionsState.version !== version || questionsState.updatedAt !== updatedAt) && !questionsState.loading) {
-    questionsState.loaded = false;
-    questionsState.list = [];
-    questionsState.error = "";
     fetchQuestionsForVersion(version, updatedAt).finally(render);
   }
 }
@@ -499,191 +583,240 @@ function renderAndSync(fn, app) {
 }
 
 async function refreshAuthState() {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) {
-    console.error("getSession error:", error);
-    const authMessage = String(error.message || "");
-    if (authMessage.includes("Invalid Refresh Token") || authMessage.includes("Refresh Token Not Found")) {
-      await supabase.auth.signOut({ scope: "local" });
+  if (authRefreshPromise) {
+    return authRefreshPromise;
+  }
+
+  authRefreshPromise = (async () => {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        logSupabaseError("getSession error", error);
+        const authMessage = String(error.message || "");
+        if (authMessage.includes("Invalid Refresh Token") || authMessage.includes("Refresh Token Not Found")) {
+          try {
+            await supabase.auth.signOut({ scope: "local" });
+          } catch (signOutError) {
+            logUnexpectedError("auth signOut after invalid refresh token failed", signOutError);
+          }
+        }
+      }
+
+      authState.session = data?.session ?? null;
+      authState.profile = null;
+      authState.profileError = "";
+      authState.mustChangePassword = false;
+
+      const isRecovery = window.location.hash.includes("type=recovery") || window.location.hash.includes("access_token=");
+      authState.recoveryMode = Boolean(isRecovery && authState.session);
+
+      if (!authState.session) {
+        state.requireLogin = true;
+        resetSessionScopedState();
+        return;
+      }
+
+      authState.mustChangePassword = Boolean(authState.recoveryMode);
+
+      try {
+        const { data: prof, error: profErr } = await supabase
+          .from("profiles")
+          .select(PROFILE_SELECT_FIELDS)
+          .eq("id", authState.session.user.id)
+          .single();
+
+        if (profErr) {
+          authState.profileError = getErrorMessage(profErr, "Failed to load profile.");
+          logSupabaseError("fetch profile error", profErr);
+        } else {
+          authState.profile = prof;
+          authState.mustChangePassword = Boolean(authState.mustChangePassword || prof?.force_password_change);
+          const nextName = (prof?.display_name ?? "").trim() || (state.user?.name ?? "").trim();
+          const nextId = (prof?.student_code ?? "").trim() || (state.user?.id ?? "").trim();
+          state.user = { name: nextName, id: nextId };
+          saveState();
+        }
+      } catch (profileError) {
+        authState.profileError = getErrorMessage(profileError, "Failed to load profile.");
+        logUnexpectedError("fetch profile error", profileError);
+      }
+
+      if (authState.session && state.linkId) {
+        if (state.phase === "login" && !state.requireLogin) {
+          state.linkLoginRequired = false;
+          state.phase = "intro";
+          saveState();
+        }
+      }
+
+      if (!state.linkLoginRequired) {
+        state.requireLogin = false;
+        if (state.phase === "login") {
+          state.studentTab = "home";
+          state.phase = "intro";
+          saveState();
+        }
+      }
+
+      const currentUserId = authState.session.user.id;
+      if (studentPanelEntryUserId !== currentUserId) {
+        studentPanelEntryUserId = currentUserId;
+        state.studentTab = "home";
+        resultDetailState.open = false;
+        resultDetailState.mode = "";
+        resultDetailState.subTab = "score";
+        resultDetailState.sectionFilter = "";
+        resultDetailState.attempt = null;
+        saveState();
+      }
+      if (studentResultsState.userId !== currentUserId) {
+        studentResultsState.userId = currentUserId;
+        studentResultsState.loaded = false;
+        studentResultsState.loading = false;
+        studentResultsState.list = [];
+        studentResultsState.error = "";
+      }
+      if (studentAttendanceState.userId !== currentUserId) {
+        studentAttendanceState.userId = currentUserId;
+        studentAttendanceState.loaded = false;
+        studentAttendanceState.loading = false;
+        studentAttendanceState.list = [];
+        studentAttendanceState.error = "";
+      }
+      if (rankingState.userId !== currentUserId) {
+        rankingState.userId = currentUserId;
+        rankingState.loaded = false;
+        rankingState.loading = false;
+        rankingState.list = [];
+        rankingState.error = "";
+      }
+      if (sessionAttemptOverrideState.userId !== currentUserId) {
+        sessionAttemptOverrideState.userId = currentUserId;
+        sessionAttemptOverrideState.loaded = false;
+        sessionAttemptOverrideState.loading = false;
+        sessionAttemptOverrideState.map = {};
+        sessionAttemptOverrideState.error = "";
+      }
+    } catch (error) {
+      logUnexpectedError("refreshAuthState failed", error);
+      authState.session = null;
+      authState.profile = null;
+      authState.profileError = getErrorMessage(error, "Authentication check failed.");
+      state.requireLogin = true;
+      resetSessionScopedState();
+    } finally {
+      authState.checked = true;
+      authRefreshPromise = null;
     }
-  }
-  authState.session = data?.session ?? null;
-  authState.profile = null;
+  })();
 
-  const isRecovery = window.location.hash.includes("type=recovery") || window.location.hash.includes("access_token=");
-  authState.recoveryMode = Boolean(isRecovery && authState.session);
-
-  if (!authState.session) {
-    studentPanelEntryUserId = "";
-    state.requireLogin = true;
-    authState.checked = true;
-    studentResultsState.userId = "";
-    studentResultsState.loaded = false;
-    studentResultsState.list = [];
-    studentResultsState.error = "";
-    studentAttendanceState.userId = "";
-    studentAttendanceState.loaded = false;
-    studentAttendanceState.list = [];
-    studentAttendanceState.error = "";
-    rankingState.userId = "";
-    rankingState.loaded = false;
-    rankingState.list = [];
-    rankingState.error = "";
-    sessionAttemptOverrideState.userId = "";
-    sessionAttemptOverrideState.loaded = false;
-    sessionAttemptOverrideState.map = {};
-    sessionAttemptOverrideState.error = "";
-    return;
-  }
-
-  const { data: prof, error: profErr } = await supabase
-    .from("profiles")
-    .select(PROFILE_SELECT_FIELDS)
-    .eq("id", authState.session.user.id)
-    .single();
-  authState.mustChangePassword = Boolean(authState.recoveryMode);
-
-  if (profErr) {
-    console.error("fetch profile error:", profErr);
-  } else {
-    authState.profile = prof;
-    authState.mustChangePassword = Boolean(authState.mustChangePassword || prof?.force_password_change);
-    const nextName = (prof?.display_name ?? "").trim() || (state.user?.name ?? "").trim();
-    const nextId = (prof?.student_code ?? "").trim() || (state.user?.id ?? "").trim();
-    state.user = { name: nextName, id: nextId };
-    saveState();
-  }
-
-  if (authState.session && state.linkId) {
-    if (state.phase === "login" && !state.requireLogin) {
-      state.linkLoginRequired = false;
-      state.phase = "intro";
-      saveState();
-    }
-  }
-
-  authState.checked = true;
-
-  if (!state.linkLoginRequired) {
-    state.requireLogin = false;
-    if (state.phase === "login") {
-      state.studentTab = "home";
-      state.phase = "intro";
-      saveState();
-    }
-  }
-  const currentUserId = authState.session.user.id;
-  if (studentPanelEntryUserId !== currentUserId) {
-    studentPanelEntryUserId = currentUserId;
-    state.studentTab = "home";
-    resultDetailState.open = false;
-    resultDetailState.mode = "";
-    resultDetailState.subTab = "score";
-    resultDetailState.sectionFilter = "";
-    resultDetailState.attempt = null;
-    saveState();
-  }
-  if (studentResultsState.userId !== currentUserId) {
-    studentResultsState.userId = currentUserId;
-    studentResultsState.loaded = false;
-    studentResultsState.list = [];
-    studentResultsState.error = "";
-  }
-  if (studentAttendanceState.userId !== currentUserId) {
-    studentAttendanceState.userId = currentUserId;
-    studentAttendanceState.loaded = false;
-    studentAttendanceState.list = [];
-    studentAttendanceState.error = "";
-  }
-  if (rankingState.userId !== currentUserId) {
-    rankingState.userId = currentUserId;
-    rankingState.loaded = false;
-    rankingState.list = [];
-    rankingState.error = "";
-  }
-  if (sessionAttemptOverrideState.userId !== currentUserId) {
-    sessionAttemptOverrideState.userId = currentUserId;
-    sessionAttemptOverrideState.loaded = false;
-    sessionAttemptOverrideState.map = {};
-    sessionAttemptOverrideState.error = "";
-  }
-  if (authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
-    fetchStudentResults().finally(render);
-  }
+  return authRefreshPromise;
 }
 
 async function fetchPublicTests() {
+  if (testsState.loading) return;
+  testsState.loading = true;
   testsState.error = "";
-  const client = authState.session ? supabase : publicSupabase;
-  let query = client
-    .from("tests")
-    .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
-    .order("created_at", { ascending: false })
-    .limit(100);
-  if (!authState.session) {
-    query = query.eq("is_public", true);
-  }
-  const { data, error } = await query;
-  if (error) {
-    testsState.list = [];
-    const msg = error.message || "Failed to load tests.";
-    if (String(msg).includes("does not exist") || error.status === 404) {
-      testsState.error = "testsテーブルがありません。Supabaseでスキーマを適用してください。";
-    } else {
-      testsState.error = msg;
+  const hadData = testsState.loaded && testsState.list.length > 0;
+  try {
+    const client = authState.session ? supabase : publicSupabase;
+    let query = client
+      .from("tests")
+      .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (!authState.session) {
+      query = query.eq("is_public", true);
     }
+    const { data, error } = await query;
+    if (error) {
+      logSupabaseError("tests fetch error", error);
+      const msg = getErrorMessage(error, "Failed to load tests.");
+      if (!hadData) {
+        testsState.list = [];
+      }
+      if (String(msg).includes("does not exist") || error.status === 404) {
+        testsState.error = "testsテーブルがありません。Supabaseでスキーマを適用してください。";
+      } else {
+        testsState.error = msg;
+      }
+      return;
+    }
+    const list = (data ?? []).filter((t) => t.type === "mock" || t.type === "daily");
+    testsState.list = list;
     testsState.loaded = true;
-    return;
+    if (!state.linkId && !state.selectedTestVersion && list.length) {
+      state.selectedTestVersion = list[0].version;
+      saveState();
+    }
+    ensureQuestionsLoaded();
+  } catch (error) {
+    logUnexpectedError("tests fetch failed", error);
+    if (!hadData) {
+      testsState.list = [];
+    }
+    testsState.error = getErrorMessage(error, "Failed to load tests.");
+  } finally {
+    testsState.loaded = true;
+    testsState.loading = false;
   }
-  const list = (data ?? []).filter((t) => t.type === "mock" || t.type === "daily");
-  testsState.list = list;
-  testsState.loaded = true;
-  if (!state.linkId && !state.selectedTestVersion && list.length) {
-    state.selectedTestVersion = list[0].version;
-    saveState();
-  }
-  ensureQuestionsLoaded();
 }
 
 async function fetchTestSessions() {
+  if (testSessionsState.loading) return;
+  testSessionsState.loading = true;
   testSessionsState.error = "";
-  let { data, error } = await publicSupabase
-    .from("test_sessions")
-    .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
-    .eq("is_published", true)
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (error && isMissingRetakeSessionFieldsError(error)) {
-    ({ data, error } = await publicSupabase
+  const hadData = testSessionsState.loaded && testSessionsState.list.length > 0;
+  try {
+    let { data, error } = await publicSupabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
+      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
       .eq("is_published", true)
       .order("created_at", { ascending: false })
-      .limit(200));
-  }
-  if (error) {
-    testSessionsState.list = [];
-    const msg = error.message || "Failed to load test sessions.";
-    if (String(msg).includes("does not exist") || error.status === 404) {
-      testSessionsState.error = "test_sessionsテーブルがありません。Supabaseでスキーマを適用してください。";
-    } else {
-      testSessionsState.error = msg;
+      .limit(200);
+    if (error && isMissingRetakeSessionFieldsError(error)) {
+      ({ data, error } = await publicSupabase
+        .from("test_sessions")
+        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
+        .eq("is_published", true)
+        .order("created_at", { ascending: false })
+        .limit(200));
     }
+    if (error) {
+      logSupabaseError("test_sessions fetch error", error);
+      const msg = getErrorMessage(error, "Failed to load test sessions.");
+      if (!hadData) {
+        testSessionsState.list = [];
+      }
+      if (String(msg).includes("does not exist") || error.status === 404) {
+        testSessionsState.error = "test_sessionsテーブルがありません。Supabaseでスキーマを適用してください。";
+      } else {
+        testSessionsState.error = msg;
+      }
+      return;
+    }
+    const list = (data ?? []).map((session) => ({
+      retake_source_session_id: null,
+      retake_release_scope: "all",
+      ...session,
+    }));
+    testSessionsState.list = list;
     testSessionsState.loaded = true;
-    return;
+    if (!state.linkId && !state.selectedTestSessionId && list.length) {
+      state.selectedTestSessionId = list[0].id;
+      saveState();
+    }
+    ensureQuestionsLoaded();
+  } catch (error) {
+    logUnexpectedError("test_sessions fetch failed", error);
+    if (!hadData) {
+      testSessionsState.list = [];
+    }
+    testSessionsState.error = getErrorMessage(error, "Failed to load test sessions.");
+  } finally {
+    testSessionsState.loaded = true;
+    testSessionsState.loading = false;
   }
-  const list = (data ?? []).map((session) => ({
-    retake_source_session_id: null,
-    retake_release_scope: "all",
-    ...session,
-  }));
-  testSessionsState.list = list;
-  testSessionsState.loaded = true;
-  if (!state.linkId && !state.selectedTestSessionId && list.length) {
-    state.selectedTestSessionId = list[0].id;
-    saveState();
-  }
-  ensureQuestionsLoaded();
 }
 
 function getActiveTestVersion() {
@@ -1069,29 +1202,43 @@ async function fetchStudentResults() {
   modelRankState.loading = false;
   modelRankState.map = {};
   modelRankState.totalMap = {};
-  let { data, error } = await supabase
-    .from("attempts")
-    .select("id, test_version, test_session_id, correct, total, score_rate, started_at, created_at, ended_at, answers_json, tab_left_count")
-    .eq("student_id", authState.session.user.id)
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (error && isMissingTabLeftCountError(error)) {
-    ({ data, error } = await supabase
+  const hadData = studentResultsState.loaded && studentResultsState.list.length > 0;
+  try {
+    let { data, error } = await supabase
       .from("attempts")
-      .select("id, test_version, test_session_id, correct, total, score_rate, started_at, created_at, ended_at, answers_json")
+      .select("id, test_version, test_session_id, correct, total, score_rate, started_at, created_at, ended_at, answers_json, tab_left_count")
       .eq("student_id", authState.session.user.id)
       .order("created_at", { ascending: false })
-      .limit(200));
-  }
-  if (error) {
-    studentResultsState.list = [];
-    studentResultsState.error = error.message || "Failed to load results.";
-  } else {
+      .limit(200);
+    if (error && isMissingTabLeftCountError(error)) {
+      ({ data, error } = await supabase
+        .from("attempts")
+        .select("id, test_version, test_session_id, correct, total, score_rate, started_at, created_at, ended_at, answers_json")
+        .eq("student_id", authState.session.user.id)
+        .order("created_at", { ascending: false })
+        .limit(200));
+    }
+    if (error) {
+      logSupabaseError("attempts fetch error", error);
+      if (!hadData) {
+        studentResultsState.list = [];
+      }
+      studentResultsState.error = getErrorMessage(error, "Failed to load results.");
+      return;
+    }
     studentResultsState.list = dedupeAttempts(data ?? []);
+    studentResultsState.loaded = true;
+    await fetchSessionAttemptOverrides();
+  } catch (error) {
+    logUnexpectedError("attempts fetch failed", error);
+    if (!hadData) {
+      studentResultsState.list = [];
+    }
+    studentResultsState.error = getErrorMessage(error, "Failed to load results.");
+  } finally {
+    studentResultsState.loaded = true;
+    studentResultsState.loading = false;
   }
-  studentResultsState.loaded = true;
-  studentResultsState.loading = false;
-  await fetchSessionAttemptOverrides();
 }
 
 async function fetchSessionAttemptOverrides() {
@@ -1099,26 +1246,33 @@ async function fetchSessionAttemptOverrides() {
   if (sessionAttemptOverrideState.loading || sessionAttemptOverrideState.loaded) return;
   sessionAttemptOverrideState.loading = true;
   sessionAttemptOverrideState.error = "";
-  const { data, error } = await supabase
-    .from("test_session_attempt_overrides")
-    .select("test_session_id, extra_attempts")
-    .eq("student_id", authState.session.user.id);
-  if (error) {
-    if (!isMissingSessionAttemptOverrideTableError(error)) {
-      console.warn("session attempt overrides fetch error:", error);
-      sessionAttemptOverrideState.error = error.message || "Failed to load extra attempts.";
+  try {
+    const { data, error } = await supabase
+      .from("test_session_attempt_overrides")
+      .select("test_session_id, extra_attempts")
+      .eq("student_id", authState.session.user.id);
+    if (error) {
+      if (!isMissingSessionAttemptOverrideTableError(error)) {
+        logSupabaseError("session attempt overrides fetch error", error);
+        sessionAttemptOverrideState.error = getErrorMessage(error, "Failed to load extra attempts.");
+      }
+      sessionAttemptOverrideState.map = {};
+      return;
     }
-    sessionAttemptOverrideState.map = {};
-  } else {
     const map = {};
     (data ?? []).forEach((row) => {
       if (!row?.test_session_id) return;
       map[row.test_session_id] = Math.max(0, Number(row.extra_attempts ?? 0));
     });
     sessionAttemptOverrideState.map = map;
+  } catch (error) {
+    sessionAttemptOverrideState.map = {};
+    sessionAttemptOverrideState.error = getErrorMessage(error, "Failed to load extra attempts.");
+    logUnexpectedError("session attempt overrides fetch failed", error);
+  } finally {
+    sessionAttemptOverrideState.loaded = true;
+    sessionAttemptOverrideState.loading = false;
   }
-  sessionAttemptOverrideState.loaded = true;
-  sessionAttemptOverrideState.loading = false;
 }
 
 async function fetchModelRanks(attempts) {
@@ -1133,31 +1287,34 @@ async function fetchModelRanks(attempts) {
   modelRankState.loading = true;
   const map = { ...modelRankState.map };
   const totalMap = { ...modelRankState.totalMap };
-  for (const sessionId of sessionIds) {
-    try {
-      const { data, error } = await supabase
-        .from("attempts")
-        .select("id, score_rate")
-        .eq("test_session_id", sessionId);
-      if (error) {
-        console.warn("model rank fetch error:", error);
-        continue;
-      }
-      const list = (data ?? []).slice().sort((a, b) => (b.score_rate ?? 0) - (a.score_rate ?? 0));
-      list.forEach((row, idx) => {
-        if (row?.id) {
-          map[row.id] = idx + 1;
-          totalMap[row.id] = list.length;
+  try {
+    for (const sessionId of sessionIds) {
+      try {
+        const { data, error } = await supabase
+          .from("attempts")
+          .select("id, score_rate")
+          .eq("test_session_id", sessionId);
+        if (error) {
+          logSupabaseError("model rank fetch error", error);
+          continue;
         }
-      });
-    } catch (e) {
-      console.warn("model rank fetch failed:", e);
+        const list = (data ?? []).slice().sort((a, b) => (b.score_rate ?? 0) - (a.score_rate ?? 0));
+        list.forEach((row, idx) => {
+          if (row?.id) {
+            map[row.id] = idx + 1;
+            totalMap[row.id] = list.length;
+          }
+        });
+      } catch (error) {
+        logUnexpectedError("model rank fetch failed", error);
+      }
     }
+    modelRankState.map = map;
+    modelRankState.totalMap = totalMap;
+  } finally {
+    modelRankState.loading = false;
+    modelRankState.loaded = true;
   }
-  modelRankState.map = map;
-  modelRankState.totalMap = totalMap;
-  modelRankState.loading = false;
-  modelRankState.loaded = true;
 }
 
 async function fetchStudentAttendance() {
@@ -1165,33 +1322,39 @@ async function fetchStudentAttendance() {
   if (studentAttendanceState.loading) return;
   studentAttendanceState.loading = true;
   studentAttendanceState.error = "";
-  const { data, error } = await supabase
-    .from("attendance_entries")
-    .select("day_id, status, comment")
-    .eq("student_id", authState.session.user.id);
-  if (error) {
-    studentAttendanceState.list = [];
-    studentAttendanceState.error = error.message || "Failed to load attendance.";
-    studentAttendanceState.loaded = true;
-    studentAttendanceState.loading = false;
-    return;
-  }
-  const entries = data ?? [];
-  const dayIds = entries.map((e) => e.day_id).filter(Boolean);
-  if (!dayIds.length) {
-    studentAttendanceState.list = [];
-    studentAttendanceState.loaded = true;
-    studentAttendanceState.loading = false;
-    return;
-  }
-  const { data: daysData, error: daysError } = await supabase
-    .from("attendance_days")
-    .select("id, day_date")
-    .in("id", dayIds);
-  if (daysError) {
-    studentAttendanceState.list = [];
-    studentAttendanceState.error = daysError.message || "Failed to load attendance.";
-  } else {
+  const hadData = studentAttendanceState.loaded && studentAttendanceState.list.length > 0;
+  try {
+    const { data, error } = await supabase
+      .from("attendance_entries")
+      .select("day_id, status, comment")
+      .eq("student_id", authState.session.user.id);
+    if (error) {
+      logSupabaseError("attendance entries fetch error", error);
+      if (!hadData) {
+        studentAttendanceState.list = [];
+      }
+      studentAttendanceState.error = getErrorMessage(error, "Failed to load attendance.");
+      return;
+    }
+    const entries = data ?? [];
+    const dayIds = entries.map((e) => e.day_id).filter(Boolean);
+    if (!dayIds.length) {
+      studentAttendanceState.list = [];
+      studentAttendanceState.loaded = true;
+      return;
+    }
+    const { data: daysData, error: daysError } = await supabase
+      .from("attendance_days")
+      .select("id, day_date")
+      .in("id", dayIds);
+    if (daysError) {
+      logSupabaseError("attendance days fetch error", daysError);
+      if (!hadData) {
+        studentAttendanceState.list = [];
+      }
+      studentAttendanceState.error = getErrorMessage(daysError, "Failed to load attendance.");
+      return;
+    }
     const dayMap = {};
     (daysData ?? []).forEach((d) => {
       dayMap[d.id] = d.day_date;
@@ -1204,96 +1367,137 @@ async function fetchStudentAttendance() {
         comment: e.comment ?? ""
       }))
       .sort((a, b) => String(b.day_date).localeCompare(String(a.day_date)));
+  } catch (error) {
+    logUnexpectedError("attendance fetch failed", error);
+    if (!hadData) {
+      studentAttendanceState.list = [];
+    }
+    studentAttendanceState.error = getErrorMessage(error, "Failed to load attendance.");
+  } finally {
+    studentAttendanceState.loaded = true;
+    studentAttendanceState.loading = false;
   }
-  studentAttendanceState.loaded = true;
-  studentAttendanceState.loading = false;
 }
 
 async function fetchStudentRanking() {
   if (rankingState.loading) return;
   if (!authState.profile?.school_id) {
-    rankingState.list = [];
-    rankingState.error = "School information is missing.";
-    rankingState.loaded = true;
     return;
   }
   rankingState.loading = true;
   rankingState.error = "";
-  const { data, error } = await supabase
-    .from("ranking_periods")
-    .select(`
-      id,
-      label,
-      start_date,
-      end_date,
-      sort_order,
-      ranking_entries(student_id, student_name, average_rate, rank_position)
-    `)
-    .eq("school_id", authState.profile.school_id)
-    .order("sort_order", { ascending: true });
-  if (error) {
-    rankingState.list = [];
-    rankingState.error = error.message || "Failed to load rankings.";
+  const hadData = rankingState.loaded && rankingState.list.length > 0;
+  try {
+    const { data, error } = await supabase
+      .from("ranking_periods")
+      .select(`
+        id,
+        label,
+        start_date,
+        end_date,
+        sort_order,
+        ranking_entries(student_id, student_name, average_rate, rank_position)
+      `)
+      .eq("school_id", authState.profile.school_id)
+      .order("sort_order", { ascending: true });
+    if (error) {
+      logSupabaseError("ranking fetch error", error);
+      if (!hadData) {
+        rankingState.list = [];
+      }
+      rankingState.error = getErrorMessage(error, "Failed to load rankings.");
+      return;
+    }
+    const currentUserId = authState.session?.user?.id ?? "";
+    rankingState.list = (data ?? []).map((period) => {
+      const entries = [...(period.ranking_entries ?? [])].sort((a, b) => (a.rank_position ?? 0) - (b.rank_position ?? 0));
+      const index = entries.findIndex((entry) => entry.student_id === currentUserId);
+      return {
+        ...period,
+        ranking_entries: entries,
+        currentEntry: index >= 0 ? entries[index] : null,
+        higherEntry: index > 0 ? entries[index - 1] : null,
+        lowerEntry: index >= 0 && index < entries.length - 1 ? entries[index + 1] : null,
+      };
+    });
+  } catch (error) {
+    logUnexpectedError("ranking fetch failed", error);
+    if (!hadData) {
+      rankingState.list = [];
+    }
+    rankingState.error = getErrorMessage(error, "Failed to load rankings.");
+  } finally {
     rankingState.loaded = true;
     rankingState.loading = false;
-    return;
   }
-  const currentUserId = authState.session?.user?.id ?? "";
-  rankingState.list = (data ?? []).map((period) => {
-    const entries = [...(period.ranking_entries ?? [])].sort((a, b) => (a.rank_position ?? 0) - (b.rank_position ?? 0));
-    const index = entries.findIndex((entry) => entry.student_id === currentUserId);
-    return {
-      ...period,
-      ranking_entries: entries,
-      currentEntry: index >= 0 ? entries[index] : null,
-      higherEntry: index > 0 ? entries[index - 1] : null,
-      lowerEntry: index >= 0 && index < entries.length - 1 ? entries[index + 1] : null,
-    };
-  });
-  rankingState.loaded = true;
-  rankingState.loading = false;
 }
 
 async function fetchAbsenceApplications() {
   if (!authState.session || absenceApplicationsState.loading) return;
   absenceApplicationsState.loading = true;
   absenceApplicationsState.error = "";
-  const { data, error } = await supabase
-    .from("absence_applications")
-    .select("id, type, day_date, status, reason, catch_up, late_type, time_value, created_at")
-    .eq("student_id", authState.session.user.id)
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (error) {
-    absenceApplicationsState.list = [];
-    absenceApplicationsState.error = error.message || "Failed to load applications.";
-  } else {
+  const hadData = absenceApplicationsState.loaded && absenceApplicationsState.list.length > 0;
+  try {
+    const { data, error } = await supabase
+      .from("absence_applications")
+      .select("id, type, day_date, status, reason, catch_up, late_type, time_value, created_at")
+      .eq("student_id", authState.session.user.id)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      logSupabaseError("absence applications fetch error", error);
+      if (!hadData) {
+        absenceApplicationsState.list = [];
+      }
+      absenceApplicationsState.error = getErrorMessage(error, "Failed to load applications.");
+      return;
+    }
     absenceApplicationsState.list = data ?? [];
+  } catch (error) {
+    logUnexpectedError("absence applications fetch failed", error);
+    if (!hadData) {
+      absenceApplicationsState.list = [];
+    }
+    absenceApplicationsState.error = getErrorMessage(error, "Failed to load applications.");
+  } finally {
+    absenceApplicationsState.loaded = true;
+    absenceApplicationsState.loading = false;
   }
-  absenceApplicationsState.loaded = true;
-  absenceApplicationsState.loading = false;
 }
 
 async function fetchAnnouncements() {
   if (announcementsState.loading) return;
   announcementsState.loading = true;
   announcementsState.error = "";
-  const nowIso = new Date().toISOString();
-  const { data, error } = await publicSupabase
-    .from("announcements")
-    .select("id, title, body, publish_at, end_at, created_at")
-    .lte("publish_at", nowIso)
-    .or(`end_at.is.null,end_at.gte.${nowIso}`)
-    .order("created_at", { ascending: false })
-    .limit(50);
-  if (error) {
-    announcementsState.list = [];
-    announcementsState.error = error.message || "Failed to load announcements.";
-  } else {
+  const hadData = announcementsState.loaded && announcementsState.list.length > 0;
+  try {
+    const nowIso = new Date().toISOString();
+    const { data, error } = await publicSupabase
+      .from("announcements")
+      .select("id, title, body, publish_at, end_at, created_at")
+      .lte("publish_at", nowIso)
+      .or(`end_at.is.null,end_at.gte.${nowIso}`)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) {
+      logSupabaseError("announcements fetch error", error);
+      if (!hadData) {
+        announcementsState.list = [];
+      }
+      announcementsState.error = getErrorMessage(error, "Failed to load announcements.");
+      return;
+    }
     announcementsState.list = data ?? [];
+  } catch (error) {
+    logUnexpectedError("announcements fetch failed", error);
+    if (!hadData) {
+      announcementsState.list = [];
+    }
+    announcementsState.error = getErrorMessage(error, "Failed to load announcements.");
+  } finally {
+    announcementsState.loaded = true;
+    announcementsState.loading = false;
   }
-  announcementsState.loaded = true;
-  announcementsState.loading = false;
 }
 
 async function fetchQuestionsForDetail(version) {
@@ -1305,23 +1509,30 @@ async function fetchQuestionsForDetail(version) {
   }
   resultDetailState.loading = true;
   resultDetailState.error = "";
-  const { data, error } = await publicSupabase
-    .from("questions")
-    .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
-    .eq("test_version", version)
-    .order("order_index", { ascending: true });
-  if (error) {
-    resultDetailState.error = error.message || "Failed to load questions.";
-    resultDetailState.loading = false;
+  try {
+    const { data, error } = await publicSupabase
+      .from("questions")
+      .select("question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .eq("test_version", version)
+      .order("order_index", { ascending: true });
+    if (error) {
+      logSupabaseError("result detail questions fetch error", error);
+      resultDetailState.error = getErrorMessage(error, "Failed to load questions.");
+      return [];
+    }
+    const list = (data ?? []).map((row) => mapDbQuestion(row, version));
+    resultDetailState.questionsByVersion = {
+      ...resultDetailState.questionsByVersion,
+      [version]: list,
+    };
+    return list;
+  } catch (error) {
+    logUnexpectedError("result detail questions fetch failed", error);
+    resultDetailState.error = getErrorMessage(error, "Failed to load questions.");
     return [];
+  } finally {
+    resultDetailState.loading = false;
   }
-  const list = (data ?? []).map((row) => mapDbQuestion(row, version));
-  resultDetailState.questionsByVersion = {
-    ...resultDetailState.questionsByVersion,
-    [version]: list,
-  };
-  resultDetailState.loading = false;
-  return list;
 }
 
 function renderLogin(app) {
@@ -2535,7 +2746,7 @@ function renderTestSelect(app) {
   if ((showDailyResults || showModelResults) && authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
   }
-  if (showRanking && authState.session && !rankingState.loaded && !rankingState.loading) {
+  if (showRanking && authState.session && authState.profile?.school_id && !rankingState.loaded && !rankingState.loading) {
     fetchStudentRanking().finally(render);
   }
   if (showModelResults && studentResultsState.loaded && !modelRankState.loaded && !modelRankState.loading) {
@@ -2546,6 +2757,9 @@ function renderTestSelect(app) {
   const welcomeName =
     (state.user?.name || authState.profile?.display_name || authState.session?.user?.email || "Student")
       .trim();
+  const authWarningHtml = authState.profileError
+    ? `<section class="home-card"><div class="text-error">${escapeHtml(authState.profileError)}</div></section>`
+    : "";
 
   const studentInfoHtml = showTabs
     ? `
@@ -2978,6 +3192,9 @@ function renderTestSelect(app) {
     ? (() => {
         if (!authState.session) {
           return `<div class="text-muted">Log in to see ranking.</div>`;
+        }
+        if (!authState.profile?.school_id) {
+          return `<div class="text-error">${escapeHtml(authState.profileError || "School information is missing.")}</div>`;
         }
         if (rankingState.loading) {
           return `<div class="text-muted">Loading ranking...</div>`;
@@ -3727,6 +3944,7 @@ function renderTestSelect(app) {
             : showHome
               ? `
                 <div class="home-stack" style="max-width:900px;">
+                  ${authWarningHtml}
                   ${homeWarningHtml ? `<section class="home-card student-warning">${homeWarningHtml}</section>` : ""}
                   ${homeHtml}
                   ${announcementHtml}
@@ -3734,6 +3952,7 @@ function renderTestSelect(app) {
               `
               : `
                 <div class="intro-form" style="margin-top:16px; max-width:900px;">
+                  ${authWarningHtml}
                   ${showPersonalInformation ? personalInformationHtml : showDailyResults ? dailyResultsHtml : showModelResults ? modelResultsHtml : showRanking ? rankingHtml : showAttendanceHistory ? attendanceHistoryHtml : attendanceHtml}
                 </div>
               `
@@ -4683,7 +4902,7 @@ function renderResult(app) {
 
 function render() {
   const app = document.querySelector("#app");
-  if (!state.linkChecked || !authState.checked) {
+  if (appBootstrapState.loading && (!state.linkChecked || !authState.checked)) {
     renderAndSync(renderLoading, app);
     return;
   }
@@ -4708,7 +4927,7 @@ function render() {
     return;
   }
 
-  const needsQuestions = ["intro", "sectionIntro", "quiz", "result"].includes(state.phase);
+  const needsQuestions = shouldBlockOnQuestions();
   const sessionsReady = testSessionsState.loaded || Boolean(state.linkId);
   if (needsQuestions && testsState.loaded && sessionsReady) {
     ensureQuestionsLoaded();
@@ -4761,21 +4980,20 @@ setInterval(() => {
 
 
 async function checkLinkFromUrl() {
-  const url = new URL(window.location.href);
-  const linkId = url.searchParams.get("link");
-  if (!linkId) {
-    state.linkId = null;
-    state.linkExpiresAt = null;
-    state.linkTestVersion = null;
-    state.linkTestSessionId = null;
-    state.linkInvalid = false;
-    state.linkLoginRequired = false;
-    state.linkChecked = true;
-    saveState();
-    return;
-  }
-
   try {
+    const url = new URL(window.location.href);
+    const linkId = url.searchParams.get("link");
+    if (!linkId) {
+      state.linkId = null;
+      state.linkExpiresAt = null;
+      state.linkTestVersion = null;
+      state.linkTestSessionId = null;
+      state.linkInvalid = false;
+      state.linkLoginRequired = false;
+      saveState();
+      return;
+    }
+
     const { data, error } = await publicSupabase
       .from("exam_links")
       .select("id, test_version, test_session_id, expires_at")
@@ -4783,8 +5001,8 @@ async function checkLinkFromUrl() {
       .single();
 
     if (error || !data) {
+      if (error) logSupabaseError("exam_links fetch error", error);
       state.linkInvalid = true;
-      state.linkChecked = true;
       saveState();
       return;
     }
@@ -4792,7 +5010,6 @@ async function checkLinkFromUrl() {
     const expiresAt = new Date(data.expires_at).getTime();
     if (Number.isNaN(expiresAt) || expiresAt < Date.now()) {
       state.linkInvalid = true;
-      state.linkChecked = true;
       saveState();
       return;
     }
@@ -4807,8 +5024,8 @@ async function checkLinkFromUrl() {
         .eq("id", data.test_session_id)
         .single();
       if (sessionErr || !sessionRow) {
+        if (sessionErr) logSupabaseError("linked test_session fetch error", sessionErr);
         state.linkInvalid = true;
-        state.linkChecked = true;
         saveState();
         return;
       }
@@ -4817,23 +5034,41 @@ async function checkLinkFromUrl() {
       state.linkTestVersion = data.test_version;
     }
     state.linkInvalid = false;
-    state.linkChecked = true;
     state.linkLoginRequired = true;
     state.requireLogin = true;
     state.phase = "login";
     saveState();
-  } catch {
+  } catch (error) {
+    logUnexpectedError("exam link bootstrap failed", error);
     state.linkInvalid = true;
-    state.linkChecked = true;
     saveState();
+  } finally {
+    state.linkChecked = true;
   }
 }
 
-supabase.auth.onAuthStateChange(() => {
-  refreshAuthState().finally(render);
-  fetchPublicTests().finally(render);
-  fetchTestSessions().finally(render);
-});
+const AUTH_SUBSCRIPTION_KEY = "__jft_student_auth_subscription__";
+
+async function handleAuthStateChange() {
+  await refreshAuthState();
+  await Promise.allSettled([fetchPublicTests(), fetchTestSessions()]);
+}
+
+function registerAuthStateListener() {
+  const globalScope = typeof window !== "undefined" ? window : globalThis;
+  const existingSubscription = globalScope[AUTH_SUBSCRIPTION_KEY];
+  if (existingSubscription?.unsubscribe) {
+    existingSubscription.unsubscribe();
+  }
+
+  const { data } = supabase.auth.onAuthStateChange(() => {
+    window.setTimeout(() => {
+      handleAuthStateChange().finally(render);
+    }, 0);
+  });
+
+  globalScope[AUTH_SUBSCRIPTION_KEY] = data?.subscription ?? null;
+}
 
 function registerFocusWarning() {
   const bumpWarning = () => {
@@ -4856,8 +5091,13 @@ function registerFocusWarning() {
   document.addEventListener("freeze", bumpWarning);
 }
 
-Promise.all([checkLinkFromUrl(), refreshAuthState()]).finally(render);
-fetchPublicTests().finally(render);
-fetchTestSessions().finally(render);
+registerAuthStateListener();
+
+Promise.allSettled([checkLinkFromUrl(), refreshAuthState(), fetchPublicTests(), fetchTestSessions()])
+  .finally(() => {
+    appBootstrapState.loading = false;
+    render();
+  });
+
 registerFocusWarning();
 registerStudentMenu();
