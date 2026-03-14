@@ -613,7 +613,7 @@ body { padding: 0; }
 .attendance-filter-box {
   background: #f8fafc;
   border: 1px solid var(--admin-control-border);
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 10px;
 }
 
@@ -628,7 +628,7 @@ body { padding: 0; }
 .admin-form input, .admin-form select, .admin-form textarea {
   width: 100%;
   border: 1px solid var(--admin-control-border);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 10px 10px;
   font-size: 14px;
   font-family: inherit;
@@ -3272,7 +3272,8 @@ body { padding: 0; }
 .attendance-table-header {
   display: flex;
   justify-content: flex-end;
-  margin-top: 10px;
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 
 .attendance-table-header .admin-help {
@@ -3316,9 +3317,9 @@ body { padding: 0; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 5px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   margin-right: 6px;
   background: #f3f4f6;
