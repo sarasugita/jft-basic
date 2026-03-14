@@ -6987,6 +6987,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   async function createTestSession() {
     setTestSessionsMsg("");
+    if (!activeSchoolId) {
+      setTestSessionsMsg("School scope is required.");
+      return;
+    }
     if (modelConductMode === "retake" && !modelRetakeSourceId) {
       setTestSessionsMsg("Please choose a past session to retake.");
       return;
@@ -7037,6 +7041,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
     const payload = {
+      school_id: activeSchoolId,
       problem_set_id: problemSetId,
       title,
       starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,
@@ -7097,6 +7102,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   async function createDailySession() {
     setDailySessionsMsg("");
+    if (!activeSchoolId) {
+      setDailySessionsMsg("School scope is required.");
+      return;
+    }
     if (dailyConductMode === "retake" && !dailyRetakeSourceId) {
       setDailySessionsMsg("Please choose a past session to retake.");
       return;
@@ -7175,6 +7184,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
     const payload = {
+      school_id: activeSchoolId,
       problem_set_id: problemSetId,
       title,
       starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,

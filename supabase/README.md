@@ -44,6 +44,12 @@ See `supabase/sql/schema.sql` for required tables/columns:
 - `supabase/sql/phase5_question_set_upload_support.sql` for question-set status/version labels, upload-ready question fields, and library version grouping
 - `supabase/sql/phase6_super_admin_completion_pack.sql` for audit logs plus dashboard/analytics aggregate RPCs
 - `supabase/sql/phase7_admin_multi_school_access.sql` for multi-school admin assignments, admin school switching, and scoped admin access helpers
+- `supabase/sql/phase8_legacy_global_test_visibility.sql` for legacy test/question visibility to follow question-set access
+- `supabase/sql/phase9_attempt_tab_left_count.sql` for persisted tab-switch warning counts on attempts
+- `supabase/sql/phase10_retake_session_release_scope.sql` for retake-session source/release scoping
+- `supabase/sql/phase11_session_attempt_overrides.sql` for per-student extra attempt allowances
+- `supabase/sql/phase12_student_warnings.sql` for student warning tracking
+- `supabase/sql/phase13_fix_test_session_school_scope.sql` to keep created test sessions scoped to the active school instead of inheriting a legacy test row's school
 
 Multi-school setup and promotion steps:
 - `docs/multi-school-rbac.md`
