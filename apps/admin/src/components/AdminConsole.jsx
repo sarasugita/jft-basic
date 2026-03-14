@@ -12602,6 +12602,9 @@ export default function AdminConsole({
             const totalCorrect = Number(selectedAttempt.correct ?? selectedAttemptRows.filter((row) => row.isCorrect).length);
             const totalQuestions = Number(selectedAttempt.total ?? selectedAttemptRows.length);
             const scorePercent = (selectedAttemptScoreRate * 100).toFixed(1);
+            const attemptTitle = getAttemptTitle(selectedAttempt) || selectedAttempt.test_version || "";
+            const tabLeftCount = getTabLeftCount(selectedAttempt);
+            const selectedAttemptRankInfo = studentAttemptRanks[selectedAttempt.id] ?? null;
             const radarData = selectedAttemptMainSectionSummary.map((row) => ({
               label: row.section,
               value: row.total ? row.correct / row.total : 0,
@@ -12620,18 +12623,7 @@ export default function AdminConsole({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="admin-modal-header">
-                    <div>
-                      <div className="admin-title">Attempt Detail</div>
-                      <div className="admin-help">
-                        <b>{selectedAttempt.display_name ?? ""}</b> ({selectedAttempt.student_code ?? ""})
-                        <br />
-                        test: <b>{selectedAttempt.test_version ?? ""}</b>
-                        <br />
-                        created: {formatDateTime(selectedAttempt.created_at)}
-                        <br />
-                        tab left count: <b>{getTabLeftCount(selectedAttempt)}</b>
-                      </div>
-                    </div>
+                    <div className="admin-title">Attempt Detail</div>
                     <button
                       className="admin-modal-close"
                       onClick={() => {
@@ -12643,35 +12635,78 @@ export default function AdminConsole({
                       ×
                     </button>
                   </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                    <button
-                      className="btn"
-                      type="button"
-                      onClick={() => exportSelectedAttemptCsv(selectedAttempt)}
-                    >
-                      Export CSV
-                    </button>
-                    <button
-                      className="btn btn-danger"
-                      type="button"
-                      onClick={() => deleteAttempt(selectedAttempt.id)}
-                    >
-                      Delete Attempt
-                    </button>
-                    <button
-                      className="btn"
-                      onClick={() => {
-                        setAttemptDetailOpen(false);
-                        setSelectedAttemptObj(null);
-                      }}
-                    >
-                      Close
-                    </button>
+                  <div className="attempt-detail-top">
+                    <div className="attempt-detail-summary-card">
+                      <table className="attempt-detail-summary-table">
+                        <tbody>
+                          <tr>
+                            <th>Student Name</th>
+                            <td>{selectedAttempt.display_name ?? ""}</td>
+                          </tr>
+                          <tr>
+                            <th>Test</th>
+                            <td>{attemptTitle}</td>
+                          </tr>
+                          <tr>
+                            <th>Attempt Date</th>
+                            <td>{formatDateTime(selectedAttempt.created_at)}</td>
+                          </tr>
+                          <tr>
+                            <th>Tab left count</th>
+                            <td className={tabLeftCount > 0 ? "attempt-detail-warn-value" : ""}>{tabLeftCount}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="attempt-detail-actions">
+                      <button
+                        className="attempt-detail-action-button"
+                        type="button"
+                        onClick={() => exportSelectedAttemptCsv(selectedAttempt)}
+                      >
+                        <span className="attempt-detail-action-icon" aria-hidden="true">
+                          <svg viewBox="0 0 20 20" focusable="false">
+                            <path d="M10 3v8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            <path d="M6.5 8.5 10 12l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M4 15h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        </span>
+                        <span>Export Attempt Detail (csv)</span>
+                      </button>
+                      <button
+                        className="attempt-detail-action-button"
+                        type="button"
+                        disabled
+                      >
+                        <span className="attempt-detail-action-icon" aria-hidden="true">
+                          <svg viewBox="0 0 20 20" focusable="false">
+                            <path d="M10 3v8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            <path d="M6.5 8.5 10 12l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M4 15h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        </span>
+                        <span>Export Overview (PDF)</span>
+                      </button>
+                      <button
+                        className="attempt-detail-action-button attempt-detail-action-button-danger"
+                        type="button"
+                        onClick={() => deleteAttempt(selectedAttempt.id)}
+                      >
+                        <span className="attempt-detail-action-icon" aria-hidden="true">
+                          <svg viewBox="0 0 20 20" focusable="false">
+                            <path d="M5 5 15 15" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                            <path d="M15 5 5 15" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                          </svg>
+                        </span>
+                        <span>Delete Attempt</span>
+                      </button>
+                    </div>
                   </div>
+                  <div className="attempt-detail-top-divider" />
                   {attemptQuestionsLoading ? <div className="admin-help">Loading questions...</div> : null}
                   {attemptQuestionsError ? <div className="admin-msg">{attemptQuestionsError}</div> : null}
 
-                  <div className="admin-top-tabs" style={{ marginBottom: 12 }}>
+                  <div className="admin-top-tabs attempt-detail-tabs" style={{ marginBottom: 12 }}>
                     <button
                       className={`admin-top-tab ${attemptDetailTab === "overview" ? "active" : ""}`}
                       type="button"
@@ -12684,69 +12719,103 @@ export default function AdminConsole({
                       type="button"
                       onClick={() => setAttemptDetailTab("questions")}
                     >
-                      Individual Questions
+                      All Questions
                     </button>
                   </div>
 
                   {attemptDetailTab === "overview" ? (
                     <div className="attempt-detail-pane">
                       <div className="attempt-detail-stat-grid">
-                        <div className="attempt-detail-stat-card">
+                        <div className="attempt-detail-stat-card attempt-detail-stat-card-score">
                           <div className="attempt-detail-stat-label">Total Score</div>
-                          <div className="attempt-detail-stat-value">{totalCorrect} / {totalQuestions}</div>
-                          <div className="attempt-detail-stat-meta">{scorePercent}%</div>
+                          <div className="attempt-detail-stat-inline">
+                            <div className={`attempt-detail-stat-value attempt-detail-stat-value-split ${selectedAttemptIsPass ? "" : "fail"}`}>
+                              <span className="attempt-detail-stat-value-primary">{totalCorrect}</span>
+                              <span className="attempt-detail-stat-value-separator">/</span>
+                              <span>{totalQuestions}</span>
+                            </div>
+                            <div className={`attempt-detail-stat-inline-note ${selectedAttemptIsPass ? "" : "fail"}`}>({scorePercent}%)</div>
+                          </div>
                         </div>
-                        <div className="attempt-detail-stat-card">
-                          <div className="attempt-detail-stat-label">Result</div>
-                          <div className="attempt-detail-stat-value">{selectedAttemptIsPass ? "Pass" : "Fail"}</div>
-                          <div className="attempt-detail-stat-meta">Threshold {(selectedAttemptPassRate * 100).toFixed(0)}%</div>
+                        <div className="attempt-detail-stat-card attempt-detail-stat-card-result">
+                          <div className="attempt-detail-stat-label">Pass/Fail</div>
+                          <div className={`attempt-detail-stat-value attempt-detail-stat-value-result ${selectedAttemptIsPass ? "pass" : "fail"}`}>
+                            {selectedAttemptIsPass ? "Pass" : "Fail"}
+                          </div>
                         </div>
-                        <div className="attempt-detail-stat-card">
-                          <div className="attempt-detail-stat-label">Created</div>
-                          <div className="attempt-detail-stat-value">{formatDateTime(selectedAttempt.created_at)}</div>
-                          <div className="attempt-detail-stat-meta">Attempt ID {selectedAttempt.id}</div>
+                        <div className="attempt-detail-stat-card attempt-detail-stat-card-ranking">
+                          <div className="attempt-detail-stat-label">Class Ranking</div>
+                          <div className="attempt-detail-stat-inline">
+                            <div className="attempt-detail-stat-value attempt-detail-stat-value-split">
+                              {selectedAttemptRankInfo ? (
+                                <>
+                                  <span className="attempt-detail-stat-value-primary">{selectedAttemptRankInfo.rank}</span>
+                                  <span className="attempt-detail-stat-value-separator">/</span>
+                                  <span>{selectedAttemptRankInfo.total}</span>
+                                </>
+                              ) : (
+                                <span>-</span>
+                              )}
+                            </div>
+                            <div className="attempt-detail-stat-inline-note">
+                              {selectedAttemptRankInfo ? "students" : ""}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
                       {selectedAttemptIsModel && selectedAttemptMainSectionSummary.length ? (
                         <>
-                          <div className="session-overview-grid">
+                          <div className="attempt-detail-overview-grid">
                             <div className="session-radar-wrap">
                               {buildSectionRadarSvg(radarData)}
                             </div>
                             <div className="admin-table-wrap">
-                              <table className="admin-table" style={{ minWidth: 460 }}>
+                              <table className="admin-table attempt-score-detail-table" style={{ minWidth: 640 }}>
+                                <colgroup>
+                                  <col className="attempt-score-detail-col-section" />
+                                  <col className="attempt-score-detail-col-subsection" />
+                                  <col className="attempt-score-detail-col-total" />
+                                  <col className="attempt-score-detail-col-correct" />
+                                  <col className="attempt-score-detail-col-rate" />
+                                </colgroup>
                                 <thead>
                                   <tr>
-                                    <th>Area</th>
-                                    <th>Unit</th>
-                                    <th>Correct</th>
-                                    <th>Total</th>
-                                    <th>Rate</th>
+                                    <th className="attempt-score-detail-head-section">Section</th>
+                                    <th className="attempt-score-detail-head-subsection">Sub-section</th>
+                                    <th className="attempt-score-detail-head-total">Total</th>
+                                    <th className="attempt-score-detail-head-correct">Correct</th>
+                                    <th className="attempt-score-detail-head-rate">%</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {selectedAttemptNestedSectionSummary.map((group) => {
                                     const rowSpan = 1 + group.subSections.length;
+                                    const isGroupBelowPass = group.rate < selectedAttemptPassRate;
                                     return (
                                       <Fragment key={`attempt-group-${group.mainSection}`}>
                                         <tr className="attempt-overview-total-row">
-                                          <td rowSpan={rowSpan} className="attempt-overview-area-cell">
+                                          <td rowSpan={rowSpan} className="attempt-overview-area-cell attempt-score-detail-cell-section">
                                             <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
                                           </td>
-                                          <td><b>Total</b></td>
-                                          <td>{group.correct}</td>
-                                          <td>{group.total}</td>
-                                          <td>{(group.rate * 100).toFixed(1)}%</td>
+                                          <td className="attempt-score-detail-cell-subsection">
+                                            <span className="attempt-score-detail-total-label">Total</span>
+                                          </td>
+                                          <td className="attempt-score-detail-cell-total">{group.total}</td>
+                                          <td className={`attempt-score-detail-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{group.correct}</td>
+                                          <td className={`attempt-score-detail-cell-rate ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(group.rate * 100).toFixed(1)}%</td>
                                         </tr>
-                                        {group.subSections.map((subSection) => (
-                                          <tr key={`attempt-sub-${group.mainSection}-${subSection.section}`}>
-                                            <td>{subSection.section}</td>
-                                            <td>{subSection.correct}</td>
-                                            <td>{subSection.total}</td>
-                                            <td>{(subSection.rate * 100).toFixed(1)}%</td>
-                                          </tr>
-                                        ))}
+                                        {group.subSections.map((subSection) => {
+                                          const isSubSectionBelowPass = subSection.rate < selectedAttemptPassRate;
+                                          return (
+                                            <tr key={`attempt-sub-${group.mainSection}-${subSection.section}`}>
+                                              <td className="attempt-score-detail-cell-subsection">{subSection.section}</td>
+                                              <td className="attempt-score-detail-cell-total">{subSection.total}</td>
+                                              <td className={`attempt-score-detail-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{subSection.correct}</td>
+                                              <td className={`attempt-score-detail-cell-rate ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(subSection.rate * 100).toFixed(1)}%</td>
+                                            </tr>
+                                          );
+                                        })}
                                       </Fragment>
                                     );
                                   })}
