@@ -9933,7 +9933,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
             <div className="session-detail-analysis-grid">
               <div className="admin-panel">
-                <div className="admin-title" style={{ fontSize: 18 }}>Top 5 Best Questions</div>
+                <div className="session-analysis-heading">Top 5 Best Questions</div>
                 <div className="session-analysis-list">
                   {bestQuestions.map((row) => (
                     <div key={`best-${row.qid}`} className="session-analysis-item">
@@ -9949,7 +9949,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               </div>
 
               <div className="admin-panel">
-                <div className="admin-title" style={{ fontSize: 18 }}>Top 5 Worst Questions</div>
+                <div className="session-analysis-heading">Top 5 Worst Questions</div>
                 <div className="session-analysis-list">
                   {worstQuestions.map((row) => (
                     <div key={`worst-${row.qid}`} className="session-analysis-item">

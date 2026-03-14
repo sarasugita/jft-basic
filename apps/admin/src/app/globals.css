@@ -132,7 +132,7 @@ body { padding: 0; }
 .admin-sidebar-toggle {
   width: 32px;
   height: 32px;
-  border: 1px solid var(--admin-control-border);
+  border: 1px solid rgba(17, 24, 39, 0.14);
   border-radius: 6px;
   background: #f8fafc;
   color: #333333;
@@ -1289,6 +1289,13 @@ body { padding: 0; }
 
 .session-analysis-performance-panel .admin-table-wrap {
   border-color: #d8dde3;
+}
+
+.session-analysis-heading {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--admin-text);
+  margin-bottom: 10px;
 }
 
 .session-section-average-table {
