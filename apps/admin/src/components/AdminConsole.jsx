@@ -7769,7 +7769,16 @@ export default function AdminConsole({
               aria-label="Back to sessions"
               title="Back to sessions"
             >
-              ←
+              <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 18, height: 18 }}>
+                <path
+                  d="m15 6-6 6 6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </button>
             <div className="admin-title session-detail-title">
               {selectedSessionDetail.title || selectedSessionDetail.problem_set_id}
@@ -8419,7 +8428,19 @@ export default function AdminConsole({
         </div>
         <div className="admin-actions" style={{ marginTop: 14 }}>
           {profile.role === "super_admin" ? (
-            <Link className="btn" href="/super/schools">Go to Schools</Link>
+            <Link className="btn" href="/super/schools" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 18, height: 18 }}>
+                <path
+                  d="m15 6-6 6 6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Go to Schools</span>
+            </Link>
           ) : null}
           <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </div>
@@ -8951,7 +8972,16 @@ export default function AdminConsole({
                       }}
                       aria-label="Back"
                     >
-                      ←
+                      <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 18, height: 18 }}>
+                        <path
+                          d="m15 6-6 6 6 6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                     </button>
                     <div className="admin-title">
                       {selectedStudent?.display_name ?? ""} {selectedStudent?.student_code ? `(${selectedStudent.student_code})` : ""}

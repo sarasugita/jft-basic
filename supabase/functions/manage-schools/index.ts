@@ -50,6 +50,75 @@ async function getOtherAdminAssignments(
   return data ?? [];
 }
 
+async function grantSuperAdminQuestionSetsToNewSchool(
+  adminClient: ReturnType<(typeof import("https://esm.sh/@supabase/supabase-js@2.94.1"))["createClient"]>,
+  schoolId: string,
+) {
+  const { data: restrictedSets, error: restrictedSetsError } = await adminClient
+    .from("question_sets")
+    .select("id, created_by, status, visibility_scope")
+    .eq("visibility_scope", "restricted")
+    .neq("status", "archived");
+
+  if (restrictedSetsError) {
+    if (isMissingRelationError(restrictedSetsError.message, "question_sets")) {
+      return { linkedCount: 0 };
+    }
+    throw new Error(`Failed to load question sets: ${restrictedSetsError.message}`);
+  }
+
+  const creatorIds = Array.from(new Set(
+    (restrictedSets ?? [])
+      .map((row) => row.created_by)
+      .filter(Boolean),
+  ));
+
+  if (!creatorIds.length) {
+    return { linkedCount: 0 };
+  }
+
+  const { data: creators, error: creatorsError } = await adminClient
+    .from("profiles")
+    .select("id, role")
+    .in("id", creatorIds);
+
+  if (creatorsError) {
+    throw new Error(`Failed to load question-set creators: ${creatorsError.message}`);
+  }
+
+  const superAdminIds = new Set(
+    (creators ?? [])
+      .filter((row) => row.role === "super_admin")
+      .map((row) => row.id),
+  );
+
+  const accessRows = (restrictedSets ?? [])
+    .filter((row) => row.created_by && superAdminIds.has(row.created_by))
+    .map((row) => ({
+      question_set_id: row.id,
+      school_id: schoolId,
+    }));
+
+  if (!accessRows.length) {
+    return { linkedCount: 0 };
+  }
+
+  const { error: accessError } = await adminClient
+    .from("question_set_school_access")
+    .upsert(accessRows, { onConflict: "question_set_id,school_id" });
+
+  if (accessError) {
+    if (isMissingRelationError(accessError.message, "question_set_school_access")) {
+      return { linkedCount: 0 };
+    }
+    throw new Error(`Failed to grant question-set access: ${accessError.message}`);
+  }
+
+  return {
+    linkedCount: accessRows.length,
+  };
+}
+
 async function permanentlyDeleteSchool(
   adminClient: ReturnType<(typeof import("https://esm.sh/@supabase/supabase-js@2.94.1"))["createClient"]>,
   schoolId: string,
@@ -186,6 +255,15 @@ serve(async (req) => {
       .single();
     if (error || !data) return bad(error?.message ?? "Failed to create school");
 
+    let questionSetAccessSummary = { linkedCount: 0 };
+    try {
+      questionSetAccessSummary = await grantSuperAdminQuestionSetsToNewSchool(context.adminClient, data.id);
+    } catch (grantError) {
+      return bad("Failed to initialize school question-set access", {
+        detail: String(grantError?.message ?? grantError),
+      });
+    }
+
     await logAuditEvent(context.adminClient, context, {
       actionType: "create",
       entityType: "school",
@@ -196,10 +274,15 @@ serve(async (req) => {
         status: data.status,
         start_date: data.start_date,
         end_date: data.end_date,
+        linked_question_set_count: questionSetAccessSummary.linkedCount,
       },
     });
 
-    return ok({ ok: true, school: data });
+    return ok({
+      ok: true,
+      school: data,
+      question_set_access: questionSetAccessSummary,
+    });
   }
 
   if (!schoolId) return bad("school_id is required");

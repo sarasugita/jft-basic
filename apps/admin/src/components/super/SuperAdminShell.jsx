@@ -102,6 +102,12 @@ function getPageMeta(pathname) {
       description: "Cross-school test analytics workspace for filters, comparisons, and trends.",
     };
   }
+  if (/^\/super\/tests\/analytics\/[^/]+$/.test(pathname ?? "")) {
+    return {
+      title: "Question Set Comparison",
+      description: "School-by-school and question-by-question comparison for a selected question set.",
+    };
+  }
   if (pathname === "/super/audit") {
     return {
       title: "Audit / Logs",

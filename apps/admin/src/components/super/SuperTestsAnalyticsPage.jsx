@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSuperAdmin } from "./SuperAdminShell";
 
 function toDateInput(date) {
@@ -24,6 +25,7 @@ function formatPercent(value) {
 
 export default function SuperTestsAnalyticsPage() {
   const { supabase } = useSuperAdmin();
+  const router = useRouter();
   const [filters, setFilters] = useState({
     schoolId: "all",
     testType: "all",
@@ -33,7 +35,7 @@ export default function SuperTestsAnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [schoolRows, setSchoolRows] = useState([]);
-  const [performanceRows, setPerformanceRows] = useState([]);
+  const [questionSetRows, setQuestionSetRows] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,28 +59,39 @@ export default function SuperTestsAnalyticsPage() {
       setLoading(true);
       setMsg("");
 
-      const schoolIdParam = filters.schoolId === "all" ? null : filters.schoolId;
+      let questionSetsQuery = supabase
+        .from("question_sets")
+        .select("id, title, version_label, version, test_type, status, visibility_scope, created_at")
+        .order("title", { ascending: true })
+        .order("version", { ascending: false });
 
-      const [summaryRes, performanceRes] = await Promise.all([
+      if (filters.testType !== "all") {
+        questionSetsQuery = questionSetsQuery.eq("test_type", filters.testType);
+      }
+
+      const [summaryRes, questionSetsRes, accessRes, questionCountsRes] = await Promise.all([
         supabase.rpc("super_school_metrics_summary", {
           p_date_from: filters.from || null,
           p_date_to: filters.to || null,
           p_test_type: filters.testType,
         }),
-        supabase.rpc("super_question_set_performance", {
-          p_date_from: filters.from || null,
-          p_date_to: filters.to || null,
-          p_school_id: schoolIdParam,
-          p_test_type: filters.testType,
-        }),
+        questionSetsQuery,
+        supabase.from("question_set_school_access").select("question_set_id, school_id"),
+        supabase.from("question_set_questions").select("question_set_id"),
       ]);
 
       if (cancelled) return;
 
-      if (summaryRes.error || performanceRes.error) {
-        setMsg(summaryRes.error?.message || performanceRes.error?.message || "Failed to load analytics.");
+      if (summaryRes.error || questionSetsRes.error || accessRes.error || questionCountsRes.error) {
+        setMsg(
+          summaryRes.error?.message
+            || questionSetsRes.error?.message
+            || accessRes.error?.message
+            || questionCountsRes.error?.message
+            || "Failed to load analytics.",
+        );
         setSchoolRows([]);
-        setPerformanceRows([]);
+        setQuestionSetRows([]);
         setLoading(false);
         return;
       }
@@ -91,15 +104,35 @@ export default function SuperTestsAnalyticsPage() {
           school_name: schoolMap[row.school_id] ?? row.school_id,
         }));
 
-      const nextPerformanceRows = (performanceRes.data ?? [])
-        .filter((row) => filters.schoolId === "all" || row.school_id === filters.schoolId)
+      const accessByQuestionSet = {};
+      for (const row of accessRes.data ?? []) {
+        if (!accessByQuestionSet[row.question_set_id]) accessByQuestionSet[row.question_set_id] = [];
+        accessByQuestionSet[row.question_set_id].push(row.school_id);
+      }
+
+      const questionCountBySet = {};
+      for (const row of questionCountsRes.data ?? []) {
+        if (!row?.question_set_id) continue;
+        questionCountBySet[row.question_set_id] = (questionCountBySet[row.question_set_id] ?? 0) + 1;
+      }
+
+      const nextQuestionSetRows = (questionSetsRes.data ?? [])
+        .filter((row) => {
+          if (filters.schoolId === "all") return true;
+          if (row.visibility_scope === "global") return true;
+          return (accessByQuestionSet[row.id] ?? []).includes(filters.schoolId);
+        })
         .map((row) => ({
           ...row,
-          school_name: row.school_id ? schoolMap[row.school_id] ?? row.school_id : "All schools",
+          question_count: questionCountBySet[row.id] ?? 0,
+          visible_school_count:
+            row.visibility_scope === "global"
+              ? schools.length
+              : (accessByQuestionSet[row.id] ?? []).length,
         }));
 
       setSchoolRows(nextSchoolRows);
-      setPerformanceRows(nextPerformanceRows);
+      setQuestionSetRows(nextQuestionSetRows);
       setLoading(false);
     }
 
@@ -109,14 +142,12 @@ export default function SuperTestsAnalyticsPage() {
     };
   }, [filters, schools, supabase]);
 
-  const visiblePerformanceRows = useMemo(() => performanceRows.slice(0, 50), [performanceRows]);
-
   return (
     <div className="super-page-content">
       <div className="admin-panel">
         <div className="admin-title">Analytics Filters</div>
         <div className="admin-help" style={{ marginTop: 6 }}>
-          Real aggregate data is shown below. Question-level accuracy for the new question-set runtime remains a TODO.
+          School comparison uses aggregate metrics. Click a question set below to open its school and question accuracy breakdown.
         </div>
         <div className="admin-form" style={{ marginTop: 12 }}>
           <div className="field small">
@@ -208,51 +239,47 @@ export default function SuperTestsAnalyticsPage() {
       <div className="admin-panel">
         <div className="admin-title">Question Set Performance</div>
         <div className="admin-help" style={{ marginTop: 6 }}>
-          New question-set runtime data appears here when attempts are linked. Legacy tests are shown as fallback.
+          Rows below are question sets from the shared library. Click one to open its comparison page.
         </div>
         <div className="admin-table-wrap" style={{ marginTop: 12 }}>
-          <table className="admin-table" style={{ minWidth: 980 }}>
+          <table className="admin-table" style={{ minWidth: 920 }}>
             <thead>
               <tr>
                 <th>Title</th>
-                <th>Source</th>
-                <th>School</th>
-                <th>Test Type</th>
-                <th>Attempts</th>
-                <th>Avg Score</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Visibility</th>
+                <th>Questions</th>
+                <th>Schools</th>
               </tr>
             </thead>
             <tbody>
-              {visiblePerformanceRows.map((row) => (
-                <tr key={`${row.entity_id}-${row.school_id ?? "all"}`}>
+              {questionSetRows.map((row) => (
+                <tr
+                  key={row.id}
+                  onClick={() => router.push(`/super/tests/analytics/${row.id}`)}
+                  style={{ cursor: "pointer" }}
+                >
                   <td>{row.title}</td>
-                  <td>{row.source_type}</td>
-                  <td>{row.school_name}</td>
-                  <td style={{ textTransform: "capitalize" }}>{row.normalized_test_type ?? "N/A"}</td>
-                  <td>{row.attempts_count ?? 0}</td>
-                  <td>{formatPercent(row.avg_score)}</td>
+                  <td style={{ textTransform: "capitalize" }}>{row.test_type}</td>
+                  <td style={{ textTransform: "capitalize" }}>{row.status}</td>
+                  <td style={{ textTransform: "capitalize" }}>{row.visibility_scope}</td>
+                  <td>{row.question_count ?? 0}</td>
+                  <td>{row.visible_school_count ?? 0}</td>
                 </tr>
               ))}
-              {!loading && visiblePerformanceRows.length === 0 ? (
+              {!loading && questionSetRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>No question-set performance rows found for the selected filters.</td>
+                  <td colSpan={6}>No question sets found for the selected filters.</td>
                 </tr>
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={6}>Loading question-set performance...</td>
+                  <td colSpan={6}>Loading question sets...</td>
                 </tr>
               ) : null}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <div className="super-placeholder-block">
-        <div className="admin-title">Question Accuracy</div>
-        <div className="admin-help" style={{ marginTop: 6 }}>
-          TODO: expose per-question accuracy once the new question-set runtime stores question-level result facts in a
-          queryable form. The filters and layout are already in place.
         </div>
       </div>
     </div>

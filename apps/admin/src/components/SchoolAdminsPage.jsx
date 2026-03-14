@@ -345,7 +345,19 @@ export default function SchoolAdminsPage({ schoolId }) {
             </div>
           </div>
           <div className="admin-actions">
-            <Link className="btn" href="/super/schools">Back to Schools</Link>
+            <Link className="btn" href="/super/schools" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 18, height: 18 }}>
+                <path
+                  d="m15 6-6 6 6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Back to Schools</span>
+            </Link>
             <button className="btn" onClick={openAssignModal}>Add Existing Admin</button>
             <button className="btn btn-primary" onClick={openCreateModal}>Create Admin</button>
           </div>
