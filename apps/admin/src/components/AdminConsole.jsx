@@ -1076,6 +1076,80 @@ function buildSectionAverageRows(attemptsList, questionsList) {
     .filter((row) => row.totalQuestions > 0);
 }
 
+function buildMainSectionAverageRows(attemptsList, questionsList) {
+  if (!questionsList?.length || !attemptsList?.length) return [];
+  const baseRows = buildAttemptDetailRowsFromList({}, questionsList);
+  const baseSummary = buildMainSectionSummary(baseRows);
+  const sectionTitles = sections
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => getSectionTitle(section.key))
+    .filter((title) => baseSummary.some((row) => row.section === title));
+  return sectionTitles
+    .map((sectionTitle) => {
+      const baseRow = baseSummary.find((row) => row.section === sectionTitle);
+      const stats = attemptsList.reduce(
+        (acc, attempt) => {
+          const summary = buildMainSectionSummary(buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList));
+          const row = summary.find((item) => item.section === sectionTitle);
+          acc.rateSum += Number(row?.rate ?? 0);
+          acc.correctSum += Number(row?.correct ?? 0);
+          return acc;
+        },
+        { rateSum: 0, correctSum: 0 }
+      );
+      return {
+        section: sectionTitle,
+        total: Number(baseRow?.total ?? 0),
+        averageCorrect: stats.correctSum / attemptsList.length,
+        averageRate: stats.rateSum / attemptsList.length,
+      };
+    })
+    .filter((row) => row.total > 0);
+}
+
+function buildNestedSectionAverageRows(attemptsList, questionsList) {
+  if (!questionsList?.length || !attemptsList?.length) return [];
+  const baseRows = buildAttemptDetailRowsFromList({}, questionsList);
+  const baseSummary = buildNestedSectionSummary(baseRows);
+  return baseSummary.map((baseGroup) => {
+    const groupStats = attemptsList.reduce(
+      (acc, attempt) => {
+        const summary = buildNestedSectionSummary(buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList));
+        const group = summary.find((item) => item.mainSection === baseGroup.mainSection);
+        acc.rateSum += Number(group?.rate ?? 0);
+        acc.correctSum += Number(group?.correct ?? 0);
+        return acc;
+      },
+      { rateSum: 0, correctSum: 0 }
+    );
+    return {
+      mainSection: baseGroup.mainSection,
+      total: Number(baseGroup.total ?? 0),
+      averageCorrect: groupStats.correctSum / attemptsList.length,
+      averageRate: groupStats.rateSum / attemptsList.length,
+      subSections: baseGroup.subSections.map((baseSubSection) => {
+        const subStats = attemptsList.reduce(
+          (acc, attempt) => {
+            const summary = buildNestedSectionSummary(buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList));
+            const group = summary.find((item) => item.mainSection === baseGroup.mainSection);
+            const subSection = group?.subSections?.find((item) => item.section === baseSubSection.section);
+            acc.rateSum += Number(subSection?.rate ?? 0);
+            acc.correctSum += Number(subSection?.correct ?? 0);
+            return acc;
+          },
+          { rateSum: 0, correctSum: 0 }
+        );
+        return {
+          section: baseSubSection.section,
+          total: Number(baseSubSection.total ?? 0),
+          averageCorrect: subStats.correctSum / attemptsList.length,
+          averageRate: subStats.rateSum / attemptsList.length,
+        };
+      }),
+    };
+  });
+}
+
 function buildSessionStudentRankingRows(attemptsList, questionsList, studentsList) {
   if (!attemptsList?.length) return [];
   const sectionAverageRows = buildSectionAverageRows(attemptsList, questionsList);
@@ -2651,6 +2725,43 @@ export default function AdminConsole({
     };
   }, [sessionDetailLatestAttempts, sessionDetailPassRate]);
 
+  const sessionDetailAnalysisSummary = useMemo(() => {
+    const attendedCount = sessionDetailLatestAttempts.length;
+    const activeStudentCount = (students ?? []).filter((student) => !student.is_withdrawn).length;
+    const absentCount = Math.max(0, activeStudentCount - attendedCount);
+    const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
+    const failCount = Math.max(0, attendedCount - passCount);
+    const totalQuestions = sessionDetailQuestions.length;
+    const averageCorrect = attendedCount
+      ? sessionDetailLatestAttempts.reduce((total, attempt) => {
+        return total + Number(attempt.correct ?? (attempt.total ? getScoreRate(attempt) * attempt.total : 0));
+      }, 0) / attendedCount
+      : 0;
+    const bucketLabels = Array.from({ length: 10 }, (_, index) => {
+      const start = index * 10;
+      const end = index === 9 ? 100 : start + 9;
+      return `${start}-${end}%`;
+    });
+    const bucketCounts = Array.from({ length: 10 }, () => 0);
+    sessionDetailLatestAttempts.forEach((attempt) => {
+      const ratePercent = Math.max(0, Math.min(100, getScoreRate(attempt) * 100));
+      const bucketIndex = ratePercent >= 100 ? 9 : Math.floor(ratePercent / 10);
+      bucketCounts[bucketIndex] += 1;
+    });
+    return {
+      attendedCount,
+      absentCount,
+      passCount,
+      failCount,
+      totalQuestions,
+      averageCorrect,
+      averageRate: sessionDetailOverview.averageScore,
+      bucketLabels,
+      bucketCounts,
+      maxBucketCount: Math.max(0, ...bucketCounts),
+    };
+  }, [sessionDetailLatestAttempts, sessionDetailOverview.averageScore, sessionDetailPassRate, sessionDetailQuestions.length, students]);
+
   const sessionDetailQuestionAnalysis = useMemo(() => {
     if (!sessionDetailQuestions.length || !sessionDetailLatestAttempts.length) return [];
     return buildQuestionAnalysisRows(sessionDetailLatestAttempts, sessionDetailQuestions)
@@ -2680,6 +2791,16 @@ export default function AdminConsole({
   const sessionDetailSectionAverages = useMemo(() => {
     if (sessionDetail.type !== "mock") return [];
     return buildSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
+  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions]);
+
+  const sessionDetailMainSectionAverages = useMemo(() => {
+    if (sessionDetail.type !== "mock") return [];
+    return buildMainSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
+  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions]);
+
+  const sessionDetailNestedSectionAverages = useMemo(() => {
+    if (sessionDetail.type !== "mock") return [];
+    return buildNestedSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
   }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions]);
 
   const sessionDetailStudentRankingRows = useMemo(() => {
@@ -3830,7 +3951,7 @@ export default function AdminConsole({
     setEditingSessionId("");
     setEditingSessionMsg("");
     setSessionDetail({ type, sessionId: session.id });
-    setSessionDetailTab("questions");
+    setSessionDetailTab("analysis");
     setSessionDetailAllowStudentId("");
     setSessionDetailAllowMsg("");
     setSessionDetailShowAllAnalysis(false);
@@ -7551,45 +7672,51 @@ export default function AdminConsole({
       })
       .slice(0, 5);
     const sessionDetailTabs = [
+      ["analysis", "Result Analysis"],
       ["questions", "Questions"],
       ["attempts", "Attempts"],
       ...(isMockSessionDetail ? [["studentRanking", "Student Ranking"]] : []),
-      ["analysis", "Result Analysis"],
     ];
-    const analysisRadarData = sessionDetailSectionAverages.map((row) => ({
+    const analysisRadarData = sessionDetailMainSectionAverages.map((row) => ({
       label: row.section,
-      value: row.averageRate,
+      value: row.averageRate ?? 0,
     }));
 
     return (
       <div className="session-detail-page">
         <div className="session-detail-header">
-          <div>
-            <button className="link-btn" type="button" onClick={closeSessionDetail}>
-              {"<- Back to sessions"}
+          <div className="session-detail-head-main">
+            <button
+              className="session-detail-back-btn"
+              type="button"
+              onClick={closeSessionDetail}
+              aria-label="Back to sessions"
+              title="Back to sessions"
+            >
+              ←
             </button>
-            <div className="admin-title" style={{ marginTop: 10 }}>
+            <div className="admin-title session-detail-title">
               {selectedSessionDetail.title || selectedSessionDetail.problem_set_id}
             </div>
-            <div className="admin-help" style={{ marginTop: 6 }}>
+            <div className="admin-help session-detail-meta">
               SetID: <b>{selectedSessionDetail.problem_set_id}</b>
               {" · "}
               Start: <b>{formatDateTime(selectedSessionDetail.starts_at) || "—"}</b>
               {" · "}
               End: <b>{formatDateTime(selectedSessionDetail.ends_at) || "—"}</b>
             </div>
-          </div>
-          <div className="admin-top-tabs">
-            {sessionDetailTabs.map(([key, label]) => (
-              <button
-                key={`session-detail-tab-${key}`}
-                className={`admin-top-tab ${sessionDetailTab === key ? "active" : ""}`}
-                type="button"
-                onClick={() => setSessionDetailTab(key)}
-              >
-                {label}
-              </button>
-            ))}
+            <div className="admin-top-tabs session-detail-tabs">
+              {sessionDetailTabs.map(([key, label]) => (
+                <button
+                  key={`session-detail-tab-${key}`}
+                  className={`admin-top-tab ${sessionDetailTab === key ? "active" : ""}`}
+                  type="button"
+                  onClick={() => setSessionDetailTab(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -7755,24 +7882,100 @@ export default function AdminConsole({
 
         {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "analysis" ? (
           <div className="session-detail-section">
-            <div className="admin-kpi session-detail-kpi">
-              <div className="box">
-                <div className="label">Average Score</div>
-                <div className="value">{(sessionDetailOverview.averageScore * 100).toFixed(1)}%</div>
-              </div>
-              <div className="box">
-                <div className="label">Pass Rate</div>
-                <div className="value">{(sessionDetailOverview.passRate * 100).toFixed(1)}%</div>
-              </div>
-              <div className="box">
-                <div className="label">Students Passed</div>
-                <div className="value">{sessionDetailOverview.passCount}/{sessionDetailOverview.count}</div>
-              </div>
-            </div>
-
             {isMockSessionDetail ? (
               <div className="session-detail-analysis-summary">
-                <div className="admin-panel">
+                <div className="session-analysis-top-grid">
+                  <div className="session-analysis-top-card">
+                    <div className="session-analysis-top-heading">Class Score</div>
+                    <div className="session-analysis-score-table-wrap">
+                      <table className="session-analysis-score-table">
+                        <tbody>
+                          <tr>
+                            <th className="pass">No. of Pass</th>
+                            <td>
+                              <span className="session-analysis-score-main pass">{sessionDetailAnalysisSummary.passCount}</span>
+                              <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.attendedCount}</span>
+                            </td>
+                          </tr>
+                          <tr>
+                            <th className="fail">No. of Fail</th>
+                            <td>
+                              <span className="session-analysis-score-main fail">{sessionDetailAnalysisSummary.failCount}</span>
+                              <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.attendedCount}</span>
+                            </td>
+                          </tr>
+                          <tr>
+                            <th>Average score</th>
+                            <td>
+                              <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.averageCorrect.toFixed(2)}</span>
+                              <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.totalQuestions || 0}</span>
+                            </td>
+                          </tr>
+                          <tr>
+                            <th>Average %</th>
+                            <td>
+                              <span className={`session-analysis-score-main ${sessionDetailOverview.averageScore < sessionDetailPassRate ? "fail" : ""}`}>
+                                {(sessionDetailAnalysisSummary.averageRate * 100).toFixed(2)}%
+                              </span>
+                            </td>
+                          </tr>
+                          <tr>
+                            <th>Absent</th>
+                            <td>
+                              <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.absentCount}</span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="session-analysis-top-card">
+                    <div className="session-analysis-top-heading">Grade Distribution</div>
+                    <div className="session-analysis-distribution-chart">
+                      <div className="session-analysis-distribution-yaxis">
+                        {Array.from({ length: Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1) }, (_, index) => {
+                          const value = sessionDetailAnalysisSummary.maxBucketCount - index;
+                          return (
+                            <div key={`dist-y-${value}`} className="session-analysis-distribution-ytick">
+                              <span>{value}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="session-analysis-distribution-plot">
+                        <div
+                          className="session-analysis-distribution-grid"
+                          style={{ gridTemplateRows: `repeat(${Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1)}, 1fr)` }}
+                        >
+                          {Array.from({ length: Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1) }, (_, index) => (
+                            <div key={`dist-grid-${index}`} className="session-analysis-distribution-gridline" />
+                          ))}
+                        </div>
+                        <div className="session-analysis-distribution-bars">
+                          {sessionDetailAnalysisSummary.bucketLabels.map((label, index) => {
+                            const count = sessionDetailAnalysisSummary.bucketCounts[index] ?? 0;
+                            const maxCount = Math.max(1, sessionDetailAnalysisSummary.maxBucketCount);
+                            return (
+                              <div key={`dist-bar-${label}`} className="session-analysis-distribution-bar-group">
+                                <div className="session-analysis-distribution-bar-wrap">
+                                  <div
+                                    className={`session-analysis-distribution-bar ${index * 10 < sessionDetailPassRate * 100 ? "fail" : "pass"}`}
+                                    style={{ height: `${(count / maxCount) * 100}%` }}
+                                    title={`${label}: ${count} student${count === 1 ? "" : "s"}`}
+                                  />
+                                </div>
+                                <div className="session-analysis-distribution-label">{label}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="admin-panel session-analysis-performance-panel">
                   <div className="admin-title" style={{ fontSize: 18 }}>Average Section Performance</div>
                   <div className="session-analysis-summary-grid">
                     <div className="session-radar-wrap">
@@ -7783,27 +7986,65 @@ export default function AdminConsole({
                       )}
                     </div>
                     <div className="admin-table-wrap">
-                      <table className="admin-table session-section-average-table" style={{ minWidth: 520 }}>
+                      <table className="admin-table session-section-average-table" style={{ minWidth: 640 }}>
+                        <colgroup>
+                          <col className="session-section-average-col-section" />
+                          <col className="session-section-average-col-subsection" />
+                          <col className="session-section-average-col-total" />
+                          <col className="session-section-average-col-correct" />
+                          <col className="session-section-average-col-rate" />
+                        </colgroup>
                         <thead>
                           <tr>
-                            <th>Section</th>
-                            <th>Average %</th>
-                            <th>Average Correct No.</th>
-                            <th>Total Questions</th>
+                            <th className="session-section-average-head-section">Section</th>
+                            <th className="session-section-average-head-subsection">Sub-section</th>
+                            <th className="session-section-average-head-total">Total</th>
+                            <th className="session-section-average-head-correct">Average</th>
+                            <th className="session-section-average-head-rate">Average %</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {sessionDetailSectionAverages.map((row) => (
-                            <tr key={`session-section-average-${row.section}`}>
-                              <td>{row.section}</td>
-                              <td>{(row.averageRate * 100).toFixed(1)}%</td>
-                              <td>{row.averageCorrect.toFixed(2)}</td>
-                              <td>{row.totalQuestions}</td>
-                            </tr>
-                          ))}
-                          {!sessionDetailSectionAverages.length ? (
+                          {sessionDetailNestedSectionAverages.map((group) => {
+                            const rowSpan = 1 + group.subSections.length;
+                            const isGroupBelowPass = group.averageRate < sessionDetailPassRate;
+                            return (
+                              <Fragment key={`session-average-group-${group.mainSection}`}>
+                                <tr className="attempt-overview-total-row">
+                                  <td rowSpan={rowSpan} className="attempt-overview-area-cell session-section-average-cell-section">
+                                    <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
+                                  </td>
+                                  <td className="session-section-average-cell-subsection">
+                                    <span className="attempt-score-detail-total-label">Total</span>
+                                  </td>
+                                  <td className="session-section-average-cell-total">{group.total}</td>
+                                  <td className={`session-section-average-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
+                                    {group.averageCorrect.toFixed(2)}
+                                  </td>
+                                  <td className={`session-section-average-cell-rate ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
+                                    {(group.averageRate * 100).toFixed(1)}%
+                                  </td>
+                                </tr>
+                                {group.subSections.map((subSection) => {
+                                  const isSubSectionBelowPass = subSection.averageRate < sessionDetailPassRate;
+                                  return (
+                                    <tr key={`session-average-sub-${group.mainSection}-${subSection.section}`}>
+                                      <td className="session-section-average-cell-subsection">{subSection.section}</td>
+                                      <td className="session-section-average-cell-total">{subSection.total}</td>
+                                      <td className={`session-section-average-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
+                                        {subSection.averageCorrect.toFixed(2)}
+                                      </td>
+                                      <td className={`session-section-average-cell-rate ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
+                                        {(subSection.averageRate * 100).toFixed(1)}%
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </Fragment>
+                            );
+                          })}
+                          {!sessionDetailNestedSectionAverages.length ? (
                             <tr>
-                              <td colSpan={4}>No section average data available.</td>
+                              <td colSpan={5}>No section average data available.</td>
                             </tr>
                           ) : null}
                         </tbody>
@@ -12725,42 +12966,31 @@ export default function AdminConsole({
 
                   {attemptDetailTab === "overview" ? (
                     <div className="attempt-detail-pane">
-                      <div className="attempt-detail-stat-grid">
-                        <div className="attempt-detail-stat-card attempt-detail-stat-card-score">
-                          <div className="attempt-detail-stat-label">Total Score</div>
-                          <div className="attempt-detail-stat-inline">
-                            <div className={`attempt-detail-stat-value attempt-detail-stat-value-split ${selectedAttemptIsPass ? "" : "fail"}`}>
-                              <span className="attempt-detail-stat-value-primary">{totalCorrect}</span>
-                              <span className="attempt-detail-stat-value-separator">/</span>
+                      <div className="attempt-detail-score-summary">
+                        <div className="attempt-detail-score-row">
+                          <span className="attempt-detail-score-label">Total Score</span>
+                          <span className={`attempt-detail-score-right ${selectedAttemptIsPass ? "" : "attempt-detail-score-right-fail"}`}>
+                            <span className="attempt-detail-score-value">
+                              <span className="attempt-detail-score-value-primary">{totalCorrect}</span>
+                              <span className="attempt-detail-score-value-separator">/</span>
                               <span>{totalQuestions}</span>
-                            </div>
-                            <div className={`attempt-detail-stat-inline-note ${selectedAttemptIsPass ? "" : "fail"}`}>({scorePercent}%)</div>
-                          </div>
+                            </span>
+                            <span className="attempt-detail-score-rate">({scorePercent}%)</span>
+                          </span>
                         </div>
-                        <div className="attempt-detail-stat-card attempt-detail-stat-card-result">
-                          <div className="attempt-detail-stat-label">Pass/Fail</div>
-                          <div className={`attempt-detail-stat-value attempt-detail-stat-value-result ${selectedAttemptIsPass ? "pass" : "fail"}`}>
+                        <div className="attempt-detail-score-row">
+                          <span className="attempt-detail-score-label">Pass/Fail</span>
+                          <span className={`attempt-detail-score-pass ${selectedAttemptIsPass ? "pass" : "fail"}`}>
                             {selectedAttemptIsPass ? "Pass" : "Fail"}
-                          </div>
+                          </span>
                         </div>
-                        <div className="attempt-detail-stat-card attempt-detail-stat-card-ranking">
-                          <div className="attempt-detail-stat-label">Class Ranking</div>
-                          <div className="attempt-detail-stat-inline">
-                            <div className="attempt-detail-stat-value attempt-detail-stat-value-split">
-                              {selectedAttemptRankInfo ? (
-                                <>
-                                  <span className="attempt-detail-stat-value-primary">{selectedAttemptRankInfo.rank}</span>
-                                  <span className="attempt-detail-stat-value-separator">/</span>
-                                  <span>{selectedAttemptRankInfo.total}</span>
-                                </>
-                              ) : (
-                                <span>-</span>
-                              )}
-                            </div>
-                            <div className="attempt-detail-stat-inline-note">
-                              {selectedAttemptRankInfo ? "students" : ""}
-                            </div>
-                          </div>
+                        <div className="attempt-detail-score-row">
+                          <span className="attempt-detail-score-label">Class Rank</span>
+                          <span className="attempt-detail-score-rank">
+                            {selectedAttemptRankInfo
+                              ? `${formatOrdinal(selectedAttemptRankInfo.rank)} of ${selectedAttemptRankInfo.total} students`
+                              : "—"}
+                          </span>
                         </div>
                       </div>
 
