@@ -559,6 +559,97 @@ function getDefaultStudentWarningForm(filters = {}) {
   };
 }
 
+function buildAttendancePieData(stats) {
+  const presentCount = Math.max(0, Number(stats?.present ?? 0) - Number(stats?.late ?? 0));
+  const lateCount = Math.max(0, Number(stats?.late ?? 0));
+  const excusedCount = Math.max(0, Number(stats?.excused ?? 0));
+  const unexcusedCount = Math.max(0, Number(stats?.unexcused ?? 0));
+  const totalCount = presentCount + lateCount + excusedCount + unexcusedCount;
+  const rateValue = totalCount ? ((presentCount + lateCount) / totalCount) * 100 : 0;
+  const segments = [
+    { key: "present", label: "P", name: "Present", value: presentCount, color: "#22c55e" },
+    { key: "late", label: "L", name: "Late/Leave Early", value: lateCount, color: "#2563eb" },
+    { key: "excused", label: "E", name: "Excused Absence", value: excusedCount, color: "#f59e0b" },
+    { key: "unexcused", label: "A", name: "Unexcused Absence", value: unexcusedCount, color: "#ef4444" },
+  ];
+
+  let stopAcc = 0;
+  const pieStops = totalCount
+    ? segments
+        .map((segment) => {
+          const start = stopAcc;
+          const portion = (segment.value / totalCount) * 100;
+          stopAcc += portion;
+          return `${segment.color} ${start.toFixed(2)}% ${stopAcc.toFixed(2)}%`;
+        })
+        .join(", ")
+    : "#e5e7eb 0% 100%";
+
+  let angleAcc = 0;
+  const pieLabels = totalCount
+    ? segments
+        .filter((segment) => segment.value > 0)
+        .map((segment) => {
+          const portion = (segment.value / totalCount) * 360;
+          const mid = angleAcc + portion / 2;
+          angleAcc += portion;
+          const rad = (mid - 90) * (Math.PI / 180);
+          return {
+            key: segment.key,
+            label: segment.label,
+            x: Math.cos(rad) * 78,
+            y: Math.sin(rad) * 78,
+          };
+        })
+    : [];
+
+  return {
+    rateValue,
+    segments,
+    pieStops,
+    pieLabels,
+  };
+}
+
+function buildAttendanceSummary(list) {
+  const rows = list ?? [];
+  const monthKeys = Array.from(
+    new Set(
+      rows
+        .map((row) => String(row.day_date || ""))
+        .filter(Boolean)
+        .map((date) => date.slice(0, 7))
+    )
+  ).sort();
+
+  const calc = (items) => {
+    const total = items.length;
+    const present = items.filter((item) => item.status === "P" || item.status === "L").length;
+    const late = items.filter((item) => item.status === "L").length;
+    const excused = items.filter((item) => item.status === "E").length;
+    const unexcused = items.filter((item) => item.status === "A").length;
+    const rate = total ? (present / total) * 100 : null;
+    return { total, present, late, excused, unexcused, rate };
+  };
+
+  const overall = calc(rows);
+  const months = monthKeys.map((key, idx) => {
+    const monthRows = rows.filter((item) => String(item.day_date || "").startsWith(key));
+    const stats = calc(monthRows);
+    const parts = key.split("-");
+    const labelMonth = parts.length === 2
+      ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined, { month: "short" })
+      : key;
+    return {
+      key,
+      label: `Month ${idx + 1} (${labelMonth})`,
+      stats,
+    };
+  });
+
+  return { overall, months };
+}
+
 function isMissingStudentWarningsTableError(error) {
   const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
   return /(student_warnings|student_warning_recipients)/i.test(text) && /does not exist/i.test(text);
@@ -2707,13 +2798,17 @@ export default function AdminConsole({
   const [studentWarningIssueOpen, setStudentWarningIssueOpen] = useState(false);
   const [studentWarningIssueSaving, setStudentWarningIssueSaving] = useState(false);
   const [studentWarningIssueMsg, setStudentWarningIssueMsg] = useState("");
+  const [studentWarningDeletingId, setStudentWarningDeletingId] = useState("");
   const [studentWarningForm, setStudentWarningForm] = useState(() => getDefaultStudentWarningForm());
   const [selectedStudentWarning, setSelectedStudentWarning] = useState(null);
+  const [studentWarningPreviewStudentId, setStudentWarningPreviewStudentId] = useState("");
   const [studentListAttendanceMap, setStudentListAttendanceMap] = useState({});
   const [studentListAttempts, setStudentListAttempts] = useState([]);
   const [studentListLoading, setStudentListLoading] = useState(false);
   const [studentDetailOpen, setStudentDetailOpen] = useState(false);
+  const [studentReportExporting, setStudentReportExporting] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [studentAttendanceMonthKey, setStudentAttendanceMonthKey] = useState("__all__");
   const [inviteForm, setInviteForm] = useState({
     email: "",
     display_name: "",
@@ -2924,6 +3019,34 @@ export default function AdminConsole({
     });
     return map;
   }, [studentWarnings]);
+
+  const studentWarningsByStudentId = useMemo(() => {
+    const map = {};
+    (studentWarnings ?? []).forEach((warning) => {
+      (warning.recipients ?? []).forEach((recipient) => {
+        if (!recipient?.student_id) return;
+        if (!map[recipient.student_id]) map[recipient.student_id] = [];
+        map[recipient.student_id].push({
+          warning,
+          recipient,
+        });
+      });
+    });
+    Object.values(map).forEach((list) => {
+      list.sort((left, right) => String(right.warning?.created_at ?? "").localeCompare(String(left.warning?.created_at ?? "")));
+    });
+    return map;
+  }, [studentWarnings]);
+
+  const studentWarningPreviewEntries = useMemo(
+    () => studentWarningsByStudentId[studentWarningPreviewStudentId] ?? [],
+    [studentWarningsByStudentId, studentWarningPreviewStudentId]
+  );
+
+  const studentWarningPreviewStudent = useMemo(
+    () => students.find((student) => student.id === studentWarningPreviewStudentId) ?? null,
+    [students, studentWarningPreviewStudentId]
+  );
 
   useEffect(() => {
     if (!studentInfoOpen) {
@@ -3187,6 +3310,23 @@ export default function AdminConsole({
     return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
   }, [studentAttempts, testMetaByVersion]);
 
+  const studentModelAttemptsByCategory = useMemo(() => {
+    const grouped = new Map();
+    (studentModelAttempts ?? []).forEach((attempt) => {
+      const category = testMetaByVersion[attempt.test_version]?.category || DEFAULT_MODEL_CATEGORY;
+      if (!grouped.has(category)) grouped.set(category, []);
+      grouped.get(category).push(attempt);
+    });
+    const ordered = [];
+    modelCategories.forEach((category) => {
+      if (grouped.has(category.name)) ordered.push([category.name, grouped.get(category.name)]);
+    });
+    for (const entry of grouped.entries()) {
+      if (!ordered.some((item) => item[0] === entry[0])) ordered.push(entry);
+    }
+    return ordered;
+  }, [studentModelAttempts, testMetaByVersion, modelCategories]);
+
   const studentDailyAttempts = useMemo(() => {
     return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type !== "mock");
   }, [studentAttempts, testMetaByVersion]);
@@ -3214,10 +3354,10 @@ export default function AdminConsole({
       const list = attemptQuestionsByVersion[a.test_version];
       if (!list) return;
       const rows = buildAttemptDetailRowsFromList(a.answers_json, list);
-      const summary = buildSectionSummary(rows);
+      const summary = buildMainSectionSummary(rows);
       const bySection = {};
       summary.forEach((s) => {
-        bySection[s.section] = s;
+        bySection[s.section ?? s.mainSection] = s;
       });
       summaryMap[a.id] = bySection;
     });
@@ -3227,6 +3367,42 @@ export default function AdminConsole({
   const sectionTitles = useMemo(
     () => sections.filter((s) => s.key !== "DAILY").map((s) => s.title),
     []
+  );
+
+  const buildCategorySummaryRows = useCallback((groups) => {
+    return (groups ?? []).map(([category, attemptsList]) => {
+      const attempts = attemptsList ?? [];
+      const count = attempts.length;
+      const passCount = attempts.filter((attempt) => {
+        const passRate = Number(testPassRateByVersion[attempt.test_version] ?? 0.8);
+        return getScoreRate(attempt) >= passRate;
+      }).length;
+      const failCount = Math.max(0, count - passCount);
+      const totalCorrect = attempts.reduce((sum, attempt) => sum + Number(attempt.correct ?? 0), 0);
+      const totalQuestions = attempts.reduce((sum, attempt) => sum + Number(attempt.total ?? 0), 0);
+      const avgCorrect = count ? totalCorrect / count : 0;
+      const avgTotal = count ? totalQuestions / count : 0;
+      const avgRate = count
+        ? attempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / count
+        : 0;
+      return {
+        category,
+        averageScoreLabel: count ? `${avgCorrect.toFixed(1)}/${avgTotal.toFixed(1)}` : "-",
+        averageRateLabel: count ? `${(avgRate * 100).toFixed(1)}%` : "-",
+        passCount,
+        failCount,
+      };
+    });
+  }, [testPassRateByVersion]);
+
+  const studentModelCategorySummaryRows = useMemo(
+    () => buildCategorySummaryRows(studentModelAttemptsByCategory),
+    [buildCategorySummaryRows, studentModelAttemptsByCategory]
+  );
+
+  const studentDailyCategorySummaryRows = useMemo(
+    () => buildCategorySummaryRows(studentDailyAttemptsByCategory),
+    [buildCategorySummaryRows, studentDailyAttemptsByCategory]
   );
 
   const filteredStudentAttendance = useMemo(() => {
@@ -3520,45 +3696,56 @@ export default function AdminConsole({
   const selectedAttemptScoreRate = selectedAttempt ? getScoreRate(selectedAttempt) : 0;
   const selectedAttemptIsPass = selectedAttemptScoreRate >= selectedAttemptPassRate;
 
-  const attendanceSummary = useMemo(() => {
-    const list = studentAttendance ?? [];
-    const monthKeys = Array.from(
-      new Set(
-        list
-          .map((r) => String(r.day_date || ""))
-          .filter(Boolean)
-          .map((d) => d.slice(0, 7))
-      )
-    ).sort();
+  const attendanceSummary = useMemo(() => buildAttendanceSummary(studentAttendance), [studentAttendance]);
 
-    const calc = (rows) => {
-      const total = rows.length;
-      const present = rows.filter((r) => r.status === "P" || r.status === "L").length;
-      const late = rows.filter((r) => r.status === "L").length;
-      const excused = rows.filter((r) => r.status === "E").length;
-      const unexcused = rows.filter((r) => r.status === "A").length;
-      const rate = total ? (present / total) * 100 : null;
-      return { total, present, late, excused, unexcused, rate };
-    };
-
-    const overall = calc(list);
-    const months = monthKeys.map((key, idx) => {
-      const rows = list.filter((r) => String(r.day_date || "").startsWith(key));
-      const stats = calc(rows);
-      const parts = key.split("-");
-      const labelMonth = parts.length === 2
-        ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined, { month: "short" })
-        : key;
+  const studentAttendanceMonthOptions = useMemo(() => {
+    const months = attendanceSummary.months.map((month) => {
+      const parts = month.key.split("-");
+      const label = parts.length === 2
+        ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "long",
+          })
+        : month.label;
       return {
-        key,
-        label: `Month ${idx + 1} (${labelMonth})`,
-        stats
+        key: month.key,
+        label,
+        stats: month.stats,
       };
     });
-    return { overall, months };
-  }, [studentAttendance]);
+    return [{ key: "__all__", label: "All period", stats: attendanceSummary.overall }, ...months];
+  }, [attendanceSummary]);
+
+  const selectedStudentAttendanceMonth = useMemo(() => {
+    return studentAttendanceMonthOptions.find((option) => option.key === studentAttendanceMonthKey) ?? studentAttendanceMonthOptions[0] ?? {
+      key: "__all__",
+      label: "All period",
+      stats: attendanceSummary.overall,
+    };
+  }, [attendanceSummary, studentAttendanceMonthKey, studentAttendanceMonthOptions]);
+
+  const studentAttendanceMonthIndex = Math.max(
+    0,
+    studentAttendanceMonthOptions.findIndex((option) => option.key === selectedStudentAttendanceMonth.key)
+  );
+  const studentAttendancePrevMonthKey = studentAttendanceMonthOptions[studentAttendanceMonthIndex - 1]?.key ?? "";
+  const studentAttendanceNextMonthKey = studentAttendanceMonthOptions[studentAttendanceMonthIndex + 1]?.key ?? "";
 
   const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
+  const studentAttendancePie = useMemo(
+    () => buildAttendancePieData(selectedStudentAttendanceMonth.stats),
+    [selectedStudentAttendanceMonth]
+  );
+
+  useEffect(() => {
+    if (!studentAttendanceMonthOptions.some((option) => option.key === studentAttendanceMonthKey)) {
+      setStudentAttendanceMonthKey(studentAttendanceMonthOptions[0]?.key ?? "__all__");
+    }
+  }, [studentAttendanceMonthKey, studentAttendanceMonthOptions]);
+
+  useEffect(() => {
+    setStudentAttendanceMonthKey("__all__");
+  }, [selectedStudent?.id]);
 
   const sortedStudents = useMemo(() => {
     const list = [...(students ?? [])];
@@ -5104,6 +5291,44 @@ export default function AdminConsole({
     }
   }
 
+  async function deleteStudentWarning(warning) {
+    if (!warning?.id) return;
+    const ok = window.confirm(`Delete warning "${warning.title || "Warning"}"?`);
+    if (!ok) return;
+    setStudentWarningDeletingId(warning.id);
+    setStudentWarningsMsg("");
+    try {
+      const { error: recipientError } = await supabase
+        .from("student_warning_recipients")
+        .delete()
+        .eq("warning_id", warning.id);
+      if (recipientError) throw recipientError;
+
+      const { error: warningError } = await supabase
+        .from("student_warnings")
+        .delete()
+        .eq("id", warning.id);
+      if (warningError) throw warningError;
+
+      if (selectedStudentWarning?.id === warning.id) {
+        setSelectedStudentWarning(null);
+      }
+      setStudentMsg(`Deleted warning: ${warning.title || "Warning"}`);
+      await fetchStudentWarnings();
+    } catch (error) {
+      if (!isMissingStudentWarningsTableError(error)) {
+        console.error("delete student warning error:", error);
+      }
+      setStudentWarningsMsg(
+        isMissingStudentWarningsTableError(error)
+          ? "Warning tables are not available yet. Apply the latest Supabase migration first."
+          : `Delete warning failed: ${error.message || error}`
+      );
+    } finally {
+      setStudentWarningDeletingId("");
+    }
+  }
+
   async function toggleWithdrawn(student, nextValue) {
     if (!student?.id) return;
     setStudentMsg("");
@@ -5981,7 +6206,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   async function fetchStudentAttempts(studentId) {
-    if (!studentId) return;
+    if (!studentId) return { list: [], hydratedQuestions: {}, rankMap: {} };
     setStudentAttemptsMsg("Loading...");
     let { data, error } = await supabase
       .from("attempts")
@@ -6001,20 +6226,21 @@ function openDailyRecordModal(record = null, recordDate = "") {
       console.error("student attempts fetch error:", error);
       setStudentAttempts([]);
       setStudentAttemptsMsg(`Load failed: ${error.message}`);
-      return;
+      return { list: [], hydratedQuestions: {}, rankMap: {} };
     }
     const list = data ?? [];
     setStudentAttempts(list);
     setStudentAttemptsMsg(list.length ? "" : "No attempts.");
-    hydrateAttemptQuestions(list.map((a) => a.test_version));
-    fetchAttemptRanksForSessions(list);
+    const hydratedQuestions = await hydrateAttemptQuestions(list.map((a) => a.test_version));
+    const rankMap = await fetchAttemptRanksForSessions(list);
+    return { list, hydratedQuestions, rankMap };
   }
 
   async function fetchAttemptRanksForSessions(attemptsList) {
     const sessionIds = Array.from(new Set((attemptsList ?? []).map((a) => a.test_session_id).filter(Boolean)));
     if (!sessionIds.length) {
       setStudentAttemptRanks({});
-      return;
+      return {};
     }
     const { data, error } = await supabase
       .from("attempts")
@@ -6023,7 +6249,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     if (error) {
       console.error("attempt rank fetch error:", error);
       setStudentAttemptRanks({});
-      return;
+      return {};
     }
     const bySession = new Map();
     (data ?? []).forEach((a) => {
@@ -6051,12 +6277,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
       });
     });
     setStudentAttemptRanks(rankMap);
+    return rankMap;
   }
 
   async function hydrateAttemptQuestions(versions) {
     const unique = Array.from(new Set((versions ?? []).filter(Boolean)));
     const missing = unique.filter((v) => !attemptQuestionsByVersion[v]);
-    if (!missing.length) return;
+    if (!missing.length) return {};
     const { data, error } = await supabase
       .from("questions")
       .select("test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
@@ -6064,7 +6291,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       .order("order_index", { ascending: true });
     if (error) {
       console.error("attempt questions preload error:", error);
-      return;
+      return {};
     }
     const grouped = {};
     (data ?? []).forEach((row) => {
@@ -6074,10 +6301,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
       grouped[version].push(mapDbQuestion(row));
     });
     setAttemptQuestionsByVersion((prev) => ({ ...prev, ...grouped }));
+    return grouped;
   }
 
   async function fetchStudentAttendance(studentId) {
-    if (!studentId) return;
+    if (!studentId) return [];
     setStudentAttendanceMsg("Loading...");
     const { data, error } = await supabase
       .from("attendance_entries")
@@ -6087,14 +6315,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
       console.error("student attendance fetch error:", error);
       setStudentAttendance([]);
       setStudentAttendanceMsg(`Load failed: ${error.message}`);
-      return;
+      return [];
     }
     const entries = data ?? [];
     const dayIds = entries.map((e) => e.day_id).filter(Boolean);
     if (!dayIds.length) {
       setStudentAttendance([]);
       setStudentAttendanceMsg("No attendance records.");
-      return;
+      return [];
     }
     const { data: daysData, error: daysError } = await supabase
       .from("attendance_days")
@@ -6104,7 +6332,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       console.error("attendance days fetch error:", daysError);
       setStudentAttendance([]);
       setStudentAttendanceMsg(`Load failed: ${daysError.message}`);
-      return;
+      return [];
     }
     const dayMap = {};
     (daysData ?? []).forEach((d) => {
@@ -6120,6 +6348,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       .sort((a, b) => String(a.day_date).localeCompare(String(b.day_date)));
     setStudentAttendance(list);
     setStudentAttendanceMsg(list.length ? "" : "No attendance records.");
+    return list;
   }
 
   async function seedModelCategory(list) {
@@ -7625,6 +7854,378 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     setStudentMsg(`Deleted: ${email || userId}`);
     fetchStudents();
+  }
+
+  async function exportStudentReportPdf() {
+    if (!selectedStudentId || !selectedStudent || typeof window === "undefined") return;
+    const reportWindow = window.open("", "_blank", "width=1200,height=900");
+    if (!reportWindow) {
+      setStudentMsg("Popup blocked. Please allow popups and try again.");
+      return;
+    }
+
+    setStudentReportExporting(true);
+    setStudentMsg("");
+    reportWindow.document.write("<!doctype html><html><head><title>Preparing report...</title></head><body style=\"font-family: Arial, sans-serif; padding: 24px;\">Preparing student report...</body></html>");
+    reportWindow.document.close();
+
+    try {
+      const [attemptResult, attendanceList] = await Promise.all([
+        fetchStudentAttempts(selectedStudentId),
+        fetchStudentAttendance(selectedStudentId),
+      ]);
+
+      const attemptsList = attemptResult?.list ?? [];
+      const questionMap = { ...(attemptQuestionsByVersion ?? {}), ...(attemptResult?.hydratedQuestions ?? {}) };
+      const rankMap = attemptResult?.rankMap ?? {};
+      const attendanceRows = attendanceList ?? [];
+      const attendanceSummaryData = buildAttendanceSummary(attendanceRows);
+
+      const modelAttempts = attemptsList.filter((attempt) => testMetaByVersion[attempt.test_version]?.type === "mock");
+      const dailyAttempts = attemptsList.filter((attempt) => testMetaByVersion[attempt.test_version]?.type !== "mock");
+
+      const modelGrouped = new Map();
+      modelAttempts.forEach((attempt) => {
+        const category = testMetaByVersion[attempt.test_version]?.category || DEFAULT_MODEL_CATEGORY;
+        if (!modelGrouped.has(category)) modelGrouped.set(category, []);
+        modelGrouped.get(category).push(attempt);
+      });
+      const modelAttemptsByCategory = [];
+      modelCategories.forEach((category) => {
+        if (modelGrouped.has(category.name)) modelAttemptsByCategory.push([category.name, modelGrouped.get(category.name)]);
+      });
+      for (const entry of modelGrouped.entries()) {
+        if (!modelAttemptsByCategory.some((item) => item[0] === entry[0])) modelAttemptsByCategory.push(entry);
+      }
+
+      const dailyGrouped = new Map();
+      dailyAttempts.forEach((attempt) => {
+        const category = testMetaByVersion[attempt.test_version]?.category || "Uncategorized";
+        if (!dailyGrouped.has(category)) dailyGrouped.set(category, []);
+        dailyGrouped.get(category).push(attempt);
+      });
+      const dailyAttemptsByCategory = [];
+      dailyCategories.forEach((category) => {
+        if (dailyGrouped.has(category.name)) dailyAttemptsByCategory.push([category.name, dailyGrouped.get(category.name)]);
+      });
+      for (const entry of dailyGrouped.entries()) {
+        if (!dailyAttemptsByCategory.some((item) => item[0] === entry[0])) dailyAttemptsByCategory.push(entry);
+      }
+
+      const modelSummaryByAttemptId = {};
+      modelAttempts.forEach((attempt) => {
+        const list = questionMap[attempt.test_version];
+        if (!list) return;
+        const rows = buildAttemptDetailRowsFromList(attempt.answers_json, list);
+        const summary = buildMainSectionSummary(rows);
+        const bySection = {};
+        summary.forEach((item) => {
+          bySection[item.section ?? item.mainSection] = item;
+        });
+        modelSummaryByAttemptId[attempt.id] = bySection;
+      });
+      const modelSectionTitles = [...sectionTitles];
+
+      const uploadMap = getProfileUploads(selectedStudent.profile_uploads);
+      const personalInfoRows = [
+        { label: "Full Name", value: selectedStudent.display_name || "-" },
+        { label: "Email", value: selectedStudent.email || "-" },
+        { label: "Phone Number", value: selectedStudent.phone_number || "-" },
+        {
+          label: "Date of Birth",
+          value: selectedStudent.date_of_birth
+            ? `${formatDateFull(selectedStudent.date_of_birth)}${calculateAge(selectedStudent.date_of_birth) != null ? ` / Age ${calculateAge(selectedStudent.date_of_birth)}` : ""}`
+            : "-",
+        },
+        { label: "Sex", value: selectedStudent.sex || "-" },
+        { label: "UID", value: selectedStudent.student_code || "-" },
+        { label: "Current Working Facility", value: selectedStudent.current_working_facility || "-" },
+        { label: "Years of Experience", value: formatYearsOfExperience(selectedStudent.years_of_experience) || "-" },
+        { label: "Nursing Certificate", value: selectedStudent.nursing_certificate || "-" },
+        { label: "Certificate Status", value: selectedStudent.nursing_certificate_status || "-" },
+        { label: "BNMC Registration Number", value: selectedStudent.bnmc_registration_number || "-" },
+        {
+          label: "BNMC Registration Expiry Date",
+          value: selectedStudent.bnmc_registration_expiry_date ? formatDateFull(selectedStudent.bnmc_registration_expiry_date) : "-",
+        },
+        { label: "Passport Number", value: selectedStudent.passport_number || "-" },
+        ...PERSONAL_UPLOAD_FIELDS.map((field) => {
+          const asset = uploadMap[field.key];
+          const url = String(asset?.url ?? "").trim();
+          const name = String(asset?.name ?? field.label ?? "").trim();
+          return {
+            label: field.label,
+            value: url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(name || url)}</a>` : "-",
+            isHtml: true,
+          };
+        }),
+      ];
+
+      const formatPercent = (value, digits = 1) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? `${num.toFixed(digits)}%` : "N/A";
+      };
+
+      const buildCategorySummaryRowsForExport = (groups) => {
+        return (groups ?? []).map(([category, attemptsForCategory]) => {
+          const attempts = attemptsForCategory ?? [];
+          const count = attempts.length;
+          const passCount = attempts.filter((attempt) => {
+            const passRate = Number(testPassRateByVersion[attempt.test_version] ?? 0.8);
+            return getScoreRate(attempt) >= passRate;
+          }).length;
+          const failCount = Math.max(0, count - passCount);
+          const totalCorrect = attempts.reduce((sum, attempt) => sum + Number(attempt.correct ?? 0), 0);
+          const totalQuestions = attempts.reduce((sum, attempt) => sum + Number(attempt.total ?? 0), 0);
+          const avgCorrect = count ? totalCorrect / count : 0;
+          const avgTotal = count ? totalQuestions / count : 0;
+          const avgRate = count ? attempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / count : 0;
+          return [
+            escapeHtml(category),
+            escapeHtml(count ? `${avgCorrect.toFixed(1)}/${avgTotal.toFixed(1)}` : "-"),
+            escapeHtml(count ? `${(avgRate * 100).toFixed(1)}%` : "-"),
+            escapeHtml(passCount),
+            escapeHtml(failCount),
+          ];
+        });
+      };
+
+      const renderTable = (headers, rows, options = {}) => {
+        if (!rows.length) {
+          return `<div class="report-empty">${escapeHtml(options.emptyText || "No records found.")}</div>`;
+        }
+        return `
+          <div class="report-table-wrap">
+            <table class="report-table">
+              <thead>
+                <tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr>
+              </thead>
+              <tbody>
+                ${rows.map((row) => `
+                  <tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+      };
+
+      const personalInfoTable = renderTable(
+        ["Field", "Value"],
+        personalInfoRows.map((row) => [
+          escapeHtml(row.label),
+          row.isHtml ? row.value : escapeHtml(row.value),
+        ]),
+        { emptyText: "No personal information found." }
+      );
+
+      const attendanceSummaryTable = renderTable(
+        ["Metric", "Overall", ...attendanceSummaryData.months.map((month) => escapeHtml(month.label))],
+        [
+          [
+            "Attendance Rate",
+            escapeHtml(formatPercent(attendanceSummaryData.overall.rate, 2)),
+            ...attendanceSummaryData.months.map((month) => escapeHtml(formatPercent(month.stats.rate, 2))),
+          ],
+          [
+            "Total Days",
+            escapeHtml(attendanceSummaryData.overall.total || "-"),
+            ...attendanceSummaryData.months.map((month) => escapeHtml(month.stats.total || "-")),
+          ],
+          [
+            "Present (P)",
+            escapeHtml(attendanceSummaryData.overall.present || "-"),
+            ...attendanceSummaryData.months.map((month) => escapeHtml(month.stats.present || "-")),
+          ],
+          [
+            "Late / Left Early (L)",
+            escapeHtml(attendanceSummaryData.overall.late || "-"),
+            ...attendanceSummaryData.months.map((month) => escapeHtml(month.stats.late || "-")),
+          ],
+          [
+            "Excused Absence (E)",
+            escapeHtml(attendanceSummaryData.overall.excused || "-"),
+            ...attendanceSummaryData.months.map((month) => escapeHtml(month.stats.excused || "-")),
+          ],
+          [
+            "Unexcused Absence (A)",
+            escapeHtml(attendanceSummaryData.overall.unexcused || "-"),
+            ...attendanceSummaryData.months.map((month) => escapeHtml(month.stats.unexcused || "-")),
+          ],
+        ]
+      );
+
+      const attendanceDetailTable = renderTable(
+        ["Date", "Weekday", "Status", "Comment"],
+        attendanceRows.map((row) => [
+          escapeHtml(formatDateFull(row.day_date) || "-"),
+          escapeHtml(formatWeekday(row.day_date) || "-"),
+          escapeHtml(row.status || "-"),
+          escapeHtml(row.comment || "-"),
+        ]),
+        { emptyText: "No attendance records." }
+      );
+
+      const dailySummaryTable = renderTable(
+        ["Category", "Average Score", "Average Rate", "Pass", "Fail"],
+        buildCategorySummaryRowsForExport(dailyAttemptsByCategory),
+        { emptyText: "No daily test records." }
+      );
+
+      const modelSummaryTable = renderTable(
+        ["Category", "Average Score", "Average Rate", "Pass", "Fail"],
+        buildCategorySummaryRowsForExport(modelAttemptsByCategory),
+        { emptyText: "No model test records." }
+      );
+
+      const dailyResultsHtml = dailyAttemptsByCategory.length
+        ? dailyAttemptsByCategory.map(([category, items]) => `
+            <section class="report-subsection">
+              <h3>${escapeHtml(category)}</h3>
+              ${renderTable(
+                ["Test", "Date", "Score", "Rate", "P/F"],
+                items.map((attempt) => {
+                  const passRate = Number(testPassRateByVersion[attempt.test_version] ?? 0.8);
+                  const passed = getScoreRate(attempt) >= passRate;
+                  return [
+                    escapeHtml(getAttemptTitle(attempt) || "-"),
+                    escapeHtml(formatDateFull(attempt.created_at) || "-"),
+                    escapeHtml(`${attempt.correct}/${attempt.total}`),
+                    escapeHtml(formatPercent(getScoreRate(attempt) * 100, 1)),
+                    escapeHtml(passed ? "Pass" : "Fail"),
+                  ];
+                }),
+                { emptyText: "No daily test records." }
+              )}
+            </section>
+          `).join("")
+        : `<div class="report-empty">No daily test records.</div>`;
+
+      const modelResultsHtml = renderTable(
+        [
+          "Test",
+          "Date",
+          "Total Score",
+          "Rate",
+          "P/F",
+          "Class Rank",
+          ...modelSectionTitles.map((title) => escapeHtml(title)),
+        ],
+        modelAttempts.map((attempt) => {
+          const passRate = Number(testPassRateByVersion[attempt.test_version] ?? 0.8);
+          const passed = getScoreRate(attempt) >= passRate;
+          const rankInfo = rankMap[attempt.id];
+          const summary = modelSummaryByAttemptId[attempt.id] || {};
+          return [
+            escapeHtml(getAttemptTitle(attempt) || "-"),
+            escapeHtml(formatDateFull(attempt.created_at) || "-"),
+            escapeHtml(`${attempt.correct}/${attempt.total}`),
+            escapeHtml(formatPercent(getScoreRate(attempt) * 100, 1)),
+            escapeHtml(passed ? "Pass" : "Fail"),
+            escapeHtml(rankInfo ? `${rankInfo.rank}/${rankInfo.total}` : "-"),
+            ...modelSectionTitles.map((title) => {
+              const section = summary[title];
+              return escapeHtml(section ? `${section.correct}/${section.total}` : "-");
+            }),
+          ];
+        }),
+        { emptyText: "No model test records." }
+      );
+
+      const reportTitle = `${selectedStudent.display_name || selectedStudent.email || "Student"} - Student Report`;
+      const html = `
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>${escapeHtml(reportTitle)}</title>
+            <style>
+              @page { size: A4 portrait; margin: 14mm; }
+              body { font-family: Arial, sans-serif; color: #111827; margin: 0; }
+              .report { padding: 0; }
+              .report-header { margin-bottom: 18px; border-bottom: 2px solid #cbd5e1; padding-bottom: 10px; }
+              .report-title { font-size: 24px; font-weight: 800; margin: 0 0 6px; }
+              .report-meta { font-size: 12px; color: #475569; margin: 2px 0; }
+              .report-section { margin-top: 18px; }
+              .report-section h2 { font-size: 17px; margin: 0 0 8px; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; }
+              .report-subsection { margin-top: 14px; }
+              .report-subsection h3 { font-size: 14px; margin: 0 0 8px; }
+              .report-table-wrap { width: 100%; overflow: hidden; }
+              .report-table { width: 100%; border-collapse: collapse; table-layout: auto; }
+              .report-table th, .report-table td {
+                border: 1px solid #cbd5e1;
+                padding: 6px 8px;
+                font-size: 11px;
+                vertical-align: top;
+                text-align: left;
+                word-break: break-word;
+              }
+              .report-table th { background: #e2e8f0; font-weight: 800; }
+              .report-empty { border: 1px dashed #cbd5e1; padding: 10px; font-size: 12px; color: #64748b; }
+              .page-break { break-before: page; page-break-before: always; }
+              a { color: #0f766e; text-decoration: none; }
+            </style>
+          </head>
+          <body>
+            <div class="report">
+              <div class="report-header">
+                <div class="report-title">${escapeHtml(reportTitle)}</div>
+                <div class="report-meta">Student Code: ${escapeHtml(selectedStudent.student_code || "-")}</div>
+                <div class="report-meta">Email: ${escapeHtml(selectedStudent.email || "-")}</div>
+                <div class="report-meta">Generated: ${escapeHtml(new Date().toLocaleString())}</div>
+              </div>
+
+              <section class="report-section">
+                <h2>Personal Information</h2>
+                ${personalInfoTable}
+              </section>
+
+              <section class="report-section">
+                <h2>Attendance Summary</h2>
+                ${attendanceSummaryTable}
+              </section>
+
+              <section class="report-section">
+                <h2>Daily Test Results</h2>
+                ${dailySummaryTable}
+                <div style="height: 10px;"></div>
+                ${dailyResultsHtml}
+              </section>
+
+              <section class="report-section">
+                <h2>Model Test Results</h2>
+                ${modelSummaryTable}
+                <div style="height: 10px;"></div>
+                ${modelResultsHtml}
+              </section>
+
+              <section class="report-section page-break">
+                <h2>Attendance Details</h2>
+                ${attendanceDetailTable}
+              </section>
+            </div>
+            <script>
+              window.onload = function () {
+                setTimeout(function () {
+                  window.focus();
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      reportWindow.document.open();
+      reportWindow.document.write(html);
+      reportWindow.document.close();
+    } catch (error) {
+      console.error("student report export error:", error);
+      setStudentMsg(`Export failed: ${error?.message || error}`);
+      reportWindow.close();
+    } finally {
+      setStudentReportExporting(false);
+    }
   }
 
   function parseCsv(text) {
@@ -9614,7 +10215,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   const displayName = profile?.display_name?.trim() || session?.user?.email || "User";
   const adminPageTitle = (() => {
-    if (activeTab === "students") return "Students";
+    if (activeTab === "students") return "Student List";
     if (activeTab === "attendance") {
       return attendanceSubTab === "absence" ? "Absence Applications" : "Attendance Sheet";
     }
@@ -9929,122 +10530,95 @@ function openDailyRecordModal(record = null, recordDate = "") {
         <div style={{ marginBottom: 12 }}>
           {!studentDetailOpen ? (
             <>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div>
-                  <div className="admin-title">Students</div>
-                  <div className="admin-subtitle">Student list and performance overview.</div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    className="btn btn-danger"
-                    onClick={() => {
-                      setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters));
-                      setStudentWarningIssueMsg("");
-                      setStudentWarningIssueOpen(true);
-                    }}
-                  >
-                    Issue Warning
-                  </button>
-                  <button className="btn btn-primary" onClick={() => setInviteOpen(true)}>Add New Student</button>
-                  <button className="btn" onClick={() => fetchStudents()}>Refresh Students</button>
-                  <button className="btn" onClick={() => fetchStudentListMetrics()}>Refresh Metrics</button>
-                </div>
+              <div style={{ marginTop: 14 }}>
+                <div className="admin-title">Student List</div>
               </div>
 
-              <div className="admin-form" style={{ marginTop: 10 }}>
-                <div className="field small">
-                  <label>Date From</label>
-                  <input
-                    type="date"
-                    value={studentListFilters.from}
-                    onChange={(e) => setStudentListFilters((s) => ({ ...s, from: e.target.value }))}
-                  />
-                </div>
-                <div className="field small">
-                  <label>Date To</label>
-                  <input
-                    type="date"
-                    value={studentListFilters.to}
-                    onChange={(e) => setStudentListFilters((s) => ({ ...s, to: e.target.value }))}
-                  />
-                </div>
-                <div className="field small">
-                  <label>Attendance % (≤)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    placeholder="e.g. 80"
-                    value={studentListFilters.maxAttendance}
-                    onChange={(e) => setStudentListFilters((s) => ({ ...s, maxAttendance: e.target.value }))}
-                  />
-                </div>
-                <div className="field small">
-                  <label>Unexcused (≥)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="e.g. 3"
-                    value={studentListFilters.minUnexcused}
-                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minUnexcused: e.target.value }))}
-                  />
-                </div>
-                <div className="field small">
-                  <label>Model Avg % (≥)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    placeholder="e.g. 60"
-                    value={studentListFilters.minModelAvg}
-                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minModelAvg: e.target.value }))}
-                  />
-                </div>
-                <div className="field small">
-                  <label>Daily Avg % (≥)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    placeholder="e.g. 60"
-                    value={studentListFilters.minDailyAvg}
-                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minDailyAvg: e.target.value }))}
-                  />
-                </div>
+              <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="btn student-list-primary-btn student-warning-launch-btn"
+                  onClick={() => {
+                    setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters));
+                    setStudentWarningIssueMsg("");
+                    setStudentWarningIssueOpen(true);
+                  }}
+                >
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  <span>Warnings</span>
+                </button>
+                <button className="btn btn-primary student-list-primary-btn" onClick={() => setInviteOpen(true)}>
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  <span>Add New Student</span>
+                </button>
               </div>
 
-              <div className="student-warning-history">
-                <div className="student-warning-history-head">
-                  <div className="admin-title" style={{ fontSize: 18 }}>Issued Warnings</div>
-                  {studentWarningsLoading ? <div className="admin-help">Loading warnings...</div> : null}
+              <div className="attendance-filter-box" style={{ marginTop: 14 }}>
+                <div className="admin-form" style={{ marginTop: 0 }}>
+                  <div className="field small">
+                    <label className="student-list-filter-label">Filter<br />(Attendance Rate ≤)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="e.g. 80"
+                      value={studentListFilters.maxAttendance}
+                      onChange={(e) => setStudentListFilters((s) => ({ ...s, maxAttendance: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label className="student-list-filter-label">Filter<br />(Unexcused ≥)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="e.g. 3"
+                      value={studentListFilters.minUnexcused}
+                      onChange={(e) => setStudentListFilters((s) => ({ ...s, minUnexcused: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label className="student-list-filter-label">Filter<br />(Model Avg Rate ≥)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="e.g. 60"
+                      value={studentListFilters.minModelAvg}
+                      onChange={(e) => setStudentListFilters((s) => ({ ...s, minModelAvg: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label className="student-list-filter-label">Filter<br />(Daily Avg Rate ≥)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="e.g. 60"
+                      value={studentListFilters.minDailyAvg}
+                      onChange={(e) => setStudentListFilters((s) => ({ ...s, minDailyAvg: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label className="student-list-filter-label">Filter<br />Date From</label>
+                    <input
+                      type="date"
+                      value={studentListFilters.from}
+                      onChange={(e) => setStudentListFilters((s) => ({ ...s, from: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label className="student-list-filter-label">Filter<br />Date To</label>
+                    <input
+                      type="date"
+                      value={studentListFilters.to}
+                      onChange={(e) => setStudentListFilters((s) => ({ ...s, to: e.target.value }))}
+                    />
+                  </div>
                 </div>
-                <div className="student-warning-history-list">
-                  {studentWarnings.map((warning) => {
-                    const summary = summarizeWarningCriteria(warning.criteria);
-                    return (
-                      <button
-                        key={warning.id}
-                        type="button"
-                        className="student-warning-card"
-                        onClick={() => setSelectedStudentWarning(warning)}
-                      >
-                        <div className="student-warning-card-title">{warning.title || "Warning"}</div>
-                        <div className="student-warning-card-meta">
-                          {formatDateTime(warning.created_at)} · {warning.student_count || warning.recipients?.length || 0} student{(warning.student_count || warning.recipients?.length || 0) === 1 ? "" : "s"}
-                        </div>
-                        <div className="student-warning-card-summary">
-                          {(summary.length ? summary : ["No criteria summary"]).join(" / ")}
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {!studentWarningsLoading && !studentWarnings.length ? (
-                    <div className="admin-help">No warnings issued yet.</div>
-                  ) : null}
-                </div>
-                {studentWarningsMsg ? <div className="admin-msg">{studentWarningsMsg}</div> : null}
               </div>
-
               <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                 <table className="admin-table" style={{ minWidth: 960 }}>
                   <thead>
@@ -10052,10 +10626,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       <th>Code</th>
                       <th>Name</th>
                       <th>Email</th>
-                      <th>Attendance %</th>
-                      <th>Unexcused</th>
-                      <th>Model Avg %</th>
-                      <th>Daily Avg %</th>
+                      <th>Attendance<br />Rate</th>
+                      <th>Unexcused<br />Absence</th>
+                      <th>Model Avg<br />Rate</th>
+                      <th>Daily Avg<br />Rate</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -10082,9 +10656,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
                             <div className="student-list-name-cell">
                               <span>{s.display_name ?? ""}</span>
                               {studentWarningCounts[s.id] ? (
-                                <span className="student-warning-badge" title={`${studentWarningCounts[s.id]} warning(s) issued`}>
+                                <button
+                                  type="button"
+                                  className="student-warning-badge student-warning-badge-btn"
+                                  title={`${studentWarningCounts[s.id]} warning(s) issued`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setStudentWarningPreviewStudentId(s.id);
+                                  }}
+                                >
                                   !
-                                </span>
+                                </button>
                               ) : null}
                             </div>
                           </td>
@@ -10147,7 +10729,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button
-                    className="btn"
+                    className="btn student-detail-action-btn"
+                    onClick={exportStudentReportPdf}
+                    disabled={studentReportExporting}
+                  >
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M10 3v8m0 0 3-3m-3 3-3-3M4 13.5v1.25C4 15.44 4.56 16 5.25 16h9.5c.69 0 1.25-.56 1.25-1.25V13.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    {studentReportExporting ? "Exporting..." : "Export PDF"}
+                  </button>
+                  <button
+                    className="btn student-detail-action-btn"
                     onClick={() => {
                       if (!selectedStudent) return;
                       setReissueStudent(selectedStudent);
@@ -10161,7 +10753,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     Reissue Temp Pass
                   </button>
                   <button
-                    className={`btn ${selectedStudent?.is_withdrawn ? "btn-withdrawn" : ""}`}
+                    className={`btn student-detail-action-btn ${selectedStudent?.is_withdrawn ? "btn-withdrawn" : ""}`}
                     onClick={() => {
                       if (!selectedStudent) return;
                       toggleWithdrawn(selectedStudent, !selectedStudent.is_withdrawn);
@@ -10170,7 +10762,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     {selectedStudent?.is_withdrawn ? "Withdrawn" : "Withdraw"}
                   </button>
                   <button
-                    className="btn btn-danger"
+                    className="btn btn-danger student-detail-action-btn"
                     onClick={() => {
                       if (!selectedStudent) return;
                       deleteStudent(selectedStudent.id, selectedStudent.email);
@@ -10182,7 +10774,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               </div>
 
               <div className="student-detail-tab-row">
-                <div className="admin-top-tabs">
+                <div className="admin-top-tabs student-detail-tabs">
                   <button
                     className={`admin-top-tab ${selectedStudentTab === "information" ? "active" : ""}`}
                     onClick={() => {
@@ -10219,20 +10811,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     Model Test
                   </button>
                 </div>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    if (selectedStudentTab === "information") {
-                      fetchStudents();
-                    } else if (selectedStudentTab === "attendance") {
-                      fetchStudentAttendance(selectedStudentId);
-                    } else {
-                      fetchStudentAttempts(selectedStudentId);
-                    }
-                  }}
-                >
-                  Refresh
-                </button>
               </div>
 
               {selectedStudentTab === "information" ? (
@@ -10302,6 +10880,34 @@ function openDailyRecordModal(record = null, recordDate = "") {
               {selectedStudentTab === "model" ? (
                 <>
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                    <table className="admin-table" style={{ minWidth: 640 }}>
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+                          <th>Average Score</th>
+                          <th>Average Rate</th>
+                          <th>Pass</th>
+                          <th>Fail</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {studentModelCategorySummaryRows.length ? studentModelCategorySummaryRows.map((row) => (
+                          <tr key={`student-model-summary-${row.category}`}>
+                            <td>{row.category}</td>
+                            <td>{row.averageScoreLabel}</td>
+                            <td>{row.averageRateLabel}</td>
+                            <td>{row.passCount}</td>
+                            <td>{row.failCount}</td>
+                          </tr>
+                        )) : (
+                          <tr>
+                            <td colSpan={5}>No model test records.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                     <table className="admin-table" style={{ minWidth: 980 }}>
                       <thead>
                         <tr>
@@ -10359,6 +10965,34 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
               {selectedStudentTab === "daily" ? (
                 <>
+                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                    <table className="admin-table" style={{ minWidth: 640 }}>
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+                          <th>Average Score</th>
+                          <th>Average Rate</th>
+                          <th>Pass</th>
+                          <th>Fail</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {studentDailyCategorySummaryRows.length ? studentDailyCategorySummaryRows.map((row) => (
+                          <tr key={`student-daily-summary-${row.category}`}>
+                            <td>{row.category}</td>
+                            <td>{row.averageScoreLabel}</td>
+                            <td>{row.averageRateLabel}</td>
+                            <td>{row.passCount}</td>
+                            <td>{row.failCount}</td>
+                          </tr>
+                        )) : (
+                          <tr>
+                            <td colSpan={5}>No daily test records.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                   {studentDailyAttemptsByCategory.map(([category, items]) => (
                     <div key={`daily-${category}`} style={{ marginTop: 12 }}>
                       <div className="admin-subtitle" style={{ fontWeight: 900 }}>{category}</div>
@@ -10402,6 +11036,127 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
               {selectedStudentTab === "attendance" ? (
                 <>
+                  <div className="student-attendance-summary-section" style={{ marginTop: 10 }}>
+                    <div className="student-attendance-summary-top">
+                      <div className="student-attendance-pie-panel">
+                        <div className="student-attendance-month-bar">
+                          <button
+                            className="student-attendance-month-nav"
+                            type="button"
+                            onClick={() => studentAttendancePrevMonthKey && setStudentAttendanceMonthKey(studentAttendancePrevMonthKey)}
+                            disabled={!studentAttendancePrevMonthKey}
+                            aria-label="Previous month"
+                          >
+                            ‹
+                          </button>
+                          <div className="student-attendance-month-label">
+                            <select
+                              className="student-attendance-month-select"
+                              value={selectedStudentAttendanceMonth.key}
+                              onChange={(e) => setStudentAttendanceMonthKey(e.target.value)}
+                            >
+                              {studentAttendanceMonthOptions.map((option) => (
+                                <option key={`student-attendance-month-${option.key}`} value={option.key}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            className="student-attendance-month-nav"
+                            type="button"
+                            onClick={() => studentAttendanceNextMonthKey && setStudentAttendanceMonthKey(studentAttendanceNextMonthKey)}
+                            disabled={!studentAttendanceNextMonthKey}
+                            aria-label="Next month"
+                          >
+                            ›
+                          </button>
+                        </div>
+
+                        <div className="student-attendance-pie-wrap">
+                          <div
+                            className="student-attendance-pie"
+                            style={{ "--pie-bg": `conic-gradient(${studentAttendancePie.pieStops})` }}
+                          >
+                            <div className="student-attendance-pie-labels">
+                              {studentAttendancePie.pieLabels.map((item) => (
+                                <span
+                                  key={`student-attendance-pie-${item.key}`}
+                                  className="student-attendance-pie-label"
+                                  style={{ "--x": `${item.x.toFixed(1)}px`, "--y": `${item.y.toFixed(1)}px` }}
+                                >
+                                  {item.label}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="student-attendance-pie-center">
+                              <div className="student-attendance-rate">{studentAttendancePie.rateValue.toFixed(1)}%</div>
+                              <div className="student-attendance-rate-label">Attendance Rate</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="admin-table-wrap">
+                        <table className="admin-table" style={{ minWidth: 760 }}>
+                          <thead>
+                            <tr>
+                              <th></th>
+                              <th>Overall</th>
+                              {attendanceSummary.months.map((m) => (
+                                <th key={m.key}>{m.label}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td>Attendance %</td>
+                              <td>{attendanceSummary.overall.rate == null ? "N/A" : `${attendanceSummary.overall.rate.toFixed(2)}%`}</td>
+                              {attendanceSummary.months.map((m) => (
+                                <td key={`${m.key}-rate`}>{m.stats.rate == null ? "N/A" : `${m.stats.rate.toFixed(2)}%`}</td>
+                            ))}
+                          </tr>
+                          <tr>
+                            <td>Total Days</td>
+                            <td>{attendanceSummary.overall.total || "-"}</td>
+                              {attendanceSummary.months.map((m) => (
+                              <td key={`${m.key}-total`}>{m.stats.total || "-"}</td>
+                            ))}
+                          </tr>
+                          <tr>
+                            <td>Present (P)</td>
+                            <td>{attendanceSummary.overall.present || "-"}</td>
+                            {attendanceSummary.months.map((m) => (
+                              <td key={`${m.key}-present`}>{m.stats.present || "-"}</td>
+                            ))}
+                          </tr>
+                          <tr>
+                            <td>Late/Left Early (L)</td>
+                            <td>{attendanceSummary.overall.late || "-"}</td>
+                            {attendanceSummary.months.map((m) => (
+                              <td key={`${m.key}-late`}>{m.stats.late || "-"}</td>
+                            ))}
+                          </tr>
+                          <tr>
+                            <td>Excused Absence (E)</td>
+                            <td>{attendanceSummary.overall.excused || "-"}</td>
+                            {attendanceSummary.months.map((m) => (
+                              <td key={`${m.key}-excused`}>{m.stats.excused || "-"}</td>
+                            ))}
+                          </tr>
+                          <tr>
+                            <td>Unexcused Absence (A)</td>
+                            <td>{attendanceSummary.overall.unexcused || "-"}</td>
+                            {attendanceSummary.months.map((m) => (
+                              <td key={`${m.key}-unexcused`}>{m.stats.unexcused || "-"}</td>
+                              ))}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="admin-form" style={{ marginTop: 10 }}>
                     <div className="field small">
                       <label>From</label>
@@ -10435,64 +11190,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     <table className="admin-table" style={{ minWidth: 760 }}>
                       <thead>
                         <tr>
-                          <th></th>
-                          <th>Overall</th>
-                          {attendanceSummary.months.map((m) => (
-                            <th key={m.key}>{m.label}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td>Attendance %</td>
-                          <td>{attendanceSummary.overall.rate == null ? "N/A" : `${attendanceSummary.overall.rate.toFixed(2)}%`}</td>
-                          {attendanceSummary.months.map((m) => (
-                            <td key={`${m.key}-rate`}>{m.stats.rate == null ? "N/A" : `${m.stats.rate.toFixed(2)}%`}</td>
-                          ))}
-                        </tr>
-                        <tr>
-                          <td>Total Days</td>
-                          <td>{attendanceSummary.overall.total || "-"}</td>
-                          {attendanceSummary.months.map((m) => (
-                            <td key={`${m.key}-total`}>{m.stats.total || "-"}</td>
-                          ))}
-                        </tr>
-                        <tr>
-                          <td>Present (Days)</td>
-                          <td>{attendanceSummary.overall.present || "-"}</td>
-                          {attendanceSummary.months.map((m) => (
-                            <td key={`${m.key}-present`}>{m.stats.present || "-"}</td>
-                          ))}
-                        </tr>
-                        <tr>
-                          <td>Late/Left early (Days)</td>
-                          <td>{attendanceSummary.overall.late || "-"}</td>
-                          {attendanceSummary.months.map((m) => (
-                            <td key={`${m.key}-late`}>{m.stats.late || "-"}</td>
-                          ))}
-                        </tr>
-                        <tr>
-                          <td>Excused Absence (Days)</td>
-                          <td>{attendanceSummary.overall.excused || "-"}</td>
-                          {attendanceSummary.months.map((m) => (
-                            <td key={`${m.key}-excused`}>{m.stats.excused || "-"}</td>
-                          ))}
-                        </tr>
-                        <tr>
-                          <td>Unexcused Absence (Days)</td>
-                          <td>{attendanceSummary.overall.unexcused || "-"}</td>
-                          {attendanceSummary.months.map((m) => (
-                            <td key={`${m.key}-unexcused`}>{m.stats.unexcused || "-"}</td>
-                          ))}
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                    <table className="admin-table" style={{ minWidth: 760 }}>
-                      <thead>
-                        <tr>
                           <th>Date</th>
                           <th>Status</th>
                           <th>Comment</th>
@@ -10517,14 +11214,46 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
           {studentWarningIssueOpen ? (
             <div className="admin-modal-overlay" onClick={() => setStudentWarningIssueOpen(false)}>
-              <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="admin-modal-header">
-                  <div className="admin-title">Issue Warning</div>
+                  <div className="admin-title">Warnings</div>
                   <button className="admin-modal-close" onClick={() => setStudentWarningIssueOpen(false)} aria-label="Close">
                     &times;
                   </button>
                 </div>
-                <div className="admin-form" style={{ marginTop: 10 }}>
+                <div className="student-warning-history" style={{ marginTop: 10 }}>
+                  <div className="student-warning-history-head">
+                    <div className="admin-title" style={{ fontSize: 18 }}>Issued Warnings</div>
+                    {studentWarningsLoading ? <div className="admin-help">Loading warnings...</div> : null}
+                  </div>
+                  <div className="student-warning-history-list">
+                    {studentWarnings.map((warning) => {
+                      const summary = summarizeWarningCriteria(warning.criteria);
+                      return (
+                        <button
+                          key={warning.id}
+                          type="button"
+                          className="student-warning-card"
+                          onClick={() => setSelectedStudentWarning(warning)}
+                        >
+                          <div className="student-warning-card-title">{warning.title || "Warning"}</div>
+                          <div className="student-warning-card-meta">
+                            {formatDateTime(warning.created_at)} · {warning.student_count || warning.recipients?.length || 0} student{(warning.student_count || warning.recipients?.length || 0) === 1 ? "" : "s"}
+                          </div>
+                          <div className="student-warning-card-summary">
+                            {(summary.length ? summary : ["No criteria summary"]).join(" / ")}
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {!studentWarningsLoading && !studentWarnings.length ? (
+                      <div className="admin-help">No warnings issued yet.</div>
+                    ) : null}
+                  </div>
+                  {studentWarningsMsg ? <div className="admin-msg">{studentWarningsMsg}</div> : null}
+                </div>
+                <div className="admin-title" style={{ fontSize: 18, marginTop: 14 }}>Create Warning</div>
+                <div className="admin-form" style={{ marginTop: 10, gridTemplateColumns: "1fr" }}>
                   <div className="field">
                     <label>Title (optional)</label>
                     <input
@@ -10533,7 +11262,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       placeholder="Warning title"
                     />
                   </div>
-                  <div className="field small">
+                  <div className="field">
                     <label>Date From</label>
                     <input
                       type="date"
@@ -10541,7 +11270,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, from: e.target.value }))}
                     />
                   </div>
-                  <div className="field small">
+                  <div className="field">
                     <label>Date To</label>
                     <input
                       type="date"
@@ -10549,7 +11278,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, to: e.target.value }))}
                     />
                   </div>
-                  <div className="field small">
+                  <div className="field">
                     <label>Attendance % (≤)</label>
                     <input
                       type="number"
@@ -10559,7 +11288,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxAttendance: e.target.value }))}
                     />
                   </div>
-                  <div className="field small">
+                  <div className="field">
                     <label>Unexcused (≥)</label>
                     <input
                       type="number"
@@ -10568,7 +11297,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, minUnexcused: e.target.value }))}
                     />
                   </div>
-                  <div className="field small">
+                  <div className="field">
                     <label>Model Avg % (≤)</label>
                     <input
                       type="number"
@@ -10578,7 +11307,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxModelAvg: e.target.value }))}
                     />
                   </div>
-                  <div className="field small">
+                  <div className="field">
                     <label>Daily Avg % (≤)</label>
                     <input
                       type="number"
@@ -10654,6 +11383,60 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       ) : null}
                     </tbody>
                   </table>
+                </div>
+                <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => deleteStudentWarning(selectedStudentWarning)}
+                    disabled={studentWarningDeletingId === selectedStudentWarning.id}
+                  >
+                    {studentWarningDeletingId === selectedStudentWarning.id ? "Deleting..." : "Delete Warning"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {studentWarningPreviewStudentId ? (
+            <div className="admin-modal-overlay" onClick={() => setStudentWarningPreviewStudentId("")}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div>
+                    <div className="admin-title">Applied Warnings</div>
+                    <div className="admin-help" style={{ marginTop: 6 }}>
+                      {studentWarningPreviewStudent?.display_name || studentWarningPreviewStudent?.email || studentWarningPreviewStudentId}
+                    </div>
+                  </div>
+                  <button className="admin-modal-close" onClick={() => setStudentWarningPreviewStudentId("")} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+                <div className="student-warning-history-list" style={{ marginTop: 12 }}>
+                  {studentWarningPreviewEntries.map(({ warning, recipient }) => {
+                    const summary = summarizeWarningCriteria(warning.criteria);
+                    return (
+                      <button
+                        key={`student-warning-preview-${warning.id}-${recipient.id}`}
+                        type="button"
+                        className="student-warning-card"
+                        onClick={() => {
+                          setStudentWarningPreviewStudentId("");
+                          setSelectedStudentWarning(warning);
+                        }}
+                      >
+                        <div className="student-warning-card-title">{warning.title || "Warning"}</div>
+                        <div className="student-warning-card-meta">
+                          {formatDateTime(warning.created_at)}
+                        </div>
+                        <div className="student-warning-card-summary">
+                          {(recipient.issues ?? []).join(" / ") || (summary.length ? summary.join(" / ") : "No criteria summary")}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {!studentWarningPreviewEntries.length ? (
+                    <div className="admin-help">No warnings found for this student.</div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -13523,7 +14306,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ), document.body) : null}
 
-        {studentInfoOpen && selectedStudent ? (
+        {studentInfoOpen && selectedStudent && typeof document !== "undefined" ? createPortal((
           <div
             className="admin-modal-overlay"
             onClick={() => {
@@ -13533,10 +14316,55 @@ function openDailyRecordModal(record = null, recordDate = "") {
               setStudentInfoForm(getPersonalInfoForm(selectedStudent));
               setStudentInfoUploadFiles({});
             }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.5)",
+              backdropFilter: "none",
+              WebkitBackdropFilter: "none",
+              zIndex: 300,
+            }}
           >
-            <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="admin-modal-header">
-                <div className="admin-title">Edit Personal Information</div>
+            <div
+              className="admin-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "relative",
+                maxWidth: 720,
+                width: "min(720px, calc(100vw - 28px))",
+                paddingTop: 56,
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "12px 14px",
+                  background: "#d9e7d7",
+                  borderBottom: "1px solid #d1dbcf",
+                  borderTopLeftRadius: 6,
+                  borderTopRightRadius: 6,
+                }}
+              >
+                <div
+                  className="admin-title"
+                  style={{
+                    color: "#1f2937",
+                    fontSize: 16,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    textAlign: "left",
+                    marginRight: "auto",
+                  }}
+                >
+                  Edit Information
+                </div>
                 <button
                   className="admin-modal-close"
                   onClick={() => {
@@ -13547,12 +14375,23 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     setStudentInfoUploadFiles({});
                   }}
                   aria-label="Close"
+                  style={{
+                    border: 0,
+                    background: "transparent",
+                    color: "#333333",
+                    fontSize: 24,
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    padding: "4px 8px",
+                    marginLeft: "auto",
+                    cursor: "pointer",
+                  }}
                 >
                   &times;
                 </button>
               </div>
 
-              <div className="admin-form student-info-form" style={{ marginTop: 10 }}>
+              <div className="admin-form student-info-form" style={{ marginTop: 10, gridTemplateColumns: "1fr" }}>
                 <div className="field">
                   <label>Full Name</label>
                   <input
@@ -13714,7 +14553,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               </div>
             </div>
           </div>
-        ) : null}
+        ), document.body) : null}
 
         {reissueOpen && reissueStudent ? (
           <div
@@ -13805,19 +14644,83 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ) : null}
 
-        {inviteOpen ? (
+        {inviteOpen && typeof document !== "undefined" ? createPortal((
           <div
             className="admin-modal-overlay"
             onClick={() => setInviteOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              width: "100vw",
+              height: "100vh",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 20,
+              background: "rgba(15, 23, 42, 0.5)",
+              backdropFilter: "none",
+              WebkitBackdropFilter: "none",
+              zIndex: 300,
+            }}
           >
-            <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="admin-modal-header">
-                <div className="admin-title">Add New Student</div>
-                <button className="admin-modal-close" onClick={() => setInviteOpen(false)} aria-label="Close">
+            <div
+              className="admin-modal student-add-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ position: "relative", zIndex: 301 }}
+            >
+              <div
+                className="student-add-modal-titlebar"
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "12px 14px",
+                  background: "#d9e7d7",
+                  borderBottom: "1px solid #d1dbcf",
+                  borderTopLeftRadius: 6,
+                  borderTopRightRadius: 6,
+                  zIndex: 1,
+                }}
+              >
+                <div
+                  className="admin-title student-add-modal-title"
+                  style={{
+                    display: "block",
+                    color: "#1f2937",
+                    fontSize: 16,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    textAlign: "left",
+                    marginRight: "auto",
+                  }}
+                >
+                  Add New Student
+                </div>
+                <button
+                  className="admin-modal-close student-add-modal-close"
+                  onClick={() => setInviteOpen(false)}
+                  aria-label="Close"
+                  style={{
+                    border: 0,
+                    background: "transparent",
+                    color: "#333333",
+                    fontSize: 24,
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    padding: "4px 8px",
+                    marginLeft: "auto",
+                    cursor: "pointer",
+                  }}
+                >
                   &times;
                 </button>
               </div>
-              <div className="admin-form" style={{ marginTop: 10 }}>
+              <div className="admin-form" style={{ marginTop: 10, gridTemplateColumns: "1fr" }}>
                 <div className="field">
                   <label>Email</label>
                   <input
@@ -13834,7 +14737,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     placeholder="Taro"
                   />
                 </div>
-                <div className="field small">
+                <div className="field">
                   <label>Code</label>
                   <input
                     value={inviteForm.student_code}
@@ -13842,7 +14745,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     placeholder="ID001"
                   />
                 </div>
-                <div className="field small">
+                <div className="field">
                   <label>Temp Password</label>
                   <input
                     value={inviteForm.temp_password}
@@ -13850,34 +14753,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     placeholder="(optional)"
                   />
                 </div>
-                <div className="field small">
-                  <label>&nbsp;</label>
-                  <button
-                    className="btn"
-                    type="button"
-                    onClick={() => setInviteForm((s) => ({ ...s, temp_password: generateTempPassword() }))}
-                  >
-                    Generate
-                  </button>
-                </div>
-                <div className="field small">
-                  <label>&nbsp;</label>
-                  <button
-                    className="btn btn-primary"
-                    type="button"
-                    onClick={async () => {
-                      const ok = await inviteStudents(inviteForm);
-                      if (ok) setInviteOpen(false);
-                    }}
-                  >
-                    Create
-                  </button>
-                </div>
               </div>
               {studentMsg ? <div className="admin-msg">{studentMsg}</div> : null}
               {inviteResults.length ? (
                 <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                  <table className="admin-table" style={{ minWidth: 520 }}>
+                  <table className="admin-table" style={{ minWidth: 0 }}>
                     <thead>
                       <tr>
                         <th>Email</th>
@@ -13901,9 +14781,28 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </table>
                 </div>
               ) : null}
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => setInviteForm((s) => ({ ...s, temp_password: generateTempPassword() }))}
+                >
+                  Generate
+                </button>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={async () => {
+                    const ok = await inviteStudents(inviteForm);
+                    if (ok) setInviteOpen(false);
+                  }}
+                >
+                  Create
+                </button>
+              </div>
             </div>
           </div>
-        ) : null}
+        ), document.body) : null}
 
         {attendanceModalOpen && attendanceModalDay ? (
           <div
