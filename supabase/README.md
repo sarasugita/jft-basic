@@ -50,6 +50,7 @@ See `supabase/sql/schema.sql` for required tables/columns:
 - `supabase/sql/phase11_session_attempt_overrides.sql` for per-student extra attempt allowances
 - `supabase/sql/phase12_student_warnings.sql` for student warning tracking
 - `supabase/sql/phase13_fix_test_session_school_scope.sql` to keep created test sessions scoped to the active school instead of inheriting a legacy test row's school
+- `supabase/sql/phase14_student_session_based_legacy_access.sql` so students can load legacy tests/questions/choices whenever a published session exists in their own school
 
 Multi-school setup and promotion steps:
 - `docs/multi-school-rbac.md`

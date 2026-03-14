@@ -449,6 +449,35 @@ async function fetchQuestionsForVersion(version, updatedAt = "") {
   }
 }
 
+async function ensureSessionQuestionsAvailable(session) {
+  const version = String(session?.problem_set_id ?? "").trim();
+  if (!version) {
+    questionsState.error = "This test session is missing a problem set.";
+    render();
+    window.alert(questionsState.error);
+    return false;
+  }
+
+  const problemSet = testsState.list.find((test) => test.version === version);
+  const updatedAt = problemSet?.updated_at ?? "";
+  const needsRefresh =
+    !questionsState.loaded
+    || questionsState.version !== version
+    || questionsState.updatedAt !== updatedAt;
+
+  if (needsRefresh) {
+    await fetchQuestionsForVersion(version, updatedAt);
+  }
+
+  if (!questionsState.list.length) {
+    render();
+    window.alert(questionsState.error || `No uploaded questions found for ${version}.`);
+    return false;
+  }
+
+  return true;
+}
+
 function ensureQuestionsLoaded() {
   const version = getActiveTestVersion();
   if (!version) return;
@@ -658,10 +687,20 @@ function renderQuestionLoadError(app) {
         <h1 class="prompt">Question set could not be loaded.</h1>
         <p style="margin-top:10px;color:#7a2e00;">${escapeHtml(questionsState.error || `No uploaded questions found for ${version || "this session"}.`)}</p>
         ${version ? `<p style="margin-top:6px;color:var(--muted);">Problem Set ID: ${escapeHtml(version)}</p>` : ""}
+        <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="nav-btn" id="backToTestSelectBtn">Back to Test Selection</button>
+          <button class="nav-btn ghost" id="resetErrorStateBtn">Reset</button>
+        </div>
       </main>
     </div>
   `;
   document.querySelector("#disabledBtn").disabled = true;
+  document.querySelector("#backToTestSelectBtn")?.addEventListener("click", () => {
+    goIntro();
+  });
+  document.querySelector("#resetErrorStateBtn")?.addEventListener("click", () => {
+    resetAll();
+  });
 }
 
 function syncTopbarHeight() {
@@ -2882,7 +2921,7 @@ function renderIntro(app) {
     });
   }
 
-  document.querySelector("#nextBtn").addEventListener("click", () => {
+  document.querySelector("#nextBtn").addEventListener("click", async () => {
     if (isGuest) {
       const name = document.querySelector("#nameInput").value.trim();
       const id = document.querySelector("#idInput").value.trim();
@@ -2894,6 +2933,9 @@ function renderIntro(app) {
     }
     if (!state.linkId && !canAccessSession(activeSession)) {
       window.alert("You are not eligible to take this retake session.");
+      return;
+    }
+    if (!(await ensureSessionQuestionsAvailable(activeSession))) {
       return;
     }
     state.phase = "sectionIntro";
@@ -4281,7 +4323,7 @@ function renderTestSelect(app) {
 
 
   if (showTakeTest) {
-    document.querySelector("#startBtn")?.addEventListener("click", () => {
+    document.querySelector("#startBtn")?.addEventListener("click", async () => {
       if (!canStart) return;
       if (isGuest) {
         const name = document.querySelector("#nameInput").value.trim();
@@ -4303,6 +4345,9 @@ function renderTestSelect(app) {
         window.alert("You have already taken this test.");
         return;
       }
+      if (!(await ensureSessionQuestionsAvailable(session))) {
+        return;
+      }
       state.phase = "sectionIntro";
       state.sectionIndex = 0;
       state.questionIndexInSection = 0;
@@ -4316,7 +4361,7 @@ function renderTestSelect(app) {
 
   if (showHome) {
     document.querySelectorAll(".student-home-start").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         if (btn.disabled) return;
         const sessionId = btn.dataset.sessionId;
         if (!sessionId) return;
@@ -4328,6 +4373,9 @@ function renderTestSelect(app) {
           return;
         }
         if (!hasRemainingAttemptsForSession(session)) {
+          return;
+        }
+        if (!(await ensureSessionQuestionsAvailable(session))) {
           return;
         }
         if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
