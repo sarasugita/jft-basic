@@ -2247,6 +2247,7 @@ export default function AdminConsole({
   const [selectedId, setSelectedId] = useState(null);
   const [selectedAttemptObj, setSelectedAttemptObj] = useState(null);
   const [attemptDetailOpen, setAttemptDetailOpen] = useState(false);
+  const [attemptDetailSource, setAttemptDetailSource] = useState("default");
   const [attemptDetailTab, setAttemptDetailTab] = useState("overview");
   const [attemptDetailWrongOnly, setAttemptDetailWrongOnly] = useState(false);
   const attemptDetailSectionRefs = useRef({});
@@ -2465,6 +2466,11 @@ export default function AdminConsole({
   const [sessionDetailAllowMsg, setSessionDetailAllowMsg] = useState("");
   const [sessionDetailAllowances, setSessionDetailAllowances] = useState({});
   const [sessionDetailShowAllAnalysis, setSessionDetailShowAllAnalysis] = useState(false);
+  const [sessionDetailAnalysisPopup, setSessionDetailAnalysisPopup] = useState({
+    open: false,
+    title: "",
+    questions: [],
+  });
   const [attendanceDays, setAttendanceDays] = useState([]);
   const [attendanceEntries, setAttendanceEntries] = useState({});
   const [attendanceMsg, setAttendanceMsg] = useState("");
@@ -2512,6 +2518,7 @@ export default function AdminConsole({
     || schoolAssignments.find((assignment) => assignment.school_id === activeSchoolId)?.school_name
     || activeSchoolId
     || "";
+  const activeSchoolIdRef = useRef(activeSchoolId);
   const supabaseConfigError = getAdminSupabaseConfigError();
   const supabase = useMemo(
     () => (supabaseConfigError ? null : createAdminSupabaseClient({ schoolScopeId: activeSchoolId })),
@@ -2911,8 +2918,8 @@ export default function AdminConsole({
   }, [dailyCategories, dailyResultsCategory]);
 
   const selectedModelCategory = useMemo(() => {
-    if (!modelCategories.length) return null;
-    return modelCategories.find((c) => c.name === modelResultsCategory) ?? modelCategories[0];
+    if (!modelCategories.length || !modelResultsCategory) return null;
+    return modelCategories.find((c) => c.name === modelResultsCategory) ?? null;
   }, [modelCategories, modelResultsCategory]);
 
   useEffect(() => {
@@ -2923,9 +2930,12 @@ export default function AdminConsole({
   }, [dailyCategories, dailyResultsCategory]);
 
   useEffect(() => {
-    if (!modelCategories.length) return;
-    if (!modelResultsCategory || !modelCategories.some((c) => c.name === modelResultsCategory)) {
-      setModelResultsCategory(modelCategories[0].name);
+    if (!modelCategories.length) {
+      if (modelResultsCategory) setModelResultsCategory("");
+      return;
+    }
+    if (modelResultsCategory && !modelCategories.some((c) => c.name === modelResultsCategory)) {
+      setModelResultsCategory("");
     }
   }, [modelCategories, modelResultsCategory]);
 
@@ -3293,8 +3303,8 @@ export default function AdminConsole({
   );
 
   const modelResultsMatrix = useMemo(
-    () => buildSessionResultsMatrix(selectedModelCategory),
-    [buildSessionResultsMatrix, selectedModelCategory]
+    () => buildSessionResultsMatrix(selectedModelCategory ?? { tests: modelTests }),
+    [buildSessionResultsMatrix, selectedModelCategory, modelTests]
   );
 
   const attendanceDayColumns = useMemo(() => {
@@ -3723,6 +3733,10 @@ export default function AdminConsole({
   }, [forcedSchoolId, profile, schoolScopeId]);
 
   useEffect(() => {
+    activeSchoolIdRef.current = activeSchoolId;
+  }, [activeSchoolId]);
+
+  useEffect(() => {
     if (!session || !canUseAdminConsole) return;
     fetchExamLinks();
     fetchStudents();
@@ -3798,7 +3812,6 @@ export default function AdminConsole({
   }, [forcedSchoolId, profile, router, session]);
 
   useEffect(() => {
-    if (!activeSchoolId) return;
     setAttempts([]);
     setExamLinks([]);
     setStudents([]);
@@ -3815,6 +3828,15 @@ export default function AdminConsole({
     setStudentWarnings([]);
     setStudentWarningsMsg("");
     setSelectedStudentWarning(null);
+    setAttendanceDays([]);
+    setAttendanceEntries({});
+    setAttendanceMsg("");
+    setAttendanceModalOpen(false);
+    setAttendanceModalDay(null);
+    setAttendanceDraft({});
+    setAttendanceSaving(false);
+    setAttendanceFilter({ minRate: "", minAbsences: "", startDate: "", endDate: "" });
+    setApprovedAbsenceByStudent({});
   }, [activeSchoolId]);
 
   useEffect(() => {
@@ -3927,10 +3949,11 @@ export default function AdminConsole({
     setTimeout(() => runSearch(testType), 0);
   }
 
-  function openAttemptDetail(attempt) {
+  function openAttemptDetail(attempt, source = "default") {
     if (!attempt?.id) return;
     setSelectedId(attempt.id);
     setSelectedAttemptObj(attempt);
+    setAttemptDetailSource(source);
     setAttemptDetailOpen(true);
   }
 
@@ -3944,6 +3967,7 @@ export default function AdminConsole({
     setSessionDetailAllowMsg("");
     setSessionDetailAllowances({});
     setSessionDetailShowAllAnalysis(false);
+    setSessionDetailAnalysisPopup({ open: false, title: "", questions: [] });
   }
 
   function openSessionDetailView(session, type) {
@@ -3955,6 +3979,34 @@ export default function AdminConsole({
     setSessionDetailAllowStudentId("");
     setSessionDetailAllowMsg("");
     setSessionDetailShowAllAnalysis(false);
+    setSessionDetailAnalysisPopup({ open: false, title: "", questions: [] });
+  }
+
+  function closeSessionDetailAnalysisPopup() {
+    setSessionDetailAnalysisPopup({ open: false, title: "", questions: [] });
+  }
+
+  function openSessionDetailAnalysisPopupFor(kind, value) {
+    const label = String(value ?? "").trim();
+    if (!label) return;
+    const filteredQuestions = (sessionDetailQuestions ?? []).filter((question) => {
+      const mainSection = getSectionTitle(question?.sectionKey) || question?.sectionKey || "Unknown";
+      const subSection = getQuestionSectionLabel(question) || question?.sectionKey || "Unknown";
+      if (kind === "section") return mainSection === label;
+      if (kind === "subSection") return subSection === label;
+      return false;
+    });
+    setSessionDetailAnalysisPopup({
+      open: true,
+      title: `${label} Questions`,
+      questions: filteredQuestions,
+    });
+  }
+
+  function handleSessionDetailAnalysisRowKeyDown(event, kind, value) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openSessionDetailAnalysisPopupFor(kind, value);
   }
 
   async function fetchSessionDetail(session) {
@@ -3962,6 +4014,7 @@ export default function AdminConsole({
     setSessionDetailLoading(true);
     setSessionDetailMsg("Loading...");
     setSessionDetailAllowMsg("");
+    setSessionDetailAnalysisPopup({ open: false, title: "", questions: [] });
 
     const [{ data: questionsData, error: questionsError }, attemptsResult, allowancesResult] = await Promise.all([
       fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id),
@@ -5058,10 +5111,16 @@ export default function AdminConsole({
   }, [activeSchoolId, activeTab, attendanceSubTab]);
 
   async function fetchAbsenceApplications() {
+    if (!activeSchoolId) {
+      setAbsenceApplications([]);
+      setAbsenceApplicationsMsg("");
+      return;
+    }
     setAbsenceApplicationsMsg("Loading...");
     const { data, error } = await supabase
       .from("absence_applications")
       .select("id, student_id, type, day_date, status, reason, catch_up, late_type, time_value, created_at, decided_at, profiles:student_id (display_name, student_code, email)")
+      .eq("school_id", activeSchoolId)
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
@@ -5533,15 +5592,25 @@ export default function AdminConsole({
   }
 
   async function fetchAttendanceDays() {
+    const schoolIdSnapshot = activeSchoolIdRef.current;
+    if (!schoolIdSnapshot) {
+      setAttendanceDays([]);
+      setAttendanceEntries({});
+      setAttendanceMsg("");
+      return;
+    }
     setAttendanceMsg("Loading attendance...");
     const { data, error } = await supabase
       .from("attendance_days")
       .select("id, day_date, created_at")
+      .eq("school_id", schoolIdSnapshot)
       .order("day_date", { ascending: true })
       .limit(60);
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
     if (error) {
       console.error("attendance_days fetch error:", error);
       setAttendanceDays([]);
+      setAttendanceEntries({});
       setAttendanceMsg(`Load failed: ${error.message}`);
       return;
     }
@@ -5549,13 +5618,13 @@ export default function AdminConsole({
     setAttendanceDays(list);
     setAttendanceMsg(list.length ? "" : "No attendance days yet.");
     if (list.length) {
-      fetchAttendanceEntries(list.map((d) => d.id));
+      fetchAttendanceEntries(list.map((d) => d.id), schoolIdSnapshot);
     } else {
       setAttendanceEntries({});
     }
   }
 
-  async function fetchAttendanceEntries(dayIds) {
+  async function fetchAttendanceEntries(dayIds, schoolIdSnapshot = activeSchoolIdRef.current) {
     if (!dayIds?.length) {
       setAttendanceEntries({});
       return;
@@ -5564,6 +5633,7 @@ export default function AdminConsole({
       .from("attendance_entries")
       .select("day_id, student_id, status, comment")
       .in("day_id", dayIds);
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
     if (error) {
       console.error("attendance_entries fetch error:", error);
       setAttendanceEntries({});
@@ -5607,6 +5677,7 @@ export default function AdminConsole({
     const { data: approvedApps, error: appsError } = await supabase
       .from("absence_applications")
       .select("id, student_id, type, late_type, time_value, reason, catch_up")
+      .eq("school_id", activeSchoolId)
       .eq("day_date", day.day_date)
       .eq("status", "approved");
     if (appsError) {
@@ -5667,7 +5738,8 @@ export default function AdminConsole({
     const { error } = await supabase
       .from("attendance_days")
       .delete()
-      .eq("id", day.id);
+      .eq("id", day.id)
+      .eq("school_id", activeSchoolId);
     if (error) {
       console.error("attendance delete error:", error);
       setAttendanceMsg(`Delete failed: ${error.message}`);
@@ -6703,6 +6775,7 @@ export default function AdminConsole({
     if (selectedAttemptObj?.id === attemptId || selectedId === attemptId) {
       setAttemptDetailOpen(false);
       setSelectedAttemptObj(null);
+      setAttemptDetailSource("default");
       setSelectedId(null);
     }
     if (selectedId === attemptId) setSelectedId(null);
@@ -7663,6 +7736,9 @@ export default function AdminConsole({
   function renderSessionDetailView() {
     if (!selectedSessionDetail) return null;
     const isMockSessionDetail = sessionDetail.type === "mock";
+    const analysisPopupQuestions = Array.isArray(sessionDetailAnalysisPopup.questions)
+      ? sessionDetailAnalysisPopup.questions
+      : [];
 
     const bestQuestions = sessionDetailQuestionAnalysis.slice(0, 5);
     const worstQuestions = [...sessionDetailQuestionAnalysis]
@@ -7699,8 +7775,12 @@ export default function AdminConsole({
               {selectedSessionDetail.title || selectedSessionDetail.problem_set_id}
             </div>
             <div className="admin-help session-detail-meta">
-              SetID: <b>{selectedSessionDetail.problem_set_id}</b>
-              {" · "}
+              {!isMockSessionDetail ? (
+                <>
+                  SetID: <b>{selectedSessionDetail.problem_set_id}</b>
+                  {" · "}
+                </>
+              ) : null}
               Start: <b>{formatDateTime(selectedSessionDetail.starts_at) || "—"}</b>
               {" · "}
               End: <b>{formatDateTime(selectedSessionDetail.ends_at) || "—"}</b>
@@ -7856,7 +7936,7 @@ export default function AdminConsole({
                 </thead>
                 <tbody>
                   {sessionDetailStudentRankingRows.map((row) => (
-                    <tr key={`student-ranking-row-${row.student_id}`}>
+                    <tr key={`student-ranking-row-${row.student_id}`} onClick={() => openAttemptDetail(row.attempt, "sessionRanking")}>
                       <td>{formatOrdinal(row.rank)}</td>
                       <td>{row.display_name}</td>
                       <td>{row.student_code || "—"}</td>
@@ -8009,12 +8089,24 @@ export default function AdminConsole({
                             const isGroupBelowPass = group.averageRate < sessionDetailPassRate;
                             return (
                               <Fragment key={`session-average-group-${group.mainSection}`}>
-                                <tr className="attempt-overview-total-row">
+                                <tr className="attempt-overview-total-row session-section-average-total-row">
                                   <td rowSpan={rowSpan} className="attempt-overview-area-cell session-section-average-cell-section">
-                                    <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
+                                    <button
+                                      type="button"
+                                      className="session-section-average-trigger session-section-average-section-trigger"
+                                      onClick={() => openSessionDetailAnalysisPopupFor("section", group.mainSection)}
+                                    >
+                                      <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
+                                    </button>
                                   </td>
                                   <td className="session-section-average-cell-subsection">
-                                    <span className="attempt-score-detail-total-label">Total</span>
+                                    <button
+                                      type="button"
+                                      className="session-section-average-trigger session-section-average-total-trigger"
+                                      onClick={() => openSessionDetailAnalysisPopupFor("section", group.mainSection)}
+                                    >
+                                      <span className="attempt-score-detail-total-label">Total</span>
+                                    </button>
                                   </td>
                                   <td className="session-section-average-cell-total">{group.total}</td>
                                   <td className={`session-section-average-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
@@ -8027,7 +8119,14 @@ export default function AdminConsole({
                                 {group.subSections.map((subSection) => {
                                   const isSubSectionBelowPass = subSection.averageRate < sessionDetailPassRate;
                                   return (
-                                    <tr key={`session-average-sub-${group.mainSection}-${subSection.section}`}>
+                                    <tr
+                                      key={`session-average-sub-${group.mainSection}-${subSection.section}`}
+                                      className="session-section-average-subsection-row"
+                                      onClick={() => openSessionDetailAnalysisPopupFor("subSection", subSection.section)}
+                                      onKeyDown={(event) => handleSessionDetailAnalysisRowKeyDown(event, "subSection", subSection.section)}
+                                      tabIndex={0}
+                                      role="button"
+                                    >
                                       <td className="session-section-average-cell-subsection">{subSection.section}</td>
                                       <td className="session-section-average-cell-total">{subSection.total}</td>
                                       <td className={`session-section-average-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
@@ -8143,6 +8242,37 @@ export default function AdminConsole({
                 </table>
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {sessionDetailAnalysisPopup.open ? (
+          <div className="admin-modal-overlay" onClick={closeSessionDetailAnalysisPopup}>
+            <div className="admin-modal admin-modal-wide session-analysis-popup-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div>
+                  <div className="admin-title">{sessionDetailAnalysisPopup.title || "Questions"}</div>
+                  <div className="admin-help">
+                    Total: <b>{analysisPopupQuestions.length}</b>
+                  </div>
+                </div>
+                <button className="admin-modal-close" onClick={closeSessionDetailAnalysisPopup} aria-label="Close">
+                  ×
+                </button>
+              </div>
+              <div className="session-analysis-popup-body">
+                {analysisPopupQuestions.length ? (
+                  analysisPopupQuestions.map((question, index) => (
+                    <QuestionPreviewCard
+                      key={`session-analysis-popup-${question.id}-${index}`}
+                      question={question}
+                      index={index}
+                    />
+                  ))
+                ) : (
+                  <div className="admin-help">No questions found for this selection.</div>
+                )}
+              </div>
+            </div>
           </div>
         ) : null}
       </div>
@@ -8315,7 +8445,7 @@ export default function AdminConsole({
     if (activeTab === "announcements") return "Announcements";
     if (activeTab === "model") {
       if (sessionDetail.type === "mock" && sessionDetail.sessionId) return "Test Session Detail";
-      if (modelSubTab === "results") return "Model Results";
+      if (modelSubTab === "results") return "Model Test Results";
       if (modelSubTab === "sets") return "Sets";
       return "Test Sessions";
     }
@@ -8453,7 +8583,7 @@ export default function AdminConsole({
                     setModelSubTab("results");
                   })}
                 >
-                  Results
+                  Model Test Results
                 </button>
               </div>
             ) : null}
@@ -9349,7 +9479,6 @@ export default function AdminConsole({
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div>
               <div className="admin-title">Attendance Sheet</div>
-              <div className="admin-subtitle">P / L / E / A を日別で管理します。</div>
             </div>
           </div>
 
@@ -9912,7 +10041,6 @@ export default function AdminConsole({
                       Create Retake Session
                     </button>
                   </div>
-                  <div className="admin-subtitle">SetIDから実施テストを作成します。</div>
                 </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
@@ -10500,7 +10628,6 @@ export default function AdminConsole({
                     Upload Question Set
                   </button>
                 </div>
-                <div className="admin-subtitle">CSVとAssetsをアップロードし、問題セットを登録します（タイトルはTest Sessionで設定）。</div>
               </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
@@ -10519,7 +10646,6 @@ export default function AdminConsole({
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div className="admin-title">Sets</div>
-              <div className="admin-subtitle">セット（CSV/Assets）の一覧です。</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <select
@@ -10807,7 +10933,6 @@ export default function AdminConsole({
                       Create Retake Session
                     </button>
                   </div>
-                  <div className="admin-subtitle">Daily Testの実施テストを作成します。</div>
                 </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
@@ -11521,7 +11646,6 @@ export default function AdminConsole({
                   Upload Question Set
                 </button>
               </div>
-              <div className="admin-subtitle">Daily Test用CSVとIllustrationをアップロードします。</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
@@ -11539,7 +11663,6 @@ export default function AdminConsole({
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div className="admin-title">Daily Tests</div>
-              <div className="admin-subtitle">Daily Test（CSV/Assets）の一覧です。</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <select
@@ -12420,32 +12543,23 @@ export default function AdminConsole({
           renderSessionDetailView()
         ) : (
           <>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div>
-                  <div className="admin-title">{resultContext.title}</div>
-                  <div className="admin-subtitle">受験結果を検索・詳細表示・CSV出力できます。</div>
-                </div>
-                <div className="admin-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="btn" onClick={() => runSearch(resultContext.type)}>Refresh</button>
-                  <button className="btn" onClick={() => exportSummaryCsv(attempts)}>Export CSV (Summary)</button>
-                  <button className="btn" onClick={() => exportDetailCsv(attempts)}>Export CSV (Detail)</button>
-                  {resultContext.type === "mock" ? (
-                    <button className="btn" onClick={() => exportQuizSummaryCsv()}>Export CSV (Quiz Summary)</button>
-                  ) : null}
-                </div>
-              </div>
-              {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
-            </div>
-
-            {resultContext.type === "daily" || resultContext.type === "mock" ? (
-              <>
+            <div className="results-page-header">
+              <div className="results-page-header-row">
                 {(resultContext.type === "daily" ? dailyCategories : modelCategories).length ? (
-                  <div className="admin-mini-tabs" style={{ marginBottom: 10 }}>
+                  <div className="admin-mini-tabs results-category-tabs">
+                    {resultContext.type === "mock" ? (
+                      <button
+                        key="model-cat-all"
+                        className={`admin-mini-tab results-category-tab ${!modelResultsCategory ? "active" : ""}`}
+                        onClick={() => setModelResultsCategory("")}
+                      >
+                        All
+                      </button>
+                    ) : null}
                     {(resultContext.type === "daily" ? dailyCategories : modelCategories).map((c) => (
                       <button
                         key={`daily-cat-${c.name}`}
-                        className={`admin-mini-tab ${((resultContext.type === "daily"
+                        className={`admin-mini-tab results-category-tab ${((resultContext.type === "daily"
                           ? selectedDailyCategory
                           : selectedModelCategory)?.name === c.name)
                           ? "active"
@@ -12462,13 +12576,43 @@ export default function AdminConsole({
                       </button>
                     ))}
                   </div>
-                ) : (
+                ) : <div />}
+                <div className="results-page-title-wrap">
+                  <div className="admin-title">{resultContext.title}</div>
+                </div>
+                <div className="results-page-actions">
+                  <button className="btn results-page-action-btn" onClick={() => runSearch(resultContext.type)}>
+                    <span className="results-page-action-icon" aria-hidden="true">↻</span>
+                    <span>Refresh</span>
+                  </button>
+                  <button className="btn results-page-action-btn" onClick={() => exportSummaryCsv(attempts)}>
+                    <span className="results-page-action-icon" aria-hidden="true">↓</span>
+                    <span>Export CSV (Summary)</span>
+                  </button>
+                  <button className="btn results-page-action-btn" onClick={() => exportDetailCsv(attempts)}>
+                    <span className="results-page-action-icon" aria-hidden="true">↓</span>
+                    <span>Export CSV (Detail)</span>
+                  </button>
+                  {resultContext.type === "mock" ? (
+                    <button className="btn results-page-action-btn" onClick={() => exportQuizSummaryCsv()}>
+                      <span className="results-page-action-icon" aria-hidden="true">↓</span>
+                      <span>Export CSV (Quiz Summary)</span>
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
+            </div>
+
+            {resultContext.type === "daily" || resultContext.type === "mock" ? (
+              <>
+                {!(resultContext.type === "daily" ? dailyCategories : modelCategories).length ? (
                   <div className="admin-msg">No test categories yet.</div>
-                )}
+                ) : null}
 
                 <div className="admin-table-wrap results-matrix-table-wrap" style={{ marginTop: 10 }}>
                   <table
-                    className="admin-table daily-results-table"
+                    className={`admin-table daily-results-table ${resultContext.type === "mock" ? "model-results-matrix-table" : ""}`}
                     style={{
                       minWidth: Math.max(
                         860,
@@ -12490,7 +12634,6 @@ export default function AdminConsole({
                               onClick={() => openSessionDetailView(sessionItem, resultContext.type)}
                             >
                               <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
-                              <div className="daily-col-subtitle">{sessionItem.problem_set_id ?? ""}</div>
                               <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
                             </button>
                           </th>
@@ -12582,7 +12725,6 @@ export default function AdminConsole({
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                     <div>
                       <div className="admin-title">Tests</div>
-                      <div className="admin-subtitle">テストを選ぶと結果を絞り込みます。</div>
                     </div>
                     <button className="btn" onClick={() => applyTestFilter("", resultContext.type)}>Clear Filter</button>
                   </div>
@@ -12688,7 +12830,7 @@ export default function AdminConsole({
                 </div>
 
                 <div style={{ marginTop: 12 }} className="admin-table-wrap">
-                  <table className="admin-table">
+                  <table className="admin-table admin-model-results-table">
                     <thead>
                       <tr>
                         <th>Created</th>
@@ -12707,21 +12849,34 @@ export default function AdminConsole({
                         const score = `${a.correct}/${a.total}`;
                         const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
                         return (
-                          <tr
-                            key={a.id}
-                            onClick={() => {
-                              setSelectedId(a.id);
-                              setSelectedAttemptObj(null);
-                              setAttemptDetailOpen(true);
-                            }}
-                          >
-                            <td>{formatDateTime(a.created_at)}</td>
+                          <tr key={a.id}>
+                            <td>
+                              <button className="admin-model-results-link" type="button" onClick={() => openAttemptDetail(a)}>
+                                {formatDateTime(a.created_at)}
+                              </button>
+                            </td>
                             <td>{a.display_name ?? ""}</td>
                             <td>{a.student_code ?? ""}</td>
-                            <td>{score}</td>
-                            <td>{rate}</td>
-                            <td>{a.test_version ?? ""}</td>
-                            <td style={{ whiteSpace: "nowrap" }}>{a.id}</td>
+                            <td>
+                              <button className="admin-model-results-link" type="button" onClick={() => openAttemptDetail(a)}>
+                                {score}
+                              </button>
+                            </td>
+                            <td>
+                              <button className="admin-model-results-link" type="button" onClick={() => openAttemptDetail(a)}>
+                                {rate}
+                              </button>
+                            </td>
+                            <td>
+                              <button className="admin-model-results-link" type="button" onClick={() => openAttemptDetail(a)}>
+                                {a.test_version ?? ""}
+                              </button>
+                            </td>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              <button className="admin-model-results-link" type="button" onClick={() => openAttemptDetail(a)}>
+                                {a.id}
+                              </button>
+                            </td>
                             <td>
                               <button
                                 className="btn"
@@ -12846,6 +13001,7 @@ export default function AdminConsole({
             const attemptTitle = getAttemptTitle(selectedAttempt) || selectedAttempt.test_version || "";
             const tabLeftCount = getTabLeftCount(selectedAttempt);
             const selectedAttemptRankInfo = studentAttemptRanks[selectedAttempt.id] ?? null;
+            const showRankingMainSectionsOnly = attemptDetailSource === "sessionRanking";
             const radarData = selectedAttemptMainSectionSummary.map((row) => ({
               label: row.section,
               value: row.total ? row.correct / row.total : 0,
@@ -12857,6 +13013,7 @@ export default function AdminConsole({
                 onClick={() => {
                   setAttemptDetailOpen(false);
                   setSelectedAttemptObj(null);
+                  setAttemptDetailSource("default");
                 }}
               >
                 <div
@@ -12870,6 +13027,7 @@ export default function AdminConsole({
                       onClick={() => {
                         setAttemptDetailOpen(false);
                         setSelectedAttemptObj(null);
+                        setAttemptDetailSource("default");
                       }}
                       aria-label="Close"
                     >
@@ -13002,60 +13160,78 @@ export default function AdminConsole({
                             </div>
                             <div className="admin-table-wrap">
                               <table className="admin-table attempt-score-detail-table" style={{ minWidth: 640 }}>
-                                <colgroup>
-                                  <col className="attempt-score-detail-col-section" />
-                                  <col className="attempt-score-detail-col-subsection" />
-                                  <col className="attempt-score-detail-col-total" />
-                                  <col className="attempt-score-detail-col-correct" />
-                                  <col className="attempt-score-detail-col-rate" />
-                                </colgroup>
+                                {showRankingMainSectionsOnly ? null : (
+                                  <colgroup>
+                                    <col className="attempt-score-detail-col-section" />
+                                    <col className="attempt-score-detail-col-subsection" />
+                                    <col className="attempt-score-detail-col-total" />
+                                    <col className="attempt-score-detail-col-correct" />
+                                    <col className="attempt-score-detail-col-rate" />
+                                  </colgroup>
+                                )}
                                 <thead>
                                   <tr>
                                     <th className="attempt-score-detail-head-section">Section</th>
-                                    <th className="attempt-score-detail-head-subsection">Sub-section</th>
+                                    {showRankingMainSectionsOnly ? null : <th className="attempt-score-detail-head-subsection">Sub-section</th>}
                                     <th className="attempt-score-detail-head-total">Total</th>
                                     <th className="attempt-score-detail-head-correct">Correct</th>
                                     <th className="attempt-score-detail-head-rate">%</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {selectedAttemptNestedSectionSummary.map((group) => {
-                                    const rowSpan = 1 + group.subSections.length;
-                                    const isGroupBelowPass = group.rate < selectedAttemptPassRate;
-                                    return (
-                                      <Fragment key={`attempt-group-${group.mainSection}`}>
-                                        <tr className="attempt-overview-total-row">
-                                          <td rowSpan={rowSpan} className="attempt-overview-area-cell attempt-score-detail-cell-section">
-                                            <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
-                                          </td>
-                                          <td className="attempt-score-detail-cell-subsection">
-                                            <span className="attempt-score-detail-total-label">Total</span>
-                                          </td>
-                                          <td className="attempt-score-detail-cell-total">{group.total}</td>
-                                          <td className={`attempt-score-detail-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{group.correct}</td>
-                                          <td className={`attempt-score-detail-cell-rate ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(group.rate * 100).toFixed(1)}%</td>
-                                        </tr>
-                                        {group.subSections.map((subSection) => {
-                                          const isSubSectionBelowPass = subSection.rate < selectedAttemptPassRate;
-                                          return (
-                                            <tr key={`attempt-sub-${group.mainSection}-${subSection.section}`}>
-                                              <td className="attempt-score-detail-cell-subsection">{subSection.section}</td>
-                                              <td className="attempt-score-detail-cell-total">{subSection.total}</td>
-                                              <td className={`attempt-score-detail-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{subSection.correct}</td>
-                                              <td className={`attempt-score-detail-cell-rate ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(subSection.rate * 100).toFixed(1)}%</td>
+                                  {showRankingMainSectionsOnly
+                                    ? selectedAttemptMainSectionSummary.map((section) => {
+                                        const isSectionBelowPass = section.rate < selectedAttemptPassRate;
+                                        return (
+                                          <tr key={`attempt-ranking-main-${section.section}`}>
+                                            <td className="attempt-score-detail-cell-section">
+                                              <span className="session-ranking-section-header">{renderTwoLineHeader(section.section)}</span>
+                                            </td>
+                                            <td className="attempt-score-detail-cell-total">{section.total}</td>
+                                            <td className={`attempt-score-detail-cell-correct ${isSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{section.correct}</td>
+                                            <td className={`attempt-score-detail-cell-rate ${isSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(section.rate * 100).toFixed(1)}%</td>
+                                          </tr>
+                                        );
+                                      })
+                                    : selectedAttemptNestedSectionSummary.map((group) => {
+                                        const rowSpan = 1 + group.subSections.length;
+                                        const isGroupBelowPass = group.rate < selectedAttemptPassRate;
+                                        return (
+                                          <Fragment key={`attempt-group-${group.mainSection}`}>
+                                            <tr className="attempt-overview-total-row">
+                                              <td rowSpan={rowSpan} className="attempt-overview-area-cell attempt-score-detail-cell-section">
+                                                <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
+                                              </td>
+                                              <td className="attempt-score-detail-cell-subsection">
+                                                <span className="attempt-score-detail-total-label">Total</span>
+                                              </td>
+                                              <td className="attempt-score-detail-cell-total">{group.total}</td>
+                                              <td className={`attempt-score-detail-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{group.correct}</td>
+                                              <td className={`attempt-score-detail-cell-rate ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(group.rate * 100).toFixed(1)}%</td>
                                             </tr>
-                                          );
-                                        })}
-                                      </Fragment>
-                                    );
-                                  })}
+                                            {group.subSections.map((subSection) => {
+                                              const isSubSectionBelowPass = subSection.rate < selectedAttemptPassRate;
+                                              return (
+                                                <tr key={`attempt-sub-${group.mainSection}-${subSection.section}`}>
+                                                  <td className="attempt-score-detail-cell-subsection">{subSection.section}</td>
+                                                  <td className="attempt-score-detail-cell-total">{subSection.total}</td>
+                                                  <td className={`attempt-score-detail-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{subSection.correct}</td>
+                                                  <td className={`attempt-score-detail-cell-rate ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(subSection.rate * 100).toFixed(1)}%</td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </Fragment>
+                                        );
+                                      })}
                                 </tbody>
                               </table>
                             </div>
                           </div>
-                          <div className="admin-help">
-                            Main section totals are shown with their sub-section breakdown underneath.
-                          </div>
+                          {!showRankingMainSectionsOnly ? (
+                            <div className="admin-help">
+                              Main section totals are shown with their sub-section breakdown underneath.
+                            </div>
+                          ) : null}
                         </>
                       ) : (
                         <div className="admin-table-wrap" style={{ marginTop: 10 }}>

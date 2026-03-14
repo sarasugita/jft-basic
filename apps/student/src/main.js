@@ -3245,6 +3245,7 @@ function renderTestSelect(app) {
           const detailIsPass = detailRate >= detailPassRate;
           const detailRank = modelRankState.map[attempt.id] || "";
           const detailTotalRank = modelRankState.totalMap[attempt.id] || "";
+          const detailDate = attempt?.ended_at || attempt?.created_at;
           const detailRankLabel =
             detailRank && detailTotalRank
               ? `${formatOrdinal(detailRank)} of ${detailTotalRank} students`
@@ -3437,7 +3438,7 @@ function renderTestSelect(app) {
             <div class="student-detail-topbar">
               <button class="student-detail-back" id="modelResultBack" aria-label="Back">←</button>
               <div class="student-detail-title">${escapeHtml(title)}</div>
-              <span class="student-detail-spacer" aria-hidden="true"></span>
+              <div class="student-detail-date">${escapeHtml(detailDate ? formatDateShort(detailDate) : "—")}</div>
             </div>
             <div class="student-detail-tabs">
               <button class="student-detail-tab ${subTab === "score" ? "active" : ""}" data-model-detail-tab="score">Score Details</button>
