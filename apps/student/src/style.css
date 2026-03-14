@@ -1397,58 +1397,83 @@ body { overflow-x: hidden; }
 }
 
 .score-detail-table thead th {
-  color: #6b7280;
+  color: #000;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .score-detail-table {
   table-layout: fixed;
   width: 100%;
-  min-width: 0;
+  min-width: 640px;
 }
 
-.score-detail-table th:nth-child(1),
-.score-detail-table td:nth-child(1) {
-  width: 42%;
-  padding-right: 2px;
+.score-detail-col-section,
+.score-detail-head-section,
+.score-detail-cell-section {
+  width: 34%;
 }
 
-.score-detail-table th:nth-child(2),
-.score-detail-table td:nth-child(2) {
-  width: 28px;
-  padding-left: 2px;
-  padding-right: 2px;
+.score-detail-col-subsection,
+.score-detail-head-subsection,
+.score-detail-cell-subsection {
+  width: 34%;
+}
+
+.score-detail-col-total,
+.score-detail-head-total,
+.score-detail-cell-total {
+  width: 10%;
+}
+
+.score-detail-col-correct,
+.score-detail-head-correct,
+.score-detail-cell-correct {
+  width: 10%;
+}
+
+.score-detail-col-rate,
+.score-detail-head-rate,
+.score-detail-cell-rate {
+  width: 12%;
+}
+
+.score-detail-table th,
+.score-detail-table td {
+  color: #000;
+}
+
+.score-detail-head-total,
+.score-detail-cell-total,
+.score-detail-head-correct,
+.score-detail-cell-correct,
+.score-detail-head-rate,
+.score-detail-cell-rate {
   text-align: center;
   white-space: nowrap;
 }
 
-.score-detail-table th:nth-child(3),
-.score-detail-table td:nth-child(3) {
-  width: 28px;
-  padding-left: 2px;
-  padding-right: 2px;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.score-detail-table th:nth-child(4),
-.score-detail-table td:nth-child(4) {
-  width: 44px;
-  padding-left: 2px;
-  padding-right: 2px;
-  text-align: right;
-  white-space: nowrap;
+.score-detail-head-section,
+.score-detail-cell-section,
+.score-detail-head-subsection,
+.score-detail-cell-subsection {
+  text-align: left;
 }
 
 .score-section-label {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
-  gap: 1px;
-  line-height: 1.15;
-  max-width: 100%;
+  gap: 2px;
+  line-height: 1.2;
+  width: 100%;
 }
 
 .score-section-group-cell {
   vertical-align: middle;
+}
+
+.score-detail-trigger-cell {
+  padding: 0 !important;
 }
 
 .score-section-total-row td {
@@ -1459,16 +1484,44 @@ body { overflow-x: hidden; }
   appearance: none;
   border: 0;
   background: transparent;
-  padding: 0;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 100%;
+  padding: 12px 10px;
   font: inherit;
-  color: var(--green2);
-  font-weight: 800;
+  color: #000;
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.25;
+  transition: background-color 0.15s ease;
 }
 
-.score-detail-link:hover {
-  text-decoration: underline;
+.score-detail-link-section {
+  height: 100%;
+  font-weight: 700;
+}
+
+.score-detail-link-subsection {
+  font-weight: 400;
+}
+
+.score-detail-total-label {
+  color: #000;
+  font-weight: 700;
+}
+
+.score-detail-below-pass {
+  color: #b00020 !important;
+}
+
+.score-detail-link:hover,
+.score-detail-link:focus-visible {
+  background: rgba(22, 163, 74, 0.08);
+  outline: none;
 }
 
 .student-topbar {
@@ -2842,28 +2895,12 @@ button.student-application-view {
     padding-top: 8px;
     padding-bottom: 8px;
   }
-
-  .detail-table.score-detail-table th:nth-child(1),
-  .detail-table.score-detail-table td:nth-child(1) {
-    width: 40%;
-    padding-left: 4px;
-    padding-right: 1px;
+  .score-detail-table {
+    min-width: 600px;
   }
 
-  .detail-table.score-detail-table th:nth-child(2),
-  .detail-table.score-detail-table td:nth-child(2),
-  .detail-table.score-detail-table th:nth-child(3),
-  .detail-table.score-detail-table td:nth-child(3) {
-    width: 24px;
-    padding-left: 1px;
-    padding-right: 1px;
-  }
-
-  .detail-table.score-detail-table th:nth-child(4),
-  .detail-table.score-detail-table td:nth-child(4) {
-    width: 38px;
-    padding-left: 1px;
-    padding-right: 1px;
+  .score-detail-link {
+    padding: 10px 8px;
   }
 }
 

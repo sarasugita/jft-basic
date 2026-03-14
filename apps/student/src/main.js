@@ -37,7 +37,6 @@ const PERSONAL_UPLOAD_FIELDS = [
   { key: "passport_bio_page", label: "Bio Page Image", accept: "image/*" }
 ];
 const QUESTION_SELECT_BASE = "question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
-const QUESTION_SELECT_WITH_MEDIA = `${QUESTION_SELECT_BASE}, media_file, media_type`;
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
 const TEST_VERSION = "test_exam";
@@ -278,6 +277,12 @@ function logUnexpectedError(context, error) {
 
 function resetSessionScopedState() {
   studentPanelEntryUserId = "";
+  questionsState.loaded = false;
+  questionsState.loading = false;
+  questionsState.version = "";
+  questionsState.updatedAt = "";
+  questionsState.list = [];
+  questionsState.error = "";
   studentResultsState.userId = "";
   studentResultsState.loaded = false;
   studentResultsState.loading = false;
@@ -312,31 +317,18 @@ function shouldBlockOnQuestions() {
   return ["sectionIntro", "quiz", "result"].includes(state.phase);
 }
 
-function isMissingColumnError(error, columnName) {
-  const message = String(error?.message ?? "");
-  return message.includes(columnName) && message.toLowerCase().includes("does not exist");
-}
-
 async function fetchQuestionRowsWithFallback(version) {
-  let result = await publicSupabase
+  const client = authState.session ? supabase : publicSupabase;
+  return client
     .from("questions")
-    .select(QUESTION_SELECT_WITH_MEDIA)
+    .select(QUESTION_SELECT_BASE)
     .eq("test_version", version)
     .order("order_index", { ascending: true });
-  if (result.error && (isMissingColumnError(result.error, "media_file") || isMissingColumnError(result.error, "media_type"))) {
-    result = await publicSupabase
-      .from("questions")
-      .select(QUESTION_SELECT_BASE)
-      .eq("test_version", version)
-      .order("order_index", { ascending: true });
-  }
-  return result;
 }
 
 function mapDbQuestion(row, version) {
   const data = row.data ?? {};
   const stemAsset = [
-    row.media_file,
     data.stemAsset,
     data.stem_asset,
     data.stemAudio,
@@ -359,7 +351,7 @@ function mapDbQuestion(row, version) {
     promptBn: row.prompt_bn,
     answerIndex: row.answer_index,
     orderIndex: row.order_index ?? 0,
-    stemKind: data.stemKind || data.stem_kind || row.media_type || null,
+    stemKind: data.stemKind || data.stem_kind || null,
     stemText: data.stemText || null,
     stemAsset,
     stemImage: data.stemImage || data.stem_image || null,
@@ -441,6 +433,9 @@ async function fetchQuestionsForVersion(version, updatedAt = "") {
     }
     const mappedQuestions = (data ?? []).map((row) => mapDbQuestion(row, version));
     questionsState.list = orderQuestionsForSession(mappedQuestions, version);
+    if (version !== TEST_VERSION && questionsState.list.length === 0) {
+      questionsState.error = `No uploaded questions found for ${version}.`;
+    }
     questionsState.loaded = true;
     questionsState.updatedAt = updatedAt || "";
   } catch (error) {
@@ -468,8 +463,7 @@ function getQuestions() {
   if (questionsState.loaded && questionsState.version === getActiveTestVersion()) {
     return questionsState.list;
   }
-  if (testsState.loaded && testsState.list.length > 0) return [];
-  return questions;
+  return [];
 }
 
 function resetAll() {
@@ -649,6 +643,21 @@ function renderLoading(app) {
       ${topbarHTML({ rightButtonLabel: "Loading", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
         <h1 class="prompt">Loading...</h1>
+      </main>
+    </div>
+  `;
+  document.querySelector("#disabledBtn").disabled = true;
+}
+
+function renderQuestionLoadError(app) {
+  const version = getActiveTestVersion();
+  app.innerHTML = `
+    <div class="app has-topbar">
+      ${topbarHTML({ rightButtonLabel: "Unavailable", rightButtonId: "disabledBtn" })}
+      <main class="content" style="margin:12px;">
+        <h1 class="prompt">Question set could not be loaded.</h1>
+        <p style="margin-top:10px;color:#7a2e00;">${escapeHtml(questionsState.error || `No uploaded questions found for ${version || "this session"}.`)}</p>
+        ${version ? `<p style="margin-top:6px;color:var(--muted);">Problem Set ID: ${escapeHtml(version)}</p>` : ""}
       </main>
     </div>
   `;
@@ -1931,7 +1940,19 @@ function splitAssetList(value) {
 }
 
 function getStemMediaAssets(question) {
-  const assets = splitAssetList(question?.stemAsset);
+  const assets = [
+    question?.stemAsset,
+    question?.stemAudio,
+    question?.stemImage,
+    question?.image,
+    question?.passageImage,
+    question?.tableImage,
+    question?.stem_image,
+    question?.stem_image_url,
+  ]
+    .flatMap((value) => splitAssetList(value))
+    .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index);
   return {
     images: assets.filter((value) => isImageChoiceValue(value)),
     audios: assets.filter((value) => isAudioAssetValue(value)),
@@ -2509,18 +2530,20 @@ function renderStemHTML(q, opts = {}) {
   const isDaily = getActiveTestType() === "daily";
   const parts = [];
   const stemKind = String(q.stemKind || "").trim().toLowerCase();
+  const stemMedia = getStemMediaAssets(q);
+  const audioAssets = stemMedia.audios;
+  const imageAssets = stemMedia.images;
   if (stemKind === "dialog") {
     const lines = splitStemLinesPreserveIndent(q.stemExtra || q.stemText || "");
     const dialogLines = lines.length
       ? `<div class="dialog-lines">${lines.map((l) => `<div class="dialog-line">${renderUnderlines(l)}</div>`).join("")}</div>`
       : "";
-    const assets = splitAssetList(q.stemAsset).filter(Boolean);
-    if (assets.length) {
+    if (imageAssets.length) {
       parts.push(`
         <div class="dialog-row">
           ${dialogLines}
           <div class="dialog-img">
-            ${assets.map((src) => `<img src="${src}" alt="dialog" />`).join("")}
+            ${imageAssets.map((src) => `<img src="${src}" alt="dialog" />`).join("")}
           </div>
         </div>
       `);
@@ -2541,10 +2564,7 @@ function renderStemHTML(q, opts = {}) {
     }
   }
 
-  const assets = splitAssetList(q.stemAsset);
-  const audioAssets = assets.filter((src) => isAudioAssetValue(src));
-  const imageAssets = assets.filter((src) => isImageChoiceValue(src));
-  if (((stemKind === "audio" || stemKind === "audio_image" || stemKind === "image_audio") || audioAssets.length) && q.stemAsset) {
+  if ((stemKind === "audio" || stemKind === "audio_image" || stemKind === "image_audio") || audioAssets.length) {
     const imgClass = isDaily
       ? "illustration illustration-daily"
       : q.sectionKey === "CE"
@@ -2568,7 +2588,7 @@ function renderStemHTML(q, opts = {}) {
       `);
     }
   }
-  if ((["image", "passage_image", "table_image"].includes(stemKind) || (!stemKind && imageAssets.length && !audioAssets.length)) && q.stemAsset) {
+  if ((["image", "passage_image", "table_image"].includes(stemKind) || (!stemKind && imageAssets.length && !audioAssets.length)) && imageAssets.length) {
     const cls = isDaily
       ? "illustration illustration-daily"
       : stemKind === "image"
@@ -2580,21 +2600,21 @@ function renderStemHTML(q, opts = {}) {
         : "passage-img";
     parts.push(`
       <div class="question-area">
-        ${assets.map((src) => `<img class="${cls}" src="${src}" alt="stem" />`).join("")}
+        ${imageAssets.map((src) => `<img class="${cls}" src="${src}" alt="stem" />`).join("")}
       </div>
     `);
   }
-  if (!q.stemKind && q.stemAsset && isAudioAssetValue(q.stemAsset)) {
+  if (!q.stemKind && audioAssets.length === 1 && imageAssets.length === 0) {
     parts.push(`
       <div class="stem-audio-wrap">
-        <audio class="stem-audio-player" controls preload="auto" src="${q.stemAsset}"></audio>
+        <audio class="stem-audio-player" controls preload="auto" src="${audioAssets[0]}"></audio>
       </div>
     `);
   }
-  if (!q.stemKind && q.stemAsset && isImageChoiceValue(q.stemAsset)) {
+  if (!q.stemKind && imageAssets.length === 1 && audioAssets.length === 0) {
     parts.push(`
       <div class="question-area">
-        <img class="${isDaily ? "illustration illustration-daily" : "illustration"}" src="${q.stemAsset}" alt="stem" />
+        <img class="${isDaily ? "illustration illustration-daily" : "illustration"}" src="${imageAssets[0]}" alt="stem" />
       </div>
     `);
   }
@@ -3286,6 +3306,7 @@ function renderTestSelect(app) {
             const totalCorrect = attempt.correct ?? summary.reduce((acc, s) => acc + (s.correct || 0), 0);
             const totalQuestions = attempt.total ?? summary.reduce((acc, s) => acc + (s.total || 0), 0);
             const totalRate = totalQuestions ? ((totalCorrect / totalQuestions) * 100).toFixed(1) : "0.0";
+            const scorePassRate = getPassRateForVersion(attempt.test_version);
             const radarData = mainSummary.map((row) => ({
               label: row.section,
               value: row.total ? row.correct / row.total : 0,
@@ -3312,21 +3333,32 @@ function renderTestSelect(app) {
                 </div>
                 <div class="detail-table-wrap">
                   <table class="detail-table score-detail-table">
+                    <colgroup>
+                      <col class="score-detail-col-section" />
+                      <col class="score-detail-col-subsection" />
+                      <col class="score-detail-col-total" />
+                      <col class="score-detail-col-correct" />
+                      <col class="score-detail-col-rate" />
+                    </colgroup>
                     <thead>
                       <tr>
-                        <th>Area</th>
-                        <th>Unit</th>
-                        <th>Correct</th>
-                        <th>Total</th>
-                        <th>%</th>
+                        <th class="score-detail-head-section">Section</th>
+                        <th class="score-detail-head-subsection">Sub-section</th>
+                        <th class="score-detail-head-total">Total</th>
+                        <th class="score-detail-head-correct">Correct</th>
+                        <th class="score-detail-head-rate">%</th>
                       </tr>
                     </thead>
                     <tbody>
                       ${nestedSummary
                         .map((group) => {
                           const rowSpan = 1 + group.subSections.length;
+                          const isGroupBelowPass = group.rate < scorePassRate;
                           const mainLabel = `
-                            <button class="score-detail-link" type="button" data-score-drilldown-kind="section" data-score-drilldown-value="${escapeHtml(group.mainSection)}">
+                            <button
+                              class="score-detail-link score-detail-link-section"
+                              type="button"
+                            >
                               <span class="score-section-label">
                               ${getSectionLabelLines(group.mainSection)
                                 .map((line) => `<span>${escapeHtml(line)}</span>`)
@@ -3336,27 +3368,42 @@ function renderTestSelect(app) {
                           `;
                           const totalRow = `
                             <tr class="score-section-total-row">
-                              <td rowspan="${rowSpan}" class="score-section-group-cell">${mainLabel}</td>
-                              <td><b>Total</b></td>
-                              <td>${group.correct}</td>
-                              <td>${group.total}</td>
-                              <td>${(group.rate * 100).toFixed(1)}%</td>
+                              <td
+                                rowspan="${rowSpan}"
+                                class="score-section-group-cell score-detail-trigger-cell score-detail-cell-section"
+                                data-score-drilldown-kind="section"
+                                data-score-drilldown-value="${escapeHtml(group.mainSection)}"
+                              >${mainLabel}</td>
+                              <td class="score-detail-cell-subsection"><span class="score-detail-total-label">Total</span></td>
+                              <td class="score-detail-cell-total">${group.total}</td>
+                              <td class="score-detail-cell-correct ${isGroupBelowPass ? "score-detail-below-pass" : ""}">${group.correct}</td>
+                              <td class="score-detail-cell-rate ${isGroupBelowPass ? "score-detail-below-pass" : ""}">${(group.rate * 100).toFixed(1)}%</td>
                             </tr>
                           `;
                           const subRows = group.subSections
                             .map(
-                              (subSection) => `
+                              (subSection) => {
+                                const isSubSectionBelowPass = subSection.rate < scorePassRate;
+                                return `
                                 <tr>
-                                  <td>
-                                    <button class="score-detail-link" type="button" data-score-drilldown-kind="subSection" data-score-drilldown-value="${escapeHtml(subSection.section)}">
+                                  <td
+                                    class="score-detail-trigger-cell score-detail-cell-subsection"
+                                    data-score-drilldown-kind="subSection"
+                                    data-score-drilldown-value="${escapeHtml(subSection.section)}"
+                                  >
+                                    <button
+                                      class="score-detail-link score-detail-link-subsection"
+                                      type="button"
+                                    >
                                       ${escapeHtml(subSection.section)}
                                     </button>
                                   </td>
-                                  <td>${subSection.correct}</td>
-                                  <td>${subSection.total}</td>
-                                  <td>${(subSection.rate * 100).toFixed(1)}%</td>
+                                  <td class="score-detail-cell-total">${subSection.total}</td>
+                                  <td class="score-detail-cell-correct ${isSubSectionBelowPass ? "score-detail-below-pass" : ""}">${subSection.correct}</td>
+                                  <td class="score-detail-cell-rate ${isSubSectionBelowPass ? "score-detail-below-pass" : ""}">${(subSection.rate * 100).toFixed(1)}%</td>
                                 </tr>
-                              `
+                              `;
+                              }
                             )
                             .join("");
                           return `${totalRow}${subRows}`;
@@ -5338,11 +5385,16 @@ function render() {
   }
 
   const needsQuestions = shouldBlockOnQuestions();
+  const activeVersion = getActiveTestVersion();
   const sessionsReady = testSessionsState.loaded || Boolean(state.linkId);
-  if (needsQuestions && testsState.loaded && sessionsReady) {
+  const needsDynamicQuestions = Boolean(activeVersion);
+  if (needsQuestions && sessionsReady && (testsState.loaded || needsDynamicQuestions)) {
     ensureQuestionsLoaded();
-    if (!questionsState.loaded || questionsState.version !== getActiveTestVersion()) {
+    if (!questionsState.loaded || questionsState.version !== activeVersion) {
       return renderLoading(app);
+    }
+    if (!getQuestions().length) {
+      return renderQuestionLoadError(app);
     }
   }
 

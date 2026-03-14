@@ -2941,24 +2941,6 @@ export default function AdminConsole({
     });
   }, [dailyConductTests, dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
 
-  useEffect(() => {
-    const version = testSessionForm.problem_set_id;
-    if (!version) return;
-    const passRate = testPassRateByVersion[version];
-    if (passRate != null) {
-      setTestSessionForm((s) => ({ ...s, pass_rate: String(passRate) }));
-    }
-  }, [testSessionForm.problem_set_id, testPassRateByVersion]);
-
-  useEffect(() => {
-    const version = selectedDailyProblemSetIds[0] || dailySessionForm.problem_set_id;
-    if (!version) return;
-    const passRate = testPassRateByVersion[version];
-    if (passRate != null) {
-      setDailySessionForm((s) => ({ ...s, pass_rate: String(passRate) }));
-    }
-  }, [dailySessionForm.problem_set_id, selectedDailyProblemSetIds, testPassRateByVersion]);
-
   const resultContext = useMemo(() => {
     if (activeTab === "model" && modelSubTab === "results") {
       return { type: "mock", title: "Model Test Results", tests: modelTests };
