@@ -3314,17 +3314,25 @@ function renderTestSelect(app) {
             detailBody = mainSummary.length
               ? `
                 <div class="student-score-summary">
-                  <div class="student-score-line">
+                  <div class="student-score-row">
                     <span class="student-score-label">Total Score</span>
-                    <span class="student-score-right">
-                      <span class="student-score-value">${totalCorrect} / ${totalQuestions} (${totalRate}%)</span>
-                      <span class="student-score-pass ${detailIsPass ? "result-pass-cell" : "result-fail-cell"}">
-                        ${detailIsPass ? "Pass" : "Fail"}
+                    <span class="student-score-right ${detailIsPass ? "" : "student-score-right-fail"}">
+                      <span class="student-score-value">
+                        <span class="student-score-value-primary">${totalCorrect}</span>
+                        <span class="student-score-value-separator">/</span>
+                        <span>${totalQuestions}</span>
                       </span>
+                      <span class="student-score-rate">(${totalRate}%)</span>
                     </span>
                   </div>
-                  <div class="student-score-rank">
-                    <span class="student-score-rank-label">Class Ranking</span>
+                  <div class="student-score-row">
+                    <span class="student-score-label">Pass/Fail</span>
+                    <span class="student-score-pass ${detailIsPass ? "result-pass-cell" : "result-fail-cell"}">
+                      ${detailIsPass ? "Pass" : "Fail"}
+                    </span>
+                  </div>
+                  <div class="student-score-row">
+                    <span class="student-score-label">Class Rank</span>
                     <span class="student-score-rank-value">${escapeHtml(detailRankLabel)}</span>
                   </div>
                 </div>
@@ -3344,9 +3352,9 @@ function renderTestSelect(app) {
                       <tr>
                         <th class="score-detail-head-section">Section</th>
                         <th class="score-detail-head-subsection">Sub-section</th>
-                        <th class="score-detail-head-total">Total</th>
-                        <th class="score-detail-head-correct">Correct</th>
-                        <th class="score-detail-head-rate">%</th>
+                        <th class="score-detail-head-total"><span class="score-detail-head-label score-detail-head-label-total">Total</span></th>
+                        <th class="score-detail-head-correct"><span class="score-detail-head-label score-detail-head-label-correct">Correct</span></th>
+                        <th class="score-detail-head-rate"><span class="score-detail-head-label score-detail-head-label-rate">%</span></th>
                       </tr>
                     </thead>
                     <tbody>
