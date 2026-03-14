@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { createAdminSupabaseClient, getAdminSupabaseConfig, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
@@ -283,9 +284,95 @@ function getEmptyDailyRecordPlanDraft() {
     mini_test_1: "",
     mini_test_2: "",
     special_test_1: "",
-    special_test_2: "",
   };
 }
+
+const DAILY_RECORD_CONTENT_FORMAT = "daily_record_content_v1";
+const IRODORI_TEXTBOOK_VALUE = "irodori";
+const IRODORI_BOOK_OPTIONS = [
+  { value: "starter", label: "Starter" },
+  { value: "beginner_1", label: "Beginner 1" },
+  { value: "beginner_2", label: "Beginner 2" },
+];
+const IRODORI_BOOK_LABELS = Object.fromEntries(IRODORI_BOOK_OPTIONS.map((option) => [option.value, option.label]));
+const IRODORI_BOOK_ORDER = Object.fromEntries(IRODORI_BOOK_OPTIONS.map((option, index) => [option.value, index]));
+const IRODORI_LESSON_OPTIONS = Array.from({ length: 18 }, (_, index) => String(index + 1));
+
+function expandSequentialRange(start, end) {
+  return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => String(start + index));
+}
+
+function buildIrodoriCanDoMap(chapterRanges) {
+  return Object.fromEntries(
+    Object.entries(chapterRanges).map(([lesson, ranges]) => [
+      String(lesson),
+      ranges.flatMap(([start, end]) => expandSequentialRange(start, end)),
+    ])
+  );
+}
+
+const IRODORI_CANDO_BY_BOOK = {
+  starter: buildIrodoriCanDoMap({
+    1: [[1, 4]],
+    2: [[5, 7]],
+    3: [[8, 11]],
+    4: [[12, 15]],
+    5: [[16, 20]],
+    6: [[21, 25]],
+    7: [[26, 30]],
+    8: [[31, 34]],
+    9: [[35, 38]],
+    10: [[39, 43]],
+    11: [[44, 47]],
+    12: [[48, 51]],
+    13: [[52, 56]],
+    14: [[57, 60]],
+    15: [[61, 65]],
+    16: [[66, 70]],
+    17: [[71, 75]],
+    18: [[76, 79]],
+  }),
+  beginner_1: buildIrodoriCanDoMap({
+    1: [[1, 3]],
+    2: [[4, 7]],
+    3: [[8, 10]],
+    4: [[11, 13]],
+    5: [[14, 16]],
+    6: [[17, 19]],
+    7: [[20, 23]],
+    8: [[24, 26]],
+    9: [[27, 30]],
+    10: [[31, 34]],
+    11: [[35, 38]],
+    12: [[39, 42]],
+    13: [[43, 47]],
+    14: [[48, 51]],
+    15: [[51, 56]],
+    16: [[57, 60]],
+    17: [[61, 64]],
+    18: [[65, 69]],
+  }),
+  beginner_2: buildIrodoriCanDoMap({
+    1: [[1, 4]],
+    2: [[5, 8]],
+    3: [[9, 13]],
+    4: [[14, 18]],
+    5: [[19, 22]],
+    6: [[23, 27]],
+    7: [[28, 31]],
+    8: [[33, 37]],
+    9: [[38, 42]],
+    10: [[43, 46]],
+    11: [[47, 50]],
+    12: [[51, 54]],
+    13: [[55, 59]],
+    14: [[60, 63]],
+    15: [[64, 67]],
+    16: [[68, 72]],
+    17: [[73, 75]],
+    18: [[76, 78]],
+  }),
+};
 
 function createDailyRecordCommentRow(studentId = "") {
   return {
@@ -295,17 +382,117 @@ function createDailyRecordCommentRow(studentId = "") {
   };
 }
 
+function createDailyRecordTextbookRow(book = "starter", lesson = "1") {
+  return {
+    tempId: `textbook-${Math.random().toString(36).slice(2, 10)}`,
+    textbook: IRODORI_TEXTBOOK_VALUE,
+    book,
+    lesson,
+    cando_ids: [],
+  };
+}
+
+function getIrodoriCanDoOptions(book, lesson) {
+  return IRODORI_CANDO_BY_BOOK?.[book]?.[String(lesson)] ?? [];
+}
+
+function sanitizeDailyRecordTextbookRow(value) {
+  const book = IRODORI_BOOK_LABELS[value?.book] ? value.book : "starter";
+  const lesson = IRODORI_LESSON_OPTIONS.includes(String(value?.lesson ?? "")) ? String(value.lesson) : "1";
+  const options = new Set(getIrodoriCanDoOptions(book, lesson));
+  const candoIds = Array.from(
+    new Set((value?.cando_ids ?? value?.candoIds ?? []).map((item) => String(item)).filter((item) => options.has(item)))
+  );
+  return {
+    tempId: value?.tempId || `textbook-${Math.random().toString(36).slice(2, 10)}`,
+    textbook: IRODORI_TEXTBOOK_VALUE,
+    book,
+    lesson,
+    cando_ids: candoIds,
+  };
+}
+
+function parseDailyRecordContent(value) {
+  const empty = {
+    textbook_entries: [createDailyRecordTextbookRow()],
+    free_writing: "",
+  };
+  const raw = String(value ?? "").trim();
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.format !== DAILY_RECORD_CONTENT_FORMAT) {
+      return {
+        textbook_entries: [createDailyRecordTextbookRow()],
+        free_writing: String(value ?? ""),
+      };
+    }
+    const textbookEntries = Array.isArray(parsed.textbook_entries)
+      ? parsed.textbook_entries.map((entry) => sanitizeDailyRecordTextbookRow(entry))
+      : [];
+    return {
+      textbook_entries: textbookEntries.length ? textbookEntries : [createDailyRecordTextbookRow()],
+      free_writing: String(parsed.free_writing ?? ""),
+    };
+  } catch {
+    return {
+      textbook_entries: [createDailyRecordTextbookRow()],
+      free_writing: String(value ?? ""),
+    };
+  }
+}
+
+function serializeDailyRecordContent(form) {
+  const textbookEntries = (form?.textbook_entries ?? [])
+    .map((entry) => sanitizeDailyRecordTextbookRow(entry))
+    .map(({ textbook, book, lesson, cando_ids }) => ({ textbook, book, lesson, cando_ids }))
+    .filter((entry) => entry.cando_ids.length);
+  const freeWriting = String(form?.free_writing ?? "").trim();
+  if (!textbookEntries.length && !freeWriting) return null;
+  return JSON.stringify({
+    format: DAILY_RECORD_CONTENT_FORMAT,
+    textbook_entries: textbookEntries,
+    free_writing: freeWriting,
+  });
+}
+
+function summarizeDailyRecordContent(value) {
+  const content = parseDailyRecordContent(value);
+  const textbookSummary = (content.textbook_entries ?? [])
+    .filter((entry) => entry.cando_ids.length)
+    .map((entry) => `${IRODORI_BOOK_LABELS[entry.book] || entry.book} Lesson ${entry.lesson}: Can-do ${entry.cando_ids.join(", ")}`);
+  const parts = [];
+  if (textbookSummary.length) parts.push(`Irodori - ${textbookSummary.join(" | ")}`);
+  if (content.free_writing.trim()) parts.push(content.free_writing.trim());
+  return parts.join(" | ");
+}
+
+function getLargestDailyRecordTextbookEntry(value) {
+  const entries = parseDailyRecordContent(value).textbook_entries ?? [];
+  return entries.reduce((largest, entry) => {
+    if (!largest) return entry;
+    const largestBookOrder = IRODORI_BOOK_ORDER[largest.book] ?? -1;
+    const entryBookOrder = IRODORI_BOOK_ORDER[entry.book] ?? -1;
+    if (entryBookOrder !== largestBookOrder) {
+      return entryBookOrder > largestBookOrder ? entry : largest;
+    }
+    return Number(entry.lesson) > Number(largest.lesson) ? entry : largest;
+  }, null);
+}
+
 function getEmptyDailyRecordForm(recordDate = "") {
   return {
     id: "",
     record_date: recordDate,
-    todays_content: "",
+    textbook_entries: [createDailyRecordTextbookRow()],
+    free_writing: "",
     comments: [createDailyRecordCommentRow("")]
   };
 }
 
 function getDailyRecordForm(record) {
   if (!record) return getEmptyDailyRecordForm("");
+  const content = parseDailyRecordContent(record?.todays_content);
   const comments = (record.daily_record_student_comments ?? []).length
     ? record.daily_record_student_comments.map((item) => ({
         tempId: item.id ?? `comment-${Math.random().toString(36).slice(2, 10)}`,
@@ -317,7 +504,8 @@ function getDailyRecordForm(record) {
   return {
     id: record.id ?? "",
     record_date: record.record_date ?? "",
-    todays_content: record.todays_content ?? "",
+    textbook_entries: content.textbook_entries,
+    free_writing: content.free_writing,
     comments,
   };
 }
@@ -330,7 +518,6 @@ function buildDailyRecordPlanDrafts(records) {
       mini_test_1: record.mini_test_1 ?? "",
       mini_test_2: record.mini_test_2 ?? "",
       special_test_1: record.special_test_1 ?? "",
-      special_test_2: record.special_test_2 ?? "",
     };
   });
   return drafts;
@@ -1568,6 +1755,57 @@ function formatDateFull(value) {
   });
 }
 
+function formatDateDots(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) return `${match[3]}.${match[2]}.${match[1]}`;
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).replace(/\//g, ".");
+}
+
+function parseDateDotsToIso(value) {
+  const match = String(value ?? "").trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!match) return "";
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function parseSyllabusAnnouncementDate(title) {
+  const match = String(title ?? "").match(/Exam Syllabus\s*\((\d{2}\.\d{2}\.\d{4})\)/i);
+  return match ? parseDateDotsToIso(match[1]) : "";
+}
+
+function normalizeAnnouncementDraftText(value) {
+  return String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+}
+
+function formatAnnouncementScheduleTime(value) {
+  const input = toBangladeshInput(value);
+  if (!input) return "";
+  const timeText = input.slice(11, 16);
+  const [rawHour, rawMinute] = timeText.split(":").map((part) => Number(part));
+  if (!Number.isFinite(rawHour) || !Number.isFinite(rawMinute)) return "";
+  const period = rawHour >= 12 ? "PM" : "AM";
+  const hour = rawHour % 12 || 12;
+  return `${hour}.${String(rawMinute).padStart(2, "0")}${period}`;
+}
+
+function getSessionScheduleSource(session) {
+  return session?.starts_at || session?.ends_at || session?.created_at || "";
+}
+
 function formatWeekday(value) {
   if (!value) return "";
   if (typeof value === "string") {
@@ -2319,7 +2557,11 @@ export default function AdminConsole({
   const [dailyRecordModalOpen, setDailyRecordModalOpen] = useState(false);
   const [dailyRecordSaving, setDailyRecordSaving] = useState(false);
   const [dailyRecordForm, setDailyRecordForm] = useState(() => getEmptyDailyRecordForm(getTodayDateInput()));
+  const [dailyRecordAnnouncementTitleDraft, setDailyRecordAnnouncementTitleDraft] = useState("");
+  const [dailyRecordAnnouncementDraft, setDailyRecordAnnouncementDraft] = useState("");
+  const [dailyRecordSyllabusAnnouncements, setDailyRecordSyllabusAnnouncements] = useState([]);
   const [dailyRecordPlanDrafts, setDailyRecordPlanDrafts] = useState({});
+  const [dailyRecordConfirmedDates, setDailyRecordConfirmedDates] = useState([]);
   const [dailyRecordPlanSavingDate, setDailyRecordPlanSavingDate] = useState("");
   const dailyRecordTableWrapRef = useRef(null);
   const [rankingPeriods, setRankingPeriods] = useState([]);
@@ -2499,6 +2741,7 @@ export default function AdminConsole({
     publish_at: formatDateTimeInput(new Date()),
     end_at: ""
   });
+  const [announcementCreateOpen, setAnnouncementCreateOpen] = useState(false);
   const [announcementMsg, setAnnouncementMsg] = useState("");
   const [editingAnnouncementId, setEditingAnnouncementId] = useState("");
   const [editingAnnouncementForm, setEditingAnnouncementForm] = useState({
@@ -3350,13 +3593,136 @@ export default function AdminConsole({
             mini_test_1: record.mini_test_1 ?? "",
             mini_test_2: record.mini_test_2 ?? "",
             special_test_1: record.special_test_1 ?? "",
-            special_test_2: record.special_test_2 ?? "",
           } : {}),
           ...(dailyRecordPlanDrafts[recordDate] ?? {}),
         };
         return { recordDate, record, draft };
       });
   }, [dailyRecords, dailyRecordPlanDrafts]);
+
+  const scheduleRecordActualTestsByDate = useMemo(() => {
+    const byDate = {};
+    (testSessions ?? []).forEach((session) => {
+      const scheduleDate = getBangladeshDateInput(getSessionScheduleSource(session));
+      if (!scheduleDate) return;
+      if (session.retake_source_session_id || isRetakeSessionTitle(session.title)) return;
+      const item = {
+        id: session.id,
+        title: String(session.title ?? "").trim() || getProblemSetTitle(session.problem_set_id, tests) || session.problem_set_id || "-",
+        sortValue: new Date(getSessionScheduleSource(session)).getTime(),
+      };
+      if (!byDate[scheduleDate]) byDate[scheduleDate] = [];
+      byDate[scheduleDate].push(item);
+    });
+
+    Object.values(byDate).forEach((group) => {
+      group.sort((a, b) => a.sortValue - b.sortValue);
+    });
+
+    return byDate;
+  }, [testSessions, tests]);
+
+  const scheduleRecordDisplayByDate = useMemo(() => {
+    const confirmedSet = new Set(dailyRecordConfirmedDates);
+    const recordByDate = Object.fromEntries((dailyRecords ?? []).filter((record) => record?.record_date).map((record) => [record.record_date, record]));
+    const displayMap = {};
+    scheduleRecordRows.forEach(({ recordDate, draft }) => {
+      const previousRecord = recordByDate[addDays(recordDate, -1)] ?? null;
+      const isConfirmed = Boolean(previousRecord?.id) && confirmedSet.has(recordDate);
+      const actualTests = scheduleRecordActualTestsByDate[recordDate] ?? [];
+      displayMap[recordDate] = {
+        isConfirmed,
+        mini_test_1: isConfirmed ? (actualTests[0]?.title ?? "-") : draft.mini_test_1,
+        mini_test_2: isConfirmed ? (actualTests[1]?.title ?? "-") : draft.mini_test_2,
+        special_test_1: isConfirmed ? (actualTests[2]?.title ?? "-") : draft.special_test_1,
+      };
+    });
+    return displayMap;
+  }, [dailyRecordConfirmedDates, dailyRecords, scheduleRecordActualTestsByDate, scheduleRecordRows]);
+
+  const dailyRecordTomorrowSessions = useMemo(() => {
+    const targetDate = addDays(dailyRecordForm.record_date || getTodayDateInput(), 1);
+    const rows = (testSessions ?? [])
+      .map((session) => {
+        const scheduleSource = getSessionScheduleSource(session);
+        if (!scheduleSource || getBangladeshDateInput(scheduleSource) !== targetDate) return null;
+        const fallbackTitle = getProblemSetTitle(session.problem_set_id, tests) || session.problem_set_id || "Untitled test";
+        const rawTitle = String(session.title ?? "").trim() || fallbackTitle;
+        const isRetake = Boolean(session.retake_source_session_id) || isRetakeSessionTitle(rawTitle);
+        return {
+          id: session.id,
+          isRetake,
+          title: isRetake ? (getRetakeBaseTitle(rawTitle) || fallbackTitle) : rawTitle,
+          timeLabel: formatAnnouncementScheduleTime(scheduleSource),
+          sortValue: new Date(scheduleSource).getTime(),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        const aTime = Number.isFinite(a.sortValue) ? a.sortValue : Number.MAX_SAFE_INTEGER;
+        const bTime = Number.isFinite(b.sortValue) ? b.sortValue : Number.MAX_SAFE_INTEGER;
+        if (aTime !== bTime) return aTime - bTime;
+        return a.title.localeCompare(b.title);
+      });
+
+    return {
+      targetDate,
+      regular: rows.filter((row) => !row.isRetake),
+      retake: rows.filter((row) => row.isRetake),
+    };
+  }, [dailyRecordForm.record_date, testSessions, tests]);
+
+  const dailyRecordAnnouncementTitle = useMemo(
+    () => `Exam Syllabus (${formatDateDots(dailyRecordTomorrowSessions.targetDate)})`,
+    [dailyRecordTomorrowSessions.targetDate]
+  );
+
+  const dailyRecordAutoAnnouncementDraft = useMemo(() => {
+    const lines = [];
+    if (dailyRecordTomorrowSessions.regular.length) {
+      dailyRecordTomorrowSessions.regular.forEach((session, index) => {
+        lines.push(`${index + 1}. ${session.title}${session.timeLabel ? ` (${session.timeLabel})` : ""}`);
+      });
+    } else {
+      lines.push("No tests scheduled.");
+    }
+    if (dailyRecordTomorrowSessions.retake.length) {
+      lines.push("");
+      lines.push("Retake syllabus:");
+      dailyRecordTomorrowSessions.retake.forEach((session, index) => {
+        lines.push(`${index + 1}. ${session.title}${session.timeLabel ? ` (${session.timeLabel})` : ""}`);
+      });
+    }
+    return lines.join("\n");
+  }, [dailyRecordTomorrowSessions]);
+
+  const dailyRecordSyllabusAnnouncementByDate = useMemo(() => {
+    const map = {};
+    (dailyRecordSyllabusAnnouncements ?? []).forEach((announcement) => {
+      const dateKey = parseSyllabusAnnouncementDate(announcement.title);
+      if (!dateKey) return;
+      const current = map[dateKey];
+      const announcementTime = new Date(announcement.publish_at || announcement.created_at || 0).getTime();
+      const currentTime = current ? new Date(current.publish_at || current.created_at || 0).getTime() : -Infinity;
+      if (!current || announcementTime >= currentTime) {
+        map[dateKey] = announcement;
+      }
+    });
+    return map;
+  }, [dailyRecordSyllabusAnnouncements]);
+
+  const dailyRecordExistingAnnouncement = useMemo(
+    () => dailyRecordSyllabusAnnouncementByDate[dailyRecordTomorrowSessions.targetDate] ?? null,
+    [dailyRecordSyllabusAnnouncementByDate, dailyRecordTomorrowSessions.targetDate]
+  );
+
+  const dailyRecordAnnouncementNeedsEdit = useMemo(() => {
+    if (!dailyRecordExistingAnnouncement) return false;
+    return (
+      normalizeAnnouncementDraftText(dailyRecordExistingAnnouncement.title) !== normalizeAnnouncementDraftText(dailyRecordAnnouncementTitle)
+      || normalizeAnnouncementDraftText(dailyRecordExistingAnnouncement.body) !== normalizeAnnouncementDraftText(dailyRecordAutoAnnouncementDraft)
+    );
+  }, [dailyRecordAnnouncementTitle, dailyRecordAutoAnnouncementDraft, dailyRecordExistingAnnouncement]);
 
   const rankingRowCount = useMemo(
     () => Math.max(0, ...rankingPeriods.map((period) => period.ranking_entries?.length ?? 0)),
@@ -3376,6 +3742,23 @@ export default function AdminConsole({
       wrap.scrollTop += rowRect.top - wrapRect.top;
     });
   }, [activeTab, scheduleRecordRows.length]);
+
+  useEffect(() => {
+    if (!dailyRecordModalOpen) return;
+    if (dailyRecordExistingAnnouncement && !dailyRecordAnnouncementNeedsEdit) {
+      setDailyRecordAnnouncementTitleDraft(dailyRecordExistingAnnouncement.title ?? "");
+      setDailyRecordAnnouncementDraft(dailyRecordExistingAnnouncement.body ?? "");
+      return;
+    }
+    setDailyRecordAnnouncementTitleDraft(dailyRecordAnnouncementTitle);
+    setDailyRecordAnnouncementDraft(dailyRecordAutoAnnouncementDraft);
+  }, [
+    dailyRecordAnnouncementNeedsEdit,
+    dailyRecordAnnouncementTitle,
+    dailyRecordAutoAnnouncementDraft,
+    dailyRecordExistingAnnouncement,
+    dailyRecordModalOpen,
+  ]);
 
   const attendanceFilteredStudents = useMemo(() => {
     const minRate = attendanceFilter.minRate === "" ? null : Number(attendanceFilter.minRate);
@@ -3825,6 +4208,15 @@ export default function AdminConsole({
     setStudentAttendance([]);
     setAbsenceApplications([]);
     setAnnouncements([]);
+    setAnnouncementCreateOpen(false);
+    setAnnouncementMsg("");
+    setEditingAnnouncementId("");
+    setEditingAnnouncementForm({
+      title: "",
+      body: "",
+      publish_at: "",
+      end_at: ""
+    });
     setStudentWarnings([]);
     setStudentWarningsMsg("");
     setSelectedStudentWarning(null);
@@ -3837,6 +4229,10 @@ export default function AdminConsole({
     setAttendanceSaving(false);
     setAttendanceFilter({ minRate: "", minAbsences: "", startDate: "", endDate: "" });
     setApprovedAbsenceByStudent({});
+    setDailyRecordAnnouncementTitleDraft("");
+    setDailyRecordAnnouncementDraft("");
+    setDailyRecordSyllabusAnnouncements([]);
+    setDailyRecordConfirmedDates([]);
   }, [activeSchoolId]);
 
   useEffect(() => {
@@ -4639,6 +5035,8 @@ export default function AdminConsole({
     if (!activeSchoolId) {
       setDailyRecords([]);
       setDailyRecordPlanDrafts({});
+      setDailyRecordSyllabusAnnouncements([]);
+      setDailyRecordConfirmedDates([]);
       setDailyRecordsMsg("Select a school.");
       return;
     }
@@ -4665,23 +5063,55 @@ export default function AdminConsole({
       console.error("daily records fetch error:", error);
       setDailyRecords([]);
       setDailyRecordPlanDrafts({});
+      setDailyRecordSyllabusAnnouncements([]);
+      setDailyRecordConfirmedDates([]);
       setDailyRecordsMsg(`Load failed: ${error.message}`);
       return;
+    }
+    const { data: announcementRows, error: announcementError } = await supabase
+      .from("announcements")
+      .select("id, title, body, publish_at, end_at, created_at")
+      .eq("school_id", activeSchoolId)
+      .like("title", "Exam Syllabus (%)")
+      .limit(400);
+    if (announcementError) {
+      console.error("daily record syllabus announcements fetch error:", announcementError);
     }
     const list = data ?? [];
     setDailyRecords(list);
     setDailyRecordPlanDrafts(buildDailyRecordPlanDrafts(list));
+    setDailyRecordSyllabusAnnouncements(announcementRows ?? []);
+    setDailyRecordConfirmedDates(
+      Array.from(
+        new Set(
+          (announcementRows ?? [])
+            .map((row) => parseSyllabusAnnouncementDate(row.title))
+            .filter(Boolean)
+        )
+      )
+    );
     setDailyRecordsMsg(list.length ? "" : "No daily records yet. The next 2 weeks are shown below for planning.");
   }
 
-  function openDailyRecordModal(record = null, recordDate = "") {
+function openDailyRecordModal(record = null, recordDate = "") {
     const existingRecord =
       record
       ?? dailyRecords.find((item) => item.record_date === recordDate)
       ?? null;
-    const nextForm = existingRecord
+    let nextForm = existingRecord
       ? getDailyRecordForm(existingRecord)
       : getEmptyDailyRecordForm(recordDate || getTodayDateInput());
+    if (!existingRecord) {
+      const previousRecordDate = addDays(nextForm.record_date || recordDate || getTodayDateInput(), -1);
+      const previousRecord = dailyRecords.find((item) => item.record_date === previousRecordDate) ?? null;
+      const previousLargestEntry = getLargestDailyRecordTextbookEntry(previousRecord?.todays_content);
+      if (previousLargestEntry) {
+        nextForm = {
+          ...nextForm,
+          textbook_entries: [createDailyRecordTextbookRow(previousLargestEntry.book, String(previousLargestEntry.lesson))],
+        };
+      }
+    }
     setDailyRecordForm(nextForm);
     setDailyRecordDate(nextForm.record_date || recordDate || getTodayDateInput());
     setDailyRecordsMsg("");
@@ -4693,6 +5123,8 @@ export default function AdminConsole({
     setDailyRecordModalOpen(false);
     setDailyRecordSaving(false);
     setDailyRecordForm(getEmptyDailyRecordForm(dailyRecordDate || getTodayDateInput()));
+    setDailyRecordAnnouncementTitleDraft("");
+    setDailyRecordAnnouncementDraft("");
   }
 
   function updateDailyRecordPlanDraft(recordDate, field, value) {
@@ -4713,6 +5145,63 @@ export default function AdminConsole({
     }));
   }
 
+  function updateDailyRecordTextbookEntry(tempId, patch) {
+    setDailyRecordForm((prev) => ({
+      ...prev,
+      textbook_entries: prev.textbook_entries.map((item) => {
+        if (item.tempId !== tempId) return item;
+        const nextBook = patch.book ?? item.book;
+        const nextLesson = patch.lesson ?? item.lesson;
+        const availableOptions = new Set(getIrodoriCanDoOptions(nextBook, nextLesson));
+        const nextCandoIds = (patch.cando_ids ?? item.cando_ids).filter((candoId) => availableOptions.has(String(candoId)));
+        return {
+          ...item,
+          ...patch,
+          textbook: IRODORI_TEXTBOOK_VALUE,
+          book: nextBook,
+          lesson: nextLesson,
+          cando_ids: nextCandoIds,
+        };
+      }),
+    }));
+  }
+
+  function toggleDailyRecordCanDo(tempId, candoId) {
+    setDailyRecordForm((prev) => ({
+      ...prev,
+      textbook_entries: prev.textbook_entries.map((item) => {
+        if (item.tempId !== tempId) return item;
+        const current = new Set(item.cando_ids);
+        if (current.has(candoId)) {
+          current.delete(candoId);
+        } else {
+          current.add(candoId);
+        }
+        return {
+          ...item,
+          cando_ids: Array.from(current).sort((a, b) => Number(a) - Number(b)),
+        };
+      }),
+    }));
+  }
+
+  function addDailyRecordTextbookEntry() {
+    setDailyRecordForm((prev) => ({
+      ...prev,
+      textbook_entries: [...prev.textbook_entries, createDailyRecordTextbookRow()],
+    }));
+  }
+
+  function removeDailyRecordTextbookEntry(tempId) {
+    setDailyRecordForm((prev) => {
+      const nextEntries = prev.textbook_entries.filter((item) => item.tempId !== tempId);
+      return {
+        ...prev,
+        textbook_entries: nextEntries.length ? nextEntries : [createDailyRecordTextbookRow()],
+      };
+    });
+  }
+
   function addDailyRecordCommentRow() {
     setDailyRecordForm((prev) => ({
       ...prev,
@@ -4730,7 +5219,7 @@ export default function AdminConsole({
     });
   }
 
-  async function saveDailyRecord() {
+  async function saveDailyRecord({ announcementAction = null } = {}) {
     if (!activeSchoolId) {
       setDailyRecordsMsg("Select a school.");
       return;
@@ -4739,12 +5228,20 @@ export default function AdminConsole({
       setDailyRecordsMsg("Date is required.");
       return;
     }
+    if (announcementAction && !dailyRecordAnnouncementTitleDraft.trim()) {
+      setDailyRecordsMsg("Announcement title is required.");
+      return;
+    }
+    if (announcementAction && !dailyRecordAnnouncementDraft.trim()) {
+      setDailyRecordsMsg("Announcement draft is empty.");
+      return;
+    }
     setDailyRecordSaving(true);
     setDailyRecordsMsg("");
     const payload = {
       school_id: activeSchoolId,
       record_date: dailyRecordForm.record_date,
-      todays_content: dailyRecordForm.todays_content.trim() || null,
+      todays_content: serializeDailyRecordContent(dailyRecordForm),
       updated_at: new Date().toISOString(),
       created_by: session?.user?.id ?? null,
     };
@@ -4775,6 +5272,7 @@ export default function AdminConsole({
       }
       recordId = data?.id ?? "";
     }
+    setDailyRecordForm((prev) => ({ ...prev, id: recordId }));
 
     const { error: deleteError } = await supabase
       .from("daily_record_student_comments")
@@ -4806,9 +5304,80 @@ export default function AdminConsole({
       }
     }
 
+    if (announcementAction === "send") {
+      const nowIso = new Date().toISOString();
+      const { error: closePrevError } = await supabase
+        .from("announcements")
+        .update({ end_at: nowIso })
+        .eq("school_id", activeSchoolId)
+        .like("title", "Exam Syllabus (%)")
+        .is("end_at", null);
+      if (closePrevError) {
+        console.error("daily record announcement close previous error:", closePrevError);
+        const failureMessage = `Record saved, but the previous syllabus announcement could not be closed: ${closePrevError.message}`;
+        setDailyRecordSaving(false);
+        await fetchDailyRecords();
+        setDailyRecordsMsg(failureMessage);
+        return;
+      }
+    }
+
+    if (announcementAction === "send") {
+      const nowIso = new Date().toISOString();
+      const announcementPayload = {
+        school_id: activeSchoolId,
+        title: dailyRecordAnnouncementTitleDraft.trim(),
+        body: dailyRecordAnnouncementDraft.trim(),
+        publish_at: nowIso,
+        end_at: null,
+        created_by: session?.user?.id ?? null,
+      };
+      const { error: announcementError } = await supabase
+        .from("announcements")
+        .insert(announcementPayload);
+      if (announcementError) {
+        console.error("daily record announcement create error:", announcementError);
+        const failureMessage = `Record saved, but the announcement could not be sent: ${announcementError.message}`;
+        setDailyRecordSaving(false);
+        await fetchDailyRecords();
+        setDailyRecordsMsg(failureMessage);
+        return;
+      }
+    } else if (announcementAction === "edit") {
+      if (!dailyRecordExistingAnnouncement?.id) {
+        setDailyRecordSaving(false);
+        setDailyRecordsMsg("No existing syllabus announcement was found to edit.");
+        return;
+      }
+      const { error: announcementError } = await supabase
+        .from("announcements")
+        .update({
+          title: dailyRecordAnnouncementTitleDraft.trim(),
+          body: dailyRecordAnnouncementDraft.trim(),
+        })
+        .eq("id", dailyRecordExistingAnnouncement.id);
+      if (announcementError) {
+        console.error("daily record announcement edit error:", announcementError);
+        const failureMessage = `Record saved, but the announcement could not be updated: ${announcementError.message}`;
+        setDailyRecordSaving(false);
+        await fetchDailyRecords();
+        setDailyRecordsMsg(failureMessage);
+        return;
+      }
+    }
+
     setDailyRecordSaving(false);
     setDailyRecordModalOpen(false);
     setDailyRecordDate(dailyRecordForm.record_date);
+    setDailyRecordAnnouncementTitleDraft("");
+    setDailyRecordAnnouncementDraft("");
+    setDailyRecordsMsg(
+      announcementAction === "send"
+        ? "Daily record saved and announcement sent."
+        : announcementAction === "edit"
+          ? "Daily record saved and announcement updated."
+          : ""
+    );
     await fetchDailyRecords();
   }
 
@@ -4827,7 +5396,7 @@ export default function AdminConsole({
       mini_test_1: draft.mini_test_1.trim() || null,
       mini_test_2: draft.mini_test_2.trim() || null,
       special_test_1: draft.special_test_1.trim() || null,
-      special_test_2: draft.special_test_2.trim() || null,
+      special_test_2: null,
       updated_at: new Date().toISOString(),
       created_by: session?.user?.id ?? null,
     };
@@ -5158,12 +5727,20 @@ export default function AdminConsole({
   }, [activeSchoolId, activeTab]);
 
   async function fetchAnnouncements() {
+    const schoolIdSnapshot = activeSchoolIdRef.current;
+    if (!schoolIdSnapshot) {
+      setAnnouncements([]);
+      setAnnouncementMsg("");
+      return;
+    }
     setAnnouncementMsg("Loading...");
     const { data, error } = await supabase
       .from("announcements")
       .select("id, title, body, publish_at, end_at, created_at")
+      .eq("school_id", schoolIdSnapshot)
       .order("created_at", { ascending: false })
       .limit(200);
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
     if (error) {
       console.error("announcements fetch error:", error);
       setAnnouncements([]);
@@ -5200,6 +5777,7 @@ export default function AdminConsole({
       return;
     }
     setAnnouncementForm({ title: "", body: "", publish_at: formatDateTimeInput(new Date()), end_at: "" });
+    setAnnouncementCreateOpen(false);
     setAnnouncementMsg("Announcement created.");
     fetchAnnouncements();
   }
@@ -5219,6 +5797,7 @@ export default function AdminConsole({
 
   function startEditAnnouncement(announcement) {
     if (!announcement?.id) return;
+    setAnnouncementMsg("");
     setEditingAnnouncementId(announcement.id);
     setEditingAnnouncementForm({
       title: announcement.title ?? "",
@@ -5231,6 +5810,19 @@ export default function AdminConsole({
   function cancelEditAnnouncement() {
     setEditingAnnouncementId("");
     setEditingAnnouncementForm({ title: "", body: "", publish_at: "", end_at: "" });
+  }
+
+  function openCreateAnnouncementModal() {
+    setAnnouncementMsg("");
+    setAnnouncementForm((current) => ({
+      ...current,
+      publish_at: current.publish_at || formatDateTimeInput(new Date()),
+    }));
+    setAnnouncementCreateOpen(true);
+  }
+
+  function closeCreateAnnouncementModal() {
+    setAnnouncementCreateOpen(false);
   }
 
   async function saveAnnouncementEdits() {
@@ -5259,6 +5851,7 @@ export default function AdminConsole({
       return;
     }
     cancelEditAnnouncement();
+    setAnnouncementMsg("Announcement updated.");
     fetchAnnouncements();
   }
 
@@ -9643,7 +10236,7 @@ export default function AdminConsole({
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div>
               <div className="admin-title">Schedule & Record</div>
-              <div className="admin-subtitle">Track what was covered each day, planned mini/special tests, and student-specific comments.</div>
+              <div className="admin-subtitle">Track what was covered each day, planned tests, and student-specific comments.</div>
             </div>
             <button className="btn" onClick={() => fetchDailyRecords()}>Refresh</button>
           </div>
@@ -9674,65 +10267,88 @@ export default function AdminConsole({
                   <th>Date</th>
                   <th>Today's Content</th>
                   <th>Student Comments</th>
-                  <th>Mini Test 1</th>
-                  <th>Mini Test 2</th>
-                  <th>Special Test 1</th>
-                  <th>Special Test 2</th>
-                  <th>Open Record</th>
+                  <th>Test 1</th>
+                  <th>Test 2</th>
+                  <th>Test 3</th>
                   <th>Save Plan</th>
                 </tr>
               </thead>
               <tbody>
-                {scheduleRecordRows.map(({ recordDate, record, draft }) => (
-                  <tr key={record?.id ?? recordDate} data-daily-record-date={recordDate}>
+                {scheduleRecordRows.map(({ recordDate, record, draft }) => {
+                  const display = scheduleRecordDisplayByDate[recordDate] ?? {
+                    isConfirmed: false,
+                    mini_test_1: draft.mini_test_1,
+                    mini_test_2: draft.mini_test_2,
+                    special_test_1: draft.special_test_1,
+                  };
+                  return (
+                  <tr
+                    key={record?.id ?? recordDate}
+                    data-daily-record-date={recordDate}
+                    style={{ cursor: "pointer" }}
+                    onClick={(event) => {
+                      if (event.target.closest("input, textarea, select, button, a, label")) return;
+                      openDailyRecordModal(record, recordDate);
+                    }}
+                  >
                     <td>{formatDateFull(recordDate)}</td>
-                    <td>{record?.todays_content ? (record.todays_content.length > 140 ? `${record.todays_content.slice(0, 140)}...` : record.todays_content) : "-"}</td>
+                    <td>
+                      {record?.todays_content
+                        ? (() => {
+                            const summary = summarizeDailyRecordContent(record.todays_content);
+                            return summary.length > 140 ? `${summary.slice(0, 140)}...` : summary;
+                          })()
+                        : "-"}
+                    </td>
                     <td>{record ? summarizeDailyRecordComments(record) : "-"}</td>
                     <td>
-                      <input
-                        value={draft.mini_test_1}
-                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_1", e.target.value)}
-                        placeholder="Plan"
-                      />
+                      {display.isConfirmed ? (
+                        <span>{display.mini_test_1}</span>
+                      ) : (
+                        <input
+                          className="daily-record-plan-input"
+                          value={display.mini_test_1}
+                          onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_1", e.target.value)}
+                          placeholder="Plan"
+                        />
+                      )}
                     </td>
                     <td>
-                      <input
-                        value={draft.mini_test_2}
-                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
-                        placeholder="Plan"
-                      />
+                      {display.isConfirmed ? (
+                        <span>{display.mini_test_2}</span>
+                      ) : (
+                        <input
+                          className="daily-record-plan-input"
+                          value={display.mini_test_2}
+                          onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
+                          placeholder="Plan"
+                        />
+                      )}
                     </td>
                     <td>
-                      <input
-                        value={draft.special_test_1}
-                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
-                        placeholder="Plan"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={draft.special_test_2}
-                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_2", e.target.value)}
-                        placeholder="Plan"
-                      />
-                    </td>
-                    <td>
-                      <button className="btn" type="button" onClick={() => openDailyRecordModal(record, recordDate)}>
-                        Open Record
-                      </button>
+                      {display.isConfirmed ? (
+                        <span>{display.special_test_1}</span>
+                      ) : (
+                        <input
+                          className="daily-record-plan-input"
+                          value={display.special_test_1}
+                          onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
+                          placeholder="Plan"
+                        />
+                      )}
                     </td>
                     <td>
                       <button
                         className="btn"
                         type="button"
                         onClick={() => saveDailyRecordPlan(recordDate)}
-                        disabled={dailyRecordPlanSavingDate === recordDate}
+                        disabled={display.isConfirmed || dailyRecordPlanSavingDate === recordDate}
                       >
-                        {dailyRecordPlanSavingDate === recordDate ? "Saving..." : "Save Plan"}
+                        {display.isConfirmed ? "Confirmed" : dailyRecordPlanSavingDate === recordDate ? "Saving..." : "Save Plan"}
                       </button>
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
@@ -9847,50 +10463,9 @@ export default function AdminConsole({
               <div className="admin-title">Announcements</div>
               <div className="admin-subtitle">Create announcements and send them to students.</div>
             </div>
-            <button className="btn" onClick={() => fetchAnnouncements()}>Refresh</button>
-          </div>
-
-          <div className="admin-form" style={{ marginTop: 10 }}>
-            <div className="field">
-              <label>Title</label>
-              <input
-                value={announcementForm.title}
-                onChange={(e) => setAnnouncementForm((s) => ({ ...s, title: e.target.value }))}
-                placeholder="Announcement title"
-              />
-            </div>
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label>Message</label>
-              <textarea
-                value={announcementForm.body}
-                onChange={(e) => setAnnouncementForm((s) => ({ ...s, body: e.target.value }))}
-                placeholder="Write your message here..."
-                rows={4}
-              />
-            </div>
-            <div className="field small">
-              <label>Publish At</label>
-              <input
-                type="datetime-local"
-                step="300"
-                value={announcementForm.publish_at}
-                onChange={(e) => setAnnouncementForm((s) => ({ ...s, publish_at: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>End At</label>
-              <input
-                type="datetime-local"
-                step="300"
-                value={announcementForm.end_at}
-                onChange={(e) => setAnnouncementForm((s) => ({ ...s, end_at: e.target.value }))}
-              />
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button className="btn btn-primary" type="button" onClick={createAnnouncement}>
-                Create Announcement
-              </button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={openCreateAnnouncementModal}>Create Announcement</button>
+              <button className="btn" onClick={() => fetchAnnouncements()}>Refresh</button>
             </div>
           </div>
 
@@ -9911,66 +10486,14 @@ export default function AdminConsole({
                 {announcements.map((a) => (
                   <tr key={a.id}>
                     <td>{formatDateTime(a.created_at)}</td>
+                    <td>{a.title}</td>
+                    <td>{a.body}</td>
+                    <td>{formatDateTime(a.publish_at)}</td>
+                    <td>{a.end_at ? formatDateTime(a.end_at) : ""}</td>
                     <td>
-                      {editingAnnouncementId === a.id ? (
-                        <input
-                          value={editingAnnouncementForm.title}
-                          onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, title: e.target.value }))}
-                        />
-                      ) : (
-                        a.title
-                      )}
-                    </td>
-                    <td>
-                      {editingAnnouncementId === a.id ? (
-                        <textarea
-                          value={editingAnnouncementForm.body}
-                          onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, body: e.target.value }))}
-                          rows={3}
-                        />
-                      ) : (
-                        a.body
-                      )}
-                    </td>
-                    <td>
-                      {editingAnnouncementId === a.id ? (
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={editingAnnouncementForm.publish_at}
-                          onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, publish_at: e.target.value }))}
-                        />
-                      ) : (
-                        formatDateTime(a.publish_at)
-                      )}
-                    </td>
-                    <td>
-                      {editingAnnouncementId === a.id ? (
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={editingAnnouncementForm.end_at}
-                          onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, end_at: e.target.value }))}
-                        />
-                      ) : (
-                        a.end_at ? formatDateTime(a.end_at) : ""
-                      )}
-                    </td>
-                    <td>
-                      {editingAnnouncementId === a.id ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button className="btn btn-primary" onClick={saveAnnouncementEdits}>
-                            Save
-                          </button>
-                          <button className="btn" onClick={cancelEditAnnouncement}>
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button className="btn" onClick={() => startEditAnnouncement(a)}>
-                          Edit
-                        </button>
-                      )}
+                      <button className="btn" onClick={() => startEditAnnouncement(a)}>
+                        Edit
+                      </button>
                     </td>
                     <td>
                       <button className="btn btn-danger" onClick={() => deleteAnnouncement(a.id)}>
@@ -9983,6 +10506,114 @@ export default function AdminConsole({
             </table>
           </div>
           <div className="admin-msg">{announcementMsg}</div>
+
+          {announcementCreateOpen ? (
+            <div className="admin-modal-overlay" onClick={closeCreateAnnouncementModal}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Create Announcement</div>
+                  <button className="admin-modal-close" onClick={closeCreateAnnouncementModal} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+                <div className="admin-form" style={{ marginTop: 10 }}>
+                  <div className="field">
+                    <label>Title</label>
+                    <input
+                      value={announcementForm.title}
+                      onChange={(e) => setAnnouncementForm((s) => ({ ...s, title: e.target.value }))}
+                      placeholder="Announcement title"
+                    />
+                  </div>
+                  <div className="field" style={{ gridColumn: "1 / -1" }}>
+                    <label>Message</label>
+                    <textarea
+                      value={announcementForm.body}
+                      onChange={(e) => setAnnouncementForm((s) => ({ ...s, body: e.target.value }))}
+                      placeholder="Write your message here..."
+                      rows={6}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Publish At</label>
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={announcementForm.publish_at}
+                      onChange={(e) => setAnnouncementForm((s) => ({ ...s, publish_at: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>End At</label>
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={announcementForm.end_at}
+                      onChange={(e) => setAnnouncementForm((s) => ({ ...s, end_at: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12, display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <button className="btn" onClick={closeCreateAnnouncementModal}>Cancel</button>
+                  <button className="btn btn-primary" onClick={createAnnouncement}>Create Announcement</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {editingAnnouncementId ? (
+            <div className="admin-modal-overlay" onClick={cancelEditAnnouncement}>
+              <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Edit Announcement</div>
+                  <button className="admin-modal-close" onClick={cancelEditAnnouncement} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+                <div className="admin-form" style={{ marginTop: 10 }}>
+                  <div className="field">
+                    <label>Title</label>
+                    <input
+                      value={editingAnnouncementForm.title}
+                      onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, title: e.target.value }))}
+                      placeholder="Announcement title"
+                    />
+                  </div>
+                  <div className="field" style={{ gridColumn: "1 / -1" }}>
+                    <label>Message</label>
+                    <textarea
+                      value={editingAnnouncementForm.body}
+                      onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, body: e.target.value }))}
+                      placeholder="Write your message here..."
+                      rows={6}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>Publish At</label>
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={editingAnnouncementForm.publish_at}
+                      onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, publish_at: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>End At</label>
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={editingAnnouncementForm.end_at}
+                      onChange={(e) => setEditingAnnouncementForm((s) => ({ ...s, end_at: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12, display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <button className="btn" onClick={cancelEditAnnouncement}>Cancel</button>
+                  <button className="btn btn-primary" onClick={saveAnnouncementEdits}>Save</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
         ) : null}
 
@@ -11975,111 +12606,355 @@ export default function AdminConsole({
         </>
         ) : null}
 
-        {dailyRecordModalOpen ? (
+        {dailyRecordModalOpen && typeof document !== "undefined" ? createPortal((
           <div
-            className="admin-modal-overlay"
+            className="daily-record-modal-overlay"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.52)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 9999,
+              padding: 20,
+              overflowY: "auto",
+            }}
             onClick={() => {
               if (dailyRecordSaving) return;
               closeDailyRecordModal();
             }}
           >
-            <div className="admin-modal invite-modal daily-record-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="admin-modal-header">
-                <div className="admin-title">Schedule & Record</div>
+            <div
+              className="daily-record-modal-shell"
+              style={{
+                width: "min(860px, 94vw)",
+                maxWidth: 860,
+                maxHeight: "calc(100vh - 40px)",
+                background: "#ffffff",
+                borderRadius: 12,
+                boxShadow: "0 24px 60px rgba(15, 23, 42, 0.24)",
+                padding: 0,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="daily-record-modal-topbar"
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                  margin: 0,
+                  padding: "14px 16px",
+                  background: "#d9e7d7",
+                  borderBottom: "1px solid #d1dbcf",
+                  flex: "0 0 auto",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 800,
+                    color: "#0f172a",
+                    paddingRight: 40,
+                  }}
+                >
+                  {`Daily Record${dailyRecordForm.record_date ? ` - ${formatDateFull(dailyRecordForm.record_date)}` : ""}`}
+                </div>
                 <button
-                  className="admin-modal-close"
+                  type="button"
+                  aria-label="Close"
+                  style={{
+                    position: "absolute",
+                    top: 10,
+                    right: 12,
+                    border: 0,
+                    background: "transparent",
+                    color: "#333333",
+                    fontSize: 24,
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    padding: "0 2px",
+                    minWidth: 28,
+                    minHeight: 28,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
                   onClick={() => {
                     if (dailyRecordSaving) return;
                     closeDailyRecordModal();
                   }}
-                  aria-label="Close"
                 >
                   &times;
                 </button>
               </div>
 
-              <div className="admin-form" style={{ marginTop: 10 }}>
-                <div className="field">
-                  <label>Date</label>
-                  <input
-                    type="date"
-                    value={dailyRecordForm.record_date}
-                    onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, record_date: e.target.value }))}
-                  />
-                </div>
-                <div className="field" style={{ gridColumn: "1 / -1" }}>
-                  <label>Today's Content</label>
-                  <textarea
-                    rows={5}
-                    value={dailyRecordForm.todays_content}
-                    onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, todays_content: e.target.value }))}
-                    placeholder="Write what was covered in class today."
-                  />
-                </div>
-              </div>
-
-              <div className="daily-record-comments-section">
-                <div className="daily-record-comments-header">
-                  <div>
-                    <div className="admin-title" style={{ fontSize: 16 }}>Student Comments</div>
-                    <div className="admin-subtitle">Select one or more students and add notes for the day.</div>
-                  </div>
-                  <button className="btn" type="button" onClick={addDailyRecordCommentRow}>
-                    Add Student
-                  </button>
-                </div>
-
-                <div className="daily-record-comments-list">
-                  {dailyRecordForm.comments.map((item, index) => (
-                    <div key={item.tempId} className="daily-record-comment-row">
-                      <div className="daily-record-comment-fields">
-                        <div>
-                          <label>Student</label>
-                          <select
-                            value={item.student_id}
-                            onChange={(e) => updateDailyRecordComment(item.tempId, { student_id: e.target.value })}
-                          >
-                            <option value="">Select student</option>
-                            {activeStudents.map((student) => (
-                              <option key={student.id} value={student.id}>
-                                {student.display_name || student.email || student.id}{student.student_code ? ` (${student.student_code})` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label>Comment</label>
-                          <textarea
-                            rows={3}
-                            value={item.comment}
-                            onChange={(e) => updateDailyRecordComment(item.tempId, { comment: e.target.value })}
-                            placeholder="Add a comment about this student."
-                          />
-                        </div>
-                      </div>
-                      <div className="daily-record-comment-actions">
-                        <button className="btn" type="button" onClick={() => removeDailyRecordCommentRow(item.tempId)}>
-                          Remove
-                        </button>
-                      </div>
+              <div
+                className="daily-record-modal-body"
+                style={{
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 16,
+                  overflowY: "auto",
+                  flex: "1 1 auto",
+                  minHeight: 0,
+                }}
+              >
+                <div className="daily-record-modal-section">
+                  <div className="daily-record-modal-section-head">
+                    <div>
+                      <div className="daily-record-modal-section-title">Today&apos;s Content</div>
                     </div>
-                  ))}
+                    <button className="btn" type="button" onClick={addDailyRecordTextbookEntry}>
+                      Add Lesson
+                    </button>
+                  </div>
+                  <div className="daily-record-textbook-list">
+                    {dailyRecordForm.textbook_entries.map((entry, index) => {
+                      const candoOptions = getIrodoriCanDoOptions(entry.book, entry.lesson);
+                      return (
+                        <div key={entry.tempId} className="daily-record-textbook-row">
+                          <div className="daily-record-textbook-row-head">
+                            <button
+                              className="daily-record-textbook-remove-icon"
+                              type="button"
+                              onClick={() => removeDailyRecordTextbookEntry(entry.tempId)}
+                              aria-label="Remove lesson"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                          <div className="daily-record-textbook-grid">
+                            <div>
+                              <label>Textbook</label>
+                              <select
+                                value={entry.textbook}
+                                onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { textbook: e.target.value })}
+                              >
+                                <option value={IRODORI_TEXTBOOK_VALUE}>Irodori</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label>Book</label>
+                              <select
+                                value={entry.book}
+                                onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { book: e.target.value })}
+                              >
+                                {IRODORI_BOOK_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Lesson</label>
+                              <select
+                                value={entry.lesson}
+                                onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { lesson: e.target.value })}
+                              >
+                                {IRODORI_LESSON_OPTIONS.map((lesson) => (
+                                  <option key={`${entry.tempId}-lesson-${lesson}`} value={lesson}>
+                                    {lesson}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <div className="daily-record-cando-wrap">
+                            <label>Can-do</label>
+                            <div className="daily-record-cando-list">
+                              {candoOptions.map((candoId) => (
+                                <label key={`${entry.tempId}-cando-${candoId}`} className="daily-record-cando-option">
+                                  <input
+                                    type="checkbox"
+                                    checked={entry.cando_ids.includes(candoId)}
+                                    onChange={() => toggleDailyRecordCanDo(entry.tempId, candoId)}
+                                  />
+                                  <span>{candoId}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="field" style={{ marginTop: 16 }}>
+                    <label>Other Content</label>
+                    <textarea
+                      rows={1}
+                      className="daily-record-other-content"
+                      value={dailyRecordForm.free_writing}
+                      onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, free_writing: e.target.value }))}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {dailyRecordsMsg ? <div className="admin-msg">{dailyRecordsMsg}</div> : null}
+                <div className="daily-record-modal-section">
+                  <div className="daily-record-modal-section-head">
+                    <div>
+                      <div className="daily-record-modal-section-title">Student Comment</div>
+                    </div>
+                    <button className="btn" type="button" onClick={addDailyRecordCommentRow}>
+                      Add Student
+                    </button>
+                  </div>
 
-              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <button className="btn" onClick={closeDailyRecordModal} disabled={dailyRecordSaving}>
-                  Cancel
-                </button>
-                <button className="btn btn-primary" onClick={saveDailyRecord} disabled={dailyRecordSaving}>
-                  {dailyRecordSaving ? "Saving..." : "Save Record"}
-                </button>
+                  <div className="daily-record-comments-list">
+                    {dailyRecordForm.comments.map((item) => (
+                      <div key={item.tempId} className="daily-record-comment-row">
+                        <div className="daily-record-comment-row-head">
+                          <button
+                            className="daily-record-textbook-remove-icon"
+                            type="button"
+                            onClick={() => removeDailyRecordCommentRow(item.tempId)}
+                            aria-label="Remove student comment"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                        <div className="daily-record-comment-fields">
+                          <div>
+                            <label>Student</label>
+                            <select
+                              value={item.student_id}
+                              onChange={(e) => updateDailyRecordComment(item.tempId, { student_id: e.target.value })}
+                            >
+                              <option value="">Select student</option>
+                              {activeStudents.map((student) => (
+                                <option key={student.id} value={student.id}>
+                                  {student.display_name || student.email || student.id}{student.student_code ? ` (${student.student_code})` : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label>Comment</label>
+                            <textarea
+                              rows={3}
+                              value={item.comment}
+                              onChange={(e) => updateDailyRecordComment(item.tempId, { comment: e.target.value })}
+                              placeholder="Add a comment about this student."
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="daily-record-modal-section">
+                  <div className="daily-record-modal-section-head">
+                    <div>
+                      <div className="daily-record-modal-section-title">Tomorrow&apos;s Tests</div>
+                      <div className="admin-subtitle">Scheduled for {formatDateDots(dailyRecordTomorrowSessions.targetDate)}.</div>
+                    </div>
+                  </div>
+                  <div className="daily-record-upcoming-grid">
+                    <div>
+                      <div className="daily-record-upcoming-label">Scheduled tests</div>
+                      {dailyRecordTomorrowSessions.regular.length ? (
+                        <div className="daily-record-upcoming-list">
+                          {dailyRecordTomorrowSessions.regular.map((session) => (
+                            <div key={session.id} className="daily-record-upcoming-item">
+                              <span>{session.title}</span>
+                              <strong>{session.timeLabel || "-"}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="daily-record-upcoming-empty">No standard tests scheduled.</div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="daily-record-upcoming-label">Retake syllabus</div>
+                      {dailyRecordTomorrowSessions.retake.length ? (
+                        <div className="daily-record-upcoming-list">
+                          {dailyRecordTomorrowSessions.retake.map((session) => (
+                            <div key={session.id} className="daily-record-upcoming-item">
+                              <span>{session.title}</span>
+                              <strong>{session.timeLabel || "-"}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="daily-record-upcoming-empty">No retake sessions scheduled.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="daily-record-modal-section">
+                  <div className="daily-record-modal-section-head">
+                    <div>
+                      <div className="daily-record-modal-section-title">Announcement Draft</div>
+                      <div className="admin-subtitle">This message will be sent immediately and remain active with no end date until the next syllabus announcement replaces it.</div>
+                    </div>
+                  </div>
+                    <div className="admin-form" style={{ marginTop: 0 }}>
+                      <div className="field">
+                        <label>Title</label>
+                        <input
+                          className="daily-record-announcement-title"
+                          value={dailyRecordAnnouncementTitleDraft}
+                          onChange={(e) => setDailyRecordAnnouncementTitleDraft(e.target.value)}
+                          placeholder="Announcement title"
+                        />
+                    </div>
+                    <div className="field" style={{ gridColumn: "1 / -1" }}>
+                      <label>Message</label>
+                      <textarea
+                        className="daily-record-announcement-draft"
+                        rows={10}
+                        value={dailyRecordAnnouncementDraft}
+                        onChange={(e) => setDailyRecordAnnouncementDraft(e.target.value)}
+                        placeholder="Write your message here..."
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {dailyRecordsMsg ? <div className="admin-msg">{dailyRecordsMsg}</div> : null}
+
+                <div className="daily-record-modal-actions">
+                  <button className="btn" onClick={closeDailyRecordModal} disabled={dailyRecordSaving}>
+                    Cancel
+                  </button>
+                  <button className="btn" onClick={() => saveDailyRecord()} disabled={dailyRecordSaving}>
+                    {dailyRecordSaving ? "Saving..." : "Save Record"}
+                  </button>
+                  {!dailyRecordExistingAnnouncement ? (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => saveDailyRecord({ announcementAction: "send" })}
+                      disabled={dailyRecordSaving}
+                    >
+                      {dailyRecordSaving ? "Saving..." : "Save Record and Send Announcement"}
+                    </button>
+                  ) : null}
+                  {dailyRecordExistingAnnouncement && dailyRecordAnnouncementNeedsEdit ? (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => saveDailyRecord({ announcementAction: "edit" })}
+                      disabled={dailyRecordSaving}
+                    >
+                      {dailyRecordSaving ? "Saving..." : "Save Record and Edit Announcements"}
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
-        ) : null}
+        ), document.body) : null}
 
         {studentInfoOpen && selectedStudent ? (
           <div

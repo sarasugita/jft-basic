@@ -2739,11 +2739,238 @@ body { padding: 0; }
   width: min(980px, 95vw);
 }
 
+.daily-record-modal-overlay {
+  background: rgba(15, 23, 42, 0.52);
+  z-index: 240;
+}
+
 .daily-record-modal {
   max-width: 1040px;
   width: min(1040px, 96vw);
   max-height: calc(100vh - 40px);
-  overflow-y: auto;
+}
+
+.daily-record-modal-shell {
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.daily-record-modal-shell .admin-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 16px;
+  background: #d9e7d7;
+  border-bottom: 1px solid #d1dbcf;
+}
+
+.daily-record-modal-shell .admin-title {
+  font-size: 16px;
+}
+
+.daily-record-modal-shell .admin-modal-close {
+  padding: 0 2px;
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.daily-record-modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.daily-record-modal-section {
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 16px;
+}
+
+.daily-record-modal-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.daily-record-modal-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.daily-record-textbook-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.daily-record-textbook-row {
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px 14px 14px;
+}
+
+.daily-record-textbook-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.daily-record-textbook-remove-icon {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  min-width: 24px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.daily-record-textbook-remove-icon:hover {
+  color: #0f172a;
+}
+
+.daily-record-textbook-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.daily-record-textbook-grid label,
+.daily-record-cando-wrap > label {
+  display: block;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.daily-record-textbook-grid select {
+  width: 100%;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #ffffff;
+}
+
+.daily-record-cando-wrap {
+  margin-top: 14px;
+}
+
+.daily-record-cando-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.daily-record-cando-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dbe4ef;
+  border-radius: 999px;
+  background: #f8fafc;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.daily-record-upcoming-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.daily-record-upcoming-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.daily-record-upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.daily-record-upcoming-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.daily-record-upcoming-item strong {
+  color: #0f766e;
+  white-space: nowrap;
+}
+
+.daily-record-upcoming-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #64748b;
+  padding: 14px;
+}
+
+.daily-record-announcement-draft {
+  min-height: 220px;
+  font-family: inherit;
+  border-radius: 6px;
+}
+
+.daily-record-announcement-title {
+  border-radius: 6px !important;
+}
+
+.daily-record-other-content {
+  width: 100%;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #ffffff;
+  resize: vertical;
+  min-height: 42px;
+}
+
+.daily-record-modal-actions {
+  margin-top: 4px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .admin-modal:not(.daily-session-create-modal) .admin-modal-header {
@@ -2878,20 +3105,24 @@ body { padding: 0; }
 }
 
 .daily-record-comment-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #dbe4ef;
   border-radius: 12px;
-  background: #f8fafc;
-  padding: 12px;
+  background: #ffffff;
+  padding: 10px 14px 14px;
+}
+
+.daily-record-comment-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .daily-record-comment-fields {
   display: grid;
   grid-template-columns: minmax(220px, 280px) 1fr;
   gap: 12px;
-  flex: 1;
 }
 
 .daily-record-comment-fields label {
@@ -2904,15 +3135,15 @@ body { padding: 0; }
 .daily-record-comment-fields textarea {
   width: 100%;
   border: 1px solid var(--admin-control-border);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 10px 10px;
   font-size: 14px;
   font-family: inherit;
 }
 
-.daily-record-comment-actions {
-  display: flex;
-  align-items: flex-start;
+.daily-record-plan-input {
+  border-color: #cbd5e1 !important;
+  border-radius: 6px !important;
 }
 
 .ranking-empty-cell {
@@ -4239,6 +4470,14 @@ body { padding: 0; }
 
   .super-school-delete-actions {
     flex-direction: column;
+  }
+
+  .daily-record-upcoming-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-record-textbook-grid {
+    grid-template-columns: 1fr;
   }
 }
 
