@@ -3370,11 +3370,15 @@ function renderTestSelect(app) {
                             <tr class="score-section-total-row">
                               <td
                                 rowspan="${rowSpan}"
-                                class="score-section-group-cell score-detail-trigger-cell score-detail-cell-section"
+                                class="score-section-group-cell score-detail-trigger-cell score-detail-section-trigger score-detail-cell-section"
                                 data-score-drilldown-kind="section"
                                 data-score-drilldown-value="${escapeHtml(group.mainSection)}"
                               >${mainLabel}</td>
-                              <td class="score-detail-cell-subsection"><span class="score-detail-total-label">Total</span></td>
+                              <td
+                                class="score-detail-cell-subsection score-detail-trigger-cell score-detail-total-trigger"
+                                data-score-drilldown-kind="section"
+                                data-score-drilldown-value="${escapeHtml(group.mainSection)}"
+                              ><span class="score-detail-total-label">Total</span></td>
                               <td class="score-detail-cell-total">${group.total}</td>
                               <td class="score-detail-cell-correct ${isGroupBelowPass ? "score-detail-below-pass" : ""}">${group.correct}</td>
                               <td class="score-detail-cell-rate ${isGroupBelowPass ? "score-detail-below-pass" : ""}">${(group.rate * 100).toFixed(1)}%</td>
@@ -3385,11 +3389,13 @@ function renderTestSelect(app) {
                               (subSection) => {
                                 const isSubSectionBelowPass = subSection.rate < scorePassRate;
                                 return `
-                                <tr>
+                                <tr
+                                  class="score-detail-subsection-row score-detail-subsection-trigger"
+                                  data-score-drilldown-kind="subSection"
+                                  data-score-drilldown-value="${escapeHtml(subSection.section)}"
+                                >
                                   <td
-                                    class="score-detail-trigger-cell score-detail-cell-subsection"
-                                    data-score-drilldown-kind="subSection"
-                                    data-score-drilldown-value="${escapeHtml(subSection.section)}"
+                                    class="score-detail-cell-subsection"
                                   >
                                     <button
                                       class="score-detail-link score-detail-link-subsection"

@@ -6574,10 +6574,22 @@ export default function AdminConsole({
     if (error) {
       console.error("delete attempt error:", error);
       setMsg(`Delete failed: ${error.message}`);
+      setStudentAttemptsMsg(`Delete failed: ${error.message}`);
       return;
+    }
+    setAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
+    setStudentAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
+    if (selectedAttemptObj?.id === attemptId || selectedId === attemptId) {
+      setAttemptDetailOpen(false);
+      setSelectedAttemptObj(null);
+      setSelectedId(null);
     }
     if (selectedId === attemptId) setSelectedId(null);
     setMsg(`Deleted: ${attemptId}`);
+    setStudentAttemptsMsg(`Deleted: ${attemptId}`);
+    if (selectedStudentId) {
+      fetchStudentAttempts(selectedStudentId);
+    }
     runSearch();
   }
 
@@ -12638,6 +12650,13 @@ export default function AdminConsole({
                       onClick={() => exportSelectedAttemptCsv(selectedAttempt)}
                     >
                       Export CSV
+                    </button>
+                    <button
+                      className="btn btn-danger"
+                      type="button"
+                      onClick={() => deleteAttempt(selectedAttempt.id)}
+                    >
+                      Delete Attempt
                     </button>
                     <button
                       className="btn"
