@@ -4,9 +4,9 @@ body { padding: 0; }
 
 :root {
   --admin-text: #333333;
-  --admin-table-outline: #7F7F7F;
-  --admin-surface-outline: #7F7F7F;
-  --admin-control-border: #707070;
+  --admin-table-outline: #B1B1B1;
+  --admin-surface-outline: #B1B1B1;
+  --admin-control-border: #B1B1B1;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
@@ -85,6 +85,42 @@ body { padding: 0; }
   border-color: #5e8a34;
 }
 .btn:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(0,0,0,0.25); }
+
+.admin-compact-action-btn {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.admin-compact-action-btn svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.admin-icon-action-btn {
+  min-width: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.admin-icon-action-btn svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
 
 .admin-shell {
   display: flex;
@@ -613,10 +649,36 @@ body { padding: 0; }
 .admin-form .field.small { grid-column: span 1; }
 
 .attendance-filter-box {
-  background: #f8fafc;
+  background: #fff;
   border: 1px solid var(--admin-control-border);
   border-radius: 6px;
   padding: 10px;
+  box-shadow: none;
+}
+
+.attendance-filter-box.admin-form input,
+.attendance-filter-box.admin-form select,
+.attendance-filter-box.admin-form textarea,
+.attendance-filter-box .admin-form input,
+.attendance-filter-box .admin-form select,
+.attendance-filter-box .admin-form textarea {
+  border: 1px solid #e1e8ef;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.attendance-filter-box.admin-form input:focus,
+.attendance-filter-box.admin-form select:focus,
+.attendance-filter-box.admin-form textarea:focus,
+.attendance-filter-box .admin-form input:focus,
+.attendance-filter-box .admin-form select:focus,
+.attendance-filter-box .admin-form textarea:focus {
+  border-color: #d7e1ea;
+  outline: none;
+}
+
+.attendance-filter-label {
+  font-size: 13px;
+  line-height: 1.2;
 }
 
 .attendance-control-row {
@@ -2162,13 +2224,13 @@ body { padding: 0; }
 }
 
 .student-warning-launch-btn {
-  background: #c2410c;
+  background: #dc2626;
   color: #fff;
 }
 
 .student-warning-launch-btn:hover,
 .student-warning-launch-btn:focus-visible {
-  background: #9a3412;
+  background: #b91c1c;
   color: #fff;
 }
 
@@ -2205,7 +2267,7 @@ body { padding: 0; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #f59e0b;
+  background: #dc2626;
   color: #fff;
   font-size: 12px;
   font-weight: 900;
@@ -2219,8 +2281,12 @@ body { padding: 0; }
 }
 
 .student-list-filter-label {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
+}
+
+.attendance-open-day-btn {
+  border-radius: 5px;
 }
 
 .session-analysis-list {
@@ -3336,6 +3402,16 @@ body { padding: 0; }
   gap: 10px;
 }
 
+.ranking-refresh-btn {
+  color: #fff;
+  flex: 0 0 auto;
+}
+
+.ranking-refresh-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
 .ranking-period-title {
   font-size: 16px;
   font-weight: 800;
@@ -4190,26 +4266,43 @@ body { padding: 0; }
 }
 
 .super-library-tabs {
-  display: flex;
-  gap: 8px;
+  display: inline-flex;
+  gap: 4px;
   flex-wrap: wrap;
+  padding: 4px;
+  border: 1px solid #c5cfdb;
+  border-radius: 7px;
+  background: #e7edf4;
 }
+
+.admin-upload-cta-btn {
+  padding: 10px 16px;
+  font-size: 14px;
+}
+
+.admin-upload-cta-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
 
 .super-library-tab {
   appearance: none;
-  border: 1px solid var(--admin-control-border);
-  background: #ffffff;
-  color: var(--admin-text);
+  border: 0;
+  background: transparent;
+  color: #445061;
   font-weight: 800;
-  font-size: 14px;
-  padding: 9px 14px;
-  border-radius: 2px;
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 4px;
   cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .super-library-tab.active {
-  background: #d9e7d7;
-  border-color: #c4d6c0;
+  background: #ffffff;
+  color: #1f2937;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
 }
 
 .super-library-sections {

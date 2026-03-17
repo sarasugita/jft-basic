@@ -3451,10 +3451,20 @@ export default function AdminConsole({
     return modelTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
   }, [modelTests, modelUploadCategory]);
 
+  const groupedModelUploadTests = useMemo(
+    () => buildCategories(filteredModelUploadTests, DEFAULT_MODEL_CATEGORY),
+    [filteredModelUploadTests],
+  );
+
   const filteredDailyUploadTests = useMemo(() => {
     if (!dailyUploadCategory) return dailyQuestionSets;
     return dailyQuestionSets.filter((t) => String(t.title ?? "").trim() === dailyUploadCategory);
   }, [dailyQuestionSets, dailyUploadCategory]);
+
+  const groupedDailyUploadTests = useMemo(
+    () => buildCategories(filteredDailyUploadTests),
+    [filteredDailyUploadTests],
+  );
 
   const selectedDailyCategory = useMemo(() => {
     if (!dailyCategories.length) return null;
@@ -6721,6 +6731,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
       ...current,
       problem_set_id: session.problem_set_id ?? current.problem_set_id,
       title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
+      session_date: session.ends_at
+        ? getBangladeshDateInput(session.ends_at)
+        : session.starts_at
+          ? getBangladeshDateInput(session.starts_at)
+          : current.session_date,
+      start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
+      close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
       starts_at: "",
       ends_at: "",
       time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
@@ -7000,12 +7017,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const sessionDate = testSessionForm.session_date;
     const startTime = testSessionForm.start_time;
     const closeTime = testSessionForm.close_time;
-    const startsAtInput = modelConductMode === "retake"
-      ? testSessionForm.starts_at
-      : combineBangladeshDateTime(sessionDate, startTime);
-    const endsAt = modelConductMode === "retake"
-      ? testSessionForm.ends_at
-      : combineBangladeshDateTime(sessionDate, closeTime);
+    const startsAtInput = combineBangladeshDateTime(sessionDate, startTime)
+      || (modelConductMode === "retake" ? testSessionForm.starts_at : "");
+    const endsAt = combineBangladeshDateTime(sessionDate, closeTime)
+      || (modelConductMode === "retake" ? testSessionForm.ends_at : "");
     const passRate = Number(testSessionForm.pass_rate);
     if (!problemSetId) {
       setTestSessionsMsg("SetID is required.");
@@ -7015,12 +7030,16 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setTestSessionsMsg("Test Title is required.");
       return;
     }
-    if (modelConductMode !== "retake" && !sessionDate) {
+    if (!sessionDate) {
       setTestSessionsMsg("Date is required.");
       return;
     }
-    if (modelConductMode !== "retake" && !startTime) {
+    if (!startTime) {
       setTestSessionsMsg("Start time is required.");
+      return;
+    }
+    if (!closeTime) {
+      setTestSessionsMsg("Close time is required.");
       return;
     }
     if (!endsAt) {
@@ -7117,12 +7136,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const sessionDate = dailySessionForm.session_date;
     const startTime = dailySessionForm.start_time;
     const closeTime = dailySessionForm.close_time;
-    const startsAtInput = dailyConductMode === "retake"
-      ? dailySessionForm.starts_at
-      : combineBangladeshDateTime(sessionDate, startTime);
-    const endsAtInput = dailyConductMode === "retake"
-      ? dailySessionForm.ends_at
-      : combineBangladeshDateTime(sessionDate, closeTime);
+    const startsAtInput = combineBangladeshDateTime(sessionDate, startTime)
+      || (dailyConductMode === "retake" ? dailySessionForm.starts_at : "");
+    const endsAtInput = combineBangladeshDateTime(sessionDate, closeTime)
+      || (dailyConductMode === "retake" ? dailySessionForm.ends_at : "");
     const title = dailySessionForm.title.trim();
     const endsAt = endsAtInput;
     const passRate = Number(dailySessionForm.pass_rate);
@@ -7134,15 +7151,19 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setDailySessionsMsg("Test Title is required.");
       return;
     }
-    if (dailyConductMode !== "retake" && !sessionDate) {
+    if (!sessionDate) {
       setDailySessionsMsg("Date is required.");
+      return;
+    }
+    if (!startTime) {
+      setDailySessionsMsg("Start time is required.");
       return;
     }
     if (!endsAt) {
       setDailySessionsMsg("End time is required.");
       return;
     }
-    if (dailyConductMode !== "retake" && !closeTime) {
+    if (!closeTime) {
       setDailySessionsMsg("Close time is required.");
       return;
     }
@@ -10235,12 +10256,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
     if (activeTab === "model") {
       if (sessionDetail.type === "mock" && sessionDetail.sessionId) return "Test Session Detail";
       if (modelSubTab === "results") return "Model Test Results";
+      if (modelSubTab === "upload") return "Upload Question Set";
       if (modelSubTab === "sets") return "Sets";
       return "Test Sessions";
     }
     if (activeTab === "daily") {
       if (sessionDetail.type === "daily" && sessionDetail.sessionId) return "Daily Test Session Detail";
       if (dailySubTab === "results") return "Daily Results";
+      if (dailySubTab === "upload") return "Upload Question Set";
       if (dailySubTab === "create") return "Daily Tests";
       return "Daily Test Sessions";
     }
@@ -10540,11 +10563,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
         <div style={{ marginBottom: 12 }}>
           {!studentDetailOpen ? (
             <>
-              <div style={{ marginTop: 14 }}>
+              <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8, flexWrap: "wrap" }}>
                 <div className="admin-title">Student List</div>
-              </div>
-
-              <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn btn-primary student-list-primary-btn" onClick={() => setInviteOpen(true)}>
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  <span>Add New Student</span>
+                </button>
                 <button
                   className="btn student-list-primary-btn student-warning-launch-btn"
                   onClick={() => {
@@ -10557,12 +10583,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
                   <span>Warnings</span>
-                </button>
-                <button className="btn btn-primary student-list-primary-btn" onClick={() => setInviteOpen(true)}>
-                  <svg viewBox="0 0 20 20" aria-hidden="true">
-                    <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                  <span>Add New Student</span>
                 </button>
               </div>
 
@@ -11470,7 +11490,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </div>
                 <div className="field small">
                   <label>&nbsp;</label>
-                  <button className="btn btn-primary" type="button" onClick={() => openAttendanceDay(attendanceDate)}>
+                  <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => openAttendanceDay(attendanceDate)}>
                     Open Day
                   </button>
                 </div>
@@ -11485,7 +11505,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           <div style={{ marginTop: 18 }}>
             <div className="admin-form attendance-filter-box">
             <div className="field small">
-              <label>Filter (Rate &lt;)</label>
+              <label className="attendance-filter-label">Filter (Rate &lt;)</label>
               <input
                 type="number"
                 min="0"
@@ -11496,7 +11516,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               />
             </div>
             <div className="field small">
-              <label>Filter (Unexcused ≥)</label>
+              <label className="attendance-filter-label">Filter (Unexcused ≥)</label>
               <input
                 type="number"
                 min="0"
@@ -11506,7 +11526,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               />
             </div>
             <div className="field small">
-              <label>Range From</label>
+              <label className="attendance-filter-label">Range From</label>
               <input
                 type="date"
                 value={attendanceFilter.startDate}
@@ -11514,7 +11534,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               />
             </div>
             <div className="field small">
-              <label>Range To</label>
+              <label className="attendance-filter-label">Range To</label>
               <input
                 type="date"
                 value={attendanceFilter.endDate}
@@ -11594,33 +11614,54 @@ function openDailyRecordModal(record = null, recordDate = "") {
         {activeTab === "dailyRecord" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div className="admin-title">Schedule & Record</div>
-              <div className="admin-subtitle">Track what was covered each day, planned tests, and student-specific comments.</div>
+              <div className="attendance-control-row" style={{ marginTop: 0 }}>
+                <div className="admin-form">
+                  <div className="field">
+                    <label>Date</label>
+                    <input
+                      type="date"
+                      value={dailyRecordDate}
+                      onChange={(e) => setDailyRecordDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="field small">
+                    <label>&nbsp;</label>
+                    <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => openDailyRecordModal(null, dailyRecordDate)}>
+                      Open Record
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <button className="btn" onClick={() => fetchDailyRecords()}>Refresh</button>
-          </div>
-
-          <div className="attendance-control-row" style={{ marginTop: 10 }}>
-            <div className="admin-form">
-              <div className="field">
-                <label>Date</label>
-                <input
-                  type="date"
-                  value={dailyRecordDate}
-                  onChange={(e) => setDailyRecordDate(e.target.value)}
+            <button
+              className="btn admin-icon-action-btn"
+              aria-label="Refresh daily records"
+              title="Refresh daily records"
+              onClick={() => fetchDailyRecords()}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M16 10a6 6 0 1 1-1.76-4.24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
                 />
-              </div>
-              <div className="field small">
-                <label>&nbsp;</label>
-                <button className="btn btn-primary" type="button" onClick={() => openDailyRecordModal(null, dailyRecordDate)}>
-                  Open Record
-                </button>
-              </div>
-            </div>
+                <path
+                  d="M16 4.5v3.75h-3.75"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
           </div>
 
-          <div className="admin-table-wrap" style={{ marginTop: 12, maxHeight: "70vh" }} ref={dailyRecordTableWrapRef}>
+          <div className="admin-table-wrap" style={{ marginTop: 8, maxHeight: "70vh" }} ref={dailyRecordTableWrapRef}>
             <table className="admin-table" style={{ minWidth: 1360 }}>
               <thead>
                 <tr>
@@ -11718,14 +11759,22 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
         {activeTab === "ranking" ? (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <div className="admin-title">Ranking</div>
-              <div className="admin-subtitle">Set a date range for each ranking column, then refresh that column to recalculate average test percentages.</div>
+              <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" type="button" onClick={addRankingPeriod}>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M10 5v10M5 10h10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                Add Period
+              </button>
             </div>
-            <button className="btn btn-primary" type="button" onClick={addRankingPeriod}>
-              Add Period
-            </button>
           </div>
 
           <div className="admin-table-wrap" style={{ marginTop: 12 }}>
@@ -11752,12 +11801,30 @@ function openDailyRecordModal(record = null, recordDate = "") {
                             style={{ minWidth: 0, width: "100%" }}
                           />
                           <button
-                            className="btn btn-primary"
+                            className="btn btn-primary admin-icon-action-btn ranking-refresh-btn"
                             type="button"
+                            aria-label={`Refresh ${draft.label || period.label || "ranking period"}`}
+                            title={rankingRefreshingId === period.id ? "Refreshing..." : "Refresh period"}
                             onClick={() => refreshRankingPeriod(period)}
                             disabled={rankingRefreshingId === period.id}
                           >
-                            {rankingRefreshingId === period.id ? "Refreshing..." : "Refresh"}
+                            <svg viewBox="0 0 20 20" aria-hidden="true">
+                              <path
+                                d="M16 10a6 6 0 1 1-1.76-4.24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                              />
+                              <path
+                                d="M16 4.5v3.75h-3.75"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
                           </button>
                         </div>
                         <div className="ranking-period-range">
@@ -11819,13 +11886,62 @@ function openDailyRecordModal(record = null, recordDate = "") {
         {activeTab === "announcements" ? (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <div className="admin-title">Announcements</div>
-              <div className="admin-subtitle">Create announcements and send them to students.</div>
+              <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={openCreateAnnouncementModal}>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M4.5 10.5V8.5l8-3v9l-8-3z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M12.5 8.5h1.5a2 2 0 0 1 0 4h-1.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M7.5 13.5 8.5 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                Create Announcement
+              </button>
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={openCreateAnnouncementModal}>Create Announcement</button>
-              <button className="btn" onClick={() => fetchAnnouncements()}>Refresh</button>
+              <button
+                className="btn admin-icon-action-btn"
+                aria-label="Refresh announcements"
+                title="Refresh announcements"
+                onClick={() => fetchAnnouncements()}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M16 10a6 6 0 1 1-1.76-4.24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M16 4.5v3.75h-3.75"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -11984,7 +12100,30 @@ function openDailyRecordModal(record = null, recordDate = "") {
               <div className="admin-title">Absence Applications</div>
               <div className="admin-subtitle">Review and approve/deny student applications.</div>
             </div>
-            <button className="btn" onClick={() => fetchAbsenceApplications()}>Refresh</button>
+            <button
+              className="btn admin-icon-action-btn"
+              aria-label="Refresh absence applications"
+              title="Refresh absence applications"
+              onClick={() => fetchAbsenceApplications()}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M16 10a6 6 0 1 1-1.76-4.24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M16 4.5v3.75h-3.75"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
           </div>
 
           <div className="admin-table-wrap" style={{ marginTop: 12 }}>
@@ -12055,23 +12194,84 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <div className="admin-title">Test Sessions</div>
-                    <button className="btn btn-primary" onClick={() => openModelConductModal("normal")}>
+                    <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => openModelConductModal("normal")}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path
+                          d="M10 5v10M5 10h10"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
                       Create Test Session
                     </button>
-                    <button className="btn btn-retake" onClick={() => openModelConductModal("retake")}>
+                    <button className="btn btn-retake admin-compact-action-btn admin-upload-cta-btn" onClick={() => openModelConductModal("retake")}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path
+                          d="M5.5 6.5h8V4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M13.5 13.5h-8V16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M13.5 4l2.5 2.5-2.5 2.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M6.5 16 4 13.5 6.5 11"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                       Create Retake Session
                     </button>
                   </div>
                 </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
-                  className="btn"
+                  className="btn admin-icon-action-btn"
+                  aria-label="Refresh sessions"
+                  title="Refresh sessions"
                   onClick={() => {
                     fetchTestSessions();
                     fetchExamLinks();
                   }}
                 >
-                  Refresh Sessions
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path
+                      d="M16 10a6 6 0 1 1-1.76-4.24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M16 4.5v3.75h-3.75"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </button>
               </div>
             </div>
@@ -12258,10 +12458,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
               }}
             >
               <div
-                className={`admin-modal ${modelConductMode === "retake" ? "invite-modal" : "daily-session-create-modal"}`}
+                className="admin-modal daily-session-create-modal"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className={`admin-modal-header ${modelConductMode === "retake" ? "" : "daily-session-create-header"}`}>
+                <div className="admin-modal-header daily-session-create-header">
                   <div className="admin-title">{modelConductMode === "retake" ? "Conduct Model Retake" : "Create Model Test Session"}</div>
                   <button
                     className="admin-modal-close"
@@ -12277,10 +12477,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </button>
                 </div>
 
-                <div className={modelConductMode === "retake" ? "admin-form" : "daily-session-create-body"}>
+                <div className="daily-session-create-body">
                   {modelConductMode === "retake" ? (
-                    <>
-                      <div className="field">
+                    <div className="daily-session-create-layout">
+                      <div className="daily-session-create-field">
                         <label>Original Session</label>
                         <select
                           value={modelRetakeSourceId}
@@ -12297,7 +12497,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                           )}
                         </select>
                       </div>
-                      <div className="field">
+                      <div className="daily-session-create-field">
                         <label>Release To</label>
                         <select
                           value={testSessionForm.retake_release_scope}
@@ -12307,7 +12507,206 @@ function openDailyRecordModal(record = null, recordDate = "") {
                           <option value="failed_only">Only students who failed</option>
                         </select>
                       </div>
-                    </>
+                      <div className="daily-session-create-field">
+                        <label>Test Title</label>
+                        <input
+                          value={testSessionForm.title}
+                          onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
+                          placeholder="Mock Test (Retake)"
+                        />
+                      </div>
+                      <div className="daily-session-create-split-row">
+                        <div className="daily-session-create-field">
+                          <label>Date</label>
+                          <input
+                            type="date"
+                            value={testSessionForm.session_date}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, session_date: e.target.value }))}
+                          />
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Start Time</label>
+                          <div className="daily-session-create-time-picker-wrap" data-model-time-picker>
+                            {(() => {
+                              const startTimeParts = getTwelveHourTimeParts(testSessionForm.start_time);
+                              const isOpen = activeModelTimePicker === "start_time";
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="daily-session-create-time-trigger"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isOpen}
+                                    onClick={() => setActiveModelTimePicker((current) => (current === "start_time" ? "" : "start_time"))}
+                                  >
+                                    <span>{formatTwelveHourTimeDisplay(testSessionForm.start_time)}</span>
+                                    <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {isOpen ? (
+                                    <div className="daily-session-create-time-popover" role="dialog" aria-label="Select model retake start time">
+                                      <div className="daily-session-create-time-columns">
+                                        <div className="daily-session-create-time-column">
+                                          {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                            <button
+                                              key={`model-retake-start-hour-${hourValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.hour === hourValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("start_time", "hour", hourValue)}
+                                            >
+                                              {hourValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                            <button
+                                              key={`model-retake-start-minute-${minuteValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.minute === minuteValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("start_time", "minute", minuteValue)}
+                                            >
+                                              {minuteValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {MERIDIEM_OPTIONS.map((periodValue) => (
+                                            <button
+                                              key={`model-retake-start-period-${periodValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.period === periodValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("start_time", "period", periodValue)}
+                                            >
+                                              {periodValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Close Time</label>
+                          <div className="daily-session-create-time-picker-wrap" data-model-time-picker>
+                            {(() => {
+                              const closeTimeParts = getTwelveHourTimeParts(testSessionForm.close_time);
+                              const isOpen = activeModelTimePicker === "close_time";
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="daily-session-create-time-trigger"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isOpen}
+                                    onClick={() => setActiveModelTimePicker((current) => (current === "close_time" ? "" : "close_time"))}
+                                  >
+                                    <span>{formatTwelveHourTimeDisplay(testSessionForm.close_time)}</span>
+                                    <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {isOpen ? (
+                                    <div className="daily-session-create-time-popover" role="dialog" aria-label="Select model retake close time">
+                                      <div className="daily-session-create-time-columns">
+                                        <div className="daily-session-create-time-column">
+                                          {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                            <button
+                                              key={`model-retake-close-hour-${hourValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.hour === hourValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("close_time", "hour", hourValue)}
+                                            >
+                                              {hourValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                            <button
+                                              key={`model-retake-close-minute-${minuteValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.minute === minuteValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("close_time", "minute", minuteValue)}
+                                            >
+                                              {minuteValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {MERIDIEM_OPTIONS.map((periodValue) => (
+                                            <button
+                                              key={`model-retake-close-period-${periodValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.period === periodValue ? "active" : ""}`}
+                                              onClick={() => updateModelSessionTimePart("close_time", "period", periodValue)}
+                                            >
+                                              {periodValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="daily-session-create-two-col">
+                        <div className="daily-session-create-field">
+                          <label>Time Limit (min)</label>
+                          <input
+                            value={testSessionForm.time_limit_min}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                            placeholder="60"
+                          />
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Pass Rate</label>
+                          <input
+                            value={testSessionForm.pass_rate}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                            placeholder="0.8"
+                          />
+                        </div>
+                      </div>
+                      <div className="daily-session-create-toggle-row">
+                        <span>Show Answers</span>
+                        <label className="daily-session-create-switch" aria-label="Show Answers">
+                          <input
+                            type="checkbox"
+                            checked={testSessionForm.show_answers}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, show_answers: e.target.checked }))}
+                          />
+                          <span className="daily-session-create-switch-slider" />
+                        </label>
+                      </div>
+                      <div className="daily-session-create-toggle-row">
+                        <span>Allow Multiple Attempts</span>
+                        <label className="daily-session-create-switch" aria-label="Allow Multiple Attempts">
+                          <input
+                            type="checkbox"
+                            checked={testSessionForm.allow_multiple_attempts}
+                            onChange={(e) => setTestSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.checked }))}
+                          />
+                          <span className="daily-session-create-switch-slider" />
+                        </label>
+                      </div>
+                      <div className="daily-session-create-actions">
+                        <button
+                          className="btn btn-retake"
+                          type="button"
+                          onClick={createTestSession}
+                          disabled={!modelRetakeSourceId}
+                        >
+                          Create Session
+                        </button>
+                      </div>
+                      {testSessionsMsg ? <div className="admin-msg">{testSessionsMsg}</div> : null}
+                    </div>
                   ) : (
                     <div className="daily-session-create-layout">
                       <div className="daily-session-create-field">
@@ -12545,85 +12944,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     </div>
                   )}
 
-                  {modelConductMode === "retake" ? (
-                    <>
-                      <div className="field">
-                        <label>Test Title</label>
-                        <input
-                          value={testSessionForm.title}
-                          onChange={(e) => setTestSessionForm((s) => ({ ...s, title: e.target.value }))}
-                          placeholder="Mock Test (Retake)"
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>Starts At</label>
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={testSessionForm.starts_at}
-                          onChange={(e) => setTestSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>Ends At</label>
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={testSessionForm.ends_at}
-                          onChange={(e) => setTestSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>Time Limit (min)</label>
-                        <input
-                          value={testSessionForm.time_limit_min}
-                          onChange={(e) => setTestSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                          placeholder="60"
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>Show Answers</label>
-                        <select
-                          value={testSessionForm.show_answers ? "yes" : "no"}
-                          onChange={(e) => setTestSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-                        >
-                          <option value="yes">Yes</option>
-                          <option value="no">No</option>
-                        </select>
-                      </div>
-                      <div className="field small">
-                        <label>Attempts</label>
-                        <select
-                          value={testSessionForm.allow_multiple_attempts ? "multiple" : "once"}
-                          onChange={(e) =>
-                            setTestSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
-                          }
-                        >
-                          <option value="once">Only once</option>
-                          <option value="multiple">Allow multiple</option>
-                        </select>
-                      </div>
-                      <div className="field small">
-                        <label>Pass Rate</label>
-                        <input
-                          value={testSessionForm.pass_rate}
-                          onChange={(e) => setTestSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                          placeholder="0.8"
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>&nbsp;</label>
-                        <button
-                          className="btn btn-retake"
-                          type="button"
-                          onClick={createTestSession}
-                          disabled={!modelRetakeSourceId}
-                        >
-                          Create Session
-                        </button>
-                      </div>
-                    </>
-                  ) : null}
                 </div>
 
                 {modelConductMode === "retake" ? (
@@ -12645,29 +12965,38 @@ function openDailyRecordModal(record = null, recordDate = "") {
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <div className="admin-title">Set Upload (CSV)</div>
-                  <button className="btn btn-primary" onClick={() => setModelUploadOpen(true)}>
+                  <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => setModelUploadOpen(true)}>
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path
+                        d="M10 13V4.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M6.75 7.75 10 4.5l3.25 3.25"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M4.5 14.5v1h11v-1"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
                     Upload Question Set
                   </button>
                 </div>
               </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
-            </div>
           </div>
-          <div className="admin-msg">{assetUploadMsg}</div>
-          {assetImportMsg ? (
-            <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
-              {assetImportMsg}
-            </pre>
-          ) : null}
-          <div className="admin-msg">{assetsMsg}</div>
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
-              <div className="admin-title">Sets</div>
-            </div>
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <select
                 value={modelUploadCategory}
@@ -12680,135 +13009,151 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </option>
                 ))}
               </select>
-              <button className="btn" onClick={() => fetchTests()}>Refresh Sets</button>
             </div>
           </div>
 
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>SetID</th>
-                  <th>Category</th>
-                  <th>Questions</th>
-                  <th>Preview</th>
-                  <th>Edit</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredModelUploadTests.map((t) => (
-                  <tr
-                    key={t.id}
-                    onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
-                  >
-                    <td>{formatDateTime(t.created_at)}</td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <input
-                          value={editingTestForm.version}
-                          onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
-                        />
-                      ) : (
-                        t.version ?? ""
-                      )}
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <>
-                          <select
-                            value={editingCategorySelect}
-                            onChange={(e) => {
-                              const next = e.target.value;
-                              setEditingCategorySelect(next);
-                              if (next !== "__custom__") {
-                                setEditingTestForm((s) => ({ ...s, title: next }));
-                              }
-                            }}
-                          >
-                            {modelCategories.map((c) => (
-                              <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
-                            ))}
-                            <option value="__custom__">Custom...</option>
-                          </select>
-                          {editingCategorySelect === "__custom__" ? (
-                            <input
-                              value={editingTestForm.title}
-                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
-                              placeholder="Grammar Review"
-                              style={{ marginTop: 6 }}
-                            />
-                          ) : null}
-                        </>
-                      ) : (
-                        t.title ?? ""
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
-                    <td>
-                      <button
-                        className="btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openPreview(t.version);
-                        }}
-                      >
-                        Preview
-                      </button>
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button
-                            className="btn btn-primary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              saveTestEdits(modelCategories);
-                            }}
-                          >
-                            Save
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              cancelEditTest();
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditTest(t, modelCategories);
-                          }}
+          <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
+            {groupedModelUploadTests.map((group) => (
+              <div key={`model-upload-group-${group.name}`}>
+                {!modelUploadCategory ? (
+                  <div className="admin-subtitle" style={{ fontWeight: 900 }}>{group.name}</div>
+                ) : null}
+                <div className="admin-table-wrap" style={{ marginTop: !modelUploadCategory ? 8 : 0 }}>
+                  <table className="admin-table" style={{ minWidth: 860 }}>
+                    <thead>
+                      <tr>
+                        <th>Created</th>
+                        <th>SetID</th>
+                        <th>Category</th>
+                        <th>Questions</th>
+                        <th>Preview</th>
+                        <th>Edit</th>
+                        <th>Delete</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.tests.map((t) => (
+                        <tr
+                          key={t.id}
+                          onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                         >
-                          Edit
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteTest(t.version);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                          <td>{formatDateTime(t.created_at)}</td>
+                          <td>
+                            {editingTestId === t.id ? (
+                              <input
+                                value={editingTestForm.version}
+                                onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                              />
+                            ) : (
+                              t.version ?? ""
+                            )}
+                          </td>
+                          <td>
+                            {editingTestId === t.id ? (
+                              <>
+                                <select
+                                  value={editingCategorySelect}
+                                  onChange={(e) => {
+                                    const next = e.target.value;
+                                    setEditingCategorySelect(next);
+                                    if (next !== "__custom__") {
+                                      setEditingTestForm((s) => ({ ...s, title: next }));
+                                    }
+                                  }}
+                                >
+                                  {modelCategories.map((c) => (
+                                    <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
+                                  ))}
+                                  <option value="__custom__">Custom...</option>
+                                </select>
+                                {editingCategorySelect === "__custom__" ? (
+                                  <input
+                                    value={editingTestForm.title}
+                                    onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
+                                    placeholder="Grammar Review"
+                                    style={{ marginTop: 6 }}
+                                  />
+                                ) : null}
+                              </>
+                            ) : (
+                              t.title ?? ""
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                          <td>
+                            <button
+                              className="btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPreview(t.version);
+                              }}
+                            >
+                              Preview
+                            </button>
+                          </td>
+                          <td>
+                            {editingTestId === t.id ? (
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <button
+                                  className="btn btn-primary"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    saveTestEdits(modelCategories);
+                                  }}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  className="btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    cancelEditTest();
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                className="btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startEditTest(t, modelCategories);
+                                }}
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              className="btn btn-danger"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteTest(t.version);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
+          {groupedModelUploadTests.length === 0 ? <div className="admin-msg">{testsMsg || "No sets found."}</div> : null}
+          <div className="admin-msg">{assetUploadMsg}</div>
+          {assetImportMsg ? (
+            <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
+              {assetImportMsg}
+            </pre>
+          ) : null}
+          <div className="admin-msg">{assetsMsg}</div>
           {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
-          <div className="admin-msg">{testsMsg}</div>
+          {groupedModelUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
           {modelUploadOpen ? (
             <div className="admin-modal-overlay" onClick={() => setModelUploadOpen(false)}>
@@ -12921,7 +13266,32 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     ) : null}
                   </div>
                   <div className="upload-question-actions">
-                    <button className="btn btn-primary" type="button" onClick={uploadAssets}>
+                    <button className="btn btn-primary admin-upload-cta-btn" type="button" onClick={uploadAssets}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path
+                          d="M10 13V4.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="M6.75 7.75 10 4.5l3.25 3.25"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M4.5 14.5v1h11v-1"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                       Upload & Register Set
                     </button>
                   </div>
@@ -12947,23 +13317,84 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <div className="admin-title">Daily Test Sessions</div>
-                    <button className="btn btn-primary" onClick={() => openDailyConductModal("normal")}>
+                    <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => openDailyConductModal("normal")}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path
+                          d="M10 5v10M5 10h10"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
                       Create Test Session
                     </button>
-                    <button className="btn btn-retake" onClick={() => openDailyConductModal("retake")}>
+                    <button className="btn btn-retake admin-compact-action-btn admin-upload-cta-btn" onClick={() => openDailyConductModal("retake")}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path
+                          d="M5.5 6.5h8V4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M13.5 13.5h-8V16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M13.5 4l2.5 2.5-2.5 2.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M6.5 16 4 13.5 6.5 11"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                       Create Retake Session
                     </button>
                   </div>
                 </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
-                  className="btn"
+                  className="btn admin-icon-action-btn"
+                  aria-label="Refresh sessions"
+                  title="Refresh sessions"
                   onClick={() => {
                     fetchTestSessions();
                     fetchExamLinks();
                   }}
                 >
-                  Refresh Sessions
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path
+                      d="M16 10a6 6 0 1 1-1.76-4.24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M16 4.5v3.75h-3.75"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </button>
               </div>
             </div>
@@ -13135,10 +13566,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
               }}
             >
               <div
-                className={`admin-modal ${dailyConductMode === "retake" ? "invite-modal" : "daily-session-create-modal"}`}
+                className="admin-modal daily-session-create-modal"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className={`admin-modal-header ${dailyConductMode === "retake" ? "" : "daily-session-create-header"}`}>
+                <div className="admin-modal-header daily-session-create-header">
                   <div className="admin-title">{dailyConductMode === "retake" ? "Conduct Daily Retake" : "Create Daily Test Session"}</div>
                   <button
                     className="admin-modal-close"
@@ -13155,10 +13586,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </button>
                 </div>
 
-                <div className={dailyConductMode === "retake" ? "admin-form" : "daily-session-create-body"}>
+                <div className="daily-session-create-body">
                   {dailyConductMode === "retake" ? (
-                    <>
-                      <div className="field">
+                    <div className="daily-session-create-layout">
+                      <div className="daily-session-create-field">
                         <label>Original Session</label>
                         <select
                           value={dailyRetakeSourceId}
@@ -13175,7 +13606,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                           )}
                         </select>
                       </div>
-                      <div className="field">
+                      <div className="daily-session-create-field">
                         <label>Release To</label>
                         <select
                           value={dailySessionForm.retake_release_scope}
@@ -13185,7 +13616,206 @@ function openDailyRecordModal(record = null, recordDate = "") {
                           <option value="failed_only">Only students who failed</option>
                         </select>
                       </div>
-                    </>
+                      <div className="daily-session-create-field">
+                        <label>Test Title</label>
+                        <input
+                          value={dailySessionForm.title}
+                          onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                          placeholder="Daily Test"
+                        />
+                      </div>
+                      <div className="daily-session-create-split-row">
+                        <div className="daily-session-create-field">
+                          <label>Date</label>
+                          <input
+                            type="date"
+                            value={dailySessionForm.session_date}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, session_date: e.target.value }))}
+                          />
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Start Time</label>
+                          <div className="daily-session-create-time-picker-wrap" data-daily-time-picker>
+                            {(() => {
+                              const startTimeParts = getTwelveHourTimeParts(dailySessionForm.start_time);
+                              const isOpen = activeDailyTimePicker === "start_time";
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="daily-session-create-time-trigger"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isOpen}
+                                    onClick={() => setActiveDailyTimePicker((current) => (current === "start_time" ? "" : "start_time"))}
+                                  >
+                                    <span>{formatTwelveHourTimeDisplay(dailySessionForm.start_time)}</span>
+                                    <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {isOpen ? (
+                                    <div className="daily-session-create-time-popover" role="dialog" aria-label="Select daily retake start time">
+                                      <div className="daily-session-create-time-columns">
+                                        <div className="daily-session-create-time-column">
+                                          {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                            <button
+                                              key={`daily-retake-start-hour-${hourValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.hour === hourValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("start_time", "hour", hourValue)}
+                                            >
+                                              {hourValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                            <button
+                                              key={`daily-retake-start-minute-${minuteValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.minute === minuteValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("start_time", "minute", minuteValue)}
+                                            >
+                                              {minuteValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {MERIDIEM_OPTIONS.map((periodValue) => (
+                                            <button
+                                              key={`daily-retake-start-period-${periodValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${startTimeParts.period === periodValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("start_time", "period", periodValue)}
+                                            >
+                                              {periodValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Close Time</label>
+                          <div className="daily-session-create-time-picker-wrap" data-daily-time-picker>
+                            {(() => {
+                              const closeTimeParts = getTwelveHourTimeParts(dailySessionForm.close_time);
+                              const isOpen = activeDailyTimePicker === "close_time";
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="daily-session-create-time-trigger"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={isOpen}
+                                    onClick={() => setActiveDailyTimePicker((current) => (current === "close_time" ? "" : "close_time"))}
+                                  >
+                                    <span>{formatTwelveHourTimeDisplay(dailySessionForm.close_time)}</span>
+                                    <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {isOpen ? (
+                                    <div className="daily-session-create-time-popover" role="dialog" aria-label="Select daily retake close time">
+                                      <div className="daily-session-create-time-columns">
+                                        <div className="daily-session-create-time-column">
+                                          {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                            <button
+                                              key={`daily-retake-close-hour-${hourValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.hour === hourValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("close_time", "hour", hourValue)}
+                                            >
+                                              {hourValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                            <button
+                                              key={`daily-retake-close-minute-${minuteValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.minute === minuteValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("close_time", "minute", minuteValue)}
+                                            >
+                                              {minuteValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        <div className="daily-session-create-time-column">
+                                          {MERIDIEM_OPTIONS.map((periodValue) => (
+                                            <button
+                                              key={`daily-retake-close-period-${periodValue}`}
+                                              type="button"
+                                              className={`daily-session-create-time-option ${closeTimeParts.period === periodValue ? "active" : ""}`}
+                                              onClick={() => updateDailySessionTimePart("close_time", "period", periodValue)}
+                                            >
+                                              {periodValue}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="daily-session-create-two-col">
+                        <div className="daily-session-create-field">
+                          <label>Time Limit (min)</label>
+                          <input
+                            value={dailySessionForm.time_limit_min}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                            placeholder="10"
+                          />
+                        </div>
+                        <div className="daily-session-create-field">
+                          <label>Pass Rate</label>
+                          <input
+                            value={dailySessionForm.pass_rate}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                            placeholder="0.8"
+                          />
+                        </div>
+                      </div>
+                      <div className="daily-session-create-toggle-row">
+                        <span>Show Answers After Attempt</span>
+                        <label className="daily-session-create-switch" aria-label="Show Answers After Attempt">
+                          <input
+                            type="checkbox"
+                            checked={dailySessionForm.show_answers}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.checked }))}
+                          />
+                          <span className="daily-session-create-switch-slider" />
+                        </label>
+                      </div>
+                      <div className="daily-session-create-toggle-row">
+                        <span>Allow Multiple Attempts</span>
+                        <label className="daily-session-create-switch" aria-label="Allow Multiple Attempts">
+                          <input
+                            type="checkbox"
+                            checked={dailySessionForm.allow_multiple_attempts}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.checked }))}
+                          />
+                          <span className="daily-session-create-switch-slider" />
+                        </label>
+                      </div>
+                      <div className="daily-session-create-actions">
+                        <button
+                          className="btn btn-retake"
+                          type="button"
+                          onClick={createDailySession}
+                          disabled={!dailyRetakeSourceId}
+                        >
+                          Create Session
+                        </button>
+                      </div>
+                      {dailySessionsMsg ? <div className="admin-msg">{dailySessionsMsg}</div> : null}
+                    </div>
                   ) : (
                     <div className="daily-session-create-layout">
                       <div className="daily-session-create-choice-row">
@@ -13561,87 +14191,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       {dailySessionsMsg ? <div className="admin-msg">{dailySessionsMsg}</div> : null}
                     </div>
                   )}
-                  {dailyConductMode === "retake" ? (
-                    <>
-                      <div className="field">
-                        <label>Test Title</label>
-                        <input
-                          value={dailySessionForm.title}
-                          onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
-                          placeholder="Daily Test"
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>Starts At</label>
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={dailySessionForm.starts_at}
-                          onChange={(e) => setDailySessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>Ends At</label>
-                        <input
-                          type="datetime-local"
-                          step="300"
-                          value={dailySessionForm.ends_at}
-                          onChange={(e) => setDailySessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>Time Limit (min)</label>
-                        <input
-                          value={dailySessionForm.time_limit_min}
-                          onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                          placeholder="10"
-                        />
-                      </div>
-                      <div className="field small">
-                        <label>Show Answers</label>
-                        <select
-                          value={dailySessionForm.show_answers ? "yes" : "no"}
-                          onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-                        >
-                          <option value="yes">Yes</option>
-                          <option value="no">No</option>
-                        </select>
-                      </div>
-                      <div className="field small">
-                        <label>Attempts</label>
-                        <select
-                          value={dailySessionForm.allow_multiple_attempts ? "multiple" : "once"}
-                          onChange={(e) =>
-                            setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
-                          }
-                        >
-                          <option value="once">Only once</option>
-                          <option value="multiple">Allow multiple</option>
-                        </select>
-                      </div>
-                      <div className="field small">
-                        <label>Pass Rate</label>
-                        <input
-                          value={dailySessionForm.pass_rate}
-                          onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                          placeholder="0.8"
-                        />
-                      </div>
-                    </>
-                  ) : null}
-                  {dailyConductMode === "retake" ? (
-                    <div className="field small">
-                      <label>&nbsp;</label>
-                      <button
-                        className="btn btn-retake"
-                        type="button"
-                        onClick={createDailySession}
-                        disabled={!dailyRetakeSourceId}
-                      >
-                        Create Session
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
 
                 {dailyConductMode === "retake" ? (
@@ -13663,28 +14212,38 @@ function openDailyRecordModal(record = null, recordDate = "") {
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <div className="admin-title">Daily Test Upload (CSV)</div>
-                <button className="btn btn-primary" onClick={() => setDailyUploadOpen(true)}>
+                <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => setDailyUploadOpen(true)}>
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path
+                      d="M10 13V4.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M6.75 7.75 10 4.5l3.25 3.25"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M4.5 14.5v1h11v-1"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                   Upload Question Set
                 </button>
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn" onClick={() => fetchAssets()}>Refresh</button>
-            </div>
           </div>
-          <div className="admin-msg">{dailyUploadMsg}</div>
-          {dailyImportMsg ? (
-            <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
-              {dailyImportMsg}
-            </pre>
-          ) : null}
-        </div>
-
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <div>
-              <div className="admin-title">Daily Tests</div>
-            </div>
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <select
                 value={dailyUploadCategory}
@@ -13697,135 +14256,150 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </option>
                 ))}
               </select>
-              <button className="btn" onClick={() => fetchTests()}>Refresh Daily Tests</button>
             </div>
           </div>
 
-          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-            <table className="admin-table" style={{ minWidth: 860 }}>
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Category</th>
-                  <th>SetID</th>
-                  <th>Questions</th>
-                  <th>Preview</th>
-                  <th>Edit</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredDailyUploadTests.map((t) => (
-                  <tr
-                    key={t.id}
-                    onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
-                  >
-                    <td>{formatDateTime(t.created_at)}</td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <>
-                          <select
-                            value={editingCategorySelect}
-                            onChange={(e) => {
-                              const next = e.target.value;
-                              setEditingCategorySelect(next);
-                              if (next !== "__custom__") {
-                                setEditingTestForm((s) => ({ ...s, title: next }));
-                              }
-                            }}
-                          >
-                            {dailyCategories.map((c) => (
-                              <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
-                            ))}
-                            <option value="__custom__">Custom...</option>
-                          </select>
-                          {editingCategorySelect === "__custom__" ? (
-                            <input
-                              value={editingTestForm.title}
-                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
-                              placeholder="Vocabulary Test"
-                              style={{ marginTop: 6 }}
-                            />
-                          ) : null}
-                        </>
-                      ) : (
-                        t.title ?? ""
-                      )}
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <input
-                          value={editingTestForm.version}
-                          onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
-                        />
-                      ) : (
-                        t.version ?? ""
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
-                    <td>
-                      <button
-                        className="btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openPreview(t.version);
-                        }}
-                      >
-                        Preview
-                      </button>
-                    </td>
-                    <td>
-                      {editingTestId === t.id ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button
-                            className="btn btn-primary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              saveTestEdits(dailyCategories);
-                            }}
-                          >
-                            Save
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              cancelEditTest();
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditTest(t, dailyCategories);
-                          }}
+          <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
+            {groupedDailyUploadTests.map((group) => (
+              <div key={`daily-upload-group-${group.name}`}>
+                {!dailyUploadCategory ? (
+                  <div className="admin-subtitle" style={{ fontWeight: 900 }}>{group.name}</div>
+                ) : null}
+                <div className="admin-table-wrap" style={{ marginTop: !dailyUploadCategory ? 8 : 0 }}>
+                  <table className="admin-table" style={{ minWidth: 860 }}>
+                    <thead>
+                      <tr>
+                        <th>Created</th>
+                        <th>Category</th>
+                        <th>SetID</th>
+                        <th>Questions</th>
+                        <th>Preview</th>
+                        <th>Edit</th>
+                        <th>Delete</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.tests.map((t) => (
+                        <tr
+                          key={t.id}
+                          onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                         >
-                          Edit
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteTest(t.version);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                          <td>{formatDateTime(t.created_at)}</td>
+                          <td>
+                            {editingTestId === t.id ? (
+                              <>
+                                <select
+                                  value={editingCategorySelect}
+                                  onChange={(e) => {
+                                    const next = e.target.value;
+                                    setEditingCategorySelect(next);
+                                    if (next !== "__custom__") {
+                                      setEditingTestForm((s) => ({ ...s, title: next }));
+                                    }
+                                  }}
+                                >
+                                  {dailyCategories.map((c) => (
+                                    <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
+                                  ))}
+                                  <option value="__custom__">Custom...</option>
+                                </select>
+                                {editingCategorySelect === "__custom__" ? (
+                                  <input
+                                    value={editingTestForm.title}
+                                    onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
+                                    placeholder="Vocabulary Test"
+                                    style={{ marginTop: 6 }}
+                                  />
+                                ) : null}
+                              </>
+                            ) : (
+                              t.title ?? ""
+                            )}
+                          </td>
+                          <td>
+                            {editingTestId === t.id ? (
+                              <input
+                                value={editingTestForm.version}
+                                onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                              />
+                            ) : (
+                              t.version ?? ""
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                          <td>
+                            <button
+                              className="btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPreview(t.version);
+                              }}
+                            >
+                              Preview
+                            </button>
+                          </td>
+                          <td>
+                            {editingTestId === t.id ? (
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <button
+                                  className="btn btn-primary"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    saveTestEdits(dailyCategories);
+                                  }}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  className="btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    cancelEditTest();
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                className="btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startEditTest(t, dailyCategories);
+                                }}
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              className="btn btn-danger"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteTest(t.version);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
+          {groupedDailyUploadTests.length === 0 ? <div className="admin-msg">{testsMsg || "No daily tests found."}</div> : null}
+          <div className="admin-msg">{dailyUploadMsg}</div>
+          {dailyImportMsg ? (
+            <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
+              {dailyImportMsg}
+            </pre>
+          ) : null}
           {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
-          <div className="admin-msg">{testsMsg}</div>
+          {groupedDailyUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
           {dailyUploadOpen ? (
             <div className="admin-modal-overlay" onClick={() => setDailyUploadOpen(false)}>
@@ -13948,7 +14522,32 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     ) : null}
                   </div>
                   <div className="upload-question-actions">
-                    <button className="btn btn-primary" type="button" onClick={uploadDailyAssets}>
+                    <button className="btn btn-primary admin-upload-cta-btn" type="button" onClick={uploadDailyAssets}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path
+                          d="M10 13V4.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="M6.75 7.75 10 4.5l3.25 3.25"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M4.5 14.5v1h11v-1"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                       Upload & Register Daily Test
                     </button>
                   </div>
@@ -14963,9 +15562,29 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <div className="admin-title">{resultContext.title}</div>
                 </div>
                 <div className="results-page-actions">
-                  <button className="btn results-page-action-btn" onClick={() => runSearch(resultContext.type)}>
-                    <span className="results-page-action-icon" aria-hidden="true">↻</span>
-                    <span>Refresh</span>
+                  <button
+                    className="btn admin-icon-action-btn"
+                    aria-label="Refresh results"
+                    title="Refresh results"
+                    onClick={() => runSearch(resultContext.type)}
+                  >
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path
+                        d="M16 10a6 6 0 1 1-1.76-4.24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M16 4.5v3.75h-3.75"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
                   </button>
                   <button
                     className="btn results-page-action-btn"

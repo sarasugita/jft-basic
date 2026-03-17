@@ -793,20 +793,39 @@ export default function SuperTestsImportPage() {
     <div className="super-page-content">
       <div className="admin-panel">
         <div className="super-toolbar">
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <div className="admin-title">Set Library</div>
-              <button className="btn btn-primary" onClick={openCreateModal}>
-                Upload Question Set
-              </button>
-            </div>
-            <div className="admin-help">
-              Upload shared sets, create new versions, and control school visibility.
-            </div>
+          <div style={{ marginBottom: 8 }}>
+            <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={openCreateModal}>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M10 13V4.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M6.75 7.75 10 4.5l3.25 3.25"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M4.5 14.5v1h11v-1"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Upload Question Set
+            </button>
           </div>
         </div>
 
-        <div className="super-library-tabs" style={{ marginTop: 12 }}>
+        <div className="super-library-tabs" style={{ marginTop: 10 }}>
           <button
             className={`super-library-tab ${testType === "daily" ? "active" : ""}`}
             type="button"

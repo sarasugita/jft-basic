@@ -92,7 +92,7 @@ function getPageMeta(pathname) {
   }
   if (pathname === "/super/tests/import") {
     return {
-      title: "Import Questions",
+      title: "Upload Question Sets",
       description: "Manage the global question-set library for daily and model tests.",
     };
   }
