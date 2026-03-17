@@ -158,6 +158,14 @@ async function permanentlyDeleteSchool(
     deleteUserIds.push(profile.id);
   }
 
+  const { data: legacyTests, error: legacyTestsError } = await adminClient
+    .from("tests")
+    .select("id, version")
+    .eq("school_id", schoolId);
+  if (legacyTestsError) {
+    throw new Error(`Failed to load school tests: ${legacyTestsError.message}`);
+  }
+
   await deleteBySchoolId(adminClient, "test_session_attempt_overrides", schoolId, { ignoreMissingRelation: true });
   await deleteBySchoolId(adminClient, "test_instances", schoolId, { ignoreMissingRelation: true });
   await deleteBySchoolId(adminClient, "exam_links", schoolId);
@@ -174,9 +182,86 @@ async function permanentlyDeleteSchool(
   await deleteBySchoolId(adminClient, "question_set_school_access", schoolId, { ignoreMissingRelation: true });
   await deleteBySchoolId(adminClient, "admin_school_assignments", schoolId, { ignoreMissingRelation: true });
   await deleteBySchoolId(adminClient, "test_sessions", schoolId);
-  await deleteBySchoolId(adminClient, "test_assets", schoolId);
-  await deleteBySchoolId(adminClient, "questions", schoolId);
-  await deleteBySchoolId(adminClient, "tests", schoolId);
+
+  for (const legacyTest of legacyTests ?? []) {
+    const version = String(legacyTest.version ?? "").trim();
+    if (!version) continue;
+
+    const { data: remainingSession, error: remainingSessionError } = await adminClient
+      .from("test_sessions")
+      .select("school_id")
+      .eq("problem_set_id", version)
+      .neq("school_id", schoolId)
+      .limit(1)
+      .maybeSingle();
+    if (remainingSessionError) {
+      throw new Error(`Failed to inspect remaining sessions for ${version}: ${remainingSessionError.message}`);
+    }
+
+    let replacementSchoolId = remainingSession?.school_id ?? null;
+    if (!replacementSchoolId) {
+      const { data: remainingExamLink, error: remainingExamLinkError } = await adminClient
+        .from("exam_links")
+        .select("school_id")
+        .eq("test_version", version)
+        .neq("school_id", schoolId)
+        .limit(1)
+        .maybeSingle();
+      if (remainingExamLinkError) {
+        throw new Error(`Failed to inspect remaining exam links for ${version}: ${remainingExamLinkError.message}`);
+      }
+      replacementSchoolId = remainingExamLink?.school_id ?? null;
+    }
+
+    if (!replacementSchoolId) {
+      const { data: remainingAttempt, error: remainingAttemptError } = await adminClient
+        .from("attempts")
+        .select("school_id")
+        .eq("test_version", version)
+        .neq("school_id", schoolId)
+        .limit(1)
+        .maybeSingle();
+      if (remainingAttemptError) {
+        throw new Error(`Failed to inspect remaining attempts for ${version}: ${remainingAttemptError.message}`);
+      }
+      replacementSchoolId = remainingAttempt?.school_id ?? null;
+    }
+
+    if (replacementSchoolId) {
+      const { error: testUpdateError } = await adminClient
+        .from("tests")
+        .update({ school_id: replacementSchoolId })
+        .eq("id", legacyTest.id);
+      if (testUpdateError) {
+        throw new Error(`Failed to reassign test ${version}: ${testUpdateError.message}`);
+      }
+
+      const { error: questionUpdateError } = await adminClient
+        .from("questions")
+        .update({ school_id: replacementSchoolId })
+        .eq("test_version", version);
+      if (questionUpdateError) {
+        throw new Error(`Failed to reassign questions for ${version}: ${questionUpdateError.message}`);
+      }
+
+      const { error: assetUpdateError } = await adminClient
+        .from("test_assets")
+        .update({ school_id: replacementSchoolId })
+        .eq("test_version", version);
+      if (assetUpdateError) {
+        throw new Error(`Failed to reassign assets for ${version}: ${assetUpdateError.message}`);
+      }
+      continue;
+    }
+
+    const { error: testDeleteError } = await adminClient
+      .from("tests")
+      .delete()
+      .eq("id", legacyTest.id);
+    if (testDeleteError) {
+      throw new Error(`Failed to delete test ${version}: ${testDeleteError.message}`);
+    }
+  }
 
   for (const userId of deleteUserIds) {
     const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(userId);

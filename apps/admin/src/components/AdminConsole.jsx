@@ -14814,7 +14814,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ), document.body) : null}
 
-        {attendanceModalOpen && attendanceModalDay ? (
+        {attendanceModalOpen && attendanceModalDay && typeof document !== "undefined" ? createPortal((
           <div
             className="admin-modal-overlay"
             onClick={() => {
@@ -14826,11 +14826,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
           >
             <div className="admin-modal attendance-modal" onClick={(e) => e.stopPropagation()}>
               <div className="admin-modal-header">
-                <div>
-                  <div className="admin-title">Attendance — {attendanceModalDay.day_date}</div>
+                <div className="admin-title">
+                  {`Attendance - ${formatDateFull(attendanceModalDay.day_date)}`}
                 </div>
                 <button
-                  className="btn"
+                  className="admin-modal-close"
+                  aria-label="Close"
                   onClick={() => {
                     setAttendanceModalOpen(false);
                     setAttendanceModalDay(null);
@@ -14838,7 +14839,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     setAttendanceSaving(false);
                   }}
                 >
-                  Close
+                  ×
                 </button>
               </div>
 
@@ -14916,7 +14917,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               </div>
             </div>
           </div>
-        ) : null}
+        ), document.body) : null}
 
         {resultContext ? (
         <>

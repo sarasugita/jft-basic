@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { processLock } from "@supabase/auth-js";
 import { logAdminRequestFailure } from "./adminDiagnostics";
 import { SUPER_ADMIN_SCOPE_HEADER } from "./schoolScope";
 
@@ -16,6 +17,7 @@ let defaultClient;
 const scopedClients = new Map();
 
 const nativeFetch = (...args) => fetch(...args);
+const isBrowser = typeof window !== "undefined";
 
 async function instrumentedAdminFetch(input, init) {
   const url = typeof input === "string" ? input : input?.url ?? "";
@@ -124,6 +126,12 @@ export function createAdminSupabaseClient({ schoolScopeId } = {}) {
 
   if (!defaultClient) {
     defaultClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: isBrowser,
+        detectSessionInUrl: isBrowser,
+        persistSession: isBrowser,
+        ...(isBrowser ? { lock: processLock } : {}),
+      },
       global: {
         fetch: instrumentedAdminFetch,
       },

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createAdminSupabaseClient,
@@ -266,6 +266,11 @@ export default function SuperAdminShell({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [startupError, setStartupError] = useState("");
+  const profileRef = useRef(null);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -388,11 +393,24 @@ export default function SuperAdminShell({ children }) {
         functionName,
         status: result.response.status,
       });
+      const errorContext = {
+        status: result.response.status,
+        async json() {
+          return result.data;
+        },
+        async text() {
+          return result.text;
+        },
+      };
       return {
         data: null,
         error: {
           message: result.data?.error || result.data?.message || result.text || `Failed to call ${functionName}`,
+          detail: result.data?.detail ?? "",
+          code: result.data?.code ?? "",
+          hint: result.data?.hint ?? "",
           status: result.response.status,
+          context: errorContext,
         },
       };
     }
@@ -416,6 +434,7 @@ export default function SuperAdminShell({ children }) {
     if (!supabase) return;
     let mounted = true;
     let profileAbortController = null;
+    let authEventTimeout = null;
 
     function redirectToLogin(reason, extra = {}) {
       logAdminEvent("Super shell redirecting to login", {
@@ -493,7 +512,6 @@ export default function SuperAdminShell({ children }) {
             reason,
             userId: nextSession?.user?.id ?? null,
           });
-          setStartupError("Session restore was interrupted. Please open the page again.");
           setLoading(false);
           return;
         }
@@ -529,7 +547,6 @@ export default function SuperAdminShell({ children }) {
             pathname,
             reason,
           });
-          setStartupError("Session restore was interrupted. Please open the page again.");
           setLoading(false);
           return;
         }
@@ -544,7 +561,7 @@ export default function SuperAdminShell({ children }) {
 
     bootstrap("initial");
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       logAdminEvent("Super shell auth event", {
         event,
         pathname,
@@ -559,29 +576,28 @@ export default function SuperAdminShell({ children }) {
       if (event === "TOKEN_REFRESHED") {
         setSession(nextSession ?? null);
         setLoading(false);
+        if (!profileRef.current && nextSession) {
+          if (authEventTimeout) clearTimeout(authEventTimeout);
+          authEventTimeout = setTimeout(() => {
+            void loadProfile(nextSession, `auth:${event}`);
+          }, 0);
+        }
         return;
       }
       setSession(nextSession ?? null);
-      await loadProfile(nextSession ?? null, `auth:${event}`);
+      if (authEventTimeout) clearTimeout(authEventTimeout);
+      authEventTimeout = setTimeout(() => {
+        void loadProfile(nextSession ?? null, `auth:${event}`);
+      }, 0);
     });
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        bootstrap("visibilitychange");
-      }
-    }
-
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-    }
 
     return () => {
       mounted = false;
       if (profileAbortController) {
         profileAbortController.abort();
       }
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (authEventTimeout) {
+        clearTimeout(authEventTimeout);
       }
       listener.subscription.unsubscribe();
     };

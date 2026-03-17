@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminConsole from "./AdminConsole";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
@@ -17,6 +17,16 @@ export default function SchoolScopedAdminPage({ schoolId }) {
   const [schoolOptions, setSchoolOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [startupError, setStartupError] = useState("");
+  const profileRef = useRef(null);
+  const schoolRef = useRef(null);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  useEffect(() => {
+    schoolRef.current = school;
+  }, [school]);
 
   useEffect(() => {
     if (supabaseConfigError) {
@@ -27,6 +37,7 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     if (!supabase) return;
     let mounted = true;
     let loadAbortController = null;
+    let authEventTimeout = null;
 
     function redirect(target, reason, extra = {}) {
       logAdminEvent("School scoped page redirect", {
@@ -154,7 +165,6 @@ export default function SchoolScopedAdminPage({ schoolId }) {
             schoolId,
             reason,
           });
-          setStartupError("Session restore was interrupted. Please open the admin page again.");
           return;
         }
         logAdminRequestFailure("School scoped bootstrap failed", error, {
@@ -171,7 +181,7 @@ export default function SchoolScopedAdminPage({ schoolId }) {
 
     load("initial");
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       logAdminEvent("School scoped auth event", {
         event,
         schoolId,
@@ -184,28 +194,27 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       }
       if (event === "TOKEN_REFRESHED") {
         setSession(nextSession ?? null);
+        if ((!profileRef.current || !schoolRef.current) && nextSession) {
+          if (authEventTimeout) clearTimeout(authEventTimeout);
+          authEventTimeout = setTimeout(() => {
+            void load(`auth:${event}`);
+          }, 0);
+        }
         return;
       }
-      await load(`auth:${event}`);
+      if (authEventTimeout) clearTimeout(authEventTimeout);
+      authEventTimeout = setTimeout(() => {
+        void load(`auth:${event}`);
+      }, 0);
     });
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        load("visibilitychange");
-      }
-    }
-
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-    }
 
     return () => {
       mounted = false;
       if (loadAbortController) {
         loadAbortController.abort();
       }
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (authEventTimeout) {
+        clearTimeout(authEventTimeout);
       }
       listener.subscription.unsubscribe();
     };
@@ -220,10 +229,19 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     );
   }
 
-  if (loading || !session || !profile || !school) {
+  if (loading) {
     return (
       <div className="admin-login">
         <h2>Loading...</h2>
+      </div>
+    );
+  }
+
+  if (!session || !profile || !school) {
+    return (
+      <div className="admin-login">
+        <h2>Startup Error</h2>
+        <div className="admin-msg">Admin session is not ready. Refresh the page.</div>
       </div>
     );
   }

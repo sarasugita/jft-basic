@@ -11,7 +11,10 @@
     "dev:student": "npm -w apps/student run dev",
     "build:student": "npm -w apps/student run build",
     "dev:admin": "npm -w apps/admin run dev",
-    "build:admin": "npm -w apps/admin run build"
+    "build:admin": "npm -w apps/admin run build",
+    "clean:admin-cache": "npm -w apps/admin run clean:cache",
+    "clean:admin-next": "npm -w apps/admin run clean:next",
+    "rebuild:admin": "npm -w apps/admin run rebuild"
   },
   "dependencies": {
     "@vercel/analytics": "^1.6.1"
