@@ -539,6 +539,20 @@ body { padding: 0; }
   font-size: 13px;
 }
 
+.admin-topbar-school-label {
+  min-width: min(220px, 100%);
+  max-width: 100%;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--admin-table-outline);
+  border-radius: 3px;
+  background: #fff;
+  line-height: 1.2;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+}
+
 .admin-topbar-link {
   min-width: auto;
 }
@@ -3389,6 +3403,49 @@ body { padding: 0; }
   border-radius: 6px !important;
 }
 
+.daily-record-table {
+  min-width: 1440px !important;
+}
+
+.daily-record-date-cell {
+  white-space: nowrap;
+}
+
+.daily-record-holiday-head,
+.daily-record-holiday-cell {
+  width: 78px;
+  min-width: 78px;
+  text-align: center;
+  vertical-align: middle !important;
+}
+
+.daily-record-holiday-cell {
+  padding-left: 6px !important;
+  padding-right: 6px !important;
+}
+
+.daily-record-holiday-row {
+  background: #edf1f4;
+}
+
+.daily-record-holiday-row:hover {
+  background: #edf1f4 !important;
+}
+
+.daily-record-holiday-row td {
+  color: #64748b;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.daily-record-holiday-summary {
+  font-size: 11px !important;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle !important;
+}
+
 .ranking-empty-cell {
   text-align: center;
   color: #333333;
@@ -4369,6 +4426,39 @@ body { padding: 0; }
   margin: 10px 0 2px;
   font-size: 24px;
   font-weight: 900;
+}
+
+.super-school-admin-back-link {
+  margin-bottom: 8px;
+}
+
+.super-school-admin-form {
+  grid-template-columns: 1fr;
+}
+
+.super-school-admin-form .field,
+.super-school-admin-form .field.small {
+  grid-column: 1 / -1;
+}
+
+.super-school-admin-modal-value {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 14px;
+  color: var(--admin-text);
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+}
+
+.super-school-admin-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .super-page-topbar {

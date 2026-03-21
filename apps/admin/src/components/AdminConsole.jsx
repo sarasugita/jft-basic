@@ -134,6 +134,14 @@ function isMissingColumnError(error, columnName) {
   return message.includes(columnName) && message.toLowerCase().includes("does not exist");
 }
 
+function isUniqueViolationError(error) {
+  return String(error?.code ?? "") === "23505";
+}
+
+function normalizeStudentNumberInput(value) {
+  return String(value ?? "").replace(/\D+/g, "");
+}
+
 async function fetchQuestionsForVersionWithFallback(client, version) {
   let result = await client
     .from("questions")
@@ -184,13 +192,14 @@ function getProfileUploads(value) {
 function buildPersonalInfoPayload(values) {
   const yearsRaw = String(values.years_of_experience ?? "").trim();
   const years = yearsRaw === "" ? null : Number(yearsRaw);
+  const normalizedStudentCode = normalizeStudentNumberInput(values.student_code).trim();
   return {
     display_name: String(values.display_name ?? "").trim() || null,
     email: String(values.email ?? "").trim() || null,
     phone_number: String(values.phone_number ?? "").trim() || null,
     date_of_birth: String(values.date_of_birth ?? "").trim() || null,
     sex: String(values.sex ?? "").trim() || null,
-    student_code: String(values.student_code ?? "").trim() || null,
+    student_code: normalizedStudentCode || null,
     current_working_facility: String(values.current_working_facility ?? "").trim() || null,
     years_of_experience: Number.isFinite(years) ? years : null,
     nursing_certificate: String(values.nursing_certificate ?? "").trim() || null,
@@ -277,6 +286,25 @@ function addDays(dateString, offsetDays) {
   if (Number.isNaN(base.getTime())) return dateString;
   base.setDate(base.getDate() + offsetDays);
   return base.toISOString().slice(0, 10);
+}
+
+function getWeekdayNumber(dateString) {
+  if (!dateString) return null;
+  const match = String(dateString).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getDay();
+}
+
+function isDefaultDailyRecordHoliday(dateString) {
+  const weekday = getWeekdayNumber(dateString);
+  return weekday === 5 || weekday === 6;
+}
+
+function resolveDailyRecordHoliday(dateString, explicitValue) {
+  if (typeof explicitValue === "boolean") return explicitValue;
+  return isDefaultDailyRecordHoliday(dateString);
 }
 
 function getEmptyDailyRecordPlanDraft() {
@@ -2913,6 +2941,7 @@ export default function AdminConsole({
   const [dailyRecordPlanDrafts, setDailyRecordPlanDrafts] = useState({});
   const [dailyRecordConfirmedDates, setDailyRecordConfirmedDates] = useState([]);
   const [dailyRecordPlanSavingDate, setDailyRecordPlanSavingDate] = useState("");
+  const [dailyRecordHolidaySavingDate, setDailyRecordHolidaySavingDate] = useState("");
   const dailyRecordTableWrapRef = useRef(null);
   const [rankingPeriods, setRankingPeriods] = useState([]);
   const [rankingMsg, setRankingMsg] = useState("");
@@ -4086,11 +4115,14 @@ export default function AdminConsole({
     const recordByDate = Object.fromEntries((dailyRecords ?? []).filter((record) => record?.record_date).map((record) => [record.record_date, record]));
     const displayMap = {};
     scheduleRecordRows.forEach(({ recordDate, draft }) => {
+      const record = recordByDate[recordDate] ?? null;
       const previousRecord = recordByDate[addDays(recordDate, -1)] ?? null;
       const isConfirmed = Boolean(previousRecord?.id) && confirmedSet.has(recordDate);
       const actualTests = scheduleRecordActualTestsByDate[recordDate] ?? [];
+      const isHoliday = resolveDailyRecordHoliday(recordDate, record?.is_holiday);
       displayMap[recordDate] = {
         isConfirmed,
+        isHoliday,
         mini_test_1: isConfirmed ? (actualTests[0]?.title ?? "-") : draft.mini_test_1,
         mini_test_2: isConfirmed ? (actualTests[1]?.title ?? "-") : draft.mini_test_2,
         special_test_1: isConfirmed ? (actualTests[2]?.title ?? "-") : draft.special_test_1,
@@ -4527,6 +4559,65 @@ export default function AdminConsole({
     let mounted = true;
 
     async function loadSchoolAssignments() {
+      const normalizeSchoolAssignments = (rows) => (
+        Array.isArray(rows)
+          ? rows
+              .filter((row) => row?.school_id)
+              .map((row) => ({
+                school_id: row.school_id,
+                school_name: row.school_name ?? row.school_id,
+                school_status: row.school_status ?? null,
+                is_primary: Boolean(row.is_primary),
+              }))
+          : []
+      );
+
+      const { data: rpcSchoolOptionsData, error: rpcSchoolOptionsError } = await supabase.rpc(
+        "get_admin_school_options",
+      );
+
+      const rpcAssignments = normalizeSchoolAssignments(rpcSchoolOptionsData);
+      if (!rpcSchoolOptionsError && rpcAssignments.length > 0) {
+        if (!mounted) return;
+        setSchoolAssignments(rpcAssignments);
+
+        if (!forcedSchoolId) {
+          const storedScope =
+            typeof window !== "undefined" ? window.localStorage.getItem(ADMIN_SCHOOL_SCOPE_STORAGE_KEY) : null;
+          const validStoredScope = rpcAssignments.some((assignment) => assignment.school_id === storedScope);
+          const nextScopeId = validStoredScope
+            ? storedScope
+            : profile.school_id ?? rpcAssignments[0]?.school_id ?? null;
+          setSchoolScopeId(nextScopeId);
+        }
+        return;
+      }
+
+      const { data: schoolOptionsData, error: schoolOptionsError } = await supabase.functions.invoke(
+        "get-admin-school-options",
+        {
+          body: {},
+        },
+      );
+
+      const functionAssignments = normalizeSchoolAssignments(schoolOptionsData?.schools);
+
+      if (!schoolOptionsError && functionAssignments.length > 0) {
+        if (!mounted) return;
+        setSchoolAssignments(functionAssignments);
+
+        if (!forcedSchoolId) {
+          const storedScope =
+            typeof window !== "undefined" ? window.localStorage.getItem(ADMIN_SCHOOL_SCOPE_STORAGE_KEY) : null;
+          const validStoredScope = functionAssignments.some((assignment) => assignment.school_id === storedScope);
+          const nextScopeId = validStoredScope
+            ? storedScope
+            : profile.school_id ?? functionAssignments[0]?.school_id ?? null;
+          setSchoolScopeId(nextScopeId);
+        }
+        return;
+      }
+
       const { data: assignments, error: assignmentsError } = await supabase
         .from("admin_school_assignments")
         .select("school_id, is_primary")
@@ -4535,6 +4626,12 @@ export default function AdminConsole({
 
       if (assignmentsError) {
         console.error("admin school assignments error:", assignmentsError);
+        if (rpcSchoolOptionsError) {
+          console.error("get_admin_school_options rpc error:", rpcSchoolOptionsError);
+        }
+        if (schoolOptionsError) {
+          console.error("get-admin-school-options error:", schoolOptionsError);
+        }
         if (mounted) {
           setSchoolAssignments(
             profile.school_id
@@ -5522,6 +5619,33 @@ export default function AdminConsole({
   async function saveStudentInformation() {
     if (!selectedStudentId) return;
     setStudentInfoMsg("");
+    const normalizedStudentCode = normalizeStudentNumberInput(studentInfoForm.student_code).trim();
+    if (studentInfoForm.student_code.trim() && !normalizedStudentCode) {
+      setStudentInfoMsg("Student No. must contain digits only.");
+      return;
+    }
+
+    if (normalizedStudentCode) {
+      const { data: duplicateStudent, error: duplicateError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("role", "student")
+        .eq("school_id", activeSchoolId)
+        .eq("student_code", normalizedStudentCode)
+        .neq("id", selectedStudentId)
+        .limit(1)
+        .maybeSingle();
+      if (duplicateError) {
+        console.error("student number duplicate check error:", duplicateError);
+        setStudentInfoMsg(`Save failed: ${duplicateError.message}`);
+        return;
+      }
+      if (duplicateStudent?.id) {
+        setStudentInfoMsg("Student No. is already used by another student in this school.");
+        return;
+      }
+    }
+
     setStudentInfoSaving(true);
     const nextUploads = { ...getProfileUploads(studentInfoForm.profile_uploads) };
     for (const field of PERSONAL_UPLOAD_FIELDS) {
@@ -5536,7 +5660,11 @@ export default function AdminConsole({
       }
       if (asset?.url) nextUploads[field.key] = asset;
     }
-    const payload = buildPersonalInfoPayload({ ...studentInfoForm, profile_uploads: nextUploads });
+    const payload = buildPersonalInfoPayload({
+      ...studentInfoForm,
+      student_code: normalizedStudentCode,
+      profile_uploads: nextUploads,
+    });
     const { data, error } = await supabase
       .from("profiles")
       .update(payload)
@@ -5545,7 +5673,11 @@ export default function AdminConsole({
       .single();
     if (error) {
       console.error("student info update error:", error);
-      setStudentInfoMsg(`Save failed: ${error.message}`);
+      setStudentInfoMsg(
+        isUniqueViolationError(error)
+          ? "Student No. is already used by another student in this school."
+          : `Save failed: ${error.message}`,
+      );
       setStudentInfoSaving(false);
       return;
     }
@@ -5562,16 +5694,18 @@ export default function AdminConsole({
       setDailyRecordPlanDrafts({});
       setDailyRecordSyllabusAnnouncements([]);
       setDailyRecordConfirmedDates([]);
+      setDailyRecordHolidaySavingDate("");
       setDailyRecordsMsg("Select a school.");
       return;
     }
     setDailyRecordsMsg("Loading...");
-    const { data, error } = await supabase
+    let result = await supabase
       .from("daily_records")
       .select(`
         id,
         school_id,
         record_date,
+        is_holiday,
         todays_content,
         mini_test_1,
         mini_test_2,
@@ -5584,12 +5718,34 @@ export default function AdminConsole({
       .eq("school_id", activeSchoolId)
       .order("record_date", { ascending: false })
       .limit(180);
+    if (result.error && isMissingColumnError(result.error, "is_holiday")) {
+      result = await supabase
+        .from("daily_records")
+        .select(`
+          id,
+          school_id,
+          record_date,
+          todays_content,
+          mini_test_1,
+          mini_test_2,
+          special_test_1,
+          special_test_2,
+          created_at,
+          updated_at,
+          daily_record_student_comments(${DAILY_RECORD_COMMENT_FIELDS})
+        `)
+        .eq("school_id", activeSchoolId)
+        .order("record_date", { ascending: false })
+        .limit(180);
+    }
+    const { data, error } = result;
     if (error) {
       console.error("daily records fetch error:", error);
       setDailyRecords([]);
       setDailyRecordPlanDrafts({});
       setDailyRecordSyllabusAnnouncements([]);
       setDailyRecordConfirmedDates([]);
+      setDailyRecordHolidaySavingDate("");
       setDailyRecordsMsg(`Load failed: ${error.message}`);
       return;
     }
@@ -5615,6 +5771,7 @@ export default function AdminConsole({
         )
       )
     );
+    setDailyRecordHolidaySavingDate("");
     setDailyRecordsMsg(list.length ? "" : "No daily records yet. The next 2 weeks are shown below for planning.");
   }
 
@@ -5953,6 +6110,61 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setDailyRecordPlanSavingDate("");
     setDailyRecordsMsg(`Saved plan for ${recordDate}.`);
     await fetchDailyRecords();
+  }
+
+  async function saveDailyRecordHoliday(recordDate, nextHoliday) {
+    if (!activeSchoolId || !recordDate) return;
+    setDailyRecordHolidaySavingDate(recordDate);
+    setDailyRecordsMsg("");
+    const existingRecord = dailyRecords.find((item) => item.record_date === recordDate) ?? null;
+    const payload = {
+      school_id: activeSchoolId,
+      record_date: recordDate,
+      is_holiday: nextHoliday,
+      updated_at: new Date().toISOString(),
+      created_by: session?.user?.id ?? null,
+    };
+
+    if (existingRecord?.id) {
+      const { error } = await supabase
+        .from("daily_records")
+        .update(payload)
+        .eq("id", existingRecord.id);
+      if (error) {
+        console.error("daily record holiday update error:", error);
+        setDailyRecordHolidaySavingDate("");
+        setDailyRecordsMsg(
+          isMissingColumnError(error, "is_holiday")
+            ? "Holiday toggle requires the latest daily_records migration."
+            : `Save failed: ${error.message}`,
+        );
+        return;
+      }
+    } else {
+      const { error } = await supabase
+        .from("daily_records")
+        .insert({
+          ...payload,
+          todays_content: null,
+          mini_test_1: null,
+          mini_test_2: null,
+          special_test_1: null,
+          special_test_2: null,
+        });
+      if (error) {
+        console.error("daily record holiday insert error:", error);
+        setDailyRecordHolidaySavingDate("");
+        setDailyRecordsMsg(
+          isMissingColumnError(error, "is_holiday")
+            ? "Holiday toggle requires the latest daily_records migration."
+            : `Save failed: ${error.message}`,
+        );
+        return;
+      }
+    }
+
+    await fetchDailyRecords();
+    setDailyRecordsMsg(`${recordDate} marked as ${nextHoliday ? "holiday" : "school day"}.`);
   }
 
   async function fetchRankingPeriods() {
@@ -8026,6 +8238,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setStudentMsg(`Reissued temp password for ${student.email || student.id}`);
   }
 
+  function closeReissueModal() {
+    setReissueOpen(false);
+    setReissueStudent(null);
+    setReissuePassword("");
+    setReissueIssuedPassword("");
+    setReissueLoading(false);
+    setReissueMsg("");
+  }
+
   async function deleteStudent(userId, email) {
     if (!userId) return;
     const ok = window.confirm(`Delete student ${email || userId}?`);
@@ -8126,6 +8347,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       const personalInfoRows = [
         { label: "Full Name", value: selectedStudent.display_name || "-" },
         { label: "Email", value: selectedStudent.email || "-" },
+        { label: "Student No.", value: selectedStudent.student_code || "-" },
         { label: "Phone Number", value: selectedStudent.phone_number || "-" },
         {
           label: "Date of Birth",
@@ -8134,7 +8356,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
             : "-",
         },
         { label: "Sex", value: selectedStudent.sex || "-" },
-        { label: "UID", value: selectedStudent.student_code || "-" },
         { label: "Current Working Facility", value: selectedStudent.current_working_facility || "-" },
         { label: "Years of Experience", value: formatYearsOfExperience(selectedStudent.years_of_experience) || "-" },
         { label: "Nursing Certificate", value: selectedStudent.nursing_certificate || "-" },
@@ -8366,7 +8587,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
             <div class="report">
               <div class="report-header">
                 <div class="report-title">${escapeHtml(reportTitle)}</div>
-                <div class="report-meta">Student Code: ${escapeHtml(selectedStudent.student_code || "-")}</div>
+                <div class="report-meta">Student No.: ${escapeHtml(selectedStudent.student_code || "-")}</div>
                 <div class="report-meta">Email: ${escapeHtml(selectedStudent.email || "-")}</div>
                 <div class="report-meta">Generated: ${escapeHtml(new Date().toLocaleString())}</div>
               </div>
@@ -10268,7 +10489,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     <th>No.</th>
                     <th>Submitted</th>
                     <th>Name</th>
-                    <th>Code</th>
+                    <th>Student<br />No.</th>
                     <th>Score</th>
                     <th>Rate</th>
                     <th>Status</th>
@@ -10310,7 +10531,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <tr>
                     <th>Rank</th>
                     <th>Student</th>
-                    <th>Code</th>
+                    <th>Student<br />No.</th>
                     <th>Total Score</th>
                     <th>Total %</th>
                     {sessionDetailSectionAverages.map((section) => (
@@ -11116,18 +11337,23 @@ function openDailyRecordModal(record = null, recordDate = "") {
               {!forcedSchoolId && profile?.role === "admin" ? (
                 <div className="admin-school-switcher admin-topbar-school-switcher">
                   <label htmlFor="admin-school-switcher">School</label>
-                  <select
-                    id="admin-school-switcher"
-                    value={activeSchoolId ?? ""}
-                    onChange={(event) => handleAdminSchoolScopeChange(event.target.value)}
-                  >
-                    {schoolAssignments.map((assignment) => (
-                      <option key={assignment.school_id} value={assignment.school_id}>
-                        {assignment.school_name}
-                        {assignment.is_primary ? " (Primary)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                  {schoolAssignments.length > 1 ? (
+                    <select
+                      id="admin-school-switcher"
+                      value={activeSchoolId ?? ""}
+                      onChange={(event) => handleAdminSchoolScopeChange(event.target.value)}
+                    >
+                      {schoolAssignments.map((assignment) => (
+                        <option key={assignment.school_id} value={assignment.school_id}>
+                          {assignment.school_name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="admin-topbar-school-label">
+                      {schoolAssignments[0]?.school_name ?? activeSchoolName}
+                    </div>
+                  )}
                 </div>
               ) : null}
               {changeSchoolHref && profile?.role !== "super_admin" ? (
@@ -11240,7 +11466,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <table className="admin-table" style={{ minWidth: 960 }}>
                   <thead>
                     <tr>
-                      <th>Code</th>
+                      <th>Student<br />No.</th>
                       <th>Name</th>
                       <th>Email</th>
                       <th>Attendance<br />Rate</th>
@@ -11454,6 +11680,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       {[
                         { label: "Full Name", value: selectedStudent?.display_name || "-" },
                         { label: "Email", value: selectedStudent?.email || "-" },
+                        { label: "Student No.", value: selectedStudent?.student_code || "-" },
                         { label: "Phone Number", value: selectedStudent?.phone_number || "-" },
                         {
                           label: "Date of Birth",
@@ -11462,7 +11689,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                             : "-"
                         },
                         { label: "Sex", value: selectedStudent?.sex || "-" },
-                        { label: "UID", value: selectedStudent?.student_code || "-" },
                         { label: "Current Working Facility", value: selectedStudent?.current_working_facility || "-" },
                         {
                           label: "Years of Experience",
@@ -11975,7 +12201,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <table className="admin-table" style={{ minWidth: 760 }}>
                     <thead>
                       <tr>
-                        <th>Code</th>
+                        <th>Student<br />No.</th>
                         <th>Name</th>
                         <th>Email</th>
                         <th>Issues</th>
@@ -12174,7 +12400,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
             <table className="admin-table attendance-table">
               <thead>
                 <tr>
-                  <th className="att-col-code att-sticky-1">ID</th>
+                  <th className="att-col-code att-sticky-1">Student<br />No.</th>
                   <th className="att-col-name att-sticky-2">Student Name</th>
                   <th className="att-col-rate att-sticky-3">Attendance<br />Rate</th>
                   <th className="att-col-absent att-sticky-4">Unexcused<br />Absence</th>
@@ -12269,10 +12495,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
 
           <div className="admin-table-wrap" style={{ marginTop: 8, maxHeight: "70vh" }} ref={dailyRecordTableWrapRef}>
-            <table className="admin-table" style={{ minWidth: 1360 }}>
+            <table className="admin-table daily-record-table" style={{ minWidth: 1360 }}>
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th className="daily-record-holiday-head">Holiday</th>
                   <th>Today's Content</th>
                   <th>Student Comments</th>
                   <th>Test 1</th>
@@ -12285,76 +12512,100 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 {scheduleRecordRows.map(({ recordDate, record, draft }) => {
                   const display = scheduleRecordDisplayByDate[recordDate] ?? {
                     isConfirmed: false,
+                    isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
                     mini_test_1: draft.mini_test_1,
                     mini_test_2: draft.mini_test_2,
                     special_test_1: draft.special_test_1,
                   };
+                  const weekdayLabel = formatWeekday(recordDate);
                   return (
                   <tr
                     key={record?.id ?? recordDate}
                     data-daily-record-date={recordDate}
+                    className={display.isHoliday ? "daily-record-holiday-row" : ""}
                     style={{ cursor: "pointer" }}
                     onClick={(event) => {
                       if (event.target.closest("input, textarea, select, button, a, label")) return;
                       openDailyRecordModal(record, recordDate);
                     }}
                   >
-                    <td>{formatDateFull(recordDate)}</td>
-                    <td>
-                      {record?.todays_content
-                        ? (() => {
-                            const summary = summarizeDailyRecordContent(record.todays_content);
-                            return summary.length > 140 ? `${summary.slice(0, 140)}...` : summary;
-                          })()
-                        : "-"}
+                    <td className="daily-record-date-cell">
+                      {`${formatDateFull(recordDate)}${weekdayLabel ? ` (${weekdayLabel})` : ""}`}
                     </td>
-                    <td>{record ? summarizeDailyRecordComments(record) : "-"}</td>
-                    <td>
-                      {display.isConfirmed ? (
-                        <span>{display.mini_test_1}</span>
-                      ) : (
+                    <td className="daily-record-holiday-cell" onClick={(event) => event.stopPropagation()}>
+                      <label className="daily-session-create-switch" aria-label={`Mark ${recordDate} as holiday`}>
                         <input
-                          className="daily-record-plan-input"
-                          value={display.mini_test_1}
-                          onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_1", e.target.value)}
-                          placeholder="Plan"
+                          type="checkbox"
+                          checked={display.isHoliday}
+                          disabled={dailyRecordHolidaySavingDate === recordDate}
+                          onChange={(event) => saveDailyRecordHoliday(recordDate, event.target.checked)}
                         />
-                      )}
+                        <span className="daily-session-create-switch-slider" />
+                      </label>
                     </td>
-                    <td>
-                      {display.isConfirmed ? (
-                        <span>{display.mini_test_2}</span>
-                      ) : (
-                        <input
-                          className="daily-record-plan-input"
-                          value={display.mini_test_2}
-                          onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
-                          placeholder="Plan"
-                        />
-                      )}
-                    </td>
-                    <td>
-                      {display.isConfirmed ? (
-                        <span>{display.special_test_1}</span>
-                      ) : (
-                        <input
-                          className="daily-record-plan-input"
-                          value={display.special_test_1}
-                          onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
-                          placeholder="Plan"
-                        />
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        className="btn"
-                        type="button"
-                        onClick={() => saveDailyRecordPlan(recordDate)}
-                        disabled={display.isConfirmed || dailyRecordPlanSavingDate === recordDate}
-                      >
-                        {display.isConfirmed ? "Confirmed" : dailyRecordPlanSavingDate === recordDate ? "Saving..." : "Save Plan"}
-                      </button>
-                    </td>
+                    {display.isHoliday ? (
+                      <td colSpan={5} className="daily-record-holiday-summary">
+                        {dailyRecordHolidaySavingDate === recordDate ? "Saving..." : "Holiday"}
+                      </td>
+                    ) : (
+                      <>
+                        <td>
+                          {record?.todays_content
+                            ? (() => {
+                                const summary = summarizeDailyRecordContent(record.todays_content);
+                                return summary.length > 140 ? `${summary.slice(0, 140)}...` : summary;
+                              })()
+                            : "-"}
+                        </td>
+                        <td>{record ? summarizeDailyRecordComments(record) : "-"}</td>
+                        <td>
+                          {display.isConfirmed ? (
+                            <span>{display.mini_test_1}</span>
+                          ) : (
+                            <input
+                              className="daily-record-plan-input"
+                              value={display.mini_test_1}
+                              onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_1", e.target.value)}
+                              placeholder="Plan"
+                            />
+                          )}
+                        </td>
+                        <td>
+                          {display.isConfirmed ? (
+                            <span>{display.mini_test_2}</span>
+                          ) : (
+                            <input
+                              className="daily-record-plan-input"
+                              value={display.mini_test_2}
+                              onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
+                              placeholder="Plan"
+                            />
+                          )}
+                        </td>
+                        <td>
+                          {display.isConfirmed ? (
+                            <span>{display.special_test_1}</span>
+                          ) : (
+                            <input
+                              className="daily-record-plan-input"
+                              value={display.special_test_1}
+                              onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
+                              placeholder="Plan"
+                            />
+                          )}
+                        </td>
+                        <td>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={() => saveDailyRecordPlan(recordDate)}
+                            disabled={display.isConfirmed || dailyRecordPlanSavingDate === recordDate}
+                          >
+                            {display.isConfirmed ? "Confirmed" : dailyRecordPlanSavingDate === recordDate ? "Saving..." : "Save Plan"}
+                          </button>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 )})}
               </tbody>
@@ -15624,17 +15875,22 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   />
                 </div>
                 <div className="field">
+                  <label>Student No.</label>
+                  <input
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={studentInfoForm.student_code}
+                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, student_code: normalizeStudentNumberInput(e.target.value) }))}
+                  />
+                  <div className="admin-help" style={{ marginTop: 4 }}>
+                    Numbers only. Must be unique within this school.
+                  </div>
+                </div>
+                <div className="field">
                   <label>Phone Number</label>
                   <input
                     value={studentInfoForm.phone_number}
                     onChange={(e) => setStudentInfoForm((s) => ({ ...s, phone_number: e.target.value }))}
-                  />
-                </div>
-                <div className="field">
-                  <label>UID</label>
-                  <input
-                    value={studentInfoForm.student_code}
-                    onChange={(e) => setStudentInfoForm((s) => ({ ...s, student_code: e.target.value }))}
                   />
                 </div>
                 <div className="field">
@@ -15771,33 +16027,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ), document.body) : null}
 
-        {reissueOpen && reissueStudent ? (
-          <div
-            className="admin-modal-overlay"
-            onClick={() => {
-              setReissueOpen(false);
-              setReissueStudent(null);
-              setReissuePassword("");
-              setReissueIssuedPassword("");
-              setReissueLoading(false);
-              setReissueMsg("");
-            }}
-          >
+        {reissueOpen && reissueStudent && typeof document !== "undefined" ? createPortal((
+          <div className="admin-modal-overlay" onClick={closeReissueModal}>
             <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
               <div className="admin-modal-header">
                 <div className="admin-title">Reissue Temp Password</div>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    setReissueOpen(false);
-                    setReissueStudent(null);
-                    setReissuePassword("");
-                    setReissueIssuedPassword("");
-                    setReissueLoading(false);
-                    setReissueMsg("");
-                  }}
-                >
-                  Close
+                <button className="admin-modal-close" onClick={closeReissueModal} aria-label="Close">
+                  &times;
                 </button>
               </div>
               <div className="admin-help" style={{ marginTop: 6 }}>
@@ -15847,7 +16083,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </div>
               ) : null}
 
-              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button className="btn" onClick={closeReissueModal} disabled={reissueLoading}>
+                  Cancel
+                </button>
                 <button
                   className="btn btn-primary"
                   onClick={() => reissueTempPassword(reissueStudent, reissuePassword.trim())}
@@ -15858,7 +16097,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               </div>
             </div>
           </div>
-        ) : null}
+        ), document.body) : null}
 
         {inviteOpen && typeof document !== "undefined" ? createPortal((
           <div
@@ -15954,7 +16193,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   />
                 </div>
                 <div className="field">
-                  <label>Code</label>
+                  <label>Student No.</label>
                   <input
                     value={inviteForm.student_code}
                     onChange={(e) => setInviteForm((s) => ({ ...s, student_code: e.target.value }))}
@@ -16053,7 +16292,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <table className="admin-table attendance-modal-table">
                   <thead>
                     <tr>
-                      <th>Code</th>
+                      <th>Student<br />No.</th>
                       <th>Student</th>
                       <th>Present</th>
                       <th>Late/Leave Early</th>
@@ -16247,7 +16486,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   >
                     <thead>
                       <tr>
-                        <th className="daily-sticky-1 daily-col-no">Student ID</th>
+                        <th className="daily-sticky-1 daily-col-no">Student<br />No.</th>
                         <th className="daily-sticky-2 daily-col-name">Student Name</th>
                         {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem) => (
                           <th key={`daily-col-${sessionItem.id}`}>
@@ -16411,7 +16650,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   }}
                 >
                   <div className="field">
-                    <label>Student Code（部分一致）</label>
+                    <label>Student No.（partial match）</label>
                     <input
                       placeholder="ID001"
                       value={filters.code}
@@ -16481,7 +16720,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       <tr>
                         <th>Created</th>
                         <th>Name</th>
-                        <th>Code</th>
+                        <th>Student<br />No.</th>
                         <th>Score</th>
                         <th>Rate</th>
                         <th>Test</th>

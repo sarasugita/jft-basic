@@ -338,14 +338,11 @@ export default function SchoolAdminsPage({ schoolId }) {
       <div className="admin-panel">
         <div className="super-toolbar">
           <div>
-            <div className="admin-chip">School Admin Management</div>
-            <div className="super-inline-title">{school.name}</div>
-            <div className="admin-help">
-              New admins receive a temporary password and must change it on first login.
-            </div>
-          </div>
-          <div className="admin-actions">
-            <Link className="btn" href="/super/schools" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <Link
+              className="btn super-school-admin-back-link"
+              href="/super/schools"
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
               <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 18, height: 18 }}>
                 <path
                   d="m15 6-6 6 6 6"
@@ -358,6 +355,12 @@ export default function SchoolAdminsPage({ schoolId }) {
               </svg>
               <span>Back to Schools</span>
             </Link>
+            <div className="super-inline-title" style={{ marginTop: 0 }}>{school.name}</div>
+            <div className="admin-help">
+              New admins receive a temporary password and must change it on first login.
+            </div>
+          </div>
+          <div className="admin-actions">
             <button className="btn" onClick={openAssignModal}>Add Existing Admin</button>
             <button className="btn btn-primary" onClick={openCreateModal}>Create Admin</button>
           </div>
@@ -431,7 +434,7 @@ export default function SchoolAdminsPage({ schoolId }) {
 
             {modalMode === "assign" ? (
               <>
-                <div className="admin-form" style={{ marginTop: 12 }}>
+                <div className="admin-form super-school-admin-form" style={{ marginTop: 12 }}>
                   <div className="field">
                     <label>Existing Admin</label>
                     <select
@@ -452,14 +455,12 @@ export default function SchoolAdminsPage({ schoolId }) {
                 <div className="admin-help" style={{ marginTop: 10 }}>
                   {existingAdminsLoading
                     ? "Loading available admins..."
-                    : selectedExistingAdmin
-                    ? `Primary school: ${selectedExistingAdmin.primary_school_name} | Status: ${selectedExistingAdmin.account_status}`
                     : "Select an existing admin from another school to add them here as a shared admin."}
                 </div>
               </>
             ) : (
               <>
-                <div className="admin-form" style={{ marginTop: 12 }}>
+                <div className="admin-form super-school-admin-form" style={{ marginTop: 12 }}>
                   <div className="field">
                     <label>Name</label>
                     <input
@@ -488,7 +489,7 @@ export default function SchoolAdminsPage({ schoolId }) {
                   ) : null}
                 </div>
                 {modalMode === "create" ? (
-                  <div className="admin-actions" style={{ marginTop: 10 }}>
+                  <div className="super-school-admin-modal-actions" style={{ marginTop: 10, justifyContent: "flex-start" }}>
                     <button
                       className="btn"
                       onClick={() => setForm((prev) => ({ ...prev, temp_password: generateTempPassword() }))}
@@ -500,11 +501,11 @@ export default function SchoolAdminsPage({ schoolId }) {
               </>
             )}
 
-            <div className="admin-actions" style={{ marginTop: 16 }}>
+            <div className="super-school-admin-modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn" onClick={() => setModalOpen(false)}>Cancel</button>
               <button className="btn btn-primary" disabled={saving || existingAdminsLoading} onClick={saveAdmin}>
                 {saving ? "Saving..." : modalActionLabel}
               </button>
-              <button className="btn" onClick={() => setModalOpen(false)}>Cancel</button>
             </div>
           </div>
         </div>

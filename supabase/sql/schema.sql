@@ -196,6 +196,7 @@ create table if not exists public.daily_records (
   id uuid primary key default gen_random_uuid(),
   school_id uuid not null references public.schools(id) on delete cascade,
   record_date date not null,
+  is_holiday boolean,
   todays_content text,
   mini_test_1 text,
   mini_test_2 text,
