@@ -7092,28 +7092,40 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setAttendanceEntries(map);
   }
 
-  async function openAttendanceDay(dayDate) {
+  async function openAttendanceDay(dayDate, options = {}) {
     if (!dayDate) return;
     if (!activeSchoolId) {
       setAttendanceMsg("School context is missing for this admin.");
       return;
     }
+    const existingDay = (attendanceDays ?? []).find((day) => day.day_date === dayDate) ?? null;
+    if (existingDay && options.confirmExisting) {
+      const shouldEditExisting = window.confirm(
+        `Attendance for ${dayDate} already exists. Edit it?`
+      );
+      if (!shouldEditExisting) {
+        return;
+      }
+    }
     setAttendanceMsg("");
     setAttendanceModalOpen(true);
     setAttendanceSaving(false);
     setApprovedAbsenceByStudent({});
-    const { data, error } = await supabase
-      .from("attendance_days")
-      .upsert({ school_id: activeSchoolId, day_date: dayDate }, { onConflict: "school_id,day_date" })
-      .select()
-      .single();
-    if (error || !data?.id) {
-      console.error("attendance day upsert error:", error);
-      setAttendanceMsg(`Open day failed: ${error?.message ?? "Unknown error"}`);
-      setAttendanceModalOpen(false);
-      return;
+    let day = existingDay;
+    if (!day) {
+      const { data, error } = await supabase
+        .from("attendance_days")
+        .upsert({ school_id: activeSchoolId, day_date: dayDate }, { onConflict: "school_id,day_date" })
+        .select()
+        .single();
+      if (error || !data?.id) {
+        console.error("attendance day upsert error:", error);
+        setAttendanceMsg(`Open day failed: ${error?.message ?? "Unknown error"}`);
+        setAttendanceModalOpen(false);
+        return;
+      }
+      day = data;
     }
-    const day = data;
     const { data: approvedApps, error: appsError } = await supabase
       .from("absence_applications")
       .select("id, student_id, type, late_type, time_value, reason, catch_up")
@@ -12417,7 +12429,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </div>
                 <div className="field small">
                   <label>&nbsp;</label>
-                  <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => openAttendanceDay(attendanceDate)}>
+                  <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => openAttendanceDay(attendanceDate, { confirmExisting: true })}>
                     Open Day
                   </button>
                 </div>
