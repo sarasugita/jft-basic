@@ -288,6 +288,18 @@ function addDays(dateString, offsetDays) {
   return base.toISOString().slice(0, 10);
 }
 
+function addMonths(dateString, offsetMonths) {
+  const match = String(dateString ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return dateString;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const base = new Date(year, monthIndex, day);
+  if (Number.isNaN(base.getTime())) return dateString;
+  base.setMonth(base.getMonth() + offsetMonths);
+  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}-${String(base.getDate()).padStart(2, "0")}`;
+}
+
 function getWeekdayNumber(dateString) {
   if (!dateString) return null;
   const match = String(dateString).match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -3150,6 +3162,9 @@ export default function AdminConsole({
   const [attendanceModalDay, setAttendanceModalDay] = useState(null);
   const [attendanceDraft, setAttendanceDraft] = useState({});
   const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const attendanceImportChoiceResolverRef = useRef(null);
+  const [attendanceImportConflict, setAttendanceImportConflict] = useState(null);
+  const [attendanceImportStatus, setAttendanceImportStatus] = useState(null);
   const [approvedAbsenceByStudent, setApprovedAbsenceByStudent] = useState({});
   const [attendanceFilter, setAttendanceFilter] = useState({
     minRate: "",
@@ -4104,9 +4119,10 @@ export default function AdminConsole({
 
   const scheduleRecordRows = useMemo(() => {
     const today = getTodayDateInput();
+    const planningEnd = addMonths(today, 2);
     const dateSet = new Set();
-    for (let i = 0; i < 14; i += 1) {
-      dateSet.add(addDays(today, i));
+    for (let date = today; date && date <= planningEnd; date = addDays(date, 1)) {
+      dateSet.add(date);
     }
     (dailyRecords ?? []).forEach((record) => {
       if (record?.record_date) dateSet.add(record.record_date);
@@ -4305,6 +4321,48 @@ export default function AdminConsole({
       return true;
     });
   }, [activeStudents, attendanceFilter, attendanceRangeColumns, attendanceEntriesByDay]);
+
+  const attendanceDayRates = useMemo(() => {
+    const rates = {};
+    attendanceDayColumns.forEach((day) => {
+      const statuses = attendanceFilteredStudents.map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "");
+      rates[day.id] = buildAttendanceStats(statuses).rate;
+    });
+    return rates;
+  }, [attendanceDayColumns, attendanceEntriesByDay, attendanceFilteredStudents]);
+
+  const resolveAttendanceImportConflict = useCallback((choice) => {
+    const resolve = attendanceImportChoiceResolverRef.current;
+    attendanceImportChoiceResolverRef.current = null;
+    setAttendanceImportConflict(null);
+    if (resolve) resolve(choice);
+  }, []);
+
+  const promptAttendanceImportConflict = useCallback((dayDates) => {
+    return new Promise((resolve) => {
+      if (attendanceImportChoiceResolverRef.current) {
+        attendanceImportChoiceResolverRef.current("cancel");
+      }
+      attendanceImportChoiceResolverRef.current = resolve;
+      setAttendanceImportConflict({
+        dayDates,
+        previewDates: dayDates.slice(0, 8),
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (attendanceImportChoiceResolverRef.current) {
+        attendanceImportChoiceResolverRef.current("cancel");
+        attendanceImportChoiceResolverRef.current = null;
+      }
+    };
+  }, []);
+
+  const closeAttendanceImportStatus = useCallback(() => {
+    setAttendanceImportStatus((current) => (current?.loading ? current : null));
+  }, []);
 
   const studentListRows = useMemo(() => {
     const rows = buildStudentMetricRows(sortedStudents, studentListAttendanceMap, studentListAttempts, testMetaByVersion);
@@ -5878,7 +5936,7 @@ export default function AdminConsole({
       )
     );
     setDailyRecordHolidaySavingDate("");
-    setDailyRecordsMsg(list.length ? "" : "No daily records yet. The next 2 weeks are shown below for planning.");
+    setDailyRecordsMsg(list.length ? "" : "No daily records yet. The next 2 months are shown below for planning.");
   }
 
 function openDailyRecordModal(record = null, recordDate = "") {
@@ -7113,18 +7171,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setApprovedAbsenceByStudent({});
     let day = existingDay;
     if (!day) {
-      const { data, error } = await supabase
-        .from("attendance_days")
-        .upsert({ school_id: activeSchoolId, day_date: dayDate }, { onConflict: "school_id,day_date" })
-        .select()
-        .single();
-      if (error || !data?.id) {
-        console.error("attendance day upsert error:", error);
-        setAttendanceMsg(`Open day failed: ${error?.message ?? "Unknown error"}`);
-        setAttendanceModalOpen(false);
-        return;
-      }
-      day = data;
+      day = {
+        id: null,
+        school_id: activeSchoolId,
+        day_date: dayDate,
+        created_at: null,
+        isDraft: true,
+      };
     }
     const { data: approvedApps, error: appsError } = await supabase
       .from("absence_applications")
@@ -7143,7 +7196,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setApprovedAbsenceByStudent(map);
     }
     setAttendanceModalDay(day);
-    const existing = attendanceEntriesByDay[day.id] ?? {};
+    const existing = day.id ? (attendanceEntriesByDay[day.id] ?? {}) : {};
     const draft = {};
     (activeStudents ?? []).forEach((s) => {
       const entry = existing[s.id] || {};
@@ -7153,15 +7206,30 @@ function openDailyRecordModal(record = null, recordDate = "") {
       };
     });
     setAttendanceDraft(draft);
-    await fetchAttendanceDays();
   }
 
   async function saveAttendanceDay() {
-    if (!attendanceModalDay?.id) return;
+    if (!attendanceModalDay?.day_date) return;
     setAttendanceSaving(true);
+    let dayId = attendanceModalDay.id;
+    if (!dayId) {
+      const { data: dayData, error: dayError } = await supabase
+        .from("attendance_days")
+        .upsert({ school_id: activeSchoolId, day_date: attendanceModalDay.day_date }, { onConflict: "school_id,day_date" })
+        .select()
+        .single();
+      if (dayError || !dayData?.id) {
+        console.error("attendance day upsert error:", dayError);
+        setAttendanceMsg(`Save failed: ${dayError?.message ?? "Unknown error"}`);
+        setAttendanceSaving(false);
+        return;
+      }
+      dayId = dayData.id;
+      setAttendanceModalDay(dayData);
+    }
     const rows = Object.entries(attendanceDraft || {})
       .map(([studentId, v]) => ({
-        day_id: attendanceModalDay.id,
+        day_id: dayId,
         student_id: studentId,
         status: v.status,
         comment: v.comment?.trim() || null
@@ -9848,12 +9916,34 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setAttendanceMsg("School context is missing for this admin.");
       return;
     }
-    setAttendanceMsg("Importing CSV...");
+    const showLoadingStatus = (message) => {
+      setAttendanceMsg(message);
+      setAttendanceImportStatus({
+        loading: true,
+        tone: "info",
+        title: "Importing Attendance CSV",
+        message,
+      });
+    };
+    const showResultStatus = (message, tone = "info", title = "") => {
+      setAttendanceMsg(message);
+      setAttendanceImportStatus({
+        loading: false,
+        tone,
+        title: title || (tone === "success"
+          ? "Attendance Import Complete"
+          : tone === "error"
+            ? "Attendance Import Failed"
+            : "Attendance Import Status"),
+        message,
+      });
+    };
+    showLoadingStatus("Reading uploaded attendance CSV...");
     try {
       const text = await file.text();
       const rows = parseSeparatedRows(text, detectDelimiter(text));
       if (rows.length < 4) {
-        setAttendanceMsg("Import failed: CSV format is not recognized.");
+        showResultStatus("Import failed: CSV format is not recognized.", "error");
         return;
       }
 
@@ -9865,14 +9955,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
         }
       }
       if (!dayColumns.length) {
-        setAttendanceMsg("Import failed: no attendance date columns were found.");
+        showResultStatus("Import failed: no attendance date columns were found.", "error");
         return;
       }
 
+      showLoadingStatus("Matching students and attendance columns...");
       const matchStudent = createImportedStudentMatcher(sortedStudents);
       const importedByDay = new Map();
       const unmatchedRows = [];
-      let importedStatusCount = 0;
+      let skippedEmptyDayCount = 0;
 
       for (let rowIndex = 3; rowIndex < rows.length; rowIndex += 1) {
         const row = rows[rowIndex] ?? [];
@@ -9893,37 +9984,76 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
         dayColumns.forEach(({ colIndex, dayDate }) => {
           const status = normalizeCsvValue(row[colIndex]).toUpperCase();
-          if (!importedByDay.has(dayDate)) {
-            importedByDay.set(dayDate, new Map());
-          }
-          if (["P", "L", "E", "A", "", "W"].includes(status)) {
+          if (["P", "L", "E", "A"].includes(status)) {
+            if (!importedByDay.has(dayDate)) {
+              importedByDay.set(dayDate, new Map());
+            }
             importedByDay.get(dayDate).set(student.id, status);
-            if (["P", "L", "E", "A"].includes(status)) importedStatusCount += 1;
           }
         });
       }
 
       if (!importedByDay.size) {
-        setAttendanceMsg("Import failed: no student attendance rows were recognized.");
+        showResultStatus("Import failed: no student attendance rows were recognized.", "error");
         return;
       }
 
+      skippedEmptyDayCount = dayColumns.filter(({ dayDate }) => !importedByDay.has(dayDate)).length;
+      const importedDayDates = Array.from(importedByDay.keys());
+
+      showLoadingStatus("Checking for existing attendance dates...");
+      const { data: existingDaysData, error: existingDaysError } = await supabase
+        .from("attendance_days")
+        .select("id, day_date")
+        .eq("school_id", activeSchoolId)
+        .in("day_date", importedDayDates);
+      if (existingDaysError) {
+        showResultStatus(`Import failed: ${existingDaysError.message}`, "error");
+        return;
+      }
+
+      const existingDayDates = new Set((existingDaysData ?? []).map((row) => row.day_date));
+      const overlappingDayDates = importedDayDates.filter((dayDate) => existingDayDates.has(dayDate));
+      let shouldUpdateExistingDays = true;
+
+      if (overlappingDayDates.length) {
+        setAttendanceImportStatus(null);
+        const importChoice = await promptAttendanceImportConflict(overlappingDayDates);
+        if (importChoice === "cancel") {
+          showResultStatus("Import cancelled.", "info", "Attendance Import Cancelled");
+          return;
+        }
+        shouldUpdateExistingDays = importChoice === "update";
+      }
+
+      const daysToImport = importedDayDates.filter((dayDate) => shouldUpdateExistingDays || !existingDayDates.has(dayDate));
+      if (!daysToImport.length) {
+        showResultStatus("Import skipped: all imported attendance days already exist, and only new days was selected.", "info");
+        return;
+      }
+
+      showLoadingStatus("Saving attendance days and entries...");
       const { data: daysData, error: daysError } = await supabase
         .from("attendance_days")
         .upsert(
-          Array.from(importedByDay.keys()).map((dayDate) => ({ school_id: activeSchoolId, day_date: dayDate })),
+          daysToImport.map((dayDate) => ({ school_id: activeSchoolId, day_date: dayDate })),
           { onConflict: "school_id,day_date" }
         )
         .select("id, day_date");
       if (daysError) {
-        setAttendanceMsg(`Import failed: ${daysError.message}`);
+        showResultStatus(`Import failed: ${daysError.message}`, "error");
         return;
       }
 
       const dayIdByDate = Object.fromEntries((daysData ?? []).map((row) => [row.day_date, row.id]));
-      for (const [dayDate, statusMap] of importedByDay.entries()) {
+      const actualImportedStatusCount = daysToImport.reduce(
+        (sum, dayDate) => sum + (importedByDay.get(dayDate)?.size ?? 0),
+        0
+      );
+      for (const dayDate of daysToImport) {
+        const statusMap = importedByDay.get(dayDate);
         const dayId = dayIdByDate[dayDate];
-        const studentIds = Array.from(statusMap.keys());
+        const studentIds = Array.from(statusMap?.keys?.() ?? []);
         if (!dayId || !studentIds.length) continue;
 
         const { error: deleteError } = await supabase
@@ -9932,7 +10062,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           .eq("day_id", dayId)
           .in("student_id", studentIds);
         if (deleteError) {
-          setAttendanceMsg(`Import failed: ${deleteError.message}`);
+          showResultStatus(`Import failed: ${deleteError.message}`, "error");
           return;
         }
 
@@ -9950,19 +10080,27 @@ function openDailyRecordModal(record = null, recordDate = "") {
             .from("attendance_entries")
             .upsert(insertRows, { onConflict: "day_id,student_id" });
           if (insertError) {
-            setAttendanceMsg(`Import failed: ${insertError.message}`);
+            showResultStatus(`Import failed: ${insertError.message}`, "error");
             return;
           }
         }
       }
 
       await fetchAttendanceDays();
-      setAttendanceMsg(
-        `Imported ${importedStatusCount} attendance entries across ${importedByDay.size} day${importedByDay.size === 1 ? "" : "s"}`
-        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".")
+      const updatedExistingDayCount = shouldUpdateExistingDays ? overlappingDayDates.length : 0;
+      const addedNewDayCount = daysToImport.length - updatedExistingDayCount;
+      const skippedExistingDayCount = shouldUpdateExistingDays ? 0 : overlappingDayDates.length;
+      showResultStatus(
+        `Imported ${actualImportedStatusCount} attendance entr${actualImportedStatusCount === 1 ? "y" : "ies"} across ${daysToImport.length} day${daysToImport.length === 1 ? "" : "s"}`
+        + (addedNewDayCount ? `, added ${addedNewDayCount} new day${addedNewDayCount === 1 ? "" : "s"}` : "")
+        + (updatedExistingDayCount ? `, updated ${updatedExistingDayCount} existing day${updatedExistingDayCount === 1 ? "" : "s"}` : "")
+        + (skippedExistingDayCount ? `, skipped ${skippedExistingDayCount} existing day${skippedExistingDayCount === 1 ? "" : "s"}` : "")
+        + (skippedEmptyDayCount ? `, ignored ${skippedEmptyDayCount} empty day column${skippedEmptyDayCount === 1 ? "" : "s"}` : "")
+        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : "."),
+        "success"
       );
     } catch (error) {
-      setAttendanceMsg(`Import failed: ${error instanceof Error ? error.message : error}`);
+      showResultStatus(`Import failed: ${error instanceof Error ? error.message : error}`, "error");
     } finally {
       if (attendanceImportInputRef.current) attendanceImportInputRef.current.value = "";
     }
@@ -12532,9 +12670,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <th className="att-col-absent att-sticky-4">Unexcused<br />Absence</th>
                   {attendanceDayColumns.map((d) => (
                     <th key={d.id}>
-                      <button className="link-btn" onClick={() => openAttendanceDay(d.day_date)}>
+                      <button className="link-btn" type="button" onClick={() => openAttendanceDay(d.day_date)}>
                         {d.label}
                       </button>
+                      <div className="att-day-total">
+                        {attendanceDayRates[d.id] == null ? "-" : formatRatePercent(attendanceDayRates[d.id])}
+                      </div>
                     </th>
                   ))}
                 </tr>
@@ -12659,7 +12800,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       {`${formatDateFull(recordDate)}${weekdayLabel ? ` (${weekdayLabel})` : ""}`}
                     </td>
                     <td className="daily-record-holiday-cell" onClick={(event) => event.stopPropagation()}>
-                      <label className="daily-session-create-switch" aria-label={`Mark ${recordDate} as holiday`}>
+                      <label className="daily-session-create-switch daily-record-holiday-switch" aria-label={`Mark ${recordDate} as holiday`}>
                         <input
                           type="checkbox"
                           checked={display.isHoliday}
@@ -16385,6 +16526,119 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ), document.body) : null}
 
+        {attendanceImportStatus && typeof document !== "undefined" ? createPortal((
+          <div
+            className="admin-modal-overlay"
+            onClick={() => {
+              if (!attendanceImportStatus.loading) closeAttendanceImportStatus();
+            }}
+          >
+            <div className="admin-modal attendance-import-status-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">{attendanceImportStatus.title}</div>
+                {!attendanceImportStatus.loading ? (
+                  <button
+                    className="admin-modal-close"
+                    aria-label="Close"
+                    onClick={closeAttendanceImportStatus}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+
+              <div className={`attendance-import-status-body tone-${attendanceImportStatus.tone ?? "info"}`}>
+                {attendanceImportStatus.loading ? (
+                  <div className="attendance-import-status-loading">
+                    <span className="attendance-import-status-spinner" aria-hidden="true" />
+                    <span>{attendanceImportStatus.message}</span>
+                  </div>
+                ) : (
+                  <div className="attendance-import-status-message">{attendanceImportStatus.message}</div>
+                )}
+              </div>
+
+              {!attendanceImportStatus.loading ? (
+                <div className="attendance-import-status-actions">
+                  <button className="btn btn-primary" type="button" onClick={closeAttendanceImportStatus}>
+                    Close
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ), document.body) : null}
+
+        {attendanceImportConflict && typeof document !== "undefined" ? createPortal((
+          <div
+            className="admin-modal-overlay"
+            onClick={() => resolveAttendanceImportConflict("cancel")}
+          >
+            <div className="admin-modal attendance-import-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">Attendance Import Warning</div>
+                <button
+                  className="admin-modal-close"
+                  aria-label="Close"
+                  onClick={() => resolveAttendanceImportConflict("cancel")}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="attendance-import-modal-body">
+                <div className="admin-help">
+                  This CSV includes {attendanceImportConflict.dayDates.length} day{attendanceImportConflict.dayDates.length === 1 ? "" : "s"} that already exist in the attendance sheet.
+                </div>
+                <div className="attendance-import-modal-note">
+                  Choose one action for those existing date columns:
+                </div>
+                <div className="attendance-import-modal-option-list">
+                  <div><strong>Update Existing Columns</strong>: replace the existing attendance for those dates with the CSV values, and add any new dates.</div>
+                  <div><strong>Only Add New Columns</strong>: skip the existing dates and import only dates that are not already in the sheet.</div>
+                  <div><strong>Cancel Import</strong>: stop this upload without changing anything.</div>
+                </div>
+                <div className="attendance-import-modal-date-list">
+                  {attendanceImportConflict.previewDates.map((dayDate) => (
+                    <span key={`attendance-import-conflict-${dayDate}`} className="attendance-import-modal-date-pill">
+                      {formatDateFull(dayDate)}
+                    </span>
+                  ))}
+                  {attendanceImportConflict.dayDates.length > attendanceImportConflict.previewDates.length ? (
+                    <span className="attendance-import-modal-more">
+                      +{attendanceImportConflict.dayDates.length - attendanceImportConflict.previewDates.length} more
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="attendance-import-modal-actions">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => resolveAttendanceImportConflict("update")}
+                >
+                  Update Existing Columns
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => resolveAttendanceImportConflict("new_only")}
+                >
+                  Only Add New Columns
+                </button>
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  onClick={() => resolveAttendanceImportConflict("cancel")}
+                >
+                  Cancel Import
+                </button>
+              </div>
+            </div>
+          </div>
+        ), document.body) : null}
+
         {attendanceModalOpen && attendanceModalDay && typeof document !== "undefined" ? createPortal((
           <div
             className="admin-modal-overlay"
@@ -16482,9 +16736,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <button className="btn btn-primary" onClick={saveAttendanceDay} disabled={attendanceSaving}>
                   {attendanceSaving ? "Saving..." : "Save Attendance"}
                 </button>
-                <button className="btn btn-danger" onClick={() => deleteAttendanceDay(attendanceModalDay)}>
-                  Delete Day
-                </button>
+                {attendanceModalDay.id ? (
+                  <button className="btn btn-danger" onClick={() => deleteAttendanceDay(attendanceModalDay)}>
+                    Delete Day
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>

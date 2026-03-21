@@ -183,6 +183,7 @@ const defaultState = {
   requireLogin: true,
   selectedTestVersion: "",
   selectedTestSessionId: "",
+  studentPanelUserId: "",
   studentTab: "home",
   dailyResultsCategory: "",
   dailyResultsFailedOnly: false,
@@ -307,6 +308,7 @@ function logUnexpectedError(context, error) {
 
 function resetSessionScopedState() {
   studentPanelEntryUserId = "";
+  state.studentPanelUserId = "";
   questionsState.loaded = false;
   questionsState.loading = false;
   questionsState.version = "";
@@ -782,6 +784,7 @@ async function refreshAuthState() {
       if (!authState.session) {
         state.requireLogin = true;
         resetSessionScopedState();
+        saveState();
         return;
       }
 
@@ -829,17 +832,21 @@ async function refreshAuthState() {
 
       const currentUserId = authState.session.user.id;
       if (studentPanelEntryUserId !== currentUserId) {
+        const shouldResetStudentTab = state.studentPanelUserId !== currentUserId;
         studentPanelEntryUserId = currentUserId;
-        state.studentTab = "home";
-        resultDetailState.open = false;
-        resultDetailState.mode = "";
-        resultDetailState.subTab = "score";
-        resultDetailState.sectionFilter = "";
-        resultDetailState.wrongOnly = false;
-        resultDetailState.popupOpen = false;
-        resultDetailState.popupTitle = "";
-        resultDetailState.popupRows = [];
-        resultDetailState.attempt = null;
+        state.studentPanelUserId = currentUserId;
+        if (shouldResetStudentTab) {
+          state.studentTab = "home";
+          resultDetailState.open = false;
+          resultDetailState.mode = "";
+          resultDetailState.subTab = "score";
+          resultDetailState.sectionFilter = "";
+          resultDetailState.wrongOnly = false;
+          resultDetailState.popupOpen = false;
+          resultDetailState.popupTitle = "";
+          resultDetailState.popupRows = [];
+          resultDetailState.attempt = null;
+        }
         saveState();
       }
       if (studentResultsState.userId !== currentUserId) {
