@@ -63,10 +63,18 @@ async function instrumentedAdminFetch(input, init) {
 }
 
 function applySchoolScopeHeader(builder, schoolScopeId) {
-  if (!schoolScopeId || !builder || typeof builder.setHeader !== "function") {
+  if (!schoolScopeId || !builder) {
     return builder;
   }
-  return builder.setHeader(SUPER_ADMIN_SCOPE_HEADER, schoolScopeId);
+  if (typeof builder.setHeader === "function") {
+    return builder.setHeader(SUPER_ADMIN_SCOPE_HEADER, schoolScopeId);
+  }
+  if (builder.headers) {
+    const nextHeaders = new Headers(builder.headers);
+    nextHeaders.set(SUPER_ADMIN_SCOPE_HEADER, schoolScopeId);
+    builder.headers = nextHeaders;
+  }
+  return builder;
 }
 
 function mergeScopedHeaders(headers, schoolScopeId) {

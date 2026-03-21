@@ -108,6 +108,13 @@ let announcementsState = {
   error: "",
 };
 
+let issuedWarningsState = {
+  loaded: false,
+  loading: false,
+  list: [],
+  error: "",
+};
+
 let absenceApplicationsState = {
   loaded: false,
   loading: false,
@@ -239,6 +246,29 @@ function isMissingSessionAttemptOverrideTableError(error) {
   return /test_session_attempt_overrides/i.test(text) && /does not exist/i.test(text);
 }
 
+function isMissingStudentWarningsTableError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /student_warnings/i.test(text) && /does not exist/i.test(text);
+}
+
+function normalizeStudentWarningCriteria(criteria = {}) {
+  const normalizeNumber = (value) => {
+    if (value === "" || value == null) return "";
+    const number = Number(value);
+    return Number.isFinite(number) ? number : "";
+  };
+
+  return {
+    title: String(criteria.title ?? "").trim(),
+    from: String(criteria.from ?? "").trim(),
+    to: String(criteria.to ?? "").trim(),
+    maxAttendance: normalizeNumber(criteria.maxAttendance),
+    minUnexcused: normalizeNumber(criteria.minUnexcused),
+    maxModelAvg: normalizeNumber(criteria.maxModelAvg),
+    maxDailyAvg: normalizeNumber(criteria.maxDailyAvg),
+  };
+}
+
 function hasLinkParam() {
   try {
     const url = new URL(window.location.href);
@@ -307,6 +337,10 @@ function resetSessionScopedState() {
   absenceApplicationsState.loading = false;
   absenceApplicationsState.list = [];
   absenceApplicationsState.error = "";
+  issuedWarningsState.loaded = false;
+  issuedWarningsState.loading = false;
+  issuedWarningsState.list = [];
+  issuedWarningsState.error = "";
   modelRankState.loading = false;
   modelRankState.loaded = false;
   modelRankState.map = {};
@@ -1143,6 +1177,62 @@ function getScoreRateFromAttempt(attempt) {
   return total ? correct / total : 0;
 }
 
+function getCurrentStudentWarningIssues(criteria = {}) {
+  const normalized = normalizeStudentWarningCriteria(criteria);
+  const needsAttendance = normalized.maxAttendance !== "" || normalized.minUnexcused !== "";
+  const needsResults = normalized.maxModelAvg !== "" || normalized.maxDailyAvg !== "";
+  if (needsAttendance && !studentAttendanceState.loaded) return null;
+  if (needsResults && !studentResultsState.loaded) return null;
+
+  const attendanceRows = (studentAttendanceState.list ?? []).filter((row) => {
+    const date = String(row?.day_date ?? "");
+    if (!date) return false;
+    if (normalized.from && date < normalized.from) return false;
+    if (normalized.to && date > normalized.to) return false;
+    return true;
+  });
+  const attendanceTotal = attendanceRows.length;
+  const attendancePresent = attendanceRows.filter((row) => row.status === "P" || row.status === "L").length;
+  const attendanceRate = attendanceTotal ? (attendancePresent / attendanceTotal) * 100 : null;
+  const unexcused = attendanceRows.filter((row) => row.status === "A").length;
+
+  const attempts = (studentResultsState.list ?? []).filter((attempt) => {
+    const date = String(attempt?.created_at ?? "").slice(0, 10);
+    if (!date) return false;
+    if (normalized.from && date < normalized.from) return false;
+    if (normalized.to && date > normalized.to) return false;
+    return true;
+  });
+  const modelScores = [];
+  const dailyScores = [];
+  attempts.forEach((attempt) => {
+    const type = getAttemptTestType(attempt);
+    const rate = getScoreRateFromAttempt(attempt) * 100;
+    if (type === "mock") modelScores.push(rate);
+    if (type === "daily") dailyScores.push(rate);
+  });
+  const modelAvg = modelScores.length ? modelScores.reduce((sum, rate) => sum + rate, 0) / modelScores.length : null;
+  const dailyAvg = dailyScores.length ? dailyScores.reduce((sum, rate) => sum + rate, 0) / dailyScores.length : null;
+
+  const issues = [];
+  if (normalized.maxAttendance !== "" && normalized.maxAttendance != null) {
+    const value = attendanceRate ?? 0;
+    if (value <= normalized.maxAttendance) issues.push(`Attendance ${value.toFixed(1)}% <= ${normalized.maxAttendance}%`);
+  }
+  if (normalized.minUnexcused !== "" && normalized.minUnexcused != null && unexcused >= normalized.minUnexcused) {
+    issues.push(`Unexcused ${unexcused} >= ${normalized.minUnexcused}`);
+  }
+  if (normalized.maxModelAvg !== "" && normalized.maxModelAvg != null) {
+    const value = modelAvg ?? 0;
+    if (value <= normalized.maxModelAvg) issues.push(`Model Avg ${value.toFixed(1)}% <= ${normalized.maxModelAvg}%`);
+  }
+  if (normalized.maxDailyAvg !== "" && normalized.maxDailyAvg != null) {
+    const value = dailyAvg ?? 0;
+    if (value <= normalized.maxDailyAvg) issues.push(`Daily Avg ${value.toFixed(1)}% <= ${normalized.maxDailyAvg}%`);
+  }
+  return issues;
+}
+
 function getAttemptTitle(attempt) {
   if (attempt?.test_session_id) {
     const session = testSessionsState.list.find((s) => s.id === attempt.test_session_id);
@@ -1636,6 +1726,68 @@ async function fetchAnnouncements() {
   } finally {
     announcementsState.loaded = true;
     announcementsState.loading = false;
+  }
+}
+
+async function fetchIssuedStudentWarnings() {
+  if (!authState.session || issuedWarningsState.loading) return;
+  if (!authState.profile?.school_id) return;
+  issuedWarningsState.loading = true;
+  issuedWarningsState.error = "";
+  const hadData = issuedWarningsState.loaded && issuedWarningsState.list.length > 0;
+  try {
+    const { data: recipientRows, error: recipientError } = await supabase
+      .from("student_warning_recipients")
+      .select("id, warning_id, issues, created_at")
+      .eq("student_id", authState.session.user.id)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (recipientError) {
+      logSupabaseError("student warning recipients fetch error", recipientError);
+      if (!hadData) issuedWarningsState.list = [];
+      issuedWarningsState.error = getErrorMessage(recipientError, "Failed to load warnings.");
+      return;
+    }
+    const recipientList = recipientRows ?? [];
+    if (!recipientList.length) {
+      issuedWarningsState.list = [];
+      return;
+    }
+    const warningIds = Array.from(new Set(recipientList.map((row) => row.warning_id).filter(Boolean)));
+    const { data: warningRows, error: warningError } = await supabase
+      .from("student_warnings")
+      .select("id, title, created_at")
+      .in("id", warningIds);
+    if (warningError) {
+      if (!isMissingStudentWarningsTableError(warningError)) {
+        logSupabaseError("student warnings fetch error", warningError);
+      }
+      if (!hadData) issuedWarningsState.list = [];
+      issuedWarningsState.error = isMissingStudentWarningsTableError(warningError)
+        ? "Warning tables are not available yet."
+        : getErrorMessage(warningError, "Failed to load warnings.");
+      return;
+    }
+    const warningsById = new Map((warningRows ?? []).map((warning) => [warning.id, warning]));
+    issuedWarningsState.list = recipientList
+      .map((recipient) => {
+        const warning = warningsById.get(recipient.warning_id) || null;
+        return {
+          id: recipient.id,
+          warning_id: recipient.warning_id,
+          title: warning?.title || "Warning",
+          created_at: warning?.created_at || recipient.created_at || "",
+          issues: (Array.isArray(recipient.issues) ? recipient.issues : []).map((item) => String(item ?? "").trim()).filter(Boolean),
+        };
+      })
+      .sort((left, right) => String(right.created_at ?? "").localeCompare(String(left.created_at ?? "")));
+  } catch (error) {
+    logUnexpectedError("student warnings fetch failed", error);
+    if (!hadData) issuedWarningsState.list = [];
+    issuedWarningsState.error = getErrorMessage(error, "Failed to load warnings.");
+  } finally {
+    issuedWarningsState.loaded = true;
+    issuedWarningsState.loading = false;
   }
 }
 
@@ -2995,6 +3147,9 @@ function renderTestSelect(app) {
   if (showHome && !announcementsState.loaded && !announcementsState.loading) {
     fetchAnnouncements().finally(render);
   }
+  if (showHome && authState.session && authState.profile?.school_id && !issuedWarningsState.loaded && !issuedWarningsState.loading) {
+    fetchIssuedStudentWarnings().finally(render);
+  }
   if ((showDailyResults || showModelResults) && authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
   }
@@ -3611,19 +3766,14 @@ function renderTestSelect(app) {
 
   const homeWarningHtml = showHome
     ? (() => {
-        if (!studentAttendanceState.loaded || !studentAttendanceState.list.length) return "";
-        const total = studentAttendanceState.list.length;
-        const present = studentAttendanceState.list.filter((r) => r.status === "P" || r.status === "L").length;
-        const unexcused = studentAttendanceState.list.filter((r) => r.status === "A").length;
-        const rate = total ? (present / total) * 100 : 0;
-        const warnings = [];
-        if (rate < 80) warnings.push(`Attendance below 80% (${rate.toFixed(1)}%).`);
-        if (unexcused >= 3) warnings.push(`Unexcused absences: ${unexcused}.`);
-        if (!warnings.length) return "";
+        const warningLines = (issuedWarningsState.list ?? [])
+          .filter((warning) => Array.isArray(warning.issues) && warning.issues.length > 0)
+          .map((warning) => `${warning.title || "Warning"}: ${warning.issues.join(" / ")}`);
+        if (!warningLines.length) return "";
         return `
           <div class="student-warning-title">Warning</div>
           <ul class="student-warning-list">
-            ${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}
+            ${warningLines.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}
           </ul>
         `;
       })()

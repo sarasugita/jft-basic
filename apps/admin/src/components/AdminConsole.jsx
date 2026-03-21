@@ -587,6 +587,46 @@ function getDefaultStudentWarningForm(filters = {}) {
   };
 }
 
+function normalizeStudentWarningCriteria(criteria = {}) {
+  const normalizeNumber = (value) => {
+    if (value === "" || value == null) return "";
+    const number = Number(value);
+    return Number.isFinite(number) ? number : "";
+  };
+
+  return {
+    title: String(criteria.title ?? "").trim(),
+    from: String(criteria.from ?? "").trim(),
+    to: String(criteria.to ?? "").trim(),
+    maxAttendance: normalizeNumber(criteria.maxAttendance),
+    minUnexcused: normalizeNumber(criteria.minUnexcused),
+    maxModelAvg: normalizeNumber(criteria.maxModelAvg),
+    maxDailyAvg: normalizeNumber(criteria.maxDailyAvg),
+  };
+}
+
+function getStudentWarningMetricRangeKey(criteria = {}) {
+  return `${String(criteria.from ?? "").trim()}::${String(criteria.to ?? "").trim()}`;
+}
+
+function normalizeWarningIssueList(list) {
+  return (Array.isArray(list) ? list : []).map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+function warningRecipientsMatch(leftList = [], rightList = []) {
+  if (leftList.length !== rightList.length) return false;
+  const leftMap = new Map(
+    leftList.map((item) => [
+      String(item?.student_id ?? ""),
+      JSON.stringify(normalizeWarningIssueList(item?.issues).sort()),
+    ])
+  );
+  return rightList.every((item) => {
+    const studentId = String(item?.student_id ?? "");
+    return leftMap.get(studentId) === JSON.stringify(normalizeWarningIssueList(item?.issues).sort());
+  });
+}
+
 function buildAttendancePieData(stats) {
   const presentCount = Math.max(0, Number(stats?.present ?? 0) - Number(stats?.late ?? 0));
   const lateCount = Math.max(0, Number(stats?.late ?? 0));
@@ -4715,7 +4755,7 @@ export default function AdminConsole({
     if (activeTab !== "students") return;
     fetchStudentListMetrics();
     fetchStudentWarnings();
-  }, [activeSchoolId, activeTab, studentListFilters.from, studentListFilters.to]);
+  }, [activeSchoolId, activeTab, studentListFilters.from, studentListFilters.to, students, tests]);
 
   useEffect(() => {
     if (activeTab !== "dailyRecord") return;
@@ -5392,7 +5432,7 @@ export default function AdminConsole({
       setStudentWarningsLoading(false);
       return;
     }
-    const warningIds = warningsList.map((row) => row.id);
+    const warningIds = warningsList.map((warning) => warning.id);
     const { data: recipientRows, error: recipientError } = await supabase
       .from("student_warning_recipients")
       .select("id, warning_id, student_id, issues, created_at")
@@ -5406,23 +5446,97 @@ export default function AdminConsole({
       setStudentWarningsLoading(false);
       return;
     }
-    const recipientsByWarning = new Map();
-    (recipientRows ?? []).forEach((recipient) => {
-      const list = recipientsByWarning.get(recipient.warning_id) || [];
-      list.push({
-        ...recipient,
-        issues: Array.isArray(recipient.issues) ? recipient.issues : [],
+    try {
+      const storedRecipientsByWarning = new Map();
+      (recipientRows ?? []).forEach((recipient) => {
+        const list = storedRecipientsByWarning.get(recipient.warning_id) || [];
+        list.push({
+          ...recipient,
+          issues: normalizeWarningIssueList(recipient.issues),
+        });
+        storedRecipientsByWarning.set(recipient.warning_id, list);
       });
-      recipientsByWarning.set(recipient.warning_id, list);
-    });
-    setStudentWarnings(
-      warningsList.map((warning) => ({
-        ...warning,
-        criteria: warning.criteria && typeof warning.criteria === "object" ? warning.criteria : {},
-        recipients: (recipientsByWarning.get(warning.id) || []).sort((a, b) => String(a.student_id).localeCompare(String(b.student_id))),
-      }))
-    );
-    setStudentWarningsLoading(false);
+      const metricRowsByRange = new Map();
+      const liveWarnings = await Promise.all(
+        warningsList.map(async (warning) => {
+          const criteria = normalizeStudentWarningCriteria(
+            warning.criteria && typeof warning.criteria === "object" ? warning.criteria : {}
+          );
+          const rangeKey = getStudentWarningMetricRangeKey(criteria);
+          let rowsPromise = metricRowsByRange.get(rangeKey);
+          if (!rowsPromise) {
+            rowsPromise = loadStudentWarningMetrics(criteria);
+            metricRowsByRange.set(rangeKey, rowsPromise);
+          }
+          const rows = await rowsPromise;
+          const recipients = rows
+            .filter((row) => !row.student?.is_withdrawn)
+            .map((row) => ({
+              row,
+              issues: getStudentWarningIssues(row, criteria),
+            }))
+            .filter((item) => item.issues.length > 0)
+            .sort((left, right) => String(left.row.student?.id ?? "").localeCompare(String(right.row.student?.id ?? "")))
+            .map(({ row, issues }) => ({
+              id: `${warning.id}:${row.student.id}`,
+              warning_id: warning.id,
+              student_id: row.student.id,
+              issues,
+              created_at: warning.created_at,
+            }));
+          return {
+            ...warning,
+            criteria,
+            stored_student_count: Number(warning.student_count ?? 0),
+            student_count: recipients.length,
+            recipients,
+          };
+        })
+      );
+      const warningsNeedingSync = liveWarnings.filter((warning) => {
+        const storedRecipients = storedRecipientsByWarning.get(warning.id) || [];
+        return Number(warning.stored_student_count ?? 0) !== warning.recipients.length
+          || !warningRecipientsMatch(storedRecipients, warning.recipients);
+      });
+      if (warningsNeedingSync.length) {
+        await Promise.all(
+          warningsNeedingSync.map(async (warning) => {
+            const { error: deleteError } = await supabase
+              .from("student_warning_recipients")
+              .delete()
+              .eq("warning_id", warning.id);
+            if (deleteError) throw deleteError;
+
+            if (warning.recipients.length) {
+              const { error: insertError } = await supabase
+                .from("student_warning_recipients")
+                .insert(
+                  warning.recipients.map((recipient) => ({
+                    warning_id: warning.id,
+                    school_id: activeSchoolId,
+                    student_id: recipient.student_id,
+                    issues: normalizeWarningIssueList(recipient.issues),
+                  }))
+                );
+              if (insertError) throw insertError;
+            }
+
+            const { error: updateError } = await supabase
+              .from("student_warnings")
+              .update({ student_count: warning.recipients.length })
+              .eq("id", warning.id);
+            if (updateError) throw updateError;
+          })
+        );
+      }
+      setStudentWarnings(liveWarnings);
+      setStudentWarningsLoading(false);
+    } catch (error) {
+      console.error("student warning live refresh error:", error);
+      setStudentWarnings([]);
+      setStudentWarningsLoading(false);
+      setStudentWarningsMsg(`Warnings load failed: ${error.message || error}`);
+    }
   }
 
   async function loadStudentWarningMetrics(criteria) {
@@ -5491,15 +5605,7 @@ export default function AdminConsole({
     setStudentWarningIssueSaving(true);
     setStudentWarningIssueMsg("");
     try {
-      const criteria = {
-        title: String(studentWarningForm.title ?? "").trim(),
-        from: studentWarningForm.from || "",
-        to: studentWarningForm.to || "",
-        maxAttendance: studentWarningForm.maxAttendance === "" ? "" : Number(studentWarningForm.maxAttendance),
-        minUnexcused: studentWarningForm.minUnexcused === "" ? "" : Number(studentWarningForm.minUnexcused),
-        maxModelAvg: studentWarningForm.maxModelAvg === "" ? "" : Number(studentWarningForm.maxModelAvg),
-        maxDailyAvg: studentWarningForm.maxDailyAvg === "" ? "" : Number(studentWarningForm.maxDailyAvg),
-      };
+      const criteria = normalizeStudentWarningCriteria(studentWarningForm);
       const rows = await loadStudentWarningMetrics(criteria);
       const matched = rows
         .filter((row) => !row.student?.is_withdrawn)
@@ -8370,9 +8476,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
           const asset = uploadMap[field.key];
           const url = String(asset?.url ?? "").trim();
           const name = String(asset?.name ?? field.label ?? "").trim();
+          const isImage = isImageUpload(asset);
+          const imageHtml = isImage
+            ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(name || field.label)}" style="display:block;max-width:220px;max-height:220px;border:1px solid #cbd5e1;" />`
+            : "";
           return {
             label: field.label,
-            value: url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(name || url)}</a>` : "-",
+            value: url
+              ? isImage
+                ? imageHtml
+                : `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(name || url)}</a>`
+              : "-",
             isHtml: true,
           };
         }),

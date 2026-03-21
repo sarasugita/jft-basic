@@ -80,7 +80,7 @@ body { padding: 0; }
 .btn-primary { background: #3f6b0f; border-color: #2f520b; color: #fff; }
 .btn-retake { background: #b45309; border-color: #92400e; color: #fff; }
 .btn-danger { background: #b00020; border-color: #7a0016; color: #fff; }
-.btn:not(.btn-primary):not(.btn-retake):not(.btn-danger):hover {
+.btn:not(.btn-primary):not(.btn-retake):not(.btn-danger):not(.student-warning-launch-btn):hover {
   background: #eef4e7;
   border-color: #5e8a34;
 }
@@ -2243,12 +2243,16 @@ body { padding: 0; }
 
 .student-warning-launch-btn {
   background: #dc2626;
+  border-color: #b91c1c;
   color: #fff;
+  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .student-warning-launch-btn:hover,
 .student-warning-launch-btn:focus-visible {
-  background: #b91c1c;
+  background: #dc2626;
+  border-color: #b91c1c;
+  box-shadow: 0 4px 12px rgba(168, 31, 31, 0.18);
   color: #fff;
 }
 
