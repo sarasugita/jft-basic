@@ -530,8 +530,10 @@ body { padding: 0; }
 .admin-topbar-school-switcher select {
   min-width: min(220px, 100%);
   max-width: 100%;
-  min-height: 36px;
-  border-radius: 4px;
+  min-height: 32px;
+  padding: 6px 12px;
+  border-radius: 3px;
+  line-height: 1.2;
   font-size: 13px;
 }
 
@@ -4139,7 +4141,7 @@ body { padding: 0; }
   color: #333333;
 }
 
-.admin-school-switcher select {
+.admin-school-switcher:not(.admin-topbar-school-switcher) select {
   min-width: 220px;
   border: 1px solid var(--admin-control-border);
   border-radius: 10px;

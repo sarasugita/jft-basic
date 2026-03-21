@@ -1,5 +1,5 @@
 import AdminConsole from "../components/AdminConsole";
 
 export default function AdminPage() {
-  return <AdminConsole homeHref="/" forceLoginOnEntry />;
+  return <AdminConsole homeHref="/" />;
 }

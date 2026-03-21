@@ -1376,7 +1376,6 @@ function buildMainSectionSummary(rows) {
     summaryMap.set(key, current);
   }
   return sections
-    .filter((section) => section.key !== "DAILY")
     .map((section) => getSectionTitle(section.key))
     .filter(Boolean)
     .map((label) => summaryMap.get(label))
@@ -1407,7 +1406,6 @@ function buildNestedSectionSummary(rows) {
     mainSectionMap.set(mainSection, current);
   }
   const ordered = sections
-    .filter((section) => section.key !== "DAILY")
     .map((section) => getSectionTitle(section.key))
     .filter((title) => mainSectionMap.has(title))
     .map((title) => mainSectionMap.get(title));
@@ -1484,7 +1482,6 @@ function buildMainSectionAverageRows(attemptsList, questionsList) {
   const baseRows = buildAttemptDetailRowsFromList({}, questionsList);
   const baseSummary = buildMainSectionSummary(baseRows);
   const sectionTitles = sections
-    .filter((section) => section.key !== "DAILY")
     .map((section) => getSectionTitle(section.key))
     .filter((title) => baseSummary.some((row) => row.section === title));
   return sectionTitles
@@ -2717,8 +2714,8 @@ export default function AdminConsole({
     testVersion: ""
   });
   const [activeTab, setActiveTab] = useState("students");
-  const [modelSubTab, setModelSubTab] = useState("conduct");
-  const [dailySubTab, setDailySubTab] = useState("create");
+  const [modelSubTab, setModelSubTab] = useState("results");
+  const [dailySubTab, setDailySubTab] = useState("results");
   const [attendanceSubTab, setAttendanceSubTab] = useState("sheet");
   const [dailyResultsCategory, setDailyResultsCategory] = useState("");
   const [modelResultsCategory, setModelResultsCategory] = useState("");
@@ -3287,24 +3284,20 @@ export default function AdminConsole({
   }, [sessionDetailLatestAttempts, students]);
 
   const sessionDetailSectionAverages = useMemo(() => {
-    if (sessionDetail.type !== "mock") return [];
     return buildSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions]);
 
   const sessionDetailMainSectionAverages = useMemo(() => {
-    if (sessionDetail.type !== "mock") return [];
     return buildMainSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions]);
 
   const sessionDetailNestedSectionAverages = useMemo(() => {
-    if (sessionDetail.type !== "mock") return [];
     return buildNestedSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions]);
 
   const sessionDetailStudentRankingRows = useMemo(() => {
-    if (sessionDetail.type !== "mock") return [];
     return buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, students);
-  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailQuestions, students]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, students]);
 
   const studentModelAttempts = useMemo(() => {
     return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
@@ -9540,7 +9533,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       ["analysis", "Result Analysis"],
       ["questions", "Questions"],
       ["attempts", "Attempts"],
-      ...(isMockSessionDetail ? [["studentRanking", "Student Ranking"]] : []),
+      ["studentRanking", "Student Ranking"],
     ];
     const analysisRadarData = sessionDetailMainSectionAverages.map((row) => ({
       label: row.section,
@@ -9710,7 +9703,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ) : null}
 
-        {!sessionDetailLoading && !sessionDetailMsg && isMockSessionDetail && sessionDetailTab === "studentRanking" ? (
+        {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "studentRanking" ? (
           <div className="session-detail-section">
             <div className="admin-table-wrap">
               <table className="admin-table session-student-ranking-table" style={{ minWidth: Math.max(900, 420 + sessionDetailSectionAverages.length * 120) }}>
@@ -9760,99 +9753,99 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
         {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "analysis" ? (
           <div className="session-detail-section">
-            {isMockSessionDetail ? (
-              <div className="session-detail-analysis-summary">
-                <div className="session-analysis-top-grid">
-                  <div className="session-analysis-top-card">
-                    <div className="session-analysis-top-heading">Class Score</div>
-                    <div className="session-analysis-score-table-wrap">
-                      <table className="session-analysis-score-table">
-                        <tbody>
-                          <tr>
-                            <th className="pass">No. of Pass</th>
-                            <td>
-                              <span className="session-analysis-score-main pass">{sessionDetailAnalysisSummary.passCount}</span>
-                              <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.attendedCount}</span>
-                            </td>
-                          </tr>
-                          <tr>
-                            <th className="fail">No. of Fail</th>
-                            <td>
-                              <span className="session-analysis-score-main fail">{sessionDetailAnalysisSummary.failCount}</span>
-                              <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.attendedCount}</span>
-                            </td>
-                          </tr>
-                          <tr>
-                            <th>Average score</th>
-                            <td>
-                              <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.averageCorrect.toFixed(2)}</span>
-                              <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.totalQuestions || 0}</span>
-                            </td>
-                          </tr>
-                          <tr>
-                            <th>Average %</th>
-                            <td>
-                              <span className={`session-analysis-score-main ${sessionDetailOverview.averageScore < sessionDetailPassRate ? "fail" : ""}`}>
-                                {(sessionDetailAnalysisSummary.averageRate * 100).toFixed(2)}%
-                              </span>
-                            </td>
-                          </tr>
-                          <tr>
-                            <th>Absent</th>
-                            <td>
-                              <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.absentCount}</span>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
+            <div className="session-detail-analysis-summary">
+              <div className="session-analysis-top-grid">
+                <div className="session-analysis-top-card">
+                  <div className="session-analysis-top-heading">Class Score</div>
+                  <div className="session-analysis-score-table-wrap">
+                    <table className="session-analysis-score-table">
+                      <tbody>
+                        <tr>
+                          <th className="pass">No. of Pass</th>
+                          <td>
+                            <span className="session-analysis-score-main pass">{sessionDetailAnalysisSummary.passCount}</span>
+                            <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.attendedCount}</span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th className="fail">No. of Fail</th>
+                          <td>
+                            <span className="session-analysis-score-main fail">{sessionDetailAnalysisSummary.failCount}</span>
+                            <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.attendedCount}</span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Average score</th>
+                          <td>
+                            <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.averageCorrect.toFixed(2)}</span>
+                            <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.totalQuestions || 0}</span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Average %</th>
+                          <td>
+                            <span className={`session-analysis-score-main ${sessionDetailOverview.averageScore < sessionDetailPassRate ? "fail" : ""}`}>
+                              {(sessionDetailAnalysisSummary.averageRate * 100).toFixed(2)}%
+                            </span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Absent</th>
+                          <td>
+                            <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.absentCount}</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
+                </div>
 
-                  <div className="session-analysis-top-card">
-                    <div className="session-analysis-top-heading">Grade Distribution</div>
-                    <div className="session-analysis-distribution-chart">
-                      <div className="session-analysis-distribution-yaxis">
-                        {Array.from({ length: Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1) }, (_, index) => {
-                          const value = sessionDetailAnalysisSummary.maxBucketCount - index;
+                <div className="session-analysis-top-card">
+                  <div className="session-analysis-top-heading">Grade Distribution</div>
+                  <div className="session-analysis-distribution-chart">
+                    <div className="session-analysis-distribution-yaxis">
+                      {Array.from({ length: Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1) }, (_, index) => {
+                        const value = sessionDetailAnalysisSummary.maxBucketCount - index;
+                        return (
+                          <div key={`dist-y-${value}`} className="session-analysis-distribution-ytick">
+                            <span>{value}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="session-analysis-distribution-plot">
+                      <div
+                        className="session-analysis-distribution-grid"
+                        style={{ gridTemplateRows: `repeat(${Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1)}, 1fr)` }}
+                      >
+                        {Array.from({ length: Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1) }, (_, index) => (
+                          <div key={`dist-grid-${index}`} className="session-analysis-distribution-gridline" />
+                        ))}
+                      </div>
+                      <div className="session-analysis-distribution-bars">
+                        {sessionDetailAnalysisSummary.bucketLabels.map((label, index) => {
+                          const count = sessionDetailAnalysisSummary.bucketCounts[index] ?? 0;
+                          const maxCount = Math.max(1, sessionDetailAnalysisSummary.maxBucketCount);
                           return (
-                            <div key={`dist-y-${value}`} className="session-analysis-distribution-ytick">
-                              <span>{value}</span>
+                            <div key={`dist-bar-${label}`} className="session-analysis-distribution-bar-group">
+                              <div className="session-analysis-distribution-bar-wrap">
+                                <div
+                                  className={`session-analysis-distribution-bar ${index * 10 < sessionDetailPassRate * 100 ? "fail" : "pass"}`}
+                                  style={{ height: `${(count / maxCount) * 100}%` }}
+                                  title={`${label}: ${count} student${count === 1 ? "" : "s"}`}
+                                />
+                              </div>
+                              <div className="session-analysis-distribution-label">{label}</div>
                             </div>
                           );
                         })}
                       </div>
-                      <div className="session-analysis-distribution-plot">
-                        <div
-                          className="session-analysis-distribution-grid"
-                          style={{ gridTemplateRows: `repeat(${Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1)}, 1fr)` }}
-                        >
-                          {Array.from({ length: Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1) }, (_, index) => (
-                            <div key={`dist-grid-${index}`} className="session-analysis-distribution-gridline" />
-                          ))}
-                        </div>
-                        <div className="session-analysis-distribution-bars">
-                          {sessionDetailAnalysisSummary.bucketLabels.map((label, index) => {
-                            const count = sessionDetailAnalysisSummary.bucketCounts[index] ?? 0;
-                            const maxCount = Math.max(1, sessionDetailAnalysisSummary.maxBucketCount);
-                            return (
-                              <div key={`dist-bar-${label}`} className="session-analysis-distribution-bar-group">
-                                <div className="session-analysis-distribution-bar-wrap">
-                                  <div
-                                    className={`session-analysis-distribution-bar ${index * 10 < sessionDetailPassRate * 100 ? "fail" : "pass"}`}
-                                    style={{ height: `${(count / maxCount) * 100}%` }}
-                                    title={`${label}: ${count} student${count === 1 ? "" : "s"}`}
-                                  />
-                                </div>
-                                <div className="session-analysis-distribution-label">{label}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </div>
+              </div>
 
+              {isMockSessionDetail && sessionDetailNestedSectionAverages.length ? (
                 <div className="admin-panel session-analysis-performance-panel">
                   <div className="admin-title" style={{ fontSize: 18 }}>Average Section Performance</div>
                   <div className="session-analysis-summary-grid">
@@ -9939,18 +9932,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               </Fragment>
                             );
                           })}
-                          {!sessionDetailNestedSectionAverages.length ? (
-                            <tr>
-                              <td colSpan={5}>No section average data available.</td>
-                            </tr>
-                          ) : null}
                         </tbody>
                       </table>
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
 
             <div className="session-detail-analysis-grid">
               <div className="admin-panel">
@@ -10262,9 +10250,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     if (activeTab === "daily") {
       if (sessionDetail.type === "daily" && sessionDetail.sessionId) return "Daily Test Session Detail";
-      if (dailySubTab === "results") return "Daily Results";
+      if (dailySubTab === "results") return "Daily Test Results";
       if (dailySubTab === "upload") return "Upload Question Set";
-      if (dailySubTab === "create") return "Daily Tests";
+      if (dailySubTab === "conduct") return "Daily Test Sessions";
       return "Daily Test Sessions";
     }
     return "Admin Console";
@@ -10356,7 +10344,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               className={`admin-nav-item admin-group-toggle ${activeTab === "model" ? "active" : ""}`}
               onClick={() => handleSidebarMenuClick(() => {
                 setActiveTab("model");
-                setModelSubTab("conduct");
+                setModelSubTab("results");
               })}
             >
               <span className="admin-nav-icon" aria-hidden="true">
@@ -10370,6 +10358,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
             </button>
             {activeTab === "model" ? (
               <div className="admin-subnav">
+                <button
+                  className={`admin-subnav-item ${modelSubTab === "results" ? "active" : ""}`}
+                  onClick={() => handleSidebarMenuClick(() => {
+                    setActiveTab("model");
+                    setModelSubTab("results");
+                  })}
+                >
+                  Model Test Results
+                </button>
                 <button
                   className={`admin-subnav-item ${modelSubTab === "conduct" ? "active" : ""}`}
                   onClick={() => handleSidebarMenuClick(() => {
@@ -10388,15 +10385,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 >
                   Upload Question Set
                 </button>
-                <button
-                  className={`admin-subnav-item ${modelSubTab === "results" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("model");
-                    setModelSubTab("results");
-                  })}
-                >
-                  Model Test Results
-                </button>
               </div>
             ) : null}
           </div>
@@ -10406,7 +10394,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               className={`admin-nav-item admin-group-toggle ${activeTab === "daily" ? "active" : ""}`}
               onClick={() => handleSidebarMenuClick(() => {
                 setActiveTab("daily");
-                setDailySubTab("conduct");
+                setDailySubTab("results");
               })}
             >
               <span className="admin-nav-icon" aria-hidden="true">
@@ -10421,6 +10409,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
             </button>
             {activeTab === "daily" ? (
               <div className="admin-subnav">
+                <button
+                  className={`admin-subnav-item ${dailySubTab === "results" ? "active" : ""}`}
+                  onClick={() => handleSidebarMenuClick(() => {
+                    setActiveTab("daily");
+                    setDailySubTab("results");
+                  })}
+                >
+                  Daily Test Results
+                </button>
                 <button
                   className={`admin-subnav-item ${dailySubTab === "conduct" ? "active" : ""}`}
                   onClick={() => handleSidebarMenuClick(() => {
@@ -10438,15 +10435,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   })}
                 >
                   Upload Question Set
-                </button>
-                <button
-                  className={`admin-subnav-item ${dailySubTab === "results" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("daily");
-                    setDailySubTab("results");
-                  })}
-                >
-                  Results
                 </button>
               </div>
             ) : null}

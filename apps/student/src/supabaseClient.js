@@ -17,7 +17,13 @@ function getOrCreateBrowserSupabaseClient() {
     return cached.client;
   }
 
-  const client = createClient(supabaseUrl, supabaseAnonKey);
+  const client = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
   globalScope[CLIENT_CACHE_KEY] = {
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
