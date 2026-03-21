@@ -812,6 +812,134 @@ function formatBooleanCsv(value) {
   return value ? "TRUE" : "FALSE";
 }
 
+function normalizeLookupValue(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function rowHasCsvValues(row) {
+  return Array.isArray(row) && row.some((cell) => String(cell ?? "").trim());
+}
+
+function parsePercentCell(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-" || /^n\/a$/i.test(text)) return null;
+  const normalized = text.replace(/,/g, "").replace(/%/g, "").trim();
+  const number = Number(normalized);
+  if (!Number.isFinite(number)) return null;
+  return number > 1 ? number / 100 : number;
+}
+
+function parseScoreFractionCell(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-" || /^n\/a$/i.test(text)) return null;
+  const match = text.match(/([0-9]+(?:\.[0-9]+)?)\s*\/\s*([0-9]+(?:\.[0-9]+)?)/);
+  if (!match) return null;
+  const correct = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isFinite(correct) || !Number.isFinite(total) || total <= 0) return null;
+  return { correct, total };
+}
+
+function parseSlashDateShortYearToIso(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!match) return "";
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const rawYear = Number(match[3]);
+  if (!Number.isFinite(month) || !Number.isFinite(day) || !Number.isFinite(rawYear)) return "";
+  const year = match[3].length === 2 ? 2000 + rawYear : rawYear;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function buildImportedSummaryAnswersJson(source) {
+  return {
+    __meta: {
+      imported_summary: true,
+      imported_source: source,
+      tab_left_count: 0,
+    },
+  };
+}
+
+function isImportedSummaryAttempt(attempt) {
+  return Boolean(attempt?.answers_json?.__meta?.imported_summary);
+}
+
+function attemptHasDetailData(attempt) {
+  if (!attempt || isImportedSummaryAttempt(attempt)) return false;
+  if (!attempt.answers_json || typeof attempt.answers_json !== "object") return false;
+  return Object.keys(attempt.answers_json).some((key) => key !== "__meta");
+}
+
+function createImportedStudentMatcher(studentsList) {
+  const students = Array.isArray(studentsList) ? studentsList : [];
+  const emailMap = new Map();
+  const nameSectionMap = new Map();
+
+  students.forEach((student) => {
+    const emailKey = normalizeLookupValue(student?.email);
+    if (emailKey) emailMap.set(emailKey, student);
+    const nameSectionKey = `${normalizeLookupValue(student?.display_name)}::${normalizeLookupValue(getStudentSectionValue(student))}`;
+    if (!nameSectionMap.has(nameSectionKey)) {
+      nameSectionMap.set(nameSectionKey, []);
+    }
+    nameSectionMap.get(nameSectionKey).push(student);
+  });
+
+  return ({ rowNumber, name, section, email }) => {
+    const emailKey = normalizeLookupValue(email);
+    if (emailKey && emailMap.has(emailKey)) return emailMap.get(emailKey);
+
+    const normalizedName = normalizeLookupValue(name);
+    const normalizedSection = normalizeLookupValue(section);
+    const indexedStudent = Number.isFinite(rowNumber) && rowNumber > 0 ? students[rowNumber - 1] ?? null : null;
+    if (indexedStudent) {
+      const indexedName = normalizeLookupValue(indexedStudent.display_name);
+      const indexedSection = normalizeLookupValue(getStudentSectionValue(indexedStudent));
+      const nameMatches = !normalizedName || indexedName === normalizedName;
+      const sectionMatches = !normalizedSection || indexedSection === normalizedSection;
+      if (nameMatches && sectionMatches) return indexedStudent;
+    }
+
+    const byNameSection = nameSectionMap.get(`${normalizedName}::${normalizedSection}`) ?? [];
+    if (byNameSection.length === 1) return byNameSection[0];
+    if (byNameSection.length > 1 && indexedStudent) return indexedStudent;
+
+    if (normalizedName) {
+      const byNameOnly = students.filter((student) => normalizeLookupValue(student?.display_name) === normalizedName);
+      if (byNameOnly.length === 1) return byNameOnly[0];
+      if (byNameOnly.length > 1 && indexedStudent) return indexedStudent;
+    }
+
+    return indexedStudent;
+  };
+}
+
+function buildSessionDetailAvailability(matrix) {
+  const availability = {};
+  const sessions = matrix?.sessions ?? [];
+  const rows = matrix?.rows ?? [];
+  sessions.forEach((session, sessionIndex) => {
+    availability[session.id] = rows.some((row) => (row?.cells?.[sessionIndex] ?? []).some((attempt) => attemptHasDetailData(attempt)));
+  });
+  return availability;
+}
+
+function dedupeImportedAttemptPayloads(payloads) {
+  const payloadMap = new Map();
+  (payloads ?? []).forEach((payload) => {
+    const key = `${payload.student_id}::${payload.test_session_id}`;
+    payloadMap.set(key, payload);
+  });
+  return Array.from(payloadMap.values());
+}
+
 function getStudentSectionValue(student) {
   return String(
     student?.section
@@ -2842,6 +2970,8 @@ export default function AdminConsole({
   const dailySetDropdownRef = useRef(null);
   const assetFolderInputRef = useRef(null);
   const dailyFolderInputRef = useRef(null);
+  const attendanceImportInputRef = useRef(null);
+  const resultsImportInputRef = useRef(null);
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingSessionMsg, setEditingSessionMsg] = useState("");
   const [editingSessionForm, setEditingSessionForm] = useState({
@@ -3869,6 +3999,16 @@ export default function AdminConsole({
     [buildSessionResultsMatrix, selectedModelCategory, modelTests]
   );
 
+  const dailyResultsSessionDetailAvailability = useMemo(
+    () => buildSessionDetailAvailability(dailyResultsMatrix),
+    [dailyResultsMatrix]
+  );
+
+  const modelResultsSessionDetailAvailability = useMemo(
+    () => buildSessionDetailAvailability(modelResultsMatrix),
+    [modelResultsMatrix]
+  );
+
   const attendanceDayColumns = useMemo(() => {
     return attendanceDays.map((d) => ({
       ...d,
@@ -4693,6 +4833,7 @@ export default function AdminConsole({
 
   function openAttemptDetail(attempt, source = "default") {
     if (!attempt?.id) return;
+    if (!attemptHasDetailData(attempt)) return;
     setSelectedId(attempt.id);
     setSelectedAttemptObj(attempt);
     setAttemptDetailSource(source);
@@ -9319,6 +9460,399 @@ function openDailyRecordModal(record = null, recordDate = "") {
     downloadText(`model_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
   }
 
+  async function replaceImportedSummaryAttempts(payloads) {
+    if (!payloads.length) return { ok: true, inserted: 0 };
+
+    const sessionIds = Array.from(new Set(payloads.map((payload) => payload.test_session_id).filter(Boolean)));
+    const studentIds = Array.from(new Set(payloads.map((payload) => payload.student_id).filter(Boolean)));
+
+    if (sessionIds.length && studentIds.length) {
+      const { data: existingRows, error: existingError } = await supabase
+        .from("attempts")
+        .select("id, answers_json")
+        .in("test_session_id", sessionIds)
+        .in("student_id", studentIds);
+      if (existingError) {
+        return { ok: false, message: existingError.message };
+      }
+      const deleteIds = (existingRows ?? []).filter((row) => isImportedSummaryAttempt(row)).map((row) => row.id);
+      if (deleteIds.length) {
+        const { error: deleteError } = await supabase.from("attempts").delete().in("id", deleteIds);
+        if (deleteError) {
+          return { ok: false, message: deleteError.message };
+        }
+      }
+    }
+
+    let { error: insertError } = await supabase.from("attempts").insert(payloads);
+    if (insertError && isMissingTabLeftCountError(insertError)) {
+      const legacyPayloads = payloads.map(({ tab_left_count, ...payload }) => payload);
+      ({ error: insertError } = await supabase.from("attempts").insert(legacyPayloads));
+    }
+    if (insertError) {
+      return { ok: false, message: insertError.message };
+    }
+    return { ok: true, inserted: payloads.length };
+  }
+
+  async function importAttendanceGoogleSheetsCsv(file) {
+    if (!file) return;
+    if (!activeSchoolId) {
+      setAttendanceMsg("School context is missing for this admin.");
+      return;
+    }
+    setAttendanceMsg("Importing CSV...");
+    try {
+      const text = await file.text();
+      const rows = parseSeparatedRows(text, detectDelimiter(text));
+      if (rows.length < 4) {
+        setAttendanceMsg("Import failed: CSV format is not recognized.");
+        return;
+      }
+
+      const dayColumns = [];
+      for (let col = 10; col < (rows[0]?.length ?? 0); col += 1) {
+        const dayDate = parseSlashDateShortYearToIso(rows[0]?.[col]);
+        if (dayDate) {
+          dayColumns.push({ colIndex: col, dayDate });
+        }
+      }
+      if (!dayColumns.length) {
+        setAttendanceMsg("Import failed: no attendance date columns were found.");
+        return;
+      }
+
+      const matchStudent = createImportedStudentMatcher(sortedStudents);
+      const importedByDay = new Map();
+      const unmatchedRows = [];
+      let importedStatusCount = 0;
+
+      for (let rowIndex = 3; rowIndex < rows.length; rowIndex += 1) {
+        const row = rows[rowIndex] ?? [];
+        if (!rowHasCsvValues(row)) continue;
+        if (normalizeLookupValue(row[1]) === "rule") break;
+
+        const student = matchStudent({
+          rowNumber: Number(normalizeCsvValue(row[1])),
+          name: row[2],
+          section: row[3],
+          email: row[5],
+        });
+
+        if (!student?.id) {
+          unmatchedRows.push(rowIndex + 1);
+          continue;
+        }
+
+        dayColumns.forEach(({ colIndex, dayDate }) => {
+          const status = normalizeCsvValue(row[colIndex]).toUpperCase();
+          if (!importedByDay.has(dayDate)) {
+            importedByDay.set(dayDate, new Map());
+          }
+          if (["P", "L", "E", "A", "", "W"].includes(status)) {
+            importedByDay.get(dayDate).set(student.id, status);
+            if (["P", "L", "E", "A"].includes(status)) importedStatusCount += 1;
+          }
+        });
+      }
+
+      if (!importedByDay.size) {
+        setAttendanceMsg("Import failed: no student attendance rows were recognized.");
+        return;
+      }
+
+      const { data: daysData, error: daysError } = await supabase
+        .from("attendance_days")
+        .upsert(
+          Array.from(importedByDay.keys()).map((dayDate) => ({ school_id: activeSchoolId, day_date: dayDate })),
+          { onConflict: "school_id,day_date" }
+        )
+        .select("id, day_date");
+      if (daysError) {
+        setAttendanceMsg(`Import failed: ${daysError.message}`);
+        return;
+      }
+
+      const dayIdByDate = Object.fromEntries((daysData ?? []).map((row) => [row.day_date, row.id]));
+      for (const [dayDate, statusMap] of importedByDay.entries()) {
+        const dayId = dayIdByDate[dayDate];
+        const studentIds = Array.from(statusMap.keys());
+        if (!dayId || !studentIds.length) continue;
+
+        const { error: deleteError } = await supabase
+          .from("attendance_entries")
+          .delete()
+          .eq("day_id", dayId)
+          .in("student_id", studentIds);
+        if (deleteError) {
+          setAttendanceMsg(`Import failed: ${deleteError.message}`);
+          return;
+        }
+
+        const insertRows = studentIds
+          .map((studentId) => ({
+            day_id: dayId,
+            student_id: studentId,
+            status: statusMap.get(studentId),
+            comment: null,
+          }))
+          .filter((row) => ["P", "L", "E", "A"].includes(row.status));
+
+        if (insertRows.length) {
+          const { error: insertError } = await supabase
+            .from("attendance_entries")
+            .upsert(insertRows, { onConflict: "day_id,student_id" });
+          if (insertError) {
+            setAttendanceMsg(`Import failed: ${insertError.message}`);
+            return;
+          }
+        }
+      }
+
+      await fetchAttendanceDays();
+      setAttendanceMsg(
+        `Imported ${importedStatusCount} attendance entries across ${importedByDay.size} day${importedByDay.size === 1 ? "" : "s"}`
+        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".")
+      );
+    } catch (error) {
+      setAttendanceMsg(`Import failed: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      if (attendanceImportInputRef.current) attendanceImportInputRef.current.value = "";
+    }
+  }
+
+  async function importDailyResultsGoogleSheetsCsv(file) {
+    if (!file) return;
+    const sessions = dailyResultsMatrix.sessions ?? [];
+    if (!sessions.length) {
+      setQuizMsg("Import failed: no daily test sessions are visible.");
+      return;
+    }
+    setQuizMsg("Importing CSV...");
+    try {
+      const text = await file.text();
+      const rows = parseSeparatedRows(text, detectDelimiter(text));
+      if (rows.length < 4) {
+        setQuizMsg("Import failed: CSV format is not recognized.");
+        return;
+      }
+
+      const sessionKeyMap = new Map();
+      const uniqueTitleMap = new Map();
+      sessions.forEach((session, index) => {
+        const title = String(session.title ?? session.problem_set_id ?? "").trim();
+        const dateKey = formatSlashDateShortYear(session.starts_at || session.created_at);
+        sessionKeyMap.set(`${normalizeLookupValue(title)}::${dateKey}`, session);
+        const titleKey = normalizeLookupValue(title);
+        if (!uniqueTitleMap.has(titleKey)) uniqueTitleMap.set(titleKey, []);
+        uniqueTitleMap.get(titleKey).push({ session, index });
+      });
+
+      const mappedColumns = [];
+      for (let col = 5; col < Math.max(rows[0]?.length ?? 0, rows[1]?.length ?? 0); col += 1) {
+        const rawTitle = String(rows[0]?.[col] ?? "").trim();
+        const rawDate = String(rows[1]?.[col] ?? "").trim();
+        if (!rawTitle) continue;
+        const matchedByKey = sessionKeyMap.get(`${normalizeLookupValue(rawTitle)}::${rawDate}`);
+        const matchedByTitle = uniqueTitleMap.get(normalizeLookupValue(rawTitle)) ?? [];
+        const session = matchedByKey ?? matchedByTitle[0]?.session ?? sessions[mappedColumns.length] ?? null;
+        if (session?.id) {
+          mappedColumns.push({ colIndex: col, session });
+        }
+      }
+
+      if (!mappedColumns.length) {
+        setQuizMsg("Import failed: no daily result columns matched the current sessions.");
+        return;
+      }
+
+      const matchStudent = createImportedStudentMatcher(sortedStudents);
+      const payloads = [];
+      const unmatchedRows = [];
+
+      for (let rowIndex = 3; rowIndex < rows.length; rowIndex += 1) {
+        const row = rows[rowIndex] ?? [];
+        if (!rowHasCsvValues(row)) continue;
+        const sectionMarker = normalizeLookupValue(row[3]);
+        if (sectionMarker.startsWith("failed students") || sectionMarker.startsWith("absent students")) break;
+
+        const student = matchStudent({
+          rowNumber: Number(normalizeCsvValue(row[1])),
+          name: row[2],
+          section: row[3],
+          email: "",
+        });
+        if (!student?.id) {
+          unmatchedRows.push(rowIndex + 1);
+          continue;
+        }
+
+        mappedColumns.forEach(({ colIndex, session }) => {
+          const rate = parsePercentCell(row[colIndex]);
+          if (rate == null) return;
+          const total = Math.max(0, Number(session?.linkedTest?.question_count ?? 0));
+          const correct = total > 0 ? Math.round(rate * total) : 0;
+          payloads.push({
+            student_id: student.id,
+            display_name: student.display_name ?? null,
+            student_code: student.student_code ?? null,
+            test_version: session.problem_set_id,
+            test_session_id: session.id,
+            correct,
+            total,
+            score_rate: rate,
+            started_at: session.starts_at ?? null,
+            ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
+            answers_json: buildImportedSummaryAnswersJson("daily_results_csv"),
+            tab_left_count: 0,
+          });
+        });
+      }
+
+      const dedupedPayloads = dedupeImportedAttemptPayloads(payloads);
+      if (!dedupedPayloads.length) {
+        setQuizMsg("Import failed: no daily result rows were recognized.");
+        return;
+      }
+
+      const result = await replaceImportedSummaryAttempts(dedupedPayloads);
+      if (!result.ok) {
+        setQuizMsg(`Import failed: ${result.message}`);
+        return;
+      }
+
+      await runSearch("daily");
+      setQuizMsg(
+        `Imported ${result.inserted} daily result entr${result.inserted === 1 ? "y" : "ies"}`
+        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".")
+      );
+    } catch (error) {
+      setQuizMsg(`Import failed: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      if (resultsImportInputRef.current) resultsImportInputRef.current.value = "";
+    }
+  }
+
+  async function importModelResultsGoogleSheetsCsv(file) {
+    if (!file) return;
+    const sessions = modelResultsMatrix.sessions ?? [];
+    if (!sessions.length) {
+      setQuizMsg("Import failed: no model test sessions are visible.");
+      return;
+    }
+    setQuizMsg("Importing CSV...");
+    try {
+      const text = await file.text();
+      const rows = parseSeparatedRows(text, detectDelimiter(text));
+      if (rows.length < 5) {
+        setQuizMsg("Import failed: CSV format is not recognized.");
+        return;
+      }
+
+      const sessionKeyMap = new Map();
+      const uniqueTitleMap = new Map();
+      sessions.forEach((session, index) => {
+        const title = String(session.title ?? session.problem_set_id ?? "").trim();
+        const dateKey = formatSlashDateShortYear(session.starts_at || session.created_at);
+        sessionKeyMap.set(`${normalizeLookupValue(title)}::${dateKey}`, session);
+        const titleKey = normalizeLookupValue(title);
+        if (!uniqueTitleMap.has(titleKey)) uniqueTitleMap.set(titleKey, []);
+        uniqueTitleMap.get(titleKey).push({ session, index });
+      });
+
+      const mappedColumns = [];
+      let currentTitle = "";
+      for (let col = 5; col < Math.max(rows[0]?.length ?? 0, rows[1]?.length ?? 0, rows[2]?.length ?? 0); col += 1) {
+        const titleCell = String(rows[0]?.[col] ?? "").trim();
+        if (titleCell) currentTitle = titleCell;
+        const sectionCell = String(rows[1]?.[col] ?? "").trim();
+        if (sectionCell !== "Total") continue;
+        const dateCell = String(rows[2]?.[col] ?? "").trim();
+        const matchedByKey = sessionKeyMap.get(`${normalizeLookupValue(currentTitle)}::${dateCell}`);
+        const matchedByTitle = uniqueTitleMap.get(normalizeLookupValue(currentTitle)) ?? [];
+        const session = matchedByKey ?? matchedByTitle[0]?.session ?? sessions[mappedColumns.length] ?? null;
+        if (session?.id) {
+          mappedColumns.push({
+            rateColumnIndex: col,
+            scoreColumnIndex: col + 1,
+            session,
+          });
+        }
+      }
+
+      if (!mappedColumns.length) {
+        setQuizMsg("Import failed: no model result columns matched the current sessions.");
+        return;
+      }
+
+      const matchStudent = createImportedStudentMatcher(sortedStudents);
+      const payloads = [];
+      const unmatchedRows = [];
+
+      for (let rowIndex = 4; rowIndex < rows.length; rowIndex += 1) {
+        const row = rows[rowIndex] ?? [];
+        if (!rowHasCsvValues(row)) continue;
+        const sectionMarker = normalizeLookupValue(row[3]);
+        if (sectionMarker.startsWith("failed students") || sectionMarker.startsWith("absent students")) break;
+
+        const student = matchStudent({
+          rowNumber: Number(normalizeCsvValue(row[1])),
+          name: row[2],
+          section: row[3],
+          email: "",
+        });
+        if (!student?.id) {
+          unmatchedRows.push(rowIndex + 1);
+          continue;
+        }
+
+        mappedColumns.forEach(({ rateColumnIndex, scoreColumnIndex, session }) => {
+          const rate = parsePercentCell(row[rateColumnIndex]);
+          if (rate == null) return;
+          const score = parseScoreFractionCell(row[scoreColumnIndex]);
+          const total = score?.total ?? Math.max(0, Number(session?.linkedTest?.question_count ?? 0));
+          const correct = score?.correct ?? (total > 0 ? Math.round(rate * total) : 0);
+          payloads.push({
+            student_id: student.id,
+            display_name: student.display_name ?? null,
+            student_code: student.student_code ?? null,
+            test_version: session.problem_set_id,
+            test_session_id: session.id,
+            correct,
+            total,
+            score_rate: rate,
+            started_at: session.starts_at ?? null,
+            ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
+            answers_json: buildImportedSummaryAnswersJson("model_results_csv"),
+            tab_left_count: 0,
+          });
+        });
+      }
+
+      const dedupedPayloads = dedupeImportedAttemptPayloads(payloads);
+      if (!dedupedPayloads.length) {
+        setQuizMsg("Import failed: no model result rows were recognized.");
+        return;
+      }
+
+      const result = await replaceImportedSummaryAttempts(dedupedPayloads);
+      if (!result.ok) {
+        setQuizMsg(`Import failed: ${result.message}`);
+        return;
+      }
+
+      await runSearch("mock");
+      setQuizMsg(
+        `Imported ${result.inserted} model result entr${result.inserted === 1 ? "y" : "ies"}`
+        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".")
+      );
+    } catch (error) {
+      setQuizMsg(`Import failed: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      if (resultsImportInputRef.current) resultsImportInputRef.current.value = "";
+    }
+  }
+
   async function exportQuizSummaryCsv() {
     setQuizMsg("");
     const quizVersions = (tests ?? []).filter((t) => t.type === "quiz").map((t) => t.version);
@@ -11549,10 +12083,30 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </div>
               </div>
             </div>
-            <button className="btn results-page-action-btn" type="button" onClick={exportAttendanceGoogleSheetsCsv}>
-              <span className="results-page-action-icon" aria-hidden="true">↓</span>
-              <span>Export CSV</span>
-            </button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button className="btn results-page-action-btn" type="button" onClick={exportAttendanceGoogleSheetsCsv}>
+                <span className="results-page-action-icon" aria-hidden="true">↓</span>
+                <span>Export CSV</span>
+              </button>
+              <button
+                className="btn results-page-action-btn"
+                type="button"
+                onClick={() => attendanceImportInputRef.current?.click()}
+              >
+                <span className="results-page-action-icon" aria-hidden="true">↑</span>
+                <span>Import CSV</span>
+              </button>
+              <input
+                ref={attendanceImportInputRef}
+                type="file"
+                accept=".csv,.tsv"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  importAttendanceGoogleSheetsCsv(file);
+                }}
+              />
+            </div>
           </div>
 
           <div style={{ marginTop: 18 }}>
@@ -15646,6 +16200,28 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     <span className="results-page-action-icon" aria-hidden="true">↓</span>
                     <span>Export CSV</span>
                   </button>
+                  <button
+                    className="btn results-page-action-btn"
+                    type="button"
+                    onClick={() => resultsImportInputRef.current?.click()}
+                  >
+                    <span className="results-page-action-icon" aria-hidden="true">↑</span>
+                    <span>Import CSV</span>
+                  </button>
+                  <input
+                    ref={resultsImportInputRef}
+                    type="file"
+                    accept=".csv,.tsv"
+                    style={{ display: "none" }}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      if (resultContext.type === "daily") {
+                        importDailyResultsGoogleSheetsCsv(file);
+                        return;
+                      }
+                      importModelResultsGoogleSheetsCsv(file);
+                    }}
+                  />
                 </div>
               </div>
               {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
@@ -15675,14 +16251,23 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         <th className="daily-sticky-2 daily-col-name">Student Name</th>
                         {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem) => (
                           <th key={`daily-col-${sessionItem.id}`}>
-                            <button
-                              type="button"
-                              className="session-column-link"
-                              onClick={() => openSessionDetailView(sessionItem, resultContext.type)}
-                            >
-                              <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
-                              <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
-                            </button>
+                            {((resultContext.type === "daily"
+                              ? dailyResultsSessionDetailAvailability
+                              : modelResultsSessionDetailAvailability)[sessionItem.id]) ? (
+                              <button
+                                type="button"
+                                className="session-column-link"
+                                onClick={() => openSessionDetailView(sessionItem, resultContext.type)}
+                              >
+                                <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
+                                <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
+                              </button>
+                            ) : (
+                              <div className="session-column-link" style={{ cursor: "default" }}>
+                                <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
+                                <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
+                              </div>
+                            )}
                           </th>
                         ))}
                       </tr>
@@ -15716,6 +16301,29 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                     const label = `${(rateValue * 100).toFixed(1)}%`;
                                     const isLow = Number.isFinite(passRate) && passRate > 0 && rateValue < passRate;
                                     const tabLeftCount = getTabLeftCount(attempt);
+                                    const scoreContent = (
+                                      <>
+                                        <span className="daily-score-main">
+                                          {attempt.__isRetake ? <span className="daily-retake-icon">Re</span> : null}
+                                          <span>{label}</span>
+                                        </span>
+                                        {tabLeftCount > 0 ? (
+                                          <span className="daily-score-meta daily-score-meta-alert">
+                                            Tabs left: {tabLeftCount}
+                                          </span>
+                                        ) : null}
+                                      </>
+                                    );
+                                    if (!attemptHasDetailData(attempt)) {
+                                      return (
+                                        <div
+                                          key={`daily-cell-${row.student.id}-${idx}-${attempt.id || attemptIdx}`}
+                                          className={`daily-score-btn ${isLow ? "low" : ""}`}
+                                        >
+                                          {scoreContent}
+                                        </div>
+                                      );
+                                    }
                                     return (
                                       <button
                                         key={`daily-cell-${row.student.id}-${idx}-${attempt.id || attemptIdx}`}
@@ -15726,15 +16334,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                           openAttemptDetail(attempt);
                                         }}
                                       >
-                                        <span className="daily-score-main">
-                                          {attempt.__isRetake ? <span className="daily-retake-icon">Re</span> : null}
-                                          <span>{label}</span>
-                                        </span>
-                                        {tabLeftCount > 0 ? (
-                                          <span className="daily-score-meta daily-score-meta-alert">
-                                            Tabs left: {tabLeftCount}
-                                          </span>
-                                        ) : null}
+                                        {scoreContent}
                                       </button>
                                     );
                                   })}

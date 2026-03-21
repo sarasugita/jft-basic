@@ -532,7 +532,9 @@ body { padding: 0; }
   max-width: 100%;
   min-height: 32px;
   padding: 6px 12px;
+  border: 1px solid var(--admin-table-outline);
   border-radius: 3px;
+  background: #fff;
   line-height: 1.2;
   font-size: 13px;
 }
