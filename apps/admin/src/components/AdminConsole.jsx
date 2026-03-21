@@ -1941,6 +1941,14 @@ function normalizeAdminLoginErrorMessage(message) {
   return text;
 }
 
+function isAllowedAdminProfile(profile) {
+  return Boolean(
+    profile
+      && profile.account_status === "active"
+      && ["admin", "super_admin"].includes(profile.role)
+  );
+}
+
 function normalizeLegacyTestErrorMessage(error, action = "update") {
   const text = String(error?.message ?? "").trim();
   if (
@@ -2689,6 +2697,7 @@ export default function AdminConsole({
   const isManagedAuth = managedSession !== undefined || managedProfile !== undefined;
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
+  const loginValidationInFlightRef = useRef(false);
   const [authReady, setAuthReady] = useState(isManagedAuth);
   const [profileLoading, setProfileLoading] = useState(false);
   const [schoolAssignments, setSchoolAssignments] = useState([]);
@@ -2968,12 +2977,7 @@ export default function AdminConsole({
     end_at: ""
   });
   const activeSchoolId = forcedSchoolId ?? schoolScopeId ?? profile?.school_id ?? null;
-  const canUseAdminConsole = Boolean(
-    profile &&
-      profile.account_status === "active" &&
-      ["admin", "super_admin"].includes(profile.role) &&
-      activeSchoolId
-  );
+  const canUseAdminConsole = Boolean(isAllowedAdminProfile(profile) && activeSchoolId);
   const activeSchoolName = forcedSchoolName
     || schoolAssignments.find((assignment) => assignment.school_id === activeSchoolId)?.school_name
     || activeSchoolId
@@ -4236,6 +4240,9 @@ export default function AdminConsole({
       if (!mounted || event === "INITIAL_SESSION") {
         return;
       }
+      if (loginValidationInFlightRef.current && nextSession) {
+        return;
+      }
       setSession(nextSession ?? null);
       setAuthReady(true);
     });
@@ -4285,6 +4292,14 @@ export default function AdminConsole({
         profileAbortController.abort();
       };
     }
+    if (profile?.id === session.user.id) {
+      setProfileLoading(false);
+      setLoginMsg("");
+      return () => {
+        cancelled = true;
+        profileAbortController.abort();
+      };
+    }
 
     async function loadProfile() {
       setProfileLoading(true);
@@ -4309,8 +4324,24 @@ export default function AdminConsole({
           logAdminEvent("Admin console profile missing", {
             userId: session.user.id,
           });
+          await supabase.auth.signOut({ scope: "local" });
+          syncAdminAuthCookie(null);
+          setSession(null);
           setProfile(null);
-          setLoginMsg("This account is missing an admin profile. Please contact the system administrator.");
+          setLoginMsg("Invalid login credentials");
+          return;
+        }
+        if (!isAllowedAdminProfile(data)) {
+          logAdminEvent("Admin console login rejected for non-admin profile", {
+            userId: session.user.id,
+            role: data.role ?? null,
+            accountStatus: data.account_status ?? null,
+          });
+          await supabase.auth.signOut({ scope: "local" });
+          syncAdminAuthCookie(null);
+          setSession(null);
+          setProfile(null);
+          setLoginMsg("Invalid login credentials");
           return;
         }
         setLoginMsg("");
@@ -9493,10 +9524,44 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setLoginMsg("Email / Password を入力してください。");
       return;
     }
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    loginValidationInFlightRef.current = true;
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
+      loginValidationInFlightRef.current = false;
       setLoginMsg(normalizeAdminLoginErrorMessage(error.message));
       return;
+    }
+    try {
+      const nextSession = data?.session ?? null;
+      const userId = nextSession?.user?.id ?? data?.user?.id ?? "";
+      if (!nextSession || !userId) {
+        await supabase.auth.signOut({ scope: "local" });
+        syncAdminAuthCookie(null);
+        setSession(null);
+        setProfile(null);
+        setLoginMsg("Invalid login credentials");
+        return;
+      }
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, role, display_name, school_id, account_status, force_password_change")
+        .eq("id", userId)
+        .maybeSingle();
+      if (profileError || !isAllowedAdminProfile(profileData)) {
+        await supabase.auth.signOut({ scope: "local" });
+        syncAdminAuthCookie(null);
+        setSession(null);
+        setProfile(null);
+        setLoginMsg("Invalid login credentials");
+        return;
+      }
+      syncAdminAuthCookie(nextSession);
+      setProfile(profileData);
+      setSession(nextSession);
+      setAuthReady(true);
+      setLoginMsg("");
+    } finally {
+      loginValidationInFlightRef.current = false;
     }
   }
 
