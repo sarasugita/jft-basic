@@ -3520,6 +3520,130 @@ body { padding: 0; }
   white-space: nowrap;
 }
 
+.daily-record-date-picker {
+  position: relative;
+}
+
+.daily-record-date-picker-trigger {
+  width: 100%;
+  min-width: 280px;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 6px;
+  padding: 10px;
+  background: #fff;
+  font: inherit;
+  color: var(--admin-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.daily-record-date-picker-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: min(320px, 92vw);
+  border: 1px solid var(--admin-control-border);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
+  padding: 12px;
+}
+
+.daily-record-date-picker-weekdays,
+.daily-record-date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.daily-record-date-picker-weekdays {
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #64748b;
+  text-align: center;
+}
+
+.daily-record-date-picker-month {
+  display: grid;
+  gap: 10px;
+}
+
+.daily-record-date-picker-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.daily-record-date-picker-nav-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--admin-text);
+  cursor: pointer;
+}
+
+.daily-record-date-picker-nav-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.daily-record-date-picker-month-label {
+  font-weight: 900;
+  color: var(--admin-text);
+  text-align: center;
+  flex: 1;
+}
+
+.daily-record-date-cell-empty,
+.daily-record-date-picker-day {
+  min-height: 30px;
+  border-radius: 7px;
+}
+
+.daily-record-date-picker-day {
+  border: 1px solid #d9e2ea;
+  background: #fff;
+  font: inherit;
+  color: var(--admin-text);
+  cursor: pointer;
+}
+
+.daily-record-date-picker-day.is-selected {
+  background: #3f6b0f;
+  border-color: #2f520b;
+  color: #fff;
+}
+
+.daily-record-date-picker-day.is-holiday {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+  color: #94a3b8;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+.daily-record-date-picker-day:disabled {
+  cursor: not-allowed;
+}
+
+.daily-record-date-picker-day.is-selectable:hover,
+.daily-record-date-picker-day.is-selectable:focus-visible {
+  border-color: #3f6b0f;
+  outline: none;
+}
+
 .daily-record-holiday-head,
 .daily-record-holiday-cell {
   width: 68px;

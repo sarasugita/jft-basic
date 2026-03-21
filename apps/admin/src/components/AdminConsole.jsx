@@ -2184,6 +2184,18 @@ function formatDateFull(value) {
   });
 }
 
+function formatMonthYear(value) {
+  if (!value) return "";
+  const match = String(value).match(/^(\d{4})-(\d{2})/);
+  if (!match) return String(value);
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString("en-GB", {
+    year: "numeric",
+    month: "long",
+  });
+}
+
 function formatDateDots(value) {
   if (!value) return "";
   if (typeof value === "string") {
@@ -2984,6 +2996,8 @@ export default function AdminConsole({
   const [dailyRecords, setDailyRecords] = useState([]);
   const [dailyRecordsMsg, setDailyRecordsMsg] = useState("");
   const [dailyRecordDate, setDailyRecordDate] = useState(() => getTodayDateInput());
+  const [dailyRecordDatePickerOpen, setDailyRecordDatePickerOpen] = useState(false);
+  const [dailyRecordCalendarMonth, setDailyRecordCalendarMonth] = useState(() => getTodayDateInput().slice(0, 7));
   const [dailyRecordModalOpen, setDailyRecordModalOpen] = useState(false);
   const [dailyRecordSaving, setDailyRecordSaving] = useState(false);
   const [dailyRecordForm, setDailyRecordForm] = useState(() => getEmptyDailyRecordForm(getTodayDateInput()));
@@ -2995,6 +3009,7 @@ export default function AdminConsole({
   const [dailyRecordPlanSavingDate, setDailyRecordPlanSavingDate] = useState("");
   const [dailyRecordHolidaySavingDate, setDailyRecordHolidaySavingDate] = useState("");
   const dailyRecordTableWrapRef = useRef(null);
+  const dailyRecordDatePickerRef = useRef(null);
   const [rankingPeriods, setRankingPeriods] = useState([]);
   const [rankingMsg, setRankingMsg] = useState("");
   const [rankingDrafts, setRankingDrafts] = useState({});
@@ -4187,6 +4202,84 @@ export default function AdminConsole({
     return displayMap;
   }, [dailyRecordConfirmedDates, dailyRecords, scheduleRecordActualTestsByDate, scheduleRecordRows]);
 
+  const dailyRecordSelectableDates = useMemo(() => {
+    const today = getTodayDateInput();
+    return scheduleRecordRows
+      .map(({ recordDate, record }) => ({
+        recordDate,
+        isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
+      }))
+      .filter((item) => item.recordDate >= today && !item.isHoliday)
+      .map((item) => item.recordDate);
+  }, [scheduleRecordRows]);
+
+  const dailyRecordSelectableDateSet = useMemo(
+    () => new Set(dailyRecordSelectableDates),
+    [dailyRecordSelectableDates]
+  );
+
+  const dailyRecordCalendarMonths = useMemo(() => {
+    const today = getTodayDateInput();
+    const optionMap = new Map(
+      scheduleRecordRows
+        .map(({ recordDate, record }) => [
+          recordDate,
+          {
+            isVisible: recordDate >= today,
+            isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
+          },
+        ])
+    );
+    const monthKeys = Array.from(
+      new Set(
+        Array.from(optionMap.entries())
+          .filter(([, value]) => value.isVisible)
+          .map(([recordDate]) => recordDate.slice(0, 7))
+      )
+    ).sort();
+
+    return monthKeys.map((monthKey) => {
+      const monthStart = `${monthKey}-01`;
+      const leadingBlankCount = getWeekdayNumber(monthStart) ?? 0;
+      const monthDates = [];
+      for (let date = monthStart; date.slice(0, 7) === monthKey; date = addDays(date, 1)) {
+        const option = optionMap.get(date);
+        monthDates.push({
+          recordDate: date,
+          dayNumber: Number(date.slice(-2)),
+          isVisible: Boolean(option?.isVisible),
+          isHoliday: Boolean(option?.isHoliday),
+          isSelectable: Boolean(option?.isVisible) && !option?.isHoliday,
+        });
+      }
+
+      const cells = [
+        ...Array.from({ length: leadingBlankCount }, () => null),
+        ...monthDates,
+      ];
+      while (cells.length % 7 !== 0) {
+        cells.push(null);
+      }
+
+      return {
+        monthKey,
+        label: formatMonthYear(monthStart),
+        weeks: Array.from({ length: cells.length / 7 }, (_, index) => cells.slice(index * 7, index * 7 + 7)),
+      };
+    });
+  }, [scheduleRecordRows]);
+
+  const dailyRecordCalendarMonthKeys = useMemo(
+    () => dailyRecordCalendarMonths.map((month) => month.monthKey),
+    [dailyRecordCalendarMonths]
+  );
+
+  const dailyRecordActiveCalendarMonth = useMemo(() => {
+    return dailyRecordCalendarMonths.find((month) => month.monthKey === dailyRecordCalendarMonth)
+      ?? dailyRecordCalendarMonths[0]
+      ?? null;
+  }, [dailyRecordCalendarMonth, dailyRecordCalendarMonths]);
+
   const dailyRecordTomorrowSessions = useMemo(() => {
     const targetDate = addDays(dailyRecordForm.record_date || getTodayDateInput(), 1);
     const rows = (testSessions ?? [])
@@ -4218,6 +4311,44 @@ export default function AdminConsole({
       retake: rows.filter((row) => row.isRetake),
     };
   }, [dailyRecordForm.record_date, testSessions, tests]);
+
+  useEffect(() => {
+    if (!dailyRecordSelectableDates.length) return;
+    if (dailyRecordSelectableDateSet.has(dailyRecordDate)) return;
+    setDailyRecordDate(dailyRecordSelectableDates[0]);
+  }, [dailyRecordDate, dailyRecordSelectableDates, dailyRecordSelectableDateSet]);
+
+  useEffect(() => {
+    if (!dailyRecordCalendarMonthKeys.length) return;
+    if (dailyRecordCalendarMonthKeys.includes(dailyRecordCalendarMonth)) return;
+    const selectedMonth = dailyRecordDate.slice(0, 7);
+    setDailyRecordCalendarMonth(
+      dailyRecordCalendarMonthKeys.includes(selectedMonth)
+        ? selectedMonth
+        : dailyRecordCalendarMonthKeys[0]
+    );
+  }, [dailyRecordCalendarMonth, dailyRecordCalendarMonthKeys, dailyRecordDate]);
+
+  useEffect(() => {
+    if (!dailyRecordDatePickerOpen || !dailyRecordCalendarMonthKeys.length) return;
+    const selectedMonth = dailyRecordDate.slice(0, 7);
+    setDailyRecordCalendarMonth(
+      dailyRecordCalendarMonthKeys.includes(selectedMonth)
+        ? selectedMonth
+        : dailyRecordCalendarMonthKeys[0]
+    );
+  }, [dailyRecordDate, dailyRecordDatePickerOpen, dailyRecordCalendarMonthKeys]);
+
+  useEffect(() => {
+    if (!dailyRecordDatePickerOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (!dailyRecordDatePickerRef.current?.contains(event.target)) {
+        setDailyRecordDatePickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [dailyRecordDatePickerOpen]);
 
   const dailyRecordAnnouncementTitle = useMemo(
     () => `Exam Syllabus (${formatDateDots(dailyRecordTomorrowSessions.targetDate)})`,
@@ -12720,11 +12851,93 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <div className="admin-form">
                   <div className="field">
                     <label>Date</label>
-                    <input
-                      type="date"
-                      value={dailyRecordDate}
-                      onChange={(e) => setDailyRecordDate(e.target.value)}
-                    />
+                    <div className="daily-record-date-picker" ref={dailyRecordDatePickerRef}>
+                      <button
+                        className="daily-record-date-picker-trigger"
+                        type="button"
+                        aria-haspopup="dialog"
+                        aria-expanded={dailyRecordDatePickerOpen}
+                        onClick={() => setDailyRecordDatePickerOpen((open) => !open)}
+                      >
+                        <span>
+                          {dailyRecordDate
+                            ? `${formatDateFull(dailyRecordDate)}${formatWeekday(dailyRecordDate) ? ` (${formatWeekday(dailyRecordDate)})` : ""}`
+                            : "Select date"}
+                        </span>
+                        <span aria-hidden="true">▾</span>
+                      </button>
+                      {dailyRecordDatePickerOpen ? (
+                        <div className="daily-record-date-picker-panel" role="dialog" aria-label="Select record date">
+                          {dailyRecordActiveCalendarMonth ? (
+                            <div className="daily-record-date-picker-month">
+                              <div className="daily-record-date-picker-nav">
+                                <button
+                                  type="button"
+                                  className="daily-record-date-picker-nav-btn"
+                                  disabled={dailyRecordCalendarMonthKeys[0] === dailyRecordActiveCalendarMonth.monthKey}
+                                  onClick={() => {
+                                    const currentIndex = dailyRecordCalendarMonthKeys.indexOf(dailyRecordActiveCalendarMonth.monthKey);
+                                    if (currentIndex > 0) setDailyRecordCalendarMonth(dailyRecordCalendarMonthKeys[currentIndex - 1]);
+                                  }}
+                                  aria-label="Previous month"
+                                >
+                                  ‹
+                                </button>
+                                <div className="daily-record-date-picker-month-label">{dailyRecordActiveCalendarMonth.label}</div>
+                                <button
+                                  type="button"
+                                  className="daily-record-date-picker-nav-btn"
+                                  disabled={dailyRecordCalendarMonthKeys[dailyRecordCalendarMonthKeys.length - 1] === dailyRecordActiveCalendarMonth.monthKey}
+                                  onClick={() => {
+                                    const currentIndex = dailyRecordCalendarMonthKeys.indexOf(dailyRecordActiveCalendarMonth.monthKey);
+                                    if (currentIndex >= 0 && currentIndex < dailyRecordCalendarMonthKeys.length - 1) {
+                                      setDailyRecordCalendarMonth(dailyRecordCalendarMonthKeys[currentIndex + 1]);
+                                    }
+                                  }}
+                                  aria-label="Next month"
+                                >
+                                  ›
+                                </button>
+                              </div>
+                              <div className="daily-record-date-picker-weekdays">
+                                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                                  <span key={`daily-record-weekday-${label}`}>{label}</span>
+                                ))}
+                              </div>
+                              <div className="daily-record-date-picker-grid">
+                                {dailyRecordActiveCalendarMonth.weeks.flat().map((cell, index) => {
+                                  if (!cell) {
+                                    return <span key={`daily-record-empty-${dailyRecordActiveCalendarMonth.monthKey}-${index}`} className="daily-record-date-cell-empty" />;
+                                  }
+                                  const isSelected = cell.recordDate === dailyRecordDate;
+                                  const className = [
+                                    "daily-record-date-picker-day",
+                                    cell.isHoliday ? "is-holiday" : "",
+                                    cell.isSelectable ? "is-selectable" : "",
+                                    isSelected ? "is-selected" : "",
+                                  ].filter(Boolean).join(" ");
+                                  return (
+                                    <button
+                                      key={cell.recordDate}
+                                      type="button"
+                                      className={className}
+                                      disabled={!cell.isSelectable}
+                                      onClick={() => {
+                                        setDailyRecordDate(cell.recordDate);
+                                        setDailyRecordDatePickerOpen(false);
+                                      }}
+                                      title={cell.isHoliday ? "Holiday" : formatDateFull(cell.recordDate)}
+                                    >
+                                      {cell.dayNumber}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="field small">
                     <label>&nbsp;</label>
