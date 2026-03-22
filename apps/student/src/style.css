@@ -1889,8 +1889,26 @@ body { overflow-x: hidden; }
   flex: 1;
 }
 
+.student-menu-account {
+  display: grid;
+  gap: 4px;
+  padding: 10px 4px 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.student-menu-account-line {
+  font-size: 12px;
+  line-height: 1.35;
+  color: #4b5563;
+  word-break: break-word;
+}
+
+.student-menu-account-school {
+  font-weight: 700;
+  color: #111827;
+}
+
 .student-menu-logout {
-  margin-top: auto;
   color: #dc2626;
   font-weight: 800;
 }

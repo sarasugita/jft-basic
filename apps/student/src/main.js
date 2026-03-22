@@ -95,6 +95,14 @@ let studentAttendanceState = {
   userId: "",
 };
 
+let studentSchoolState = {
+  loaded: false,
+  loading: false,
+  name: "",
+  error: "",
+  schoolId: "",
+};
+
 let rankingState = {
   loaded: false,
   loading: false,
@@ -1703,6 +1711,36 @@ async function fetchStudentRanking() {
   }
 }
 
+async function fetchStudentSchool() {
+  const schoolId = authState.profile?.school_id ?? "";
+  if (!schoolId || studentSchoolState.loading) return;
+  if (studentSchoolState.loaded && studentSchoolState.schoolId === schoolId) return;
+  studentSchoolState.loading = true;
+  studentSchoolState.error = "";
+  try {
+    const { data, error } = await supabase
+      .from("schools")
+      .select("id, name")
+      .eq("id", schoolId)
+      .maybeSingle();
+    if (error) {
+      logSupabaseError("student school fetch error", error);
+      studentSchoolState.name = "";
+      studentSchoolState.error = getErrorMessage(error, "Failed to load school.");
+      return;
+    }
+    studentSchoolState.name = String(data?.name ?? "").trim();
+    studentSchoolState.schoolId = schoolId;
+  } catch (error) {
+    logUnexpectedError("student school fetch failed", error);
+    studentSchoolState.name = "";
+    studentSchoolState.error = getErrorMessage(error, "Failed to load school.");
+  } finally {
+    studentSchoolState.loaded = true;
+    studentSchoolState.loading = false;
+  }
+}
+
 async function fetchAbsenceApplications() {
   if (!authState.session || absenceApplicationsState.loading) return;
   absenceApplicationsState.loading = true;
@@ -3277,6 +3315,9 @@ function renderTestSelect(app) {
   if ((showDailyResults || showModelResults) && authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
   }
+  if (showTabs && authState.profile?.school_id && !studentSchoolState.loading && (!studentSchoolState.loaded || studentSchoolState.schoolId !== authState.profile.school_id)) {
+    fetchStudentSchool().finally(render);
+  }
   if (showRanking && authState.session && authState.profile?.school_id && !rankingState.loaded && !rankingState.loading) {
     fetchStudentRanking().finally(render);
   }
@@ -3288,6 +3329,8 @@ function renderTestSelect(app) {
   const welcomeName =
     (state.user?.name || authState.profile?.display_name || authState.session?.user?.email || "Student")
       .trim();
+  const menuEmail = String(authState.profile?.email || authState.session?.user?.email || "").trim();
+  const menuSchoolName = String(studentSchoolState.name || "").trim();
   const authWarningHtml = authState.profileError
     ? `<section class="home-card"><div class="text-error">${escapeHtml(authState.profileError)}</div></section>`
     : "";
@@ -3346,6 +3389,10 @@ function renderTestSelect(app) {
               Attendance
             </button>
             <div class="student-menu-spacer"></div>
+            <div class="student-menu-account">
+              ${menuEmail ? `<div class="student-menu-account-line">${escapeHtml(menuEmail)}</div>` : ""}
+              ${menuSchoolName ? `<div class="student-menu-account-line student-menu-account-school">${escapeHtml(menuSchoolName)}</div>` : ""}
+            </div>
             <button class="student-menu-item student-menu-logout" id="signOutBtn">
               <span class="student-menu-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">

@@ -29,7 +29,8 @@ const PROFILE_SELECT_FIELDS = [
   "passport_number",
   "profile_uploads",
   "created_at",
-  "is_withdrawn"
+  "is_withdrawn",
+  "is_test_account"
 ].join(", ");
 const CERTIFICATE_STATUS_OPTIONS = [
   { value: "ongoing", label: "Ongoing" },
@@ -1220,6 +1221,10 @@ function isPastSession(session) {
   if (Number.isFinite(startTime)) return startTime <= now;
   if (Number.isFinite(createdTime)) return createdTime <= now;
   return false;
+}
+
+function isAnalyticsExcludedStudent(student) {
+  return Boolean(student?.is_withdrawn || student?.is_test_account);
 }
 
 function renderTwoLineHeader(title) {
@@ -3722,10 +3727,17 @@ export default function AdminConsole({
     });
   }, [sessionDetailDisplayAttempts, students]);
 
+  const studentsById = useMemo(
+    () => new Map((students ?? []).map((student) => [student.id, student])),
+    [students]
+  );
+
   const sessionDetailLatestAttempts = useMemo(() => {
     const latestMap = buildLatestAttemptMapByStudent(sessionDetailDisplayAttempts);
-    return Array.from(latestMap.values()).sort((a, b) => getRowTimestamp(a) - getRowTimestamp(b));
-  }, [sessionDetailDisplayAttempts]);
+    return Array.from(latestMap.values())
+      .filter((attempt) => !isAnalyticsExcludedStudent(studentsById.get(attempt.student_id)))
+      .sort((a, b) => getRowTimestamp(a) - getRowTimestamp(b));
+  }, [sessionDetailDisplayAttempts, studentsById]);
 
   const sessionDetailPassRate = useMemo(() => {
     const value = Number(testPassRateByVersion[selectedSessionDetail?.problem_set_id] ?? 0.8);
@@ -3759,7 +3771,7 @@ export default function AdminConsole({
 
   const sessionDetailAnalysisSummary = useMemo(() => {
     const attendedCount = sessionDetailLatestAttempts.length;
-    const activeStudentCount = (students ?? []).filter((student) => !student.is_withdrawn).length;
+    const activeStudentCount = (students ?? []).filter((student) => !isAnalyticsExcludedStudent(student)).length;
     const absentCount = Math.max(0, activeStudentCount - attendedCount);
     const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
     const failCount = Math.max(0, attendedCount - passCount);
@@ -4587,6 +4599,7 @@ export default function AdminConsole({
     return Object.fromEntries(
       sessions.map((session, index) => {
         const visibleAttempts = rows
+          .filter((row) => !isAnalyticsExcludedStudent(row?.student))
           .map((row) => row?.cells?.[index]?.[0] ?? null)
           .filter(Boolean);
         const averageRate = visibleAttempts.length
@@ -4638,6 +4651,11 @@ export default function AdminConsole({
 
   const activeStudents = useMemo(
     () => (sortedStudents ?? []).filter((s) => !s.is_withdrawn),
+    [sortedStudents]
+  );
+
+  const analyticsStudents = useMemo(
+    () => (sortedStudents ?? []).filter((student) => !isAnalyticsExcludedStudent(student)),
     [sortedStudents]
   );
 
@@ -4962,14 +4980,19 @@ export default function AdminConsole({
     });
   }, [activeStudents, attendanceFilter, attendanceRangeColumns, attendanceEntriesByDay]);
 
+  const attendanceAnalyticsStudents = useMemo(
+    () => attendanceFilteredStudents.filter((student) => !isAnalyticsExcludedStudent(student)),
+    [attendanceFilteredStudents]
+  );
+
   const attendanceDayRates = useMemo(() => {
     const rates = {};
     attendanceDayColumns.forEach((day) => {
-      const statuses = attendanceFilteredStudents.map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "");
+      const statuses = attendanceAnalyticsStudents.map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "");
       rates[day.id] = buildAttendanceStats(statuses).rate;
     });
     return rates;
-  }, [attendanceDayColumns, attendanceEntriesByDay, attendanceFilteredStudents]);
+  }, [attendanceAnalyticsStudents, attendanceDayColumns, attendanceEntriesByDay]);
 
   const resolveAttendanceImportConflict = useCallback((choice) => {
     const resolve = attendanceImportChoiceResolverRef.current;
@@ -6285,7 +6308,7 @@ export default function AdminConsole({
           }
           const rows = await rowsPromise;
           const recipients = rows
-            .filter((row) => !row.student?.is_withdrawn)
+            .filter((row) => !isAnalyticsExcludedStudent(row.student))
             .map((row) => ({
               row,
               issues: getStudentWarningIssues(row, criteria),
@@ -6423,7 +6446,7 @@ export default function AdminConsole({
       const criteria = normalizeStudentWarningCriteria(studentWarningForm);
       const rows = await loadStudentWarningMetrics(criteria);
       const matched = rows
-        .filter((row) => !row.student?.is_withdrawn)
+        .filter((row) => !isAnalyticsExcludedStudent(row.student))
         .map((row) => ({ row, issues: getStudentWarningIssues(row, criteria) }))
         .filter((item) => item.issues.length > 0);
       if (!matched.length) {
@@ -6534,6 +6557,36 @@ export default function AdminConsole({
       setStudentMsg(`Update failed: ${error.message}`);
       return;
     }
+    fetchStudents();
+  }
+
+  async function toggleTestAccount(student, nextValue) {
+    if (!student?.id) return;
+    setStudentMsg("");
+    const isTestAccount = Boolean(nextValue);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ is_test_account: isTestAccount })
+      .eq("id", student.id);
+    if (error) {
+      console.error("test account update error:", error);
+      setStudentMsg(`Update failed: ${error.message}`);
+      return;
+    }
+    setStudentMsg(
+      `${student.display_name || student.email || "Student"} ${isTestAccount ? "is now" : "is no longer"} a test account.`
+    );
+    await recordAuditEvent({
+      actionType: "update",
+      entityType: "student",
+      entityId: student.id,
+      summary: `${isTestAccount ? "Marked test account" : "Removed test account"}: ${student.display_name || student.email || student.id}`,
+      metadata: {
+        student_id: student.id,
+        email: student.email || null,
+        is_test_account: isTestAccount,
+      },
+    });
     fetchStudents();
   }
 
@@ -7260,11 +7313,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
 
-    let rankingStudents = activeStudents ?? [];
+    let rankingStudents = analyticsStudents ?? [];
     if (!rankingStudents.length) {
       const { data: studentRows, error: studentsError } = await supabase
         .from("profiles")
-        .select("id, display_name, email, student_code, is_withdrawn")
+        .select("id, display_name, email, student_code, is_withdrawn, is_test_account")
         .eq("role", "student")
         .eq("school_id", activeSchoolId)
         .order("created_at", { ascending: false });
@@ -7274,7 +7327,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         setRankingRefreshingId("");
         return;
       }
-      rankingStudents = (studentRows ?? []).filter((student) => !student.is_withdrawn);
+      rankingStudents = (studentRows ?? []).filter((student) => !isAnalyticsExcludedStudent(student));
     }
     const studentMeta = new Map(
       rankingStudents.map((student) => [
@@ -7601,7 +7654,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
     });
     const rankMap = {};
     bySession.forEach((rows, sessionId) => {
-      const latestRows = Array.from(buildLatestAttemptMapByStudent(rows).values());
+      const latestRows = Array.from(buildLatestAttemptMapByStudent(rows).values())
+        .filter((row) => !isAnalyticsExcludedStudent(studentsById.get(row.student_id)));
       const sorted = latestRows
         .map((row) => Number(row.score_rate ?? (row.total ? row.correct / row.total : 0)))
         .sort((a, b) => b - a);
@@ -10595,8 +10649,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
           "",
           "",
           "",
-          ...exportColumns.map((day) => {
+      ...exportColumns.map((day) => {
             const statuses = sortedStudents
+              .filter((student) => !isAnalyticsExcludedStudent(student))
               .map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "")
               .filter((status) => status && status !== "W");
             const stats = buildAttendanceStats(statuses);
@@ -10676,6 +10731,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           "",
           ...sessions.map((session, index) => {
             const attemptsForSession = matrixRows
+              .filter((row) => !isAnalyticsExcludedStudent(row.student))
               .map((row) => visibleAttemptAt(row, index))
               .filter(Boolean);
             if (!attemptsForSession.length) return "-";
@@ -10735,7 +10791,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
 
     const visibleAttemptAt = (row, index) => row?.cells?.[index]?.[0] ?? null;
-    const activeMatrixRows = matrixRows.filter((row) => !row.student?.is_withdrawn);
+    const activeMatrixRows = matrixRows.filter((row) => !isAnalyticsExcludedStudent(row.student));
     const sessionBlocks = sessions.map((session, sessionIndex) => {
       const title = String(session?.title ?? session?.problem_set_id ?? "").trim() || session?.problem_set_id || "";
       const questionsList = questionsByVersion[session.problem_set_id] ?? [];
@@ -13396,6 +13452,20 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   >
                     Reissue Temp Pass
                   </button>
+                  <div className="student-detail-toggle-card">
+                    <span className="student-detail-toggle-label">Test Account</span>
+                    <label className="daily-session-create-switch" aria-label="Test Account">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedStudent?.is_test_account)}
+                        onChange={(event) => {
+                          if (!selectedStudent) return;
+                          toggleTestAccount(selectedStudent, event.target.checked);
+                        }}
+                      />
+                      <span className="daily-session-create-switch-slider" />
+                    </label>
+                  </div>
                   <button
                     className={`btn student-detail-action-btn ${selectedStudent?.is_withdrawn ? "btn-withdrawn" : ""}`}
                     onClick={() => {

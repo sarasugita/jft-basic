@@ -1008,6 +1008,22 @@ body { padding: 0; }
   flex: 0 0 auto;
 }
 
+.student-detail-toggle-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.student-detail-toggle-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-text);
+}
+
 .admin-top-tabs {
   display: flex;
   border: 1px solid var(--admin-control-border);
