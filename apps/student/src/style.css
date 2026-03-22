@@ -31,6 +31,11 @@ body { overflow-x: hidden; }
   padding-top: var(--topbar-height);
 }
 
+.app.app-result {
+  height: auto;
+  min-height: 100%;
+}
+
 .app.has-student-topbar {
   padding-top: var(--student-topbar-height);
 }
@@ -526,15 +531,27 @@ body { overflow-x: hidden; }
 .result {
   padding: 22px;
   padding-bottom: 120px;
-  max-width: 980px;
+  width: min(calc(100vw - 24px), 1120px);
+  max-width: calc(100vw - 24px);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 100%;
+  box-sizing: border-box;
+  min-width: 0;
 }
-.result h1 { margin: 12px 0 10px; }
+.result h1 { margin: 12px 0 10px; text-align: center; }
+.result-summary {
+  width: min(100%, 520px);
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  min-width: 0;
+}
 .result-line { margin: 6px 0; }
 .result-actions { display: flex; gap: 10px; margin: 16px 0 18px; }
 .review { display: grid; gap: 12px; }
@@ -644,11 +661,12 @@ body { overflow-x: hidden; }
 /* red blank box in dialog */
 .blank-red{
   display:inline-block;
-  width: 140px;
-  height: 32px;
-  border: 3px solid #ef4444;
-  vertical-align: middle;
-  margin: 0 8px;
+  width: clamp(4.8em, 18vw, 7.2em);
+  height: 0.82lh;
+  border: 0.14em solid #ef4444;
+  box-sizing: border-box;
+  vertical-align: -0.02em;
+  margin: 0 0.25em;
 }
 
 /* dialog layout */
@@ -667,13 +685,31 @@ body { overflow-x: hidden; }
 .dialog-lines{
   font-size: 20px;
   line-height: 1.8;
-  white-space: pre-wrap;
   margin-bottom: 28px;
 }
+.text-box-lines{
+  margin-bottom: 12px;
+}
 .dialog-line{
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 0.45em;
   font-size: 20px;
   line-height: 1.8;
-  white-space: pre-wrap;
+  white-space: normal;
+  align-items: baseline;
+}
+.dialog-line-plain{
+  display: block;
+}
+.dialog-speaker{
+  display: block;
+  white-space: nowrap;
+}
+.dialog-body{
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .dialog-img img{
   width:100%;
@@ -777,17 +813,25 @@ body { overflow-x: hidden; }
     grid-template-columns: 1fr;   /* 会話+画像を縦積み */
   }
 
+  .dialog-line {
+    column-gap: 0.35em;
+  }
+
   .img-choice-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr)); /* 3→2列 */
   }
 
   .result {
     padding: 16px;
-    align-items: stretch;
+    align-items: center;
   }
 
   .result h1 {
-    text-align: left;
+    text-align: center;
+  }
+
+  .result-summary {
+    width: 100%;
   }
 
   .score-correct{ font-size: 48px; }
@@ -795,7 +839,8 @@ body { overflow-x: hidden; }
   .score-total{ font-size: 34px; }
 
   .result-table{
-    min-width: 640px;
+    width: 100%;
+    min-width: 700px;
   }
 
   .result-table th,
@@ -954,11 +999,19 @@ body { overflow-x: hidden; }
 
   .result {
     padding: 12px;
-    align-items: stretch;
+    align-items: center;
     justify-content: flex-start;
     max-width: 100%;
     width: 100%;
     min-height: auto;
+  }
+
+  .result h1 {
+    text-align: center;
+  }
+
+  .result-summary {
+    width: 100%;
   }
 
   .score-correct{ font-size: 40px; }
@@ -966,7 +1019,7 @@ body { overflow-x: hidden; }
   .score-total{ font-size: 28px; }
 
   .result-table{
-    min-width: 600px;
+    min-width: 700px;
     table-layout: fixed;
   }
 
@@ -2796,6 +2849,24 @@ button.student-application-view {
   align-items:baseline;
   justify-content:center;
   margin: 10px 0 16px;
+  text-align: center;
+}
+.result-status {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+}
+.result-status-rate {
+  font-size: 14px;
+  font-weight: 500;
+  color: #444;
+}
+.result-threshold {
+  margin-top: 4px;
+  color: #666;
+  font-size: 12px;
+  text-align: center;
 }
 .save-status{
   text-align:center;
@@ -2810,19 +2881,27 @@ button.student-application-view {
 
 .result-table-wrap{
   margin-top: 18px;
-  overflow: auto;
+  align-self: stretch;
+  display: block;
+  overflow: auto hidden;
   border: 1px solid rgba(0,0,0,.15);
   border-radius: 10px;
   background: #fff;
   width: 100%;
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .result-table{
   width: 100%;
+  min-width: 760px;
+  max-width: none;
   border-collapse: collapse;
-  min-width: 800px; /* 横スクロール許可 */
+  table-layout: fixed;
 }
 
 .result-table th, .result-table td{
@@ -2841,8 +2920,26 @@ button.student-application-view {
   font-weight: 900;
 }
 
-.cell-id{ white-space: nowrap; font-weight: 800; }
-.cell-judge{ width: 80px; text-align: center; }
+.result-table .col-id,
+.cell-id{
+  width: 84px;
+  min-width: 84px;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+.result-table .col-result,
+.cell-judge{
+  width: 88px;
+  min-width: 88px;
+  text-align: center;
+}
+
+.result-table .col-question,
+.cell-prompt{
+  width: 170px;
+  min-width: 170px;
+}
 
 .badge{
   display:inline-flex;
@@ -2858,10 +2955,10 @@ button.student-application-view {
 .badge.ng{ background: #ffe9e9; }
 
 .cell-prompt{
-  display:flex;
+  display:grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   align-items:flex-start;
-  flex-wrap: wrap;
 }
 
 .result-stem-media{
@@ -2884,7 +2981,12 @@ button.student-application-view {
   width: min(260px, 100%);
 }
 
-.prompt-text{ line-height: 1.5; }
+.prompt-text{
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
 
 /* 列の区切り線（縦線） */
 .result-table th,
@@ -2903,7 +3005,8 @@ button.student-application-view {
 /* 選んだ答え / 正しい答え の列幅 */
 .result-table .col-choice,
 .result-table .cell-choice{
-  width: 30px;
+  width: 160px;
+  min-width: 160px;
 }
 
 /* 画像を大きく表示 */
@@ -2924,6 +3027,20 @@ button.student-application-view {
   line-height: 1.5;
   padding: 6px 4px;
   text-align: center;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.finish-actions {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.finish-actions .btn {
+  max-width: 100%;
 }
 
 @media (max-width: 520px) {
@@ -2934,7 +3051,14 @@ button.student-application-view {
   }
 
   .result {
-    align-items: stretch;
+    width: min(calc(100vw - 24px), 100%);
+    max-width: calc(100vw - 24px);
+    padding: 18px 12px 100px;
+    align-items: center;
+  }
+
+  .result-summary {
+    width: 100%;
   }
 
   .result-table-wrap {
@@ -2944,8 +3068,8 @@ button.student-application-view {
   }
 
   .result-table {
-    min-width: 0;
     width: 100%;
+    min-width: 620px;
     table-layout: fixed;
   }
 
@@ -2953,6 +3077,18 @@ button.student-application-view {
   .result-table td {
     font-size: 12px;
     padding: 8px 8px;
+  }
+
+  .result-table .col-question,
+  .cell-prompt {
+    width: 145px;
+    min-width: 145px;
+  }
+
+  .result-table .col-choice,
+  .result-table .cell-choice {
+    width: 136px;
+    min-width: 136px;
   }
 
   .result-thumb {

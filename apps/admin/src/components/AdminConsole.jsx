@@ -1226,7 +1226,11 @@ function escapeHtml(str) {
 
 function renderUnderlinesHtml(text) {
   const escaped = escapeHtml(text ?? "");
-  return escaped.replace(/【(.*?)】/g, '<span class="u">$1</span>');
+  return escaped
+    .replace(/【(.*?)】/g, (_, inner) => (String(inner ?? "").replace(/[\s\u3000]/g, "").length
+      ? `<span class="u">${inner}</span>`
+      : '<span class="blank-red"></span>'))
+    .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, '<span class="blank-red"></span>');
 }
 
 function splitStemLines(text) {
@@ -1234,6 +1238,41 @@ function splitStemLines(text) {
     .split(/\r?\n|\|/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function splitStemLinesPreserveIndent(text) {
+  return String(text ?? "")
+    .split(/\r?\n|\|/)
+    .map((s) => s.replace(/\s+$/g, ""))
+    .filter((s) => s.trim().length);
+}
+
+function splitTextBoxStemLines(text) {
+  const baseLines = splitStemLinesPreserveIndent(text);
+  const expanded = [];
+  for (const line of baseLines) {
+    const speakerMatches = Array.from(
+      String(line).matchAll(/(?:^|\s+)([^:：\s]{1,20}[：:].*?)(?=(?:\s+[^:：\s]{1,20}[：:])|$)/g)
+    )
+      .map((match) => String(match[1] ?? "").trim())
+      .filter(Boolean);
+    if (speakerMatches.length >= 2) {
+      expanded.push(...speakerMatches);
+      continue;
+    }
+    expanded.push(line);
+  }
+  return expanded;
+}
+
+function parseSpeakerStemLine(line) {
+  const match = String(line ?? "").match(/^\s*([^:：]+?)([:：])(.*)$/);
+  if (!match) return null;
+  return {
+    speaker: String(match[1] ?? "").trim(),
+    delimiter: match[2] ?? "：",
+    body: String(match[3] ?? "").replace(/^\s+/g, ""),
+  };
 }
 
 function splitAssetValues(value) {
@@ -1456,7 +1495,7 @@ function mapDbQuestion(row) {
     sourceVersion: data.sourceVersion ?? null,
     sourceQuestionId: data.sourceQuestionId ?? null,
     ...data,
-    stemKind: data.stemKind ?? data.stem_kind ?? row.media_type ?? null,
+    stemKind: normalizeModelCsvKind(data.stemKind ?? data.stem_kind ?? row.media_type ?? null) || null,
     stemAsset,
   };
 }
@@ -1911,7 +1950,7 @@ function formatOrdinal(value) {
 function QuestionPreviewCard({ question, index, children }) {
   const prompt = question.promptEn || question.promptBn || "";
   const choices = question.choices ?? question.choicesJa ?? [];
-  const stemKind = question.stemKind || "";
+  const stemKind = normalizeModelCsvKind(question.stemKind || "");
   const stemText = question.stemText;
   const stemExtra = question.stemExtra;
   const stemAsset = question.stemAsset;
@@ -1924,6 +1963,7 @@ function QuestionPreviewCard({ question, index, children }) {
   const shouldShowImage = imageAssets.length > 0 || (isImageStem && stemAsset);
   const shouldShowAudio = audioAssets.length > 0 || (isAudioStem && stemAsset);
   const stemLines = splitStemLines(stemExtra);
+  const textBoxLines = splitTextBoxStemLines(stemExtra || stemText);
   const sectionLabel = getQuestionSectionLabel(question) || question.sectionKey;
 
   const renderChoices = () => (
@@ -1966,13 +2006,37 @@ function QuestionPreviewCard({ question, index, children }) {
           {stemExtra}
         </div>
       ) : null}
-      {stemText ? (
+      {stemText && stemKind !== "text_box" ? (
         <div
           style={{ marginTop: 6 }}
           dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
         />
       ) : null}
-      {stemLines.length && question.type !== "daily" ? (
+      {stemKind === "text_box" && textBoxLines.length ? (
+        <div style={{ marginTop: 6, display: "grid", gap: 4 }}>
+          {textBoxLines.map((line, lineIndex) => {
+            const parsed = parseSpeakerStemLine(line);
+            if (!parsed || !parsed.speaker) {
+              return (
+                <div
+                  key={`textbox-line-${question.id}-${lineIndex}`}
+                  dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(line) }}
+                />
+              );
+            }
+            return (
+              <div
+                key={`textbox-line-${question.id}-${lineIndex}`}
+                style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", columnGap: "0.45em", alignItems: "start" }}
+              >
+                <span style={{ whiteSpace: "nowrap" }}>{parsed.speaker}{parsed.delimiter}</span>
+                <span dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(parsed.body) }} />
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {stemLines.length && question.type !== "daily" && stemKind !== "text_box" ? (
         <div style={{ marginTop: 6 }}>
           {stemLines.map((line, lineIndex) => (
             <div
@@ -2624,7 +2688,7 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
       qid: getCell(row, "qid") || null,
       subId: getCell(row, "sub_id") || null,
       itemId: questionId,
-      stemKind: getCell(row, "stem_kind") || null,
+      stemKind: normalizeModelCsvKind(getCell(row, "stem_kind")) || null,
       stemText: getCell(row, "stem_text") || null,
       stemAsset: getCell(row, "stem_asset") || null,
       stemExtra: getCell(row, "stem_extra") || null,
@@ -2866,6 +2930,17 @@ function validateAssetRefs(questions, choices, assetMap) {
   for (const c of choices) checkValue(c.choice_image);
 
   return { missing: Array.from(missing), invalid: Array.from(invalid) };
+}
+
+function buildLocalAssetNameMap(files, isCsvLike) {
+  const assetMap = {};
+  for (const file of Array.isArray(files) ? files : []) {
+    const name = String(file?.name ?? "").trim();
+    if (!name) continue;
+    if (typeof isCsvLike === "function" && isCsvLike(name)) continue;
+    assetMap[name] = name;
+  }
+  return assetMap;
 }
 
 async function buildProfileEmailMap(supabase, attemptsList) {
@@ -9027,8 +9102,91 @@ function openDailyRecordModal(record = null, recordDate = "") {
     return { error: null };
   }
 
+  async function validateCsvAssetsBeforeUpload({
+    csvFile,
+    uploadFiles,
+    testVersion,
+    parseCsv,
+    multipleVersionMessage,
+    missingVersionMessage,
+    isCsvLike,
+    onResolvedVersion,
+  }) {
+    if (!csvFile) {
+      return { ok: false, summary: "CSV file is required." };
+    }
+
+    const text = await csvFile.text();
+    const { questions, choices, errors } = parseCsv(text, testVersion);
+    if (errors.length) {
+      return {
+        ok: false,
+        summary: "Upload stopped due to CSV errors.",
+        detail: `CSV errors:\n${errors.slice(0, 5).join("\n")}`,
+      };
+    }
+    if (questions.length === 0) {
+      return { ok: false, summary: "Upload stopped: no questions found in CSV." };
+    }
+
+    const versionSet = new Set(questions.map((q) => q.test_version).filter(Boolean));
+    if (versionSet.size > 1) {
+      return { ok: false, summary: multipleVersionMessage };
+    }
+
+    const resolvedVersion = Array.from(versionSet)[0] || testVersion;
+    if (!resolvedVersion) {
+      return { ok: false, summary: missingVersionMessage };
+    }
+    if (resolvedVersion !== testVersion && typeof onResolvedVersion === "function") {
+      onResolvedVersion(resolvedVersion);
+    }
+
+    const { data: assetRows, error: assetErr } = await supabase
+      .from("test_assets")
+      .select("path, original_name")
+      .eq("test_version", resolvedVersion);
+    if (assetErr) {
+      console.error("upload asset preflight lookup error:", assetErr);
+      return {
+        ok: false,
+        summary: "Upload stopped: asset lookup failed.",
+        detail: `Asset lookup failed: ${assetErr.message}`,
+      };
+    }
+
+    const existingAssetMap = {};
+    for (const row of assetRows ?? []) {
+      const name = row.original_name || row.path?.split("/").pop();
+      if (name) existingAssetMap[name] = true;
+    }
+    const localAssetMap = buildLocalAssetNameMap(uploadFiles, isCsvLike);
+    const { missing, invalid } = validateAssetRefs(questions, choices, {
+      ...existingAssetMap,
+      ...localAssetMap,
+    });
+
+    if (invalid.length) {
+      return {
+        ok: false,
+        summary: "Upload stopped: invalid asset path in CSV.",
+        detail: `Invalid asset paths (use filename only):\n${invalid.slice(0, 10).join("\n")}`,
+      };
+    }
+    if (missing.length) {
+      return {
+        ok: false,
+        summary: `Upload stopped: ${missing.length} asset${missing.length === 1 ? "" : "s"} missing.`,
+        detail: `Missing assets referenced by CSV:\n${missing.slice(0, 10).join("\n")}`,
+      };
+    }
+
+    return { ok: true, resolvedVersion };
+  }
+
   async function uploadAssets() {
     setAssetUploadMsg("");
+    setAssetImportMsg("");
     if (!activeSchoolId) {
       setAssetUploadMsg("School scope is required.");
       return;
@@ -9073,6 +9231,28 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
 
+    const csvFile = (assetCsvFile && assetCsvFile.name.toLowerCase().endsWith(".csv"))
+      ? assetCsvFile
+      : files.find((f) => f.name.toLowerCase().endsWith(".csv")) || null;
+    const preflight = await validateCsvAssetsBeforeUpload({
+      csvFile,
+      uploadFiles: files,
+      testVersion,
+      parseCsv: parseQuestionCsv,
+      multipleVersionMessage: "Upload stopped: multiple test_version values detected. Split CSV per test_version.",
+      missingVersionMessage: "Upload stopped: test_version is required (either in form or CSV).",
+      isCsvLike: (name) => String(name ?? "").toLowerCase().endsWith(".csv"),
+      onResolvedVersion: (resolvedVersion) => setAssetForm((s) => ({ ...s, test_version: resolvedVersion })),
+    });
+    if (!preflight.ok) {
+      setAssetUploadMsg(preflight.summary);
+      if (preflight.detail) setAssetImportMsg(preflight.detail);
+      return;
+    }
+    if (preflight.resolvedVersion && preflight.resolvedVersion !== testVersion) {
+      testVersion = preflight.resolvedVersion;
+    }
+
     setAssetUploadMsg("Uploading...");
 
     const ensure = await ensureTestRecord(testVersion, title, type, null, activeSchoolId);
@@ -9098,20 +9278,20 @@ function openDailyRecordModal(record = null, recordDate = "") {
     fetchTests();
     fetchAssets();
 
-    await importQuestionsFromCsv();
+    await importQuestionsFromCsv(testVersion);
 
     setAssetFile(null);
     setAssetFiles([]);
   }
 
-  async function importQuestionsFromCsv() {
+  async function importQuestionsFromCsv(forcedTestVersion = "") {
     setAssetImportMsg("");
     if (!activeSchoolId) {
       setAssetImportMsg("School scope is required.");
       return;
     }
     const file = assetCsvFile || assetFile;
-    const testVersion = assetForm.test_version.trim();
+    const testVersion = String(forcedTestVersion || assetForm.test_version || "").trim();
     const type = "mock";
     const category = assetForm.category.trim();
 
@@ -9277,6 +9457,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   async function uploadDailyAssets() {
     setDailyUploadMsg("");
+    setDailyImportMsg("");
     if (!activeSchoolId) {
       setDailyUploadMsg("School scope is required.");
       return;
@@ -9325,6 +9506,28 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
 
+    const csvFile = (dailyCsvFile && isCsvLike(dailyCsvFile.name))
+      ? dailyCsvFile
+      : files.find((f) => isCsvLike(f.name)) || null;
+    const preflight = await validateCsvAssetsBeforeUpload({
+      csvFile,
+      uploadFiles: files,
+      testVersion,
+      parseCsv: parseDailyCsv,
+      multipleVersionMessage: "Upload stopped: multiple SetID values detected. Split CSV per SetID.",
+      missingVersionMessage: "Upload stopped: SetID is required (either in form or CSV).",
+      isCsvLike,
+      onResolvedVersion: (resolvedVersion) => setDailyForm((s) => ({ ...s, test_version: resolvedVersion })),
+    });
+    if (!preflight.ok) {
+      setDailyUploadMsg(preflight.summary);
+      if (preflight.detail) setDailyImportMsg(preflight.detail);
+      return;
+    }
+    if (preflight.resolvedVersion && preflight.resolvedVersion !== testVersion) {
+      testVersion = preflight.resolvedVersion;
+    }
+
     setDailyUploadMsg("Uploading...");
     const ensure = await ensureTestRecord(testVersion, category || testVersion, type, null, activeSchoolId);
     if (!ensure.ok) {
@@ -9349,20 +9552,20 @@ function openDailyRecordModal(record = null, recordDate = "") {
     fetchTests();
     fetchAssets();
 
-    await importDailyQuestionsFromCsv();
+    await importDailyQuestionsFromCsv(testVersion);
 
     setDailyFile(null);
     setDailyFiles([]);
   }
 
-  async function importDailyQuestionsFromCsv() {
+  async function importDailyQuestionsFromCsv(forcedTestVersion = "") {
     setDailyImportMsg("");
     if (!activeSchoolId) {
       setDailyImportMsg("School scope is required.");
       return;
     }
     const file = dailyCsvFile || dailyFile;
-    const testVersion = dailyForm.test_version.trim();
+    const testVersion = String(forcedTestVersion || dailyForm.test_version || "").trim();
     const category = dailyForm.category.trim();
     const type = "daily";
 
@@ -14483,8 +14686,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
             ))}
           </div>
           {groupedModelUploadTests.length === 0 ? <div className="admin-msg">{testsMsg || "No sets found."}</div> : null}
-          <div className="admin-msg">{assetUploadMsg}</div>
-          {assetImportMsg ? (
+          {!modelUploadOpen && assetUploadMsg ? <div className="admin-msg">{assetUploadMsg}</div> : null}
+          {!modelUploadOpen && assetImportMsg ? (
             <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
               {assetImportMsg}
             </pre>
@@ -14502,6 +14705,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     &times;
                   </button>
                 </div>
+                {assetUploadMsg ? <div className="admin-msg" style={{ marginTop: 10 }}>{assetUploadMsg}</div> : null}
+                {assetImportMsg ? (
+                  <pre className="admin-msg" style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
+                    {assetImportMsg}
+                  </pre>
+                ) : null}
 
                 <div className="admin-form upload-question-form" style={{ marginTop: 10 }}>
                   <div className="field">
@@ -14566,7 +14775,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     ) : null}
                   </div>
                   <div className="field">
-                    <label>Folder (PNG/MP3)</label>
+                    <label>Folder (PNG/MP3/M4A)</label>
                     <div className="upload-question-picker">
                       <input
                         ref={assetFolderInputRef}
@@ -15730,8 +15939,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
             ))}
           </div>
           {groupedDailyUploadTests.length === 0 ? <div className="admin-msg">{testsMsg || "No daily tests found."}</div> : null}
-          <div className="admin-msg">{dailyUploadMsg}</div>
-          {dailyImportMsg ? (
+          {!dailyUploadOpen && dailyUploadMsg ? <div className="admin-msg">{dailyUploadMsg}</div> : null}
+          {!dailyUploadOpen && dailyImportMsg ? (
             <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
               {dailyImportMsg}
             </pre>
@@ -15748,6 +15957,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     &times;
                   </button>
                 </div>
+                {dailyUploadMsg ? <div className="admin-msg" style={{ marginTop: 10 }}>{dailyUploadMsg}</div> : null}
+                {dailyImportMsg ? (
+                  <pre className="admin-msg" style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
+                    {dailyImportMsg}
+                  </pre>
+                ) : null}
 
                 <div className="admin-form upload-question-form" style={{ marginTop: 10 }}>
                   <div className="field">
@@ -15822,7 +16037,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     ) : null}
                   </div>
                   <div className="field">
-                    <label>Folder (PNG/MP3)</label>
+                    <label>Folder (PNG/MP3/M4A)</label>
                     <div className="upload-question-picker">
                       <input
                         ref={dailyFolderInputRef}

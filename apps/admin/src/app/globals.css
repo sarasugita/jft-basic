@@ -4285,6 +4285,16 @@ body { padding: 0; }
   text-underline-offset: 3px;
 }
 
+.blank-red {
+  display: inline-block;
+  width: clamp(118px, 26vw, 220px);
+  height: clamp(28px, 5vw, 64px);
+  border: 3px solid #ef4444;
+  box-sizing: border-box;
+  vertical-align: -0.2em;
+  margin: 0 0.35em;
+}
+
 .admin-login {
   max-width: 420px;
   margin: 50px auto;

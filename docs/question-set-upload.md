@@ -53,9 +53,16 @@ Headers used:
 - shared prompt text for the question group
 - if multiple rows share the same base `qid`, the prompt is shown once in the student test when the prompt values match
 
+`stem_kind`
+
+- supported values include `image`, `audio`, `audio_image`, `image_audio`, `dialog`, `passage_image`, `table_image`, `text_box`
+- `text_box` renders empty `【】` markers as red answer boxes
+- for `text_box`, lines that start with `A：...` or `B：...` wrap with a hanging indent aligned after `：`
+
 `stem_text`
 
 - supports underline markup using `【...】`
+- with `stem_kind = text_box`, empty `【】` becomes a red input-style box
 
 `stem_image` / `stem_audio`
 

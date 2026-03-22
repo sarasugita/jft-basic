@@ -30,6 +30,12 @@ set_id,qid,sub_section,prompt_en,prompt_bn,stem_kind,stem_text,stem_image,stem_a
 
 - `stem_text`
   - `【水道】` のように `【】` で囲んだ語は下線表示されます
+  - `stem_kind = text_box` のとき、空の `【】` は赤い入力ボックスとして表示されます
+  - `A：...` / `B：...` のように行頭に話者を書いた場合、折り返し後の行は `：` の後ろ位置に揃います
+
+- `stem_kind`
+  - 主な値: `image`, `audio`, `audio_image`, `image_audio`, `dialog`, `passage_image`, `table_image`, `text_box`
+  - `text_box` は会話文や穴埋め文用です
 
 - `stem_image` / `stem_audio`
   - 画像や音声のファイル名です
@@ -51,6 +57,7 @@ set_id,qid,sub_section,prompt_en,prompt_bn,stem_kind,stem_text,stem_image,stem_a
 test_exam,SV-1,Word meaning,Look at the illustration and choose the correct word.,,image,,q1.png,,,text,わらいます,なきます,おこります,
 test_exam,LC-3-1,Comprehending content (listening to announcements and instructions),You will hear an officer talking about what to do in case of fire at an emergency drill at work.,,audio,,lc3_officer.png,lc3.mp3,火事が　おきたら、まず　何を　しますか。,image,lc3_1a.png,lc3_1b.png,lc3_1c.png,
 test_exam,LC-3-2,Comprehending content (listening to announcements and instructions),You will hear an officer talking about what to do in case of fire at an emergency drill at work.,,audio,,lc3_officer.png,lc3.mp3,どこに　ひなん　しますか。,image,lc3_2b.png,lc3_2a.png,lc3_2c.png,
+test_exam,CE-9,Comprehending content (conversation),Read the dialog and choose the phrase that fits best.,,text_box,"A：ごかぞくは　今、　どこに　すんでいますか。|B：母と　あねは　フィリピン  【】。|A：そうですか。　お父さんは？|B：父は　日本に　います。",,,text,です,に　います,に　すんでいます,
 ```
 
 テンプレート:

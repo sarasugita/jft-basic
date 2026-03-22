@@ -387,7 +387,7 @@ function mapDbQuestion(row, version) {
     promptBn: row.prompt_bn,
     answerIndex: row.answer_index,
     orderIndex: row.order_index ?? 0,
-    stemKind: data.stemKind || data.stem_kind || null,
+    stemKind: normalizeStemKindValue(data.stemKind || data.stem_kind || row.media_type || null),
     stemText: data.stemText || null,
     stemAsset,
     stemImage: data.stemImage || data.stem_image || null,
@@ -704,7 +704,7 @@ function goIntro() {
 
 function renderLoading(app) {
   app.innerHTML = `
-    <div class="app has-topbar">
+    <div class="app has-topbar app-result">
       ${topbarHTML({ rightButtonLabel: "Loading", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
         <h1 class="prompt">Loading...</h1>
@@ -2082,11 +2082,24 @@ function getQuestionPrompt(q) {
   return q.boxText || q.stemText || q.stemExtra || q.promptEn || "";
 }
 
-function renderUnderlines(text) {
+function renderStemMarkup(text) {
   const escaped = escapeHtml(text ?? "");
   return escaped
-    .replace(/【(.*?)】/g, '<span class="u">$1</span>')
+    .replace(/【(.*?)】/g, (_, inner) => (String(inner ?? "").replace(/[\s\u3000]/g, "").length
+      ? `<span class="u">${inner}</span>`
+      : '<span class="blank-red"></span>'))
     .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, '<span class="blank-red"></span>');
+}
+
+function renderUnderlines(text) {
+  return renderStemMarkup(text);
+}
+
+function normalizeStemKindValue(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s/+]+/g, "_");
 }
 
 function splitStemLines(text) {
@@ -2101,6 +2114,52 @@ function splitStemLinesPreserveIndent(text) {
     .split(/\r?\n|\|/)
     .map((s) => s.replace(/\s+$/g, ""))
     .filter((s) => s.trim().length);
+}
+
+function splitTextBoxStemLines(text) {
+  const baseLines = splitStemLinesPreserveIndent(text);
+  const expanded = [];
+  for (const line of baseLines) {
+    const speakerMatches = Array.from(
+      String(line).matchAll(/(?:^|\s+)([^:：\s]{1,20}[：:].*?)(?=(?:\s+[^:：\s]{1,20}[：:])|$)/g)
+    )
+      .map((match) => String(match[1] ?? "").trim())
+      .filter(Boolean);
+    if (speakerMatches.length >= 2) {
+      expanded.push(...speakerMatches);
+      continue;
+    }
+    expanded.push(line);
+  }
+  return expanded;
+}
+
+function parseSpeakerStemLine(line) {
+  const match = String(line ?? "").match(/^\s*([^:：]+?)([:：])(.*)$/);
+  if (!match) return null;
+  return {
+    speaker: String(match[1] ?? "").trim(),
+    delimiter: match[2] ?? "：",
+    body: String(match[3] ?? "").replace(/^\s+/g, ""),
+  };
+}
+
+function renderSpeakerStemLines(lines, containerClass = "dialog-lines") {
+  if (!Array.isArray(lines) || !lines.length) return "";
+  return `<div class="${containerClass}">${lines
+    .map((line) => {
+      const parsed = parseSpeakerStemLine(line);
+      if (!parsed || !parsed.speaker) {
+        return `<div class="dialog-line dialog-line-plain">${renderStemMarkup(line)}</div>`;
+      }
+      return `
+        <div class="dialog-line">
+          <span class="dialog-speaker">${escapeHtml(parsed.speaker)}${escapeHtml(parsed.delimiter)}</span>
+          <span class="dialog-body">${renderStemMarkup(parsed.body)}</span>
+        </div>
+      `;
+    })
+    .join("")}</div>`;
 }
 
 function getAssetProbeTarget(value) {
@@ -2201,6 +2260,7 @@ function resolveAssetUrl(value, testVersion) {
 
 function normalizeQuestionAssets(q, version) {
   const next = { ...q };
+  next.stemKind = normalizeStemKindValue(next.stemKind || "");
   const mergedStemAssets = [
     next.stemAsset,
     next.stemAudio,
@@ -2727,15 +2787,15 @@ function renderStemHTML(q, opts = {}) {
   if (opts.skipStem) return "";
   const isDaily = getActiveTestType() === "daily";
   const parts = [];
-  const stemKind = String(q.stemKind || "").trim().toLowerCase();
+  const stemKind = normalizeStemKindValue(q.stemKind || "");
   const stemMedia = getStemMediaAssets(q);
   const audioAssets = stemMedia.audios;
   const imageAssets = stemMedia.images;
-  if (stemKind === "dialog") {
-    const lines = splitStemLinesPreserveIndent(q.stemExtra || q.stemText || "");
-    const dialogLines = lines.length
-      ? `<div class="dialog-lines">${lines.map((l) => `<div class="dialog-line">${renderUnderlines(l)}</div>`).join("")}</div>`
-      : "";
+  if (stemKind === "dialog" || stemKind === "text_box") {
+    const lines = stemKind === "text_box"
+      ? splitTextBoxStemLines(q.stemExtra || q.stemText || "")
+      : splitStemLinesPreserveIndent(q.stemExtra || q.stemText || "");
+    const dialogLines = renderSpeakerStemLines(lines, stemKind === "text_box" ? "dialog-lines text-box-lines" : "dialog-lines");
     if (imageAssets.length) {
       parts.push(`
         <div class="dialog-row">
@@ -5089,7 +5149,7 @@ function renderQuiz(app) {
 
   app.innerHTML = `
     <div class="app has-topbar ${isDaily ? "" : "has-bottombar"}">
-      ${topbarHTML({ rightButtonLabel: "Finish Test", rightButtonId: "finishBtn" })}
+      ${topbarHTML({ rightButtonLabel: "Finish Section", rightButtonId: "finishBtn" })}
       <div class="body">
         ${sidebarHTML()}
         <main class="content">
@@ -5477,33 +5537,35 @@ function renderResult(app) {
     <div class="app has-topbar">
       ${topbarHTML({ rightButtonLabel: "Finished", rightButtonId: "disabledBtn", hideTimer: true })}
       <main class="result">
-        <h1>Result</h1>
+        <div class="result-summary">
+          <h1>Result</h1>
 
-        <div class="score-big">
-          <span class="score-correct">${correct}</span>
-          <span class="score-slash">/</span>
-          <span class="score-total">${total}</span>
-        </div>
-        <div style="margin-top:8px;font-size:20px;font-weight:700; color:${isPass ? "#1a7f37" : "#b00"};">
-          ${isPass ? "Pass" : "Fail"}
-          <span style="font-size:14px;font-weight:500;color:#444;"> (${(scoreRate * 100).toFixed(1)}%)</span>
-        </div>
-        <div style="margin-top:4px;color:#666;font-size:12px;">Pass threshold: ${(passRate * 100).toFixed(0)}%</div>
-        <div class="save-status" id="saveStatus"></div>
+          <div class="score-big">
+            <span class="score-correct">${correct}</span>
+            <span class="score-slash">/</span>
+            <span class="score-total">${total}</span>
+          </div>
+          <div class="result-status" style="color:${isPass ? "#1a7f37" : "#b00"};">
+            ${isPass ? "Pass" : "Fail"}
+            <span class="result-status-rate"> (${(scoreRate * 100).toFixed(1)}%)</span>
+          </div>
+          <div class="result-threshold">Pass threshold: ${(passRate * 100).toFixed(0)}%</div>
+          <div class="save-status" id="saveStatus"></div>
 
-        <div class="finish-actions">
-          ${showExit ? `<button class="btn btn-primary" id="exitTestBtn">Exit Test</button>` : ``}
+          <div class="finish-actions">
+            ${showExit ? `<button class="btn btn-primary" id="exitTestBtn">Exit Test</button>` : ``}
+          </div>
         </div>
 
         <div class="result-table-wrap">
           <table class="result-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>問題</th>
-                <th>正誤</th>
-                <th class="col-choice">選んだ答え</th>
-                <th class="col-choice">正しい答え</th>
+                <th class="col-id">ID</th>
+                <th class="col-question">Question</th>
+                <th class="col-result">Result</th>
+                <th class="col-choice">Chosen Answer</th>
+                <th class="col-choice">Correct Answer</th>
               </tr>
             </thead>
             <tbody>
