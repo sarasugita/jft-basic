@@ -782,7 +782,7 @@ function getStudentWarningIssues(row, criteria) {
 
 function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, testMetaByVersion) {
   const byStudent = new Map();
-  (attemptsList ?? []).forEach((attempt) => {
+  Array.from(buildLatestAttemptMapByStudentAndScope(attemptsList).values()).forEach((attempt) => {
     if (!attempt?.student_id) return;
     const list = byStudent.get(attempt.student_id) || [];
     list.push(attempt);
@@ -1895,6 +1895,12 @@ function getRowTimestamp(row) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function getAttemptScopeKey(attempt) {
+  if (attempt?.test_session_id) return `session:${attempt.test_session_id}`;
+  if (attempt?.test_version) return `version:${attempt.test_version}`;
+  return `attempt:${attempt?.id ?? getRowTimestamp(attempt)}`;
+}
+
 function buildLatestAttemptMapByStudent(attemptsList) {
   const map = new Map();
   for (const attempt of attemptsList ?? []) {
@@ -1902,6 +1908,20 @@ function buildLatestAttemptMapByStudent(attemptsList) {
     const existing = map.get(attempt.student_id);
     if (!existing || getRowTimestamp(attempt) >= getRowTimestamp(existing)) {
       map.set(attempt.student_id, attempt);
+    }
+  }
+  return map;
+}
+
+function buildLatestAttemptMapByStudentAndScope(attemptsList, getScopeKey = getAttemptScopeKey) {
+  const map = new Map();
+  for (const attempt of attemptsList ?? []) {
+    if (!attempt?.student_id) continue;
+    const scopeKey = getScopeKey(attempt);
+    const key = `${attempt.student_id}::${scopeKey}`;
+    const existing = map.get(key);
+    if (!existing || getRowTimestamp(attempt) >= getRowTimestamp(existing)) {
+      map.set(key, attempt);
     }
   }
   return map;
@@ -5380,6 +5400,7 @@ export default function AdminConsole({
     const { error } = await supabase
       .from("test_session_attempt_overrides")
       .upsert({
+        school_id: activeSchoolId,
         test_session_id: selectedSessionDetail.id,
         student_id: sessionDetailAllowStudentId,
         extra_attempts: nextCount,
@@ -6687,7 +6708,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
     const { data: attemptsData, error: attemptsError } = await supabase
       .from("attempts")
-      .select("student_id, score_rate, correct, total, created_at")
+      .select("student_id, test_session_id, test_version, score_rate, correct, total, created_at, ended_at")
       .eq("school_id", activeSchoolId)
       .gte("created_at", new Date(`${draft.start_date}T00:00:00`).toISOString())
       .lte("created_at", new Date(`${draft.end_date}T23:59:59`).toISOString());
@@ -6721,7 +6742,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       ])
     );
     const totalsByStudent = new Map();
-    (attemptsData ?? []).forEach((row) => {
+    Array.from(buildLatestAttemptMapByStudentAndScope(attemptsData).values()).forEach((row) => {
       if (!row?.student_id || !studentMeta.has(row.student_id)) return;
       const rate = Number(row.score_rate ?? (row.total ? row.correct / row.total : 0));
       if (!Number.isFinite(rate)) return;
@@ -7001,7 +7022,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     const { data, error } = await supabase
       .from("attempts")
-      .select("id, student_id, test_session_id, correct, total, score_rate")
+      .select("id, student_id, test_session_id, correct, total, score_rate, created_at, ended_at")
       .in("test_session_id", sessionIds);
     if (error) {
       console.error("attempt rank fetch error:", error);
@@ -7016,14 +7037,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
     });
     const rankMap = {};
     bySession.forEach((rows, sessionId) => {
-      const bestByStudent = new Map();
-      rows.forEach((row) => {
-        const rate = Number(row.score_rate ?? (row.total ? row.correct / row.total : 0));
-        const prev = bestByStudent.get(row.student_id);
-        if (prev == null || rate > prev) bestByStudent.set(row.student_id, rate);
-      });
-      const sorted = Array.from(bestByStudent.values()).sort((a, b) => b - a);
-      rows.forEach((row) => {
+      const latestRows = Array.from(buildLatestAttemptMapByStudent(rows).values());
+      const sorted = latestRows
+        .map((row) => Number(row.score_rate ?? (row.total ? row.correct / row.total : 0)))
+        .sort((a, b) => b - a);
+      latestRows.forEach((row) => {
         const attemptRate = Number(row.score_rate ?? (row.total ? row.correct / row.total : 0));
         let rank = sorted.findIndex((v) => v === attemptRate);
         if (rank === -1) {

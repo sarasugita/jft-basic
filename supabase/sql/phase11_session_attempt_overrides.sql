@@ -68,7 +68,6 @@ using (
   or (
     public.current_user_role() = 'student'
     and student_id = auth.uid()
-    and school_id = public.current_user_school_id()
   )
 );
 

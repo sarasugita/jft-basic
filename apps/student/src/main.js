@@ -39,6 +39,7 @@ const PERSONAL_UPLOAD_FIELDS = [
 const QUESTION_SELECT_BASE = "question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
 
 const TOTAL_TIME_SEC = 60 * 60; // 60分
+const SESSION_ATTEMPT_OVERRIDE_REFRESH_MS = 15 * 1000;
 const TEST_VERSION = "test_exam";
 const PASS_RATE_DEFAULT = 0.8;
 
@@ -83,6 +84,7 @@ let sessionAttemptOverrideState = {
   map: {},
   error: "",
   userId: "",
+  lastFetchedAt: 0,
 };
 
 let studentAttendanceState = {
@@ -335,6 +337,7 @@ function resetSessionScopedState() {
   sessionAttemptOverrideState.loading = false;
   sessionAttemptOverrideState.map = {};
   sessionAttemptOverrideState.error = "";
+  sessionAttemptOverrideState.lastFetchedAt = 0;
   absenceApplicationsState.loaded = false;
   absenceApplicationsState.loading = false;
   absenceApplicationsState.list = [];
@@ -876,6 +879,7 @@ async function refreshAuthState() {
         sessionAttemptOverrideState.loading = false;
         sessionAttemptOverrideState.map = {};
         sessionAttemptOverrideState.error = "";
+        sessionAttemptOverrideState.lastFetchedAt = 0;
       }
     } catch (error) {
       logUnexpectedError("refreshAuthState failed", error);
@@ -1108,6 +1112,10 @@ function hasAttemptForSession(sessionId) {
   return getAttemptCountForSession(sessionId) > 0;
 }
 
+function isSessionAttemptAvailabilityReady() {
+  return !authState.session || (studentResultsState.loaded && sessionAttemptOverrideState.loaded);
+}
+
 function hasRemainingAttemptsForSession(session) {
   if (!session?.id) return false;
   if (allowMultipleAttempts(session)) return true;
@@ -1174,6 +1182,25 @@ function dedupeAttempts(list) {
     seen.add(key);
     return true;
   });
+}
+
+function getAttemptTimestamp(attempt) {
+  const value = attempt?.ended_at || attempt?.created_at || attempt?.started_at || null;
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function buildLatestAttemptMapByStudent(attemptsList) {
+  const map = new Map();
+  for (const attempt of attemptsList ?? []) {
+    if (!attempt?.student_id) continue;
+    const existing = map.get(attempt.student_id);
+    if (!existing || getAttemptTimestamp(attempt) >= getAttemptTimestamp(existing)) {
+      map.set(attempt.student_id, attempt);
+    }
+  }
+  return map;
 }
 
 function getScoreRateFromAttempt(attempt) {
@@ -1477,9 +1504,13 @@ async function fetchStudentResults() {
   }
 }
 
-async function fetchSessionAttemptOverrides() {
+async function fetchSessionAttemptOverrides(options = {}) {
   if (!authState.session) return;
-  if (sessionAttemptOverrideState.loading || sessionAttemptOverrideState.loaded) return;
+  const { force = false } = options;
+  const isFresh =
+    sessionAttemptOverrideState.loaded &&
+    Date.now() - Number(sessionAttemptOverrideState.lastFetchedAt ?? 0) < SESSION_ATTEMPT_OVERRIDE_REFRESH_MS;
+  if (sessionAttemptOverrideState.loading || (isFresh && !force)) return;
   sessionAttemptOverrideState.loading = true;
   sessionAttemptOverrideState.error = "";
   try {
@@ -1493,6 +1524,7 @@ async function fetchSessionAttemptOverrides() {
         sessionAttemptOverrideState.error = getErrorMessage(error, "Failed to load extra attempts.");
       }
       sessionAttemptOverrideState.map = {};
+      sessionAttemptOverrideState.lastFetchedAt = Date.now();
       return;
     }
     const map = {};
@@ -1501,6 +1533,7 @@ async function fetchSessionAttemptOverrides() {
       map[row.test_session_id] = Math.max(0, Number(row.extra_attempts ?? 0));
     });
     sessionAttemptOverrideState.map = map;
+    sessionAttemptOverrideState.lastFetchedAt = Date.now();
   } catch (error) {
     sessionAttemptOverrideState.map = {};
     sessionAttemptOverrideState.error = getErrorMessage(error, "Failed to load extra attempts.");
@@ -1528,13 +1561,15 @@ async function fetchModelRanks(attempts) {
       try {
         const { data, error } = await supabase
           .from("attempts")
-          .select("id, score_rate")
+          .select("id, student_id, score_rate, correct, total, created_at, ended_at")
           .eq("test_session_id", sessionId);
         if (error) {
           logSupabaseError("model rank fetch error", error);
           continue;
         }
-        const list = (data ?? []).slice().sort((a, b) => (b.score_rate ?? 0) - (a.score_rate ?? 0));
+        const list = Array.from(buildLatestAttemptMapByStudent(data).values()).sort(
+          (a, b) => getScoreRateFromAttempt(b) - getScoreRateFromAttempt(a)
+        );
         list.forEach((row, idx) => {
           if (row?.id) {
             map[row.id] = idx + 1;
@@ -2361,13 +2396,22 @@ function startTestTimer() {
   saveState();
 }
 
+function getActiveTimeLimitSec() {
+  const sessionLimitMin = Number(getActiveTestSession()?.time_limit_min);
+  if (Number.isFinite(sessionLimitMin) && sessionLimitMin > 0) {
+    return Math.max(1, Math.floor(sessionLimitMin * 60));
+  }
+  return TOTAL_TIME_SEC;
+}
+
 
 
 function getTotalTimeLeftSec() {
   const base = state.testEndAt ?? Date.now(); // ★結果なら endAt で固定
-  if (!state.testStartAt) return TOTAL_TIME_SEC;
+  const totalLimitSec = getActiveTimeLimitSec();
+  if (!state.testStartAt) return totalLimitSec;
   const elapsed = Math.floor((base - state.testStartAt) / 1000);
-  return Math.max(0, TOTAL_TIME_SEC - elapsed);
+  return Math.max(0, totalLimitSec - elapsed);
 }
 
 
@@ -3211,6 +3255,16 @@ function renderTestSelect(app) {
   if (authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
   }
+  if (
+    authState.session &&
+    !sessionAttemptOverrideState.loading &&
+    (
+      !sessionAttemptOverrideState.loaded ||
+      Date.now() - Number(sessionAttemptOverrideState.lastFetchedAt ?? 0) >= SESSION_ATTEMPT_OVERRIDE_REFRESH_MS
+    )
+  ) {
+    fetchSessionAttemptOverrides().finally(render);
+  }
   if (showHome && !announcementsState.loaded && !announcementsState.loading) {
     fetchAnnouncements().finally(render);
   }
@@ -3876,10 +3930,15 @@ function renderTestSelect(app) {
                   const startLabel = formatTimeBdt(session.starts_at);
                   const name = session.title || session.problem_set_id || "Test";
                   const startMs = new Date(session.starts_at).getTime();
+                  const attemptAvailabilityReady = isSessionAttemptAvailabilityReady();
                   const alreadyTaken =
-                    studentResultsState.loaded &&
+                    attemptAvailabilityReady &&
                     !hasRemainingAttemptsForSession(session);
-                  const canStart = Number.isFinite(startMs) && nowMs >= startMs && !alreadyTaken;
+                  const canStart =
+                    attemptAvailabilityReady &&
+                    Number.isFinite(startMs) &&
+                    nowMs >= startMs &&
+                    !alreadyTaken;
                   return `
                     <div class="student-home-card">
                       <div>
@@ -3891,7 +3950,7 @@ function renderTestSelect(app) {
                         data-session-id="${escapeHtml(session.id)}"
                         ${canStart ? "" : "disabled"}
                       >
-                        ${alreadyTaken ? "Completed" : "Start"}
+                        ${attemptAvailabilityReady ? (alreadyTaken ? "Completed" : "Start") : "Checking..."}
                       </button>
                     </div>
                   `;
@@ -4460,20 +4519,23 @@ function renderTestSelect(app) {
                           .map((t) => {
                             const problemSet = testsState.list.find((ps) => ps.version === t.problem_set_id);
                             const passRate = Number(problemSet?.pass_rate ?? PASS_RATE_DEFAULT);
+                            const attemptAvailabilityReady = isSessionAttemptAvailabilityReady();
                             const alreadyTaken =
-                              studentResultsState.loaded &&
+                              attemptAvailabilityReady &&
                               !hasRemainingAttemptsForSession(t);
                             return `
                               <label style="display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #ddd; border-radius:10px; background:#fff;">
                                 <input type="radio" name="testSelect" value="${escapeHtml(t.id)}" ${
                                   t.id === activeSessionId ? "checked" : ""
-                                } ${alreadyTaken ? "disabled" : ""} />
+                                } ${attemptAvailabilityReady && alreadyTaken ? "disabled" : ""} ${attemptAvailabilityReady ? "" : "disabled"} />
                                 <div>
                                   <div style="font-weight:600;">${escapeHtml(t.title)}</div>
                                   <div style="font-size:12px;color:#666;">${escapeHtml(t.problem_set_id)} • pass ${(passRate * 100).toFixed(0)}%</div>
                                   ${
-                                    alreadyTaken
-                                      ? `<div style="font-size:12px;color:#b00;margin-top:4px;">Already taken</div>`
+                                    !attemptAvailabilityReady
+                                      ? `<div style="font-size:12px;color:#666;margin-top:4px;">Checking attempts...</div>`
+                                      : alreadyTaken
+                                        ? `<div style="font-size:12px;color:#b00;margin-top:4px;">Already taken</div>`
                                       : ""
                                   }
                                 </div>
@@ -4554,6 +4616,9 @@ function renderTestSelect(app) {
         session = testSessionsState.list.find((s) => s.id === selected.value);
         if (session?.problem_set_id) state.selectedTestVersion = session.problem_set_id;
       }
+      if (authState.session) {
+        await fetchSessionAttemptOverrides({ force: true });
+      }
       if (!canAccessSession(session)) {
         window.alert("You are not eligible to take this retake session.");
         return;
@@ -4586,6 +4651,9 @@ function renderTestSelect(app) {
         if (!session?.starts_at) return;
         const startMs = new Date(session.starts_at).getTime();
         if (!Number.isFinite(startMs) || Date.now() < startMs) return;
+        if (authState.session) {
+          await fetchSessionAttemptOverrides({ force: true });
+        }
         if (!canAccessSession(session)) {
           return;
         }
