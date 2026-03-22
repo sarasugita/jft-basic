@@ -1072,6 +1072,19 @@ function dedupeImportedAttemptPayloads(payloads) {
   return Array.from(payloadMap.values());
 }
 
+function sanitizeImportedCategorySlug(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "category";
+}
+
+function buildImportedResultTestVersion(type, categoryName, index = 0) {
+  return `imported-${type}-${sanitizeImportedCategorySlug(categoryName)}-${Date.now()}-${index + 1}`;
+}
+
 function getStudentSectionValue(student) {
   return String(
     student?.section
@@ -3185,6 +3198,7 @@ export default function AdminConsole({
   const [modelResultsCategory, setModelResultsCategory] = useState("");
   const [dailyCategorySelect, setDailyCategorySelect] = useState("__custom__");
   const CUSTOM_CATEGORY_OPTION = "__custom__";
+  const RESULTS_IMPORT_NEW_CATEGORY_OPTION = "__new_category__";
   const [editingTestId, setEditingTestId] = useState("");
   const [editingTestMsg, setEditingTestMsg] = useState("");
   const [editingCategorySelect, setEditingCategorySelect] = useState("__custom__");
@@ -3866,6 +3880,27 @@ export default function AdminConsole({
     const sessionVersions = new Set((dailySessions ?? []).map((session) => session.problem_set_id).filter(Boolean));
     return buildCategories((dailyTests ?? []).filter((test) => sessionVersions.has(test.version)));
   }, [dailySessions, dailyTests]);
+
+  const dailyResultsImportCategories = useMemo(() => {
+    const seen = new Set();
+    const ordered = [];
+    [
+      ...(dailyResultCategories ?? []).map((category) => category.name),
+      ...(dailySessionCategories ?? []).map((category) => category.name),
+      ...(dailyCategories ?? []).map((category) => category.name),
+    ].forEach((name) => {
+      const normalized = String(name ?? "").trim();
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      ordered.push(normalized);
+    });
+    return ordered.sort((left, right) => left.localeCompare(right));
+  }, [dailyCategories, dailyResultCategories, dailySessionCategories]);
+
+  const modelResultsImportCategories = useMemo(() => {
+    return Array.from(new Set((modelCategories ?? []).map((category) => String(category.name ?? "").trim()).filter(Boolean)))
+      .sort((left, right) => left.localeCompare(right));
+  }, [modelCategories]);
 
   const studentModelAttemptsByCategory = useMemo(() => {
     const grouped = new Map();
@@ -5017,32 +5052,28 @@ export default function AdminConsole({
     setAttendanceImportStatus((current) => (current?.loading ? current : null));
   }, []);
 
-  const openResultsImportStatus = useCallback((type) => {
-    if (type === "daily" && !selectedDailyCategory?.name) {
-      setResultsImportStatus({
-        open: true,
-        type,
-        loading: false,
-        tone: "error",
-        title: "Import Daily Results CSV",
-        message: "Select a daily test category first.",
-      });
-      return;
+  const getResultsImportTargetCategoryName = useCallback((status = resultsImportStatus) => {
+    const categorySelect = String(status?.categorySelect ?? "").trim();
+    if (!categorySelect) return "";
+    if (categorySelect === RESULTS_IMPORT_NEW_CATEGORY_OPTION) {
+      return String(status?.categoryDraft ?? "").trim();
     }
+    return categorySelect;
+  }, [RESULTS_IMPORT_NEW_CATEGORY_OPTION, resultsImportStatus]);
+
+  const openResultsImportStatus = useCallback((type) => {
     setResultsImportStatus({
       open: true,
       type,
       loading: false,
       tone: "info",
-      title: type === "daily"
-        ? `Import Daily Results CSV${selectedDailyCategory?.name ? ` (${selectedDailyCategory.name})` : ""}`
-        : "Import Model Results CSV",
-      message: type === "daily" && selectedDailyCategory?.name
-        ? `Select a CSV file to import into ${selectedDailyCategory.name}.`
-        : "Select a CSV file to import.",
+      title: type === "daily" ? "Import Daily Results CSV" : "Import Model Results CSV",
+      message: "Select a category and CSV file to import.",
+      categorySelect: "",
+      categoryDraft: "",
     });
     if (resultsImportInputRef.current) resultsImportInputRef.current.value = "";
-  }, [selectedDailyCategory]);
+  }, []);
 
   const showResultsImportLoadingStatus = useCallback((type, message) => {
     setResultsImportStatus({
@@ -6950,6 +6981,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
           ? "Daily record saved and announcement updated."
           : ""
     );
+    await recordAuditEvent({
+      actionType: dailyRecordForm.id ? "update" : "create",
+      entityType: "daily_record",
+      entityId: recordId,
+      summary: `Saved daily record for ${dailyRecordForm.record_date}${announcementAction === "send" ? " and sent syllabus announcement" : announcementAction === "edit" ? " and updated syllabus announcement" : ""}.`,
+      metadata: {
+        record_date: dailyRecordForm.record_date,
+        comment_count: commentsPayload.length,
+        announcement_action: announcementAction || null,
+      },
+    });
     await fetchDailyRecords();
   }
 
@@ -7331,6 +7373,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   async function decideAbsenceApplication(id, nextStatus) {
     if (!id) return;
+    const targetApplication = (absenceApplications ?? []).find((item) => item.id === id) ?? null;
     const { error } = await supabase
       .from("absence_applications")
       .update({
@@ -7344,6 +7387,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setAbsenceApplicationsMsg(`Update failed: ${error.message}`);
       return;
     }
+    await recordAuditEvent({
+      actionType: nextStatus === "approved" ? "approve" : "deny",
+      entityType: "absence_application",
+      entityId: id,
+      summary: `${nextStatus === "approved" ? "Approved" : "Denied"} absence application for ${targetApplication?.profiles?.display_name || targetApplication?.student_id || "student"}.`,
+      metadata: {
+        application_type: targetApplication?.type ?? null,
+        day_date: targetApplication?.day_date ?? null,
+        status: nextStatus,
+      },
+    });
     fetchAbsenceApplications();
   }
 
@@ -7406,6 +7460,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setAnnouncementForm({ title: "", body: "", publish_at: formatDateTimeInput(new Date()), end_at: "" });
     setAnnouncementCreateOpen(false);
     setAnnouncementMsg("Announcement created.");
+    await recordAuditEvent({
+      actionType: "create",
+      entityType: "announcement",
+      entityId: title,
+      summary: `Created announcement "${title}".`,
+      metadata: {
+        title,
+        publish_at: publishAt,
+        end_at: endAt,
+      },
+    });
     fetchAnnouncements();
   }
 
@@ -7971,6 +8036,16 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setAttendanceModalOpen(false);
     setAttendanceModalDay(null);
     setAttendanceDraft({});
+    await recordAuditEvent({
+      actionType: attendanceModalDay.id ? "update" : "create",
+      entityType: "attendance_day",
+      entityId: dayId,
+      summary: `Saved attendance for ${attendanceModalDay.day_date}.`,
+      metadata: {
+        day_date: attendanceModalDay.day_date,
+        entry_count: rows.length,
+      },
+    });
     fetchAttendanceDays();
   }
 
@@ -7991,6 +8066,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setAttendanceModalOpen(false);
     setAttendanceModalDay(null);
     setAttendanceDraft({});
+    await recordAuditEvent({
+      actionType: "delete",
+      entityType: "attendance_day",
+      entityId: day.id,
+      summary: `Deleted attendance day ${day.day_date}.`,
+      metadata: {
+        day_date: day.day_date,
+      },
+    });
     fetchAttendanceDays();
   }
 
@@ -8473,6 +8557,19 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setModelRetakeSourceId("");
     setModelConductOpen(false);
     setActiveModelTimePicker("");
+    await recordAuditEvent({
+      actionType: modelConductMode === "retake" ? "create_retake_session" : "create_session",
+      entityType: "test_session",
+      entityId: created.id,
+      summary: `${modelConductMode === "retake" ? "Created model retake session" : "Created model test session"} "${title}" for ${problemSetId}.`,
+      metadata: {
+        test_type: "mock",
+        title,
+        problem_set_id: problemSetId,
+        starts_at: payload.starts_at,
+        ends_at: payload.ends_at,
+      },
+    });
     fetchTestSessions();
     fetchExamLinks();
   }
@@ -8629,6 +8726,21 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setDailySourceCategoryDropdownOpen(false);
     setDailySetDropdownOpen(false);
     setActiveDailyTimePicker("");
+    await recordAuditEvent({
+      actionType: dailyConductMode === "retake" ? "create_retake_session" : "create_session",
+      entityType: "test_session",
+      entityId: created.id,
+      summary: `${dailyConductMode === "retake" ? "Created daily retake session" : "Created daily test session"} "${title}" in ${sessionCategory}.`,
+      metadata: {
+        test_type: "daily",
+        title,
+        category: sessionCategory,
+        problem_set_id: problemSetId,
+        source_set_ids: selectedSetIds,
+        starts_at: payload.starts_at,
+        ends_at: payload.ends_at,
+      },
+    });
     fetchTests();
     fetchTestSessions();
     fetchExamLinks();
@@ -8755,6 +8867,16 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     setTestSessionsMsg(`Deleted: ${label}`);
     if (options?.surface === "results") setQuizMsg(`Deleted: ${label}`);
+    await recordAuditEvent({
+      actionType: "delete",
+      entityType: "test_session",
+      entityId: id,
+      summary: `Deleted test session "${label}".`,
+      metadata: {
+        title: label,
+        test_type: options?.type || null,
+      },
+    });
     if (sessionDetail.sessionId === id) {
       closeSessionDetail();
     }
@@ -8843,6 +8965,35 @@ function openDailyRecordModal(record = null, recordDate = "") {
       }
     }
     return accessToken;
+  }
+
+  async function recordAuditEvent({
+    actionType,
+    entityType,
+    entityId,
+    summary,
+    metadata = {},
+    schoolId = activeSchoolId,
+  }) {
+    if (!supabase || !actionType || !entityType || !entityId || !summary) return;
+    const accessToken = await getAccessToken();
+    if (!accessToken) return;
+    const { error } = await supabase.functions.invoke("record-audit-log", {
+      body: {
+        action_type: actionType,
+        entity_type: entityType,
+        entity_id: entityId,
+        school_id: schoolId,
+        metadata: {
+          summary,
+          ...metadata,
+        },
+      },
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (error) {
+      console.error("record-audit-log error:", error);
+    }
   }
 
   async function openPreview(testVersion) {
@@ -9196,6 +9347,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return next;
     });
     setStudentMsg(`Created: ${okCount} ok / ${ngCount} failed`);
+    if (okCount > 0) {
+      await recordAuditEvent({
+        actionType: "invite",
+        entityType: "student",
+        entityId: activeSchoolId || "student-invite",
+        summary: `Invited ${okCount} student${okCount === 1 ? "" : "s"}${ngCount ? ` (${ngCount} failed)` : ""}.`,
+        metadata: {
+          success_count: okCount,
+          failed_count: ngCount,
+        },
+      });
+    }
     fetchStudents();
     return okCount > 0;
   }
@@ -10045,6 +10208,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
 
     setAssetImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versions.length} set${versions.length === 1 ? "" : "s"}.`);
+    await recordAuditEvent({
+      actionType: "import",
+      entityType: "question_import",
+      entityId: versions[0] || `mock-import-${Date.now()}`,
+      summary: `Imported ${versions.length} model set${versions.length === 1 ? "" : "s"} in ${category}.`,
+      metadata: {
+        category,
+        set_ids: versions,
+        question_count: totalQuestions,
+        choice_count: totalChoiceRows,
+      },
+    });
     fetchTests();
     setAssetCsvFile(null);
   }
@@ -10301,6 +10476,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
 
     setDailyImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versions.length} set${versions.length === 1 ? "" : "s"}.`);
+    await recordAuditEvent({
+      actionType: "import",
+      entityType: "question_import",
+      entityId: versions[0] || `daily-import-${Date.now()}`,
+      summary: `Imported ${versions.length} daily set${versions.length === 1 ? "" : "s"}${category ? ` in ${category}` : ""}.`,
+      metadata: {
+        category: category || null,
+        set_ids: versions,
+        question_count: totalQuestions,
+        choice_count: totalChoiceRows,
+      },
+    });
     fetchTests();
     setDailyCsvFile(null);
   }
@@ -10959,6 +11146,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
       const updatedExistingDayCount = shouldUpdateExistingDays ? overlappingDayDates.length : 0;
       const addedNewDayCount = daysToImport.length - updatedExistingDayCount;
       const skippedExistingDayCount = shouldUpdateExistingDays ? 0 : overlappingDayDates.length;
+      await recordAuditEvent({
+        actionType: "import",
+        entityType: "attendance_import",
+        entityId: `${daysToImport[0] ?? "attendance"}:${daysToImport.length}`,
+        summary: `Imported attendance for ${daysToImport.length} day${daysToImport.length === 1 ? "" : "s"} (${actualImportedStatusCount} entries).`,
+        metadata: {
+          imported_day_count: daysToImport.length,
+          imported_entry_count: actualImportedStatusCount,
+          added_new_day_count: addedNewDayCount,
+          updated_existing_day_count: updatedExistingDayCount,
+        },
+      });
       showResultStatus(
         `Imported ${actualImportedStatusCount} attendance entr${actualImportedStatusCount === 1 ? "y" : "ies"} across ${daysToImport.length} day${daysToImport.length === 1 ? "" : "s"}`
         + (addedNewDayCount ? `, added ${addedNewDayCount} new day${addedNewDayCount === 1 ? "" : "s"}` : "")
@@ -10975,23 +11174,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
   }
 
-  async function importDailyResultsGoogleSheetsCsv(file) {
+  async function importDailyResultsGoogleSheetsCsv(file, targetCategoryName = "") {
     if (!file) return;
-    if (!selectedDailyCategory?.name) {
+    const categoryName = String(targetCategoryName ?? "").trim();
+    if (!categoryName) {
       const message = "Import failed: select a daily test category first.";
       setQuizMsg(message);
       showResultsImportResultStatus("daily", message, "error");
       return;
     }
     const testsForCategory = (dailyTests ?? []).filter(
-      (test) => String(test.title ?? "").trim() === selectedDailyCategory.name
+      (test) => String(test.title ?? "").trim() === categoryName
     );
-    if (!testsForCategory.length) {
-      const message = `Import failed: no daily tests are available in ${selectedDailyCategory.name}.`;
-      setQuizMsg(message);
-      showResultsImportResultStatus("daily", message, "error");
-      return;
-    }
     const testByVersion = new Map((testsForCategory ?? []).map((test) => [test.version, test]));
     const importSessions = (testSessions ?? [])
       .filter((session) => testByVersion.has(session.problem_set_id))
@@ -11083,8 +11277,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         }
       }
 
-      showResultsImportLoadingStatus("daily", `Preparing daily result sessions for ${selectedDailyCategory.name}...`);
-      const unresolvedColumns = [];
+      showResultsImportLoadingStatus("daily", `Preparing daily result sessions for ${categoryName}...`);
       selectedColumns.forEach((column) => {
         const titleKey = normalizeLookupValue(column.importTitle);
         const matchedByKey = sessionKeyMap.get(`${titleKey}::${column.importDateCell}`);
@@ -11096,18 +11289,26 @@ function openDailyRecordModal(record = null, recordDate = "") {
           return;
         }
         const linkedTest = testsForCategory[column.columnIndex] ?? testsForCategory[0] ?? null;
-        if (!linkedTest?.version) {
-          unresolvedColumns.push(column.importTitle || `Column ${column.columnIndex + 1}`);
-          return;
-        }
-        column.linkedTest = linkedTest;
+        if (linkedTest?.version) column.linkedTest = linkedTest;
       });
 
-      if (unresolvedColumns.length) {
-        const message = `Import failed: could not assign daily tests for ${unresolvedColumns.length} CSV column${unresolvedColumns.length === 1 ? "" : "s"} in ${selectedDailyCategory.name}.`;
-        setQuizMsg(message);
-        showResultsImportResultStatus("daily", message, "error");
-        return;
+      const columnsMissingLinkedTest = selectedColumns.filter((column) => !column.session?.id && !column.linkedTest?.version);
+      for (let index = 0; index < columnsMissingLinkedTest.length; index += 1) {
+        const column = columnsMissingLinkedTest[index];
+        const version = buildImportedResultTestVersion("daily", categoryName, index);
+        const ensure = await ensureTestRecord(version, categoryName, "daily", null, activeSchoolId);
+        if (!ensure.ok) {
+          const message = `Import failed: ${ensure.message}`;
+          setQuizMsg(message);
+          showResultsImportResultStatus("daily", message, "error");
+          return;
+        }
+        column.linkedTest = {
+          version,
+          title: categoryName,
+          type: "daily",
+          question_count: 0,
+        };
       }
 
       const columnsToCreate = selectedColumns.filter((column) => !column.session?.id);
@@ -11152,7 +11353,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       const matchStudent = createImportedStudentMatcher(sortedStudents);
       const payloads = [];
       const unmatchedRows = [];
-      showResultsImportLoadingStatus("daily", `Matching students and saving imported results into ${selectedDailyCategory.name}...`);
+      showResultsImportLoadingStatus("daily", `Matching students and saving imported results into ${categoryName}...`);
 
       for (let rowIndex = 3; rowIndex < rows.length; rowIndex += 1) {
         const row = rows[rowIndex] ?? [];
@@ -11212,6 +11413,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
       }
 
       await fetchTestSessions();
+      await fetchTests();
+      setDailyResultsCategory(categoryName);
       await runSearch("daily");
       const skippedExistingCount = duplicateTitles.length && !overwriteSessionIds.length
         ? duplicateTitles.length
@@ -11223,6 +11426,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
         + (overwriteSessionIds.length ? `, replaced ${overwriteSessionIds.length} existing test result set${overwriteSessionIds.length === 1 ? "" : "s"}` : "")
         + (skippedExistingCount ? `, skipped ${skippedExistingCount} existing test title${skippedExistingCount === 1 ? "" : "s"}` : "")
         + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".");
+      await recordAuditEvent({
+        actionType: "import",
+        entityType: "results_import",
+        entityId: `daily:${categoryName}:${Date.now()}`,
+        summary: `Imported daily results into ${categoryName} (${result.inserted} entries).`,
+        metadata: {
+          test_type: "daily",
+          category: categoryName,
+          imported_entry_count: result.inserted,
+          created_session_count: createdSessionCount,
+        },
+      });
       setQuizMsg(message);
       showResultsImportResultStatus("daily", message, "success");
     } catch (error) {
@@ -11234,15 +11449,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
   }
 
-  async function importModelResultsGoogleSheetsCsv(file) {
+  async function importModelResultsGoogleSheetsCsv(file, targetCategoryName = "") {
     if (!file) return;
-    const testsForCategory = selectedModelCategory?.tests ?? modelTests;
-    if (!testsForCategory.length) {
-      const message = "Import failed: no model tests are available in this category.";
+    const categoryName = String(targetCategoryName ?? "").trim();
+    if (!categoryName) {
+      const message = "Import failed: select a model test category first.";
       setQuizMsg(message);
       showResultsImportResultStatus("mock", message, "error");
       return;
     }
+    const testsForCategory = (modelTests ?? []).filter(
+      (test) => String(test.title ?? "").trim() === categoryName
+    );
     const testByVersion = new Map((testsForCategory ?? []).map((test) => [test.version, test]));
     const importSessions = (testSessions ?? [])
       .filter((session) => testByVersion.has(session.problem_set_id))
@@ -11291,7 +11509,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       });
 
       const existingResultTitles = new Set(
-        (modelResultsMatrix.sessions ?? [])
+        importSessions
           .map((session) => String(session?.title ?? session?.problem_set_id ?? "").trim())
           .filter(Boolean)
       );
@@ -11393,8 +11611,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         }
       }
 
-      showResultsImportLoadingStatus("mock", "Preparing model result sessions...");
-      const unresolvedBlocks = [];
+      showResultsImportLoadingStatus("mock", `Preparing model result sessions for ${categoryName}...`);
       selectedBlocks.forEach((block) => {
         const titleKey = normalizeLookupValue(block.importTitle);
         const matchedByKey = sessionKeyMap.get(`${titleKey}::${block.importDateCell}`);
@@ -11406,18 +11623,26 @@ function openDailyRecordModal(record = null, recordDate = "") {
           return;
         }
         const linkedTest = testsForCategory[block.blockIndex] ?? null;
-        if (!linkedTest?.version) {
-          unresolvedBlocks.push(block.importTitle || `Column ${block.blockIndex + 1}`);
-          return;
-        }
-        block.linkedTest = linkedTest;
+        if (linkedTest?.version) block.linkedTest = linkedTest;
       });
 
-      if (unresolvedBlocks.length) {
-        const message = `Import failed: could not assign model tests for ${unresolvedBlocks.length} CSV block${unresolvedBlocks.length === 1 ? "" : "s"}.`;
-        setQuizMsg(message);
-        showResultsImportResultStatus("mock", message, "error");
-        return;
+      const blocksMissingLinkedTest = selectedBlocks.filter((block) => !block.session?.id && !block.linkedTest?.version);
+      for (let index = 0; index < blocksMissingLinkedTest.length; index += 1) {
+        const block = blocksMissingLinkedTest[index];
+        const version = buildImportedResultTestVersion("mock", categoryName, index);
+        const ensure = await ensureTestRecord(version, categoryName, "mock", null, activeSchoolId);
+        if (!ensure.ok) {
+          const message = `Import failed: ${ensure.message}`;
+          setQuizMsg(message);
+          showResultsImportResultStatus("mock", message, "error");
+          return;
+        }
+        block.linkedTest = {
+          version,
+          title: categoryName,
+          type: "mock",
+          question_count: 0,
+        };
       }
 
       const blocksToCreate = selectedBlocks.filter((block) => !block.session?.id);
@@ -11471,7 +11696,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       const matchStudent = createImportedStudentMatcher(sortedStudents);
       const payloads = [];
       const unmatchedRows = [];
-      showResultsImportLoadingStatus("mock", "Matching students and saving imported results...");
+      showResultsImportLoadingStatus("mock", `Matching students and saving imported results into ${categoryName}...`);
 
       for (let rowIndex = dataStartRowIndex; rowIndex < rows.length; rowIndex += 1) {
         const row = rows[rowIndex] ?? [];
@@ -11554,6 +11779,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
       }
 
       await fetchTestSessions();
+      await fetchTests();
+      setModelResultsCategory(categoryName);
       await runSearch("mock");
       const skippedExistingCount = duplicateTitles.length && !overwriteSessionIds.length
         ? duplicateTitles.length
@@ -11565,6 +11792,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
         + (overwriteSessionIds.length ? `, replaced ${overwriteSessionIds.length} existing test result set${overwriteSessionIds.length === 1 ? "" : "s"}` : "")
         + (skippedExistingCount ? `, skipped ${skippedExistingCount} existing test title${skippedExistingCount === 1 ? "" : "s"}` : "")
         + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".");
+      await recordAuditEvent({
+        actionType: "import",
+        entityType: "results_import",
+        entityId: `mock:${categoryName}:${Date.now()}`,
+        summary: `Imported model results into ${categoryName} (${result.inserted} entries).`,
+        metadata: {
+          test_type: "mock",
+          category: categoryName,
+          imported_entry_count: result.inserted,
+          created_session_count: createdSessionCount,
+        },
+      });
       setQuizMsg(message);
       showResultsImportResultStatus("mock", message, "success");
     } catch (error) {
@@ -18106,13 +18345,60 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     <span>{resultsImportStatus.message}</span>
                   </div>
                 ) : (
-                  <div className="attendance-import-status-message">{resultsImportStatus.message}</div>
+                  <div style={{ display: "grid", gap: 12 }}>
+                    <div className="attendance-import-status-message">{resultsImportStatus.message}</div>
+                    <div className="admin-form" style={{ gridTemplateColumns: "1fr", gap: 12 }}>
+                      <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                        <label>Category</label>
+                        <select
+                          value={resultsImportStatus.categorySelect ?? ""}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            setResultsImportStatus((current) => ({
+                              ...current,
+                              categorySelect: nextValue,
+                              categoryDraft: nextValue === RESULTS_IMPORT_NEW_CATEGORY_OPTION ? current?.categoryDraft ?? "" : "",
+                            }));
+                          }}
+                        >
+                          <option value="">Select category</option>
+                          {(resultsImportStatus.type === "daily" ? dailyResultsImportCategories : modelResultsImportCategories).map((categoryName) => (
+                            <option key={`results-import-category-${resultsImportStatus.type}-${categoryName}`} value={categoryName}>
+                              {categoryName}
+                            </option>
+                          ))}
+                          <option value={RESULTS_IMPORT_NEW_CATEGORY_OPTION}>Create new category...</option>
+                        </select>
+                      </div>
+                      {resultsImportStatus.categorySelect === RESULTS_IMPORT_NEW_CATEGORY_OPTION ? (
+                        <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                          <label>New Category</label>
+                          <input
+                            value={resultsImportStatus.categoryDraft ?? ""}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setResultsImportStatus((current) => ({
+                                ...current,
+                                categoryDraft: nextValue,
+                              }));
+                            }}
+                            placeholder="New category name"
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
                 )}
               </div>
 
               {!resultsImportStatus.loading ? (
                 <div className="attendance-import-status-actions">
-                  <button className="btn" type="button" onClick={() => resultsImportInputRef.current?.click()}>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => resultsImportInputRef.current?.click()}
+                    disabled={!getResultsImportTargetCategoryName(resultsImportStatus)}
+                  >
                     Select CSV File
                   </button>
                 </div>
@@ -18529,11 +18815,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     onChange={(event) => {
                       const file = event.target.files?.[0] ?? null;
                       const importType = resultsImportStatus?.type || resultContext.type;
+                      const targetCategoryName = getResultsImportTargetCategoryName();
                       if (importType === "daily") {
-                        importDailyResultsGoogleSheetsCsv(file);
+                        importDailyResultsGoogleSheetsCsv(file, targetCategoryName);
                         return;
                       }
-                      importModelResultsGoogleSheetsCsv(file);
+                      importModelResultsGoogleSheetsCsv(file, targetCategoryName);
                     }}
                   />
                 </div>

@@ -17,6 +17,29 @@ function defaultRange() {
   };
 }
 
+function toTitleCase(value) {
+  return String(value ?? "")
+    .replace(/_/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function buildAuditSummary(row) {
+  const summary = String(row?.metadata?.summary ?? "").trim();
+  if (summary) return summary;
+
+  const actionLabel = toTitleCase(row?.action_type || "updated");
+  const entityLabel = toTitleCase(row?.entity_type || "record");
+  const targetLabel = String(
+    row?.metadata?.title
+    ?? row?.metadata?.name
+    ?? row?.metadata?.email
+    ?? row?.entity_id
+    ?? ""
+  ).trim();
+  return `${actionLabel} ${entityLabel}${targetLabel ? `: ${targetLabel}` : ""}`;
+}
+
 export default function SuperAuditPage() {
   const { supabase } = useSuperAdmin();
   const [filters, setFilters] = useState({
@@ -87,9 +110,8 @@ export default function SuperAuditPage() {
   return (
     <div className="super-page-content">
       <div className="admin-panel">
-        <div className="admin-title">Audit / Logs</div>
-        <div className="admin-help" style={{ marginTop: 6 }}>
-          Basic audit capture is enabled for school, school-admin, and question-set mutations.
+        <div className="admin-help">
+          Concise audit history for super admin and admin actions that affect other users.
         </div>
         <div className="admin-form" style={{ marginTop: 12 }}>
           <div className="field small">
@@ -120,6 +142,15 @@ export default function SuperAuditPage() {
               <option value="question_set">Question Set</option>
               <option value="question_set_version">Question Set Version</option>
               <option value="question_set_visibility">Question Set Visibility</option>
+              <option value="test_session">Test Session</option>
+              <option value="daily_record">Daily Record</option>
+              <option value="attendance_day">Attendance Day</option>
+              <option value="attendance_import">Attendance Import</option>
+              <option value="question_import">Question Import</option>
+              <option value="results_import">Results Import</option>
+              <option value="announcement">Announcement</option>
+              <option value="student">Student</option>
+              <option value="absence_application">Absence Application</option>
             </select>
           </div>
           <div className="field small">
@@ -145,10 +176,8 @@ export default function SuperAuditPage() {
               <tr>
                 <th>Time</th>
                 <th>Actor</th>
-                <th>Action</th>
-                <th>Entity</th>
+                <th>Activity</th>
                 <th>School</th>
-                <th>Metadata</th>
               </tr>
             </thead>
             <tbody>
@@ -159,25 +188,20 @@ export default function SuperAuditPage() {
                     <div>{row.actor_email || row.actor_user_id || "N/A"}</div>
                     <div className="daily-code">{row.actor_role || "N/A"}</div>
                   </td>
-                  <td>{row.action_type}</td>
                   <td>
-                    <div>{row.entity_type}</div>
-                    <div className="daily-code">{row.entity_id}</div>
+                    <div>{buildAuditSummary(row)}</div>
                   </td>
                   <td>{row.school_id ? schoolMap[row.school_id] ?? row.school_id : "N/A"}</td>
-                  <td>
-                    <pre className="super-audit-meta">{JSON.stringify(row.metadata ?? {}, null, 2)}</pre>
-                  </td>
                 </tr>
               ))}
               {!loading && logs.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>No audit logs found for the selected filters.</td>
+                  <td colSpan={4}>No audit logs found for the selected filters.</td>
                 </tr>
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={6}>Loading audit logs...</td>
+                  <td colSpan={4}>Loading audit logs...</td>
                 </tr>
               ) : null}
             </tbody>
