@@ -904,6 +904,48 @@ function rowHasCsvValues(row) {
   return Array.isArray(row) && row.some((cell) => String(cell ?? "").trim());
 }
 
+function detectAttendanceImportLayout(rows) {
+  const headerRow = Array.isArray(rows?.[0]) ? rows[0] : [];
+  if (!headerRow.length) return null;
+
+  const normalizedHeader = headerRow.map((cell) => normalizeLookupValue(cell));
+  const findHeaderIndex = (...labels) => normalizedHeader.findIndex((cell) => labels.includes(cell));
+
+  const rowNumberIndex = findHeaderIndex("vb/w");
+  const nameIndex = findHeaderIndex("student name");
+  const sectionIndex = findHeaderIndex("section");
+  const emailIndex = findHeaderIndex("email address", "email");
+  const withdrawnIndex = findHeaderIndex("withdrawn");
+  const ruleIndex = rowNumberIndex >= 0 ? rowNumberIndex : 0;
+  let dayStartIndex = withdrawnIndex >= 0 ? withdrawnIndex + 1 : -1;
+
+  if (dayStartIndex === -1) {
+    dayStartIndex = headerRow.findIndex((cell, index) => {
+      if (index <= Math.max(rowNumberIndex, nameIndex, sectionIndex, emailIndex)) return false;
+      return Boolean(parseSlashDateShortYearToIso(cell));
+    });
+  }
+
+  const dayColumns = [];
+  if (dayStartIndex >= 0) {
+    for (let col = dayStartIndex; col < headerRow.length; col += 1) {
+      const dayDate = parseSlashDateShortYearToIso(headerRow[col]);
+      if (dayDate) {
+        dayColumns.push({ colIndex: col, dayDate });
+      }
+    }
+  }
+
+  return {
+    rowNumberIndex,
+    nameIndex,
+    sectionIndex,
+    emailIndex,
+    ruleIndex,
+    dayColumns,
+  };
+}
+
 function parsePercentCell(value) {
   const text = String(value ?? "").trim();
   if (!text || text === "-" || /^n\/a$/i.test(text)) return null;
@@ -936,6 +978,32 @@ function parseSlashDateShortYearToIso(value) {
   const year = match[3].length === 2 ? 2000 + rawYear : rawYear;
   if (month < 1 || month > 12 || day < 1 || day > 31) return "";
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function hasDailyResultValues(rows, colIndex, startRowIndex = 0) {
+  for (let rowIndex = startRowIndex; rowIndex < rows.length; rowIndex += 1) {
+    if (parsePercentCell(rows[rowIndex]?.[colIndex]) != null) return true;
+  }
+  return false;
+}
+
+function hasModelResultValues(rows, block, startRowIndex = 0) {
+  if (!block?.total) return false;
+  for (let rowIndex = startRowIndex; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex] ?? [];
+    if (
+      parsePercentCell(row[block.total.rateColumnIndex]) != null
+      || parseScoreFractionCell(row[block.total.scoreColumnIndex])
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizePassRate(value, fallback = 0.8) {
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate : fallback;
 }
 
 function buildImportedSummaryAnswersJson(source, extraMeta = {}) {
@@ -975,7 +1043,7 @@ function getImportedModelSectionSummaries(attempt) {
   );
   return rows
     .map((row) => {
-      const section = String(row?.section ?? "").trim();
+      const section = normalizeImportedModelSectionTitle(row?.section);
       const correct = Number(row?.correct ?? 0);
       const total = Number(row?.total ?? 0);
       const rawRate = Number(row?.rate);
@@ -1047,6 +1115,51 @@ function createImportedStudentMatcher(studentsList) {
     }
 
     return indexedStudent;
+  };
+}
+
+function createAttendanceImportedStudentMatcher(studentsList) {
+  const fallbackMatch = createImportedStudentMatcher(studentsList);
+  const students = Array.isArray(studentsList) ? studentsList : [];
+  const nameSectionMap = new Map();
+  const nameMap = new Map();
+  const emailMap = new Map();
+
+  students.forEach((student) => {
+    const normalizedName = normalizeLookupValue(student?.display_name);
+    const normalizedSection = normalizeLookupValue(getStudentSectionValue(student));
+    const normalizedEmail = normalizeLookupValue(student?.email);
+    const nameSectionKey = `${normalizedName}::${normalizedSection}`;
+    if (!nameSectionMap.has(nameSectionKey)) nameSectionMap.set(nameSectionKey, []);
+    nameSectionMap.get(nameSectionKey).push(student);
+    if (!nameMap.has(normalizedName)) nameMap.set(normalizedName, []);
+    nameMap.get(normalizedName).push(student);
+    if (normalizedEmail && !emailMap.has(normalizedEmail)) emailMap.set(normalizedEmail, student);
+  });
+
+  return ({ rowNumber, name, section, email }) => {
+    const normalizedName = normalizeLookupValue(name);
+    const normalizedSection = normalizeLookupValue(section);
+    const normalizedEmail = normalizeLookupValue(email);
+
+    if (normalizedName) {
+      const byNameSection = nameSectionMap.get(`${normalizedName}::${normalizedSection}`) ?? [];
+      if (byNameSection.length === 1) return byNameSection[0];
+
+      const byName = nameMap.get(normalizedName) ?? [];
+      if (byName.length === 1) return byName[0];
+
+      if (normalizedEmail && emailMap.has(normalizedEmail)) {
+        const emailMatch = emailMap.get(normalizedEmail);
+        if (byName.includes(emailMatch)) return emailMatch;
+      }
+    }
+
+    if (normalizedEmail && emailMap.has(normalizedEmail)) {
+      return emailMap.get(normalizedEmail);
+    }
+
+    return fallbackMatch({ rowNumber, name, section, email });
   };
 }
 
@@ -1124,6 +1237,25 @@ function parseModelExportLabel(label) {
     partLabel: raw,
     partCode: String(match[2] ?? "").toUpperCase(),
   };
+}
+
+function normalizeImportedModelSectionTitle(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const matchedSection = sections.find((section) => {
+    return section.key !== "DAILY"
+      && (
+        normalizeLookupValue(section.key) === normalizeLookupValue(raw)
+        || normalizeLookupValue(section.title) === normalizeLookupValue(raw)
+      );
+  });
+  if (matchedSection) return matchedSection.title;
+
+  const parsed = parseModelExportLabel(raw);
+  if (parsed.partCode) return getSectionTitle(parsed.partCode);
+
+  return raw;
 }
 
 function buildAttendanceStats(statuses) {
@@ -3436,6 +3568,7 @@ export default function AdminConsole({
   const [attendanceModalDay, setAttendanceModalDay] = useState(null);
   const [attendanceDraft, setAttendanceDraft] = useState({});
   const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [attendanceClearing, setAttendanceClearing] = useState(false);
   const attendanceImportChoiceResolverRef = useRef(null);
   const [attendanceImportConflict, setAttendanceImportConflict] = useState(null);
   const [attendanceImportStatus, setAttendanceImportStatus] = useState(null);
@@ -3667,10 +3800,30 @@ export default function AdminConsole({
   const testPassRateByVersion = useMemo(() => {
     const map = {};
     (tests ?? []).forEach((t) => {
-      if (t?.version) map[t.version] = t.pass_rate ?? null;
+      if (t?.version) map[t.version] = normalizePassRate(t.pass_rate);
     });
     return map;
   }, [tests]);
+
+  const importedResultsSessionIds = useMemo(() => {
+    return new Set(
+      (attempts ?? [])
+        .filter((attempt) => isImportedResultsSummaryAttempt(attempt))
+        .map((attempt) => attempt?.test_session_id)
+        .filter(Boolean)
+    );
+  }, [attempts]);
+
+  const getAttemptEffectivePassRate = useCallback((attempt) => {
+    if (isImportedResultsSummaryAttempt(attempt)) return 0.8;
+    return normalizePassRate(testPassRateByVersion[attempt?.test_version]);
+  }, [testPassRateByVersion]);
+
+  const getSessionEffectivePassRate = useCallback((session, attemptsList = []) => {
+    if ((attemptsList ?? []).some((attempt) => isImportedResultsSummaryAttempt(attempt))) return 0.8;
+    if (session?.id && importedResultsSessionIds.has(session.id)) return 0.8;
+    return normalizePassRate(session?.linkedTest?.pass_rate ?? testPassRateByVersion[session?.problem_set_id]);
+  }, [importedResultsSessionIds, testPassRateByVersion]);
 
   const buildCategories = (list, fallbackLabel = "Uncategorized") => {
     const map = new Map();
@@ -3740,9 +3893,14 @@ export default function AdminConsole({
   }, [sessionDetailDisplayAttempts, studentsById]);
 
   const sessionDetailPassRate = useMemo(() => {
-    const value = Number(testPassRateByVersion[selectedSessionDetail?.problem_set_id] ?? 0.8);
-    return Number.isFinite(value) && value > 0 ? value : 0.8;
-  }, [selectedSessionDetail, testPassRateByVersion]);
+    if (
+      sessionDetailDisplayAttempts.length
+      && sessionDetailDisplayAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt))
+    ) {
+      return 0.8;
+    }
+    return normalizePassRate(testPassRateByVersion[selectedSessionDetail?.problem_set_id]);
+  }, [selectedSessionDetail, sessionDetailDisplayAttempts, testPassRateByVersion]);
 
   const sessionDetailOverview = useMemo(() => {
     const count = sessionDetailLatestAttempts.length;
@@ -3893,6 +4051,16 @@ export default function AdminConsole({
     return buildCategories((dailyTests ?? []).filter((test) => sessionVersions.has(test.version)));
   }, [dailySessions, dailyTests]);
 
+  const modelResultCategories = useMemo(() => {
+    const sessionVersions = new Set(
+      (testSessions ?? [])
+        .filter((session) => !isRetakeSessionTitle(session.title))
+        .map((session) => session.problem_set_id)
+        .filter(Boolean)
+    );
+    return buildCategories((modelTests ?? []).filter((test) => sessionVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
+  }, [modelTests, testSessions]);
+
   const dailyResultsImportCategories = useMemo(() => {
     const seen = new Set();
     const ordered = [];
@@ -3978,7 +4146,7 @@ export default function AdminConsole({
       const attempts = attemptsList ?? [];
       const count = attempts.length;
       const passCount = attempts.filter((attempt) => {
-        const passRate = Number(testPassRateByVersion[attempt.test_version] ?? 0.8);
+        const passRate = getAttemptEffectivePassRate(attempt);
         return getScoreRate(attempt) >= passRate;
       }).length;
       const failCount = Math.max(0, count - passCount);
@@ -3997,7 +4165,7 @@ export default function AdminConsole({
         failCount,
       };
     });
-  }, [testPassRateByVersion]);
+  }, [getAttemptEffectivePassRate]);
 
   const studentModelCategorySummaryRows = useMemo(
     () => buildCategorySummaryRows(studentModelAttemptsByCategory),
@@ -4024,8 +4192,8 @@ export default function AdminConsole({
   const [dailyUploadCategory, setDailyUploadCategory] = useState("");
 
   const selectedModelConductCategory = useMemo(() => {
-    if (!modelCategories.length) return null;
-    return modelCategories.find((c) => c.name === modelConductCategory) ?? modelCategories[0];
+    if (!modelCategories.length || !modelConductCategory) return null;
+    return modelCategories.find((c) => c.name === modelConductCategory) ?? null;
   }, [modelCategories, modelConductCategory]);
 
   const modelConductTests = selectedModelConductCategory?.tests ?? [];
@@ -4098,9 +4266,9 @@ export default function AdminConsole({
   }, [dailyResultCategories, dailyResultsCategory]);
 
   const selectedModelCategory = useMemo(() => {
-    if (!modelCategories.length || !modelResultsCategory) return null;
-    return modelCategories.find((c) => c.name === modelResultsCategory) ?? null;
-  }, [modelCategories, modelResultsCategory]);
+    if (!modelResultCategories.length || !modelResultsCategory) return null;
+    return modelResultCategories.find((c) => c.name === modelResultsCategory) ?? null;
+  }, [modelResultCategories, modelResultsCategory]);
 
   useEffect(() => {
     if (!dailyResultCategories.length) return;
@@ -4132,14 +4300,14 @@ export default function AdminConsole({
   }, [dailyConductMode, dailyRetakeSourceId, filteredPastDailySessions]);
 
   useEffect(() => {
-    if (!modelCategories.length) {
+    if (!modelResultCategories.length) {
       if (modelResultsCategory) setModelResultsCategory("");
       return;
     }
-    if (modelResultsCategory && !modelCategories.some((c) => c.name === modelResultsCategory)) {
+    if (modelResultsCategory && !modelResultCategories.some((c) => c.name === modelResultsCategory)) {
       setModelResultsCategory("");
     }
-  }, [modelCategories, modelResultsCategory]);
+  }, [modelResultCategories, modelResultsCategory]);
 
   useEffect(() => {
     if (!dailyCategories.length) return;
@@ -4179,9 +4347,12 @@ export default function AdminConsole({
   }, [modelCategories, assetForm.category, assetCategorySelect]);
 
   useEffect(() => {
-    if (!modelCategories.length) return;
-    if (!modelConductCategory || !modelCategories.some((c) => c.name === modelConductCategory)) {
-      setModelConductCategory(modelCategories[0].name);
+    if (!modelCategories.length) {
+      if (modelConductCategory) setModelConductCategory("");
+      return;
+    }
+    if (modelConductCategory && !modelCategories.some((c) => c.name === modelConductCategory)) {
+      setModelConductCategory("");
     }
   }, [modelCategories, modelConductCategory]);
 
@@ -4383,8 +4554,8 @@ export default function AdminConsole({
   );
 
   const selectedAttemptPassRate = useMemo(() => {
-    const value = Number(testPassRateByVersion[selectedAttempt?.test_version] ?? 0.8);
-    return Number.isFinite(value) && value > 0 ? value : 0.8;
+    if (isImportedResultsSummaryAttempt(selectedAttempt)) return 0.8;
+    return normalizePassRate(testPassRateByVersion[selectedAttempt?.test_version]);
   }, [selectedAttempt, testPassRateByVersion]);
 
   const selectedAttemptQuestionSections = useMemo(() => {
@@ -5795,6 +5966,71 @@ export default function AdminConsole({
     setSelectedId(null);
     setMsg(data?.length ? "" : "No results.");
     setLoading(false);
+  }
+
+  async function clearDailyResultsForCategory(category) {
+    const categoryName = String(category?.name ?? "").trim();
+    if (!categoryName) {
+      setQuizMsg("Select a daily results category first.");
+      return;
+    }
+    const testVersions = (category?.tests ?? []).map((test) => test?.version).filter(Boolean);
+    const sessionIds = (dailySessions ?? [])
+      .filter((session) => testVersions.includes(session.problem_set_id))
+      .map((session) => session.id)
+      .filter(Boolean);
+    if (!sessionIds.length) {
+      setQuizMsg(`No daily result sessions found in ${categoryName}.`);
+      return;
+    }
+
+    const { count: attemptCount, error: countError } = await supabase
+      .from("attempts")
+      .select("id", { count: "exact", head: true })
+      .in("test_session_id", sessionIds);
+    if (countError) {
+      console.error("clear daily results count error:", countError);
+      setQuizMsg(`Clear failed: ${countError.message}`);
+      return;
+    }
+
+    if (!attemptCount) {
+      setQuizMsg(`No daily results found in ${categoryName}.`);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Clear all daily test results in "${categoryName}"?\n\nThis will delete ${attemptCount} result record${attemptCount === 1 ? "" : "s"} from the current category.`
+    );
+    if (!confirmed) return;
+
+    setQuizMsg("Clearing daily results...");
+    for (let index = 0; index < sessionIds.length; index += 100) {
+      const deleteSessionIds = sessionIds.slice(index, index + 100);
+      const { error } = await supabase.from("attempts").delete().in("test_session_id", deleteSessionIds);
+      if (error) {
+        console.error("clear daily results error:", error);
+        setQuizMsg(`Clear failed: ${error.message}`);
+        return;
+      }
+    }
+
+    if (sessionDetail.type === "daily" && sessionDetail.sessionId && sessionIds.includes(sessionDetail.sessionId)) {
+      closeSessionDetail();
+    }
+    await runSearch("daily");
+    await recordAuditEvent({
+      actionType: "delete",
+      entityType: "daily_results",
+      entityId: `daily-results:${categoryName}:${Date.now()}`,
+      summary: `Cleared daily results in ${categoryName} (${attemptCount} records).`,
+      metadata: {
+        category: categoryName,
+        deleted_result_count: attemptCount,
+        session_count: sessionIds.length,
+      },
+    });
+    setQuizMsg(`Cleared ${attemptCount} daily result record${attemptCount === 1 ? "" : "s"} from ${categoryName}.`);
   }
 
   function applyTestFilter(version, testType = "") {
@@ -8132,6 +8368,75 @@ function openDailyRecordModal(record = null, recordDate = "") {
     fetchAttendanceDays();
   }
 
+  async function clearAllAttendanceValues() {
+    if (!activeSchoolId) {
+      setAttendanceMsg("School context is missing for this admin.");
+      return;
+    }
+    const ok = window.confirm(
+      "Clear all attendance data for this school? This will remove all attendance day columns and every saved attendance value."
+    );
+    if (!ok) return;
+
+    setAttendanceClearing(true);
+    setAttendanceMsg("");
+    try {
+      const { data: dayRows, error: dayError } = await supabase
+        .from("attendance_days")
+        .select("id")
+        .eq("school_id", activeSchoolId)
+        .limit(5000);
+      if (dayError) throw dayError;
+
+      const dayIds = Array.from(new Set((dayRows ?? []).map((row) => row.id).filter(Boolean)));
+      if (!dayIds.length) {
+        setAttendanceMsg("No attendance days found.");
+        return;
+      }
+
+      for (let index = 0; index < dayIds.length; index += 200) {
+        const chunk = dayIds.slice(index, index + 200);
+        const { error: deleteError } = await supabase
+          .from("attendance_entries")
+          .delete()
+          .in("day_id", chunk);
+        if (deleteError) throw deleteError;
+      }
+
+      for (let index = 0; index < dayIds.length; index += 200) {
+        const chunk = dayIds.slice(index, index + 200);
+        const { error: deleteDayError } = await supabase
+          .from("attendance_days")
+          .delete()
+          .in("id", chunk)
+          .eq("school_id", activeSchoolId);
+        if (deleteDayError) throw deleteDayError;
+      }
+
+      setAttendanceModalOpen(false);
+      setAttendanceModalDay(null);
+      setAttendanceDraft({});
+      setAttendanceSaving(false);
+      await recordAuditEvent({
+        actionType: "delete",
+        entityType: "attendance_day",
+        entityId: `${activeSchoolId}:all`,
+        summary: "Cleared all attendance data.",
+        metadata: {
+          school_id: activeSchoolId,
+          attendance_day_count: dayIds.length,
+        },
+      });
+      setAttendanceMsg("Cleared all attendance data.");
+      fetchAttendanceDays();
+    } catch (error) {
+      console.error("clear attendance values error:", error);
+      setAttendanceMsg(`Clear failed: ${error.message || error}`);
+    } finally {
+      setAttendanceClearing(false);
+    }
+  }
+
   async function hasDuplicateSessionTitle(title, excludeId = "") {
     const normalizedTitle = String(title ?? "").trim();
     if (!normalizedTitle) return false;
@@ -8802,7 +9107,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   function startEditSession(session) {
     if (!session?.id) return;
-    const passRate = testPassRateByVersion[session.problem_set_id];
+    const passRate = getSessionEffectivePassRate(session);
     setEditingSessionId(session.id);
     setEditingSessionMsg("");
     setEditingSessionForm({
@@ -8814,7 +9119,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       time_limit_min: session.time_limit_min ?? "",
       show_answers: Boolean(session.show_answers),
       allow_multiple_attempts: session.allow_multiple_attempts !== false,
-      pass_rate: passRate != null ? String(passRate) : ""
+      pass_rate: String(passRate)
     });
   }
 
@@ -9613,7 +9918,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           const attempts = attemptsForCategory ?? [];
           const count = attempts.length;
           const passCount = attempts.filter((attempt) => {
-            const passRate = Number(testPassRateByVersion[attempt.test_version] ?? 0.8);
+            const passRate = getAttemptEffectivePassRate(attempt);
             return getScoreRate(attempt) >= passRate;
           }).length;
           const failCount = Math.max(0, count - passCount);
@@ -9727,7 +10032,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               ${renderTable(
                 ["Test", "Date", "Score", "Rate", "P/F"],
                 items.map((attempt) => {
-                  const passRate = Number(testPassRateByVersion[attempt.test_version] ?? 0.8);
+                  const passRate = getAttemptEffectivePassRate(attempt);
                   const passed = getScoreRate(attempt) >= passRate;
                   return [
                     escapeHtml(getAttemptTitle(attempt) || "-"),
@@ -9754,7 +10059,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           ...modelSectionTitles.map((title) => escapeHtml(title)),
         ],
         modelAttempts.map((attempt) => {
-          const passRate = Number(testPassRateByVersion[attempt.test_version] ?? 0.8);
+          const passRate = getAttemptEffectivePassRate(attempt);
           const passed = getScoreRate(attempt) >= passRate;
           const rankInfo = rankMap[attempt.id];
           const summary = modelSummaryByAttemptId[attempt.id] || {};
@@ -11059,34 +11364,30 @@ function openDailyRecordModal(record = null, recordDate = "") {
         return;
       }
 
-      const dayColumns = [];
-      for (let col = 10; col < (rows[0]?.length ?? 0); col += 1) {
-        const dayDate = parseSlashDateShortYearToIso(rows[0]?.[col]);
-        if (dayDate) {
-          dayColumns.push({ colIndex: col, dayDate });
-        }
-      }
+      const layout = detectAttendanceImportLayout(rows);
+      const dayColumns = layout?.dayColumns ?? [];
       if (!dayColumns.length) {
         showResultStatus("Import failed: no attendance date columns were found.", "error");
         return;
       }
 
       showLoadingStatus("Matching students and attendance columns...");
-      const matchStudent = createImportedStudentMatcher(sortedStudents);
+      const matchStudent = createAttendanceImportedStudentMatcher(sortedStudents);
       const importedByDay = new Map();
       const unmatchedRows = [];
       let skippedEmptyDayCount = 0;
+      const getCell = (row, index) => (index >= 0 ? row[index] : "");
 
       for (let rowIndex = 3; rowIndex < rows.length; rowIndex += 1) {
         const row = rows[rowIndex] ?? [];
         if (!rowHasCsvValues(row)) continue;
-        if (normalizeLookupValue(row[1]) === "rule") break;
+        if (normalizeLookupValue(getCell(row, layout?.ruleIndex ?? 0)) === "rule") break;
 
         const student = matchStudent({
-          rowNumber: Number(normalizeCsvValue(row[1])),
-          name: row[2],
-          section: row[3],
-          email: row[5],
+          rowNumber: Number(normalizeCsvValue(getCell(row, layout?.rowNumberIndex ?? -1))),
+          name: getCell(row, layout?.nameIndex ?? -1),
+          section: getCell(row, layout?.sectionIndex ?? -1),
+          email: getCell(row, layout?.emailIndex ?? -1),
         });
 
         if (!student?.id) {
@@ -11294,17 +11595,19 @@ function openDailyRecordModal(record = null, recordDate = "") {
         });
       }
 
-      if (!csvColumns.length) {
+      const populatedCsvColumns = csvColumns.filter((column) => hasDailyResultValues(rows, column.colIndex, 3));
+
+      if (!populatedCsvColumns.length) {
         const message = "Import failed: no daily result columns were found in the CSV.";
         setQuizMsg(message);
         showResultsImportResultStatus("daily", message, "error");
         return;
       }
 
-      const duplicateTitles = csvColumns
+      const duplicateTitles = populatedCsvColumns
         .map((column) => String(column.importTitle ?? "").trim())
         .filter((title, index, list) => title && list.indexOf(title) === index && existingResultTitles.has(title));
-      let selectedColumns = csvColumns;
+      let selectedColumns = populatedCsvColumns;
       let overwriteSessionIds = [];
 
       if (duplicateTitles.length) {
@@ -11317,7 +11620,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           return;
         }
         if (importChoice === "new_only") {
-          selectedColumns = csvColumns.filter((column) => !existingResultTitles.has(String(column.importTitle ?? "").trim()));
+          selectedColumns = populatedCsvColumns.filter((column) => !existingResultTitles.has(String(column.importTitle ?? "").trim()));
           if (!selectedColumns.length) {
             const message = "Import skipped: all CSV test titles already exist in the current category, and only new tests was selected.";
             setQuizMsg(message);
@@ -11352,7 +11655,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       for (let index = 0; index < columnsMissingLinkedTest.length; index += 1) {
         const column = columnsMissingLinkedTest[index];
         const version = buildImportedResultTestVersion("daily", categoryName, index);
-        const ensure = await ensureTestRecord(version, categoryName, "daily", null, activeSchoolId);
+        const ensure = await ensureTestRecord(version, categoryName, "daily", 0.8, activeSchoolId);
         if (!ensure.ok) {
           const message = `Import failed: ${ensure.message}`;
           setQuizMsg(message);
@@ -11363,6 +11666,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           version,
           title: categoryName,
           type: "daily",
+          pass_rate: 0.8,
           question_count: 0,
         };
       }
@@ -11635,17 +11939,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
       });
 
       const mappedBlocks = csvBlocks.filter((block) => block.total);
-      if (!mappedBlocks.length) {
+      const populatedBlocks = mappedBlocks.filter((block) => hasModelResultValues(rows, block, dataStartRowIndex));
+      if (!populatedBlocks.length) {
         const message = "Import failed: no model result columns were found in the CSV.";
         setQuizMsg(message);
         showResultsImportResultStatus("mock", message, "error");
         return;
       }
 
-      const duplicateTitles = mappedBlocks
+      const duplicateTitles = populatedBlocks
         .map((block) => String(block.importTitle ?? "").trim())
         .filter((title, index, list) => title && list.indexOf(title) === index && existingResultTitles.has(title));
-      let selectedBlocks = mappedBlocks;
+      let selectedBlocks = populatedBlocks;
 
       if (duplicateTitles.length) {
         showResultsImportResultStatus("mock", "Duplicate test titles found. Choose how to continue.", "info", "Model Results Import Warning");
@@ -11657,7 +11962,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           return;
         }
         if (importChoice === "new_only") {
-          selectedBlocks = mappedBlocks.filter((block) => !existingResultTitles.has(String(block.importTitle ?? "").trim()));
+          selectedBlocks = populatedBlocks.filter((block) => !existingResultTitles.has(String(block.importTitle ?? "").trim()));
           if (!selectedBlocks.length) {
             const message = "Import skipped: all CSV test titles already exist in the current results, and only new tests was selected.";
             setQuizMsg(message);
@@ -11686,7 +11991,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       for (let index = 0; index < blocksMissingLinkedTest.length; index += 1) {
         const block = blocksMissingLinkedTest[index];
         const version = buildImportedResultTestVersion("mock", categoryName, index);
-        const ensure = await ensureTestRecord(version, categoryName, "mock", null, activeSchoolId);
+        const ensure = await ensureTestRecord(version, categoryName, "mock", 0.8, activeSchoolId);
         if (!ensure.ok) {
           const message = `Import failed: ${ensure.message}`;
           setQuizMsg(message);
@@ -11697,6 +12002,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           version,
           title: categoryName,
           type: "mock",
+          pass_rate: 0.8,
           question_count: 0,
         };
       }
@@ -11788,7 +12094,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 ?? (sectionRate != null && sectionTotal > 0 ? Math.round(sectionRate * sectionTotal) : 0)
               );
               return {
-                section: section.sectionTitle,
+                section: normalizeImportedModelSectionTitle(section.sectionTitle),
                 correct: Number.isFinite(sectionCorrect) ? sectionCorrect : 0,
                 total: Number.isFinite(sectionTotal) ? sectionTotal : 0,
                 rate: sectionRate != null
@@ -13642,7 +13948,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         {studentModelAttempts.map((a) => {
                           const score = `${a.correct}/${a.total}`;
                           const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
-                          const passRate = Number(testPassRateByVersion[a.test_version] ?? 0.8);
+                          const passRate = getAttemptEffectivePassRate(a);
                           const passed = getScoreRate(a) >= passRate;
                           const rankInfo = studentAttemptRanks[a.id];
                           const summary = studentAttemptSummaryById[a.id] || {};
@@ -13725,7 +14031,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                             {items.map((a) => {
                               const score = `${a.correct}/${a.total}`;
                               const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
-                              const passRate = Number(testPassRateByVersion[a.test_version] ?? 0.8);
+                              const passRate = getAttemptEffectivePassRate(a);
                               const passed = getScoreRate(a) >= passRate;
                               return (
                                 <tr key={`student-daily-${a.id}`} onClick={() => openAttemptDetail(a)}>
@@ -14160,30 +14466,40 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
         {activeTab === "attendance" && attendanceSubTab === "sheet" ? (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div>
-              <div className="admin-title">Attendance Sheet</div>
-              <div className="admin-form" style={{ marginTop: 10 }}>
-                <div className="field">
-                  <label>Date</label>
-                  <input
-                    type="date"
-                    value={attendanceDate}
-                    onChange={(e) => setAttendanceDate(e.target.value)}
-                  />
-                </div>
-                <div className="field small">
-                  <label>&nbsp;</label>
-                  <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => openAttendanceDay(attendanceDate, { confirmExisting: true })}>
-                    Open Day
-                  </button>
-                </div>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "nowrap", marginTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flex: "0 0 auto" }}>
+              <div>
+                <label style={{ display: "block", fontWeight: 800, marginBottom: 6, color: "var(--admin-text)" }}>Date</label>
+                <input
+                  type="date"
+                  value={attendanceDate}
+                  onChange={(e) => setAttendanceDate(e.target.value)}
+                  style={{
+                    width: 190,
+                    border: "1px solid var(--admin-control-border)",
+                    borderRadius: 6,
+                    padding: "10px 10px",
+                    fontSize: 14,
+                    fontFamily: "inherit",
+                  }}
+                />
               </div>
+              <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => openAttendanceDay(attendanceDate, { confirmExisting: true })}>
+                Open Day
+              </button>
             </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", justifyContent: "flex-end", marginLeft: "auto", alignSelf: "flex-start", flex: "0 0 auto" }}>
               <button className="btn results-page-action-btn" type="button" onClick={exportAttendanceGoogleSheetsCsv}>
                 <span className="results-page-action-icon" aria-hidden="true">↓</span>
                 <span>Export CSV</span>
+              </button>
+              <button
+                className="btn btn-danger results-page-action-btn"
+                type="button"
+                onClick={clearAllAttendanceValues}
+                disabled={attendanceClearing}
+              >
+                <span>{attendanceClearing ? "Clearing..." : "Clear All Attendance"}</span>
               </button>
               <button
                 className="btn results-page-action-btn"
@@ -15198,9 +15514,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
                             />
                           ) : (
-                            testPassRateByVersion[t.problem_set_id] != null
-                              ? `${Number(testPassRateByVersion[t.problem_set_id]) * 100}%`
-                              : ""
+                            `${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`
                           )}
                         </td>
                         <td style={{ textAlign: "center" }}>
@@ -15530,11 +15844,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
                           onChange={(e) => setModelConductCategory(e.target.value)}
                         >
                           {modelCategories.length ? (
-                            modelCategories.map((c) => (
-                              <option key={`model-cat-${c.name}`} value={c.name}>
-                                {c.name}
-                              </option>
-                            ))
+                            <>
+                              <option value="">Select category</option>
+                              {modelCategories.map((c) => (
+                                <option key={`model-cat-${c.name}`} value={c.name}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </>
                           ) : (
                             <option value="">No categories</option>
                           )}
@@ -16312,9 +16629,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
                             />
                           ) : (
-                            testPassRateByVersion[t.problem_set_id] != null
-                              ? `${Number(testPassRateByVersion[t.problem_set_id]) * 100}%`
-                              : ""
+                            `${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`
                           )}
                         </td>
                         <td style={{ textAlign: "center" }}>
@@ -18802,7 +19117,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           <>
             <div className="results-page-header">
               <div className="results-page-header-row">
-                {(resultContext.type === "daily" ? dailyResultCategories : modelCategories).length ? (
+                {(resultContext.type === "daily" ? dailyResultCategories : modelResultCategories).length ? (
                   <div className="admin-mini-tabs results-category-tabs">
                     {resultContext.type === "mock" ? (
                       <button
@@ -18813,7 +19128,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         All
                       </button>
                     ) : null}
-                    {(resultContext.type === "daily" ? dailyResultCategories : modelCategories).map((c) => (
+                    {(resultContext.type === "daily" ? dailyResultCategories : modelResultCategories).map((c) => (
                       <button
                         key={`daily-cat-${c.name}`}
                         className={`admin-mini-tab results-category-tab ${((resultContext.type === "daily"
@@ -18877,6 +19192,16 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     <span className="results-page-action-icon" aria-hidden="true">↑</span>
                     <span>Import CSV</span>
                   </button>
+                  {resultContext.type === "daily" ? (
+                    <button
+                      className="btn btn-danger results-page-action-btn"
+                      type="button"
+                      onClick={() => clearDailyResultsForCategory(selectedDailyCategory)}
+                      disabled={!selectedDailyCategory}
+                    >
+                      <span>Clear All Results</span>
+                    </button>
+                  ) : null}
                   <input
                     ref={resultsImportInputRef}
                     type="file"
@@ -18900,7 +19225,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
             {resultContext.type === "daily" || resultContext.type === "mock" ? (
               <>
-                {!(resultContext.type === "daily" ? dailyResultCategories : modelCategories).length ? (
+                {!(resultContext.type === "daily" ? dailyResultCategories : modelResultCategories).length ? (
                   <div className="admin-msg">No test categories yet.</div>
                 ) : null}
 
@@ -18968,7 +19293,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               ? dailyResultsMatrix.sessions
                               : modelResultsMatrix.sessions)[idx];
                             if (!attemptList?.length) return <td key={`daily-cell-${row.student.id}-${idx}`}>—</td>;
-                            const passRate = Number(sessionItem?.linkedTest?.pass_rate ?? 0);
+                            const passRate = getSessionEffectivePassRate(sessionItem, attemptList);
                             const cellKey = `${row.student.id}:${sessionItem.id}`;
                             const extraAttempts = attemptList.slice(1);
                             const visibleAttempts = expandedResultCells[cellKey] ? attemptList : attemptList.slice(0, 1);

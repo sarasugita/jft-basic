@@ -931,6 +931,12 @@ body { padding: 0; }
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
 }
 
+.results-page-action-btn.btn-danger {
+  background: #b00020;
+  border-color: #7a0016;
+  color: #fff;
+}
+
 .results-page-action-icon {
   display: inline-flex;
   align-items: center;
@@ -945,6 +951,12 @@ body { padding: 0; }
   background: #f8fafc;
   border-color: #b8c4d0;
   outline: none;
+}
+
+.results-page-action-btn.btn-danger:hover,
+.results-page-action-btn.btn-danger:focus-visible {
+  background: #97001b;
+  border-color: #650013;
 }
 
 .results-category-tabs {
