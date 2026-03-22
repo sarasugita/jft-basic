@@ -937,12 +937,13 @@ function parseSlashDateShortYearToIso(value) {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-function buildImportedSummaryAnswersJson(source) {
+function buildImportedSummaryAnswersJson(source, extraMeta = {}) {
   return {
     __meta: {
       imported_summary: true,
       imported_source: source,
       tab_left_count: 0,
+      ...extraMeta,
     },
   };
 }
@@ -951,10 +952,51 @@ function isImportedSummaryAttempt(attempt) {
   return Boolean(attempt?.answers_json?.__meta?.imported_summary);
 }
 
+function isImportedModelResultsSummaryAttempt(attempt) {
+  return isImportedSummaryAttempt(attempt)
+    && String(attempt?.answers_json?.__meta?.imported_source ?? "") === "model_results_csv";
+}
+
+function getImportedModelSectionSummaries(attempt) {
+  const rows = Array.isArray(attempt?.answers_json?.__meta?.main_section_summary)
+    ? attempt.answers_json.__meta.main_section_summary
+    : [];
+  const orderMap = new Map(
+    sections
+      .filter((section) => section.key !== "DAILY")
+      .map((section, index) => [getSectionTitle(section.key), index])
+  );
+  return rows
+    .map((row) => {
+      const section = String(row?.section ?? "").trim();
+      const correct = Number(row?.correct ?? 0);
+      const total = Number(row?.total ?? 0);
+      const rawRate = Number(row?.rate);
+      const rate = Number.isFinite(rawRate) ? rawRate : (total > 0 ? correct / total : 0);
+      return {
+        section,
+        correct: Number.isFinite(correct) ? correct : 0,
+        total: Number.isFinite(total) ? total : 0,
+        rate: Number.isFinite(rate) ? rate : 0,
+      };
+    })
+    .filter((row) => row.section)
+    .sort((left, right) => {
+      const leftOrder = orderMap.has(left.section) ? orderMap.get(left.section) : 999;
+      const rightOrder = orderMap.has(right.section) ? orderMap.get(right.section) : 999;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return left.section.localeCompare(right.section);
+    });
+}
+
 function attemptHasDetailData(attempt) {
   if (!attempt || isImportedSummaryAttempt(attempt)) return false;
   if (!attempt.answers_json || typeof attempt.answers_json !== "object") return false;
   return Object.keys(attempt.answers_json).some((key) => key !== "__meta");
+}
+
+function attemptCanOpenDetail(attempt) {
+  return attemptHasDetailData(attempt) || isImportedSummaryAttempt(attempt);
 }
 
 function createImportedStudentMatcher(studentsList) {
@@ -1006,7 +1048,11 @@ function buildSessionDetailAvailability(matrix) {
   const sessions = matrix?.sessions ?? [];
   const rows = matrix?.rows ?? [];
   sessions.forEach((session, sessionIndex) => {
-    availability[session.id] = rows.some((row) => (row?.cells?.[sessionIndex] ?? []).some((attempt) => attemptHasDetailData(attempt)));
+    availability[session.id] = rows.some((row) =>
+      (row?.cells?.[sessionIndex] ?? []).some((attempt) =>
+        attemptHasDetailData(attempt) || isImportedModelResultsSummaryAttempt(attempt)
+      )
+    );
   });
   return availability;
 }
@@ -1797,6 +1843,28 @@ function buildNestedSectionAverageRows(attemptsList, questionsList) {
   });
 }
 
+function buildImportedMainSectionAverageRows(attemptsList) {
+  if (!attemptsList?.length) return [];
+  const sectionTitles = sections
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => getSectionTitle(section.key))
+    .filter(Boolean);
+  return sectionTitles
+    .map((sectionTitle) => {
+      const matchingRows = attemptsList
+        .map((attempt) => getImportedModelSectionSummaries(attempt).find((row) => row.section === sectionTitle))
+        .filter(Boolean);
+      if (!matchingRows.length) return null;
+      return {
+        section: sectionTitle,
+        total: Math.max(...matchingRows.map((row) => Number(row.total ?? 0)), 0),
+        averageCorrect: matchingRows.reduce((sum, row) => sum + Number(row.correct ?? 0), 0) / matchingRows.length,
+        averageRate: matchingRows.reduce((sum, row) => sum + Number(row.rate ?? 0), 0) / matchingRows.length,
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildSessionStudentRankingRows(attemptsList, questionsList, studentsList) {
   if (!attemptsList?.length) return [];
   const sectionAverageRows = buildSectionAverageRows(attemptsList, questionsList);
@@ -1805,6 +1873,39 @@ function buildSessionStudentRankingRows(attemptsList, questionsList, studentsLis
     const student = (studentsList ?? []).find((item) => item.id === attempt.student_id) ?? null;
     const detailRows = buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList);
     const sectionSummary = buildSectionSummary(detailRows);
+    const sectionRates = Object.fromEntries(
+      sectionTitles.map((title) => [title, Number(sectionSummary.find((row) => row.section === title)?.rate ?? 0)])
+    );
+    return {
+      attempt,
+      student_id: attempt.student_id,
+      display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+      student_code: attempt.student_code || student?.student_code || "",
+      totalCorrect: Number(attempt?.correct ?? 0),
+      totalQuestions: Number(attempt?.total ?? 0),
+      totalRate: getScoreRate(attempt),
+      sectionRates,
+    };
+  });
+  rows.sort((a, b) => {
+    if (b.totalRate !== a.totalRate) return b.totalRate - a.totalRate;
+    if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
+    const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+    if (nameCompare !== 0) return nameCompare;
+    return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+  });
+  return rows.map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
+function buildImportedSessionStudentRankingRows(attemptsList, studentsList) {
+  if (!attemptsList?.length) return [];
+  const sectionTitles = sections
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => getSectionTitle(section.key))
+    .filter(Boolean);
+  const rows = attemptsList.map((attempt) => {
+    const student = (studentsList ?? []).find((item) => item.id === attempt.student_id) ?? null;
+    const sectionSummary = getImportedModelSectionSummaries(attempt);
     const sectionRates = Object.fromEntries(
       sectionTitles.map((title) => [title, Number(sectionSummary.find((row) => row.section === title)?.rate ?? 0)])
     );
@@ -2365,6 +2466,12 @@ function getTabLeftCount(attempt) {
 function isMissingTabLeftCountError(error) {
   const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
   return /tab_left_count/i.test(text) && /does not exist/i.test(text);
+}
+
+function isGeneratedScoreRateInsertError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /score_rate/i.test(text)
+    && /(cannot insert a non-default value|generated)/i.test(text);
 }
 
 function isMissingRetakeSessionFieldsError(error) {
@@ -3149,6 +3256,9 @@ export default function AdminConsole({
   const [linkMsg, setLinkMsg] = useState("");
   const [modelConductOpen, setModelConductOpen] = useState(false);
   const [modelUploadOpen, setModelUploadOpen] = useState(false);
+  const [modelUploadCategoryOpen, setModelUploadCategoryOpen] = useState(false);
+  const [modelUploadCategoryLaunchUpload, setModelUploadCategoryLaunchUpload] = useState(false);
+  const [modelUploadCategoryMsg, setModelUploadCategoryMsg] = useState("");
   const [dailyConductOpen, setDailyConductOpen] = useState(false);
   const [dailyUploadOpen, setDailyUploadOpen] = useState(false);
   const [modelConductMode, setModelConductMode] = useState("normal");
@@ -3193,6 +3303,7 @@ export default function AdminConsole({
   const [assets, setAssets] = useState([]);
   const [assetsMsg, setAssetsMsg] = useState("");
   const [quizMsg, setQuizMsg] = useState("");
+  const [resultsImportStatus, setResultsImportStatus] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTest, setPreviewTest] = useState("");
   const [previewQuestions, setPreviewQuestions] = useState([]);
@@ -3275,6 +3386,8 @@ export default function AdminConsole({
   const attendanceImportChoiceResolverRef = useRef(null);
   const [attendanceImportConflict, setAttendanceImportConflict] = useState(null);
   const [attendanceImportStatus, setAttendanceImportStatus] = useState(null);
+  const modelResultsImportChoiceResolverRef = useRef(null);
+  const [modelResultsImportConflict, setModelResultsImportConflict] = useState(null);
   const [approvedAbsenceByStudent, setApprovedAbsenceByStudent] = useState({});
   const [attendanceFilter, setAttendanceFilter] = useState({
     minRate: "",
@@ -3548,13 +3661,21 @@ export default function AdminConsole({
     };
   }, [sessionDetailLatestAttempts, sessionDetailPassRate]);
 
+  const sessionDetailUsesImportedModelSummary = useMemo(() => {
+    return sessionDetail.type === "mock"
+      && sessionDetailLatestAttempts.length > 0
+      && sessionDetailLatestAttempts.every((attempt) => isImportedModelResultsSummaryAttempt(attempt));
+  }, [sessionDetail.type, sessionDetailLatestAttempts]);
+
   const sessionDetailAnalysisSummary = useMemo(() => {
     const attendedCount = sessionDetailLatestAttempts.length;
     const activeStudentCount = (students ?? []).filter((student) => !student.is_withdrawn).length;
     const absentCount = Math.max(0, activeStudentCount - attendedCount);
     const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
     const failCount = Math.max(0, attendedCount - passCount);
-    const totalQuestions = sessionDetailQuestions.length;
+    const totalQuestions = sessionDetailUsesImportedModelSummary
+      ? Math.max(0, ...sessionDetailLatestAttempts.map((attempt) => Number(attempt.total ?? 0)))
+      : sessionDetailQuestions.length;
     const averageCorrect = attendedCount
       ? sessionDetailLatestAttempts.reduce((total, attempt) => {
         return total + Number(attempt.correct ?? (attempt.total ? getScoreRate(attempt) * attempt.total : 0));
@@ -3583,16 +3704,24 @@ export default function AdminConsole({
       bucketCounts,
       maxBucketCount: Math.max(0, ...bucketCounts),
     };
-  }, [sessionDetailLatestAttempts, sessionDetailOverview.averageScore, sessionDetailPassRate, sessionDetailQuestions.length, students]);
+  }, [
+    sessionDetailLatestAttempts,
+    sessionDetailOverview.averageScore,
+    sessionDetailPassRate,
+    sessionDetailQuestions.length,
+    sessionDetailUsesImportedModelSummary,
+    students,
+  ]);
 
   const sessionDetailQuestionAnalysis = useMemo(() => {
+    if (sessionDetailUsesImportedModelSummary) return [];
     if (!sessionDetailQuestions.length || !sessionDetailLatestAttempts.length) return [];
     return buildQuestionAnalysisRows(sessionDetailLatestAttempts, sessionDetailQuestions)
       .sort((a, b) => {
         if (b.rate !== a.rate) return b.rate - a.rate;
         return String(a.qid).localeCompare(String(b.qid));
       });
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary]);
 
   const sessionDetailQuestionStudents = useMemo(() => {
     return sessionDetailLatestAttempts
@@ -3612,20 +3741,40 @@ export default function AdminConsole({
   }, [sessionDetailLatestAttempts, students]);
 
   const sessionDetailSectionAverages = useMemo(() => {
+    if (sessionDetailUsesImportedModelSummary) return [];
     return buildSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary]);
 
   const sessionDetailMainSectionAverages = useMemo(() => {
+    if (sessionDetailUsesImportedModelSummary) {
+      return buildImportedMainSectionAverageRows(sessionDetailLatestAttempts);
+    }
     return buildMainSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary]);
 
   const sessionDetailNestedSectionAverages = useMemo(() => {
+    if (sessionDetailUsesImportedModelSummary) return [];
     return buildNestedSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary]);
 
   const sessionDetailStudentRankingRows = useMemo(() => {
+    if (sessionDetailUsesImportedModelSummary) {
+      return buildImportedSessionStudentRankingRows(sessionDetailLatestAttempts, students);
+    }
     return buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, students);
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions, students]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary, students]);
+
+  const sessionDetailRankingSections = useMemo(() => {
+    return sessionDetailUsesImportedModelSummary
+      ? sessionDetailMainSectionAverages
+      : sessionDetailSectionAverages;
+  }, [sessionDetailMainSectionAverages, sessionDetailSectionAverages, sessionDetailUsesImportedModelSummary]);
+
+  useEffect(() => {
+    if (!sessionDetailUsesImportedModelSummary) return;
+    if (sessionDetailTab === "analysis" || sessionDetailTab === "studentRanking") return;
+    setSessionDetailTab("analysis");
+  }, [sessionDetailTab, sessionDetailUsesImportedModelSummary]);
 
   const studentModelAttempts = useMemo(() => {
     return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
@@ -3855,6 +4004,52 @@ export default function AdminConsole({
     }
   }, [modelCategories, modelConductCategory]);
 
+  function openModelUploadCategoryPicker({ launchUploadModal = false } = {}) {
+    const normalizedCategory = String(assetForm.category ?? "").trim();
+    const availableCategories = modelCategories.length
+      ? modelCategories
+      : [{ name: DEFAULT_MODEL_CATEGORY }];
+    if (normalizedCategory && availableCategories.some((category) => category.name === normalizedCategory)) {
+      setAssetCategorySelect(normalizedCategory);
+    } else if (normalizedCategory) {
+      setAssetCategorySelect("__custom__");
+    } else {
+      const fallbackCategory = availableCategories[0]?.name ?? DEFAULT_MODEL_CATEGORY;
+      setAssetCategorySelect(fallbackCategory);
+      setAssetForm((current) => ({ ...current, category: fallbackCategory }));
+    }
+    setModelUploadCategoryMsg("");
+    setModelUploadCategoryLaunchUpload(launchUploadModal);
+    setModelUploadCategoryOpen(true);
+  }
+
+  function closeModelUploadCategoryPicker() {
+    setModelUploadCategoryOpen(false);
+    setModelUploadCategoryLaunchUpload(false);
+    setModelUploadCategoryMsg("");
+  }
+
+  function confirmModelUploadCategory() {
+    const selectedCategory = String(
+      assetCategorySelect === "__custom__" ? assetForm.category : assetCategorySelect
+    ).trim();
+    if (!selectedCategory) {
+      setModelUploadCategoryMsg("Category is required.");
+      return;
+    }
+    setAssetForm((current) => ({ ...current, category: selectedCategory }));
+    setAssetCategorySelect(
+      modelCategories.some((category) => category.name === selectedCategory) ? selectedCategory : "__custom__"
+    );
+    const shouldOpenUploadModal = modelUploadCategoryLaunchUpload || !modelUploadOpen;
+    setModelUploadCategoryOpen(false);
+    setModelUploadCategoryLaunchUpload(false);
+    setModelUploadCategoryMsg("");
+    if (shouldOpenUploadModal) {
+      setModelUploadOpen(true);
+    }
+  }
+
   useEffect(() => {
     if (!dailyCategories.length) return;
     if (!dailyConductCategory || !dailyCategories.some((c) => c.name === dailyConductCategory)) {
@@ -3962,17 +4157,28 @@ export default function AdminConsole({
     return version ? attemptQuestionsByVersion[version] : null;
   }, [selectedAttempt, attemptQuestionsByVersion]);
 
+  const selectedAttemptUsesImportedSummary = useMemo(
+    () => isImportedSummaryAttempt(selectedAttempt),
+    [selectedAttempt]
+  );
+
+  const selectedAttemptUsesImportedModelSummary = useMemo(
+    () => isImportedModelResultsSummaryAttempt(selectedAttempt),
+    [selectedAttempt]
+  );
+
   const selectedAttemptRows = useMemo(() => {
     if (!selectedAttempt) return [];
+    if (selectedAttemptUsesImportedSummary) return [];
     if (selectedAttemptQuestions && selectedAttemptQuestions.length) {
       return buildAttemptDetailRowsFromList(selectedAttempt.answers_json, selectedAttemptQuestions);
     }
     return buildAttemptDetailRows(selectedAttempt.answers_json);
-  }, [selectedAttempt, selectedAttemptQuestions]);
+  }, [selectedAttempt, selectedAttemptQuestions, selectedAttemptUsesImportedSummary]);
 
   const selectedAttemptSectionSummary = useMemo(
-    () => buildSectionSummary(selectedAttemptRows),
-    [selectedAttemptRows]
+    () => (selectedAttemptUsesImportedModelSummary ? getImportedModelSectionSummaries(selectedAttempt) : buildSectionSummary(selectedAttemptRows)),
+    [selectedAttempt, selectedAttemptRows, selectedAttemptUsesImportedModelSummary]
   );
 
   const selectedAttemptIsModel = useMemo(
@@ -3981,13 +4187,13 @@ export default function AdminConsole({
   );
 
   const selectedAttemptMainSectionSummary = useMemo(
-    () => buildMainSectionSummary(selectedAttemptRows),
-    [selectedAttemptRows]
+    () => (selectedAttemptUsesImportedModelSummary ? getImportedModelSectionSummaries(selectedAttempt) : buildMainSectionSummary(selectedAttemptRows)),
+    [selectedAttempt, selectedAttemptRows, selectedAttemptUsesImportedModelSummary]
   );
 
   const selectedAttemptNestedSectionSummary = useMemo(
-    () => buildNestedSectionSummary(selectedAttemptRows),
-    [selectedAttemptRows]
+    () => (selectedAttemptUsesImportedModelSummary ? [] : buildNestedSectionSummary(selectedAttemptRows)),
+    [selectedAttemptRows, selectedAttemptUsesImportedModelSummary]
   );
 
   const selectedAttemptPassRate = useMemo(() => {
@@ -4577,17 +4783,90 @@ export default function AdminConsole({
     });
   }, []);
 
+  const resolveModelResultsImportConflict = useCallback((choice) => {
+    const resolve = modelResultsImportChoiceResolverRef.current;
+    modelResultsImportChoiceResolverRef.current = null;
+    setModelResultsImportConflict(null);
+    if (resolve) resolve(choice);
+  }, []);
+
+  const promptModelResultsImportConflict = useCallback((testTitles) => {
+    return new Promise((resolve) => {
+      if (modelResultsImportChoiceResolverRef.current) {
+        modelResultsImportChoiceResolverRef.current("cancel");
+      }
+      modelResultsImportChoiceResolverRef.current = resolve;
+      setModelResultsImportConflict({
+        testTitles,
+        previewTitles: testTitles.slice(0, 8),
+      });
+    });
+  }, []);
+
   useEffect(() => {
     return () => {
       if (attendanceImportChoiceResolverRef.current) {
         attendanceImportChoiceResolverRef.current("cancel");
         attendanceImportChoiceResolverRef.current = null;
       }
+      if (modelResultsImportChoiceResolverRef.current) {
+        modelResultsImportChoiceResolverRef.current("cancel");
+        modelResultsImportChoiceResolverRef.current = null;
+      }
     };
   }, []);
 
   const closeAttendanceImportStatus = useCallback(() => {
     setAttendanceImportStatus((current) => (current?.loading ? current : null));
+  }, []);
+
+  const openResultsImportStatus = useCallback((type) => {
+    setResultsImportStatus({
+      open: true,
+      type,
+      loading: false,
+      tone: "info",
+      title: type === "daily" ? "Import Daily Results CSV" : "Import Model Results CSV",
+      message: "Select a CSV file to import.",
+    });
+    if (resultsImportInputRef.current) resultsImportInputRef.current.value = "";
+  }, []);
+
+  const showResultsImportLoadingStatus = useCallback((type, message) => {
+    setResultsImportStatus({
+      open: true,
+      type,
+      loading: true,
+      tone: "info",
+      title: type === "daily" ? "Importing Daily Results CSV" : "Importing Model Results CSV",
+      message,
+    });
+  }, []);
+
+  const showResultsImportResultStatus = useCallback((type, message, tone = "info", title = "") => {
+    setResultsImportStatus({
+      open: true,
+      type,
+      loading: false,
+      tone,
+      title: title || (type === "daily"
+        ? tone === "success"
+          ? "Daily Results Import Complete"
+          : tone === "error"
+            ? "Daily Results Import Failed"
+            : "Daily Results Import Status"
+        : tone === "success"
+          ? "Model Results Import Complete"
+          : tone === "error"
+            ? "Model Results Import Failed"
+            : "Model Results Import Status"),
+      message,
+    });
+  }, []);
+
+  const closeResultsImportStatus = useCallback(() => {
+    setResultsImportStatus((current) => (current?.loading ? current : null));
+    if (resultsImportInputRef.current) resultsImportInputRef.current.value = "";
   }, []);
 
   const studentListRows = useMemo(() => {
@@ -5188,6 +5467,12 @@ export default function AdminConsole({
     attemptDetailSectionRefs.current = {};
   }, [attemptDetailOpen, selectedAttempt?.id]);
 
+  useEffect(() => {
+    if (!attemptDetailOpen || !selectedAttempt?.id || !selectedAttempt?.test_session_id) return;
+    if (studentAttemptRanks[selectedAttempt.id]) return;
+    fetchAttemptRanksForSessions([selectedAttempt]);
+  }, [attemptDetailOpen, selectedAttempt, studentAttemptRanks]);
+
   async function runSearch(testType = "") {
     setLoading(true);
     setMsg("Loading...");
@@ -5254,7 +5539,7 @@ export default function AdminConsole({
 
   function openAttemptDetail(attempt, source = "default") {
     if (!attempt?.id) return;
-    if (!attemptHasDetailData(attempt)) return;
+    if (!attemptCanOpenDetail(attempt)) return;
     setSelectedId(attempt.id);
     setSelectedAttemptObj(attempt);
     setAttemptDetailSource(source);
@@ -9214,6 +9499,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
     let testVersion = assetForm.test_version.trim();
     const type = "mock";
     const category = assetForm.category.trim();
+    if (!category) {
+      setAssetUploadMsg("Category is required.");
+      return;
+    }
     const title = type === "mock" ? (category || DEFAULT_MODEL_CATEGORY) : testVersion;
 
     if (!testVersion && assetCsvFile) {
@@ -9312,6 +9601,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const testVersion = String(forcedTestVersion || assetForm.test_version || "").trim();
     const type = "mock";
     const category = assetForm.category.trim();
+    if (!category) {
+      setAssetImportMsg("Category is required.");
+      return;
+    }
 
     if (!file) {
       setAssetImportMsg("CSV file is required.");
@@ -9962,44 +10255,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
       );
     });
 
-    const activeMatrixRows = matrixRows.filter((row) => !row.student?.is_withdrawn);
-    const failColumns = sessions.map((session, sessionIndex) => {
-      const threshold = Number(session?.linkedTest?.pass_rate ?? testPassRateByVersion[session.problem_set_id] ?? 0.8);
-      return activeMatrixRows
-        .filter((row) => {
-          const attempt = visibleAttemptAt(row, sessionIndex);
-          return attempt && getScoreRate(attempt) < threshold;
-        })
-        .map((row) => getStudentDisplayName(row.student));
-    });
-    const absentColumns = sessions.map((session, sessionIndex) => {
-      return activeMatrixRows
-        .filter((row) => !visibleAttemptAt(row, sessionIndex))
-        .map((row) => getStudentDisplayName(row.student));
-    });
-
-    const maxFailRows = Math.max(0, ...failColumns.map((items) => items.length));
-    const maxAbsentRows = Math.max(0, ...absentColumns.map((items) => items.length));
-
-    exportRows.push(new Array(totalColumns).fill(""));
-    exportRows.push(
-      padCsvRow(["", "", "", "Failed Students (<80%)", "", ...sessions.map((session) => session.title ?? session.problem_set_id ?? "")], totalColumns)
-    );
-    for (let rowIndex = 0; rowIndex < maxFailRows; rowIndex += 1) {
-      exportRows.push(
-        padCsvRow(["", "", "", "", "", ...failColumns.map((items) => items[rowIndex] ?? "")], totalColumns)
-      );
-    }
-    exportRows.push(new Array(totalColumns).fill(""));
-    exportRows.push(
-      padCsvRow(["", "", "", "Absent Students (N/A)", "", ...sessions.map((session) => session.title ?? session.problem_set_id ?? "")], totalColumns)
-    );
-    for (let rowIndex = 0; rowIndex < maxAbsentRows; rowIndex += 1) {
-      exportRows.push(
-        padCsvRow(["", "", "", "", "", ...absentColumns.map((items) => items[rowIndex] ?? "")], totalColumns)
-      );
-    }
-
     downloadText(`daily_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
   }
 
@@ -10200,37 +10455,30 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return rows;
     };
 
-    const failedRows = buildModelFooterRows("Failed Students (<80%)", ({ kind, block, sectionTitle }) => {
-      const threshold = Number(block.session?.linkedTest?.pass_rate ?? testPassRateByVersion[block.session.problem_set_id] ?? 0.8);
-      return activeMatrixRows
-        .filter((row) => {
-          const attempt = visibleAttemptAt(row, block.sessionIndex);
-          if (!attempt) return false;
-          if (kind === "total") return getScoreRate(attempt) < threshold;
-          const summary = buildMainSectionSummary(buildAttemptDetailRowsFromList(attempt.answers_json, block.questionsList));
-          const summaryRow = summary.find((item) => item.section === sectionTitle);
-          return summaryRow && summaryRow.rate < threshold;
-        })
-        .map((row) => getStudentDisplayName(row.student));
-    });
-    const absentRows = buildModelFooterRows("Absent Students (N/A)", ({ kind, block }) => {
-      return activeMatrixRows
-        .filter((row) => !visibleAttemptAt(row, block.sessionIndex))
-        .map((row) => getStudentDisplayName(row.student));
-    });
-
-    exportRows.push(new Array(totalColumns).fill(""));
-    exportRows.push(...failedRows);
-    exportRows.push(new Array(totalColumns).fill(""));
-    exportRows.push(...absentRows);
-
     downloadText(`model_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
   }
 
-  async function replaceImportedSummaryAttempts(payloads) {
+  async function replaceImportedSummaryAttempts(payloads, options = {}) {
     if (!payloads.length) return { ok: true, inserted: 0 };
 
-    const sessionIds = Array.from(new Set(payloads.map((payload) => payload.test_session_id).filter(Boolean)));
+    const overwriteSessionIds = Array.from(new Set((options?.overwriteSessionIds ?? []).filter(Boolean)));
+    if (overwriteSessionIds.length) {
+      const { error: overwriteDeleteError } = await supabase
+        .from("attempts")
+        .delete()
+        .in("test_session_id", overwriteSessionIds);
+      if (overwriteDeleteError) {
+        return { ok: false, message: overwriteDeleteError.message };
+      }
+    }
+
+    const sessionIds = Array.from(
+      new Set(
+        payloads
+          .map((payload) => payload.test_session_id)
+          .filter((sessionId) => sessionId && !overwriteSessionIds.includes(sessionId))
+      )
+    );
     const studentIds = Array.from(new Set(payloads.map((payload) => payload.student_id).filter(Boolean)));
 
     if (sessionIds.length && studentIds.length) {
@@ -10251,10 +10499,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
       }
     }
 
-    let { error: insertError } = await supabase.from("attempts").insert(payloads);
+    let payloadsToInsert = payloads;
+    let { error: insertError } = await supabase.from("attempts").insert(payloadsToInsert);
     if (insertError && isMissingTabLeftCountError(insertError)) {
-      const legacyPayloads = payloads.map(({ tab_left_count, ...payload }) => payload);
-      ({ error: insertError } = await supabase.from("attempts").insert(legacyPayloads));
+      payloadsToInsert = payloadsToInsert.map(({ tab_left_count, ...payload }) => payload);
+      ({ error: insertError } = await supabase.from("attempts").insert(payloadsToInsert));
+    }
+    if (insertError && isGeneratedScoreRateInsertError(insertError)) {
+      payloadsToInsert = payloadsToInsert.map(({ score_rate, ...payload }) => payload);
+      ({ error: insertError } = await supabase.from("attempts").insert(payloadsToInsert));
     }
     if (insertError) {
       return { ok: false, message: insertError.message };
@@ -10462,15 +10715,20 @@ function openDailyRecordModal(record = null, recordDate = "") {
     if (!file) return;
     const sessions = dailyResultsMatrix.sessions ?? [];
     if (!sessions.length) {
-      setQuizMsg("Import failed: no daily test sessions are visible.");
+      const message = "Import failed: no daily test sessions are visible.";
+      setQuizMsg(message);
+      showResultsImportResultStatus("daily", message, "error");
       return;
     }
     setQuizMsg("Importing CSV...");
+    showResultsImportLoadingStatus("daily", "Reading uploaded CSV...");
     try {
       const text = await file.text();
       const rows = parseSeparatedRows(text, detectDelimiter(text));
       if (rows.length < 4) {
-        setQuizMsg("Import failed: CSV format is not recognized.");
+        const message = "Import failed: CSV format is not recognized.";
+        setQuizMsg(message);
+        showResultsImportResultStatus("daily", message, "error");
         return;
       }
 
@@ -10499,7 +10757,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
       }
 
       if (!mappedColumns.length) {
-        setQuizMsg("Import failed: no daily result columns matched the current sessions.");
+        const message = "Import failed: no daily result columns matched the current sessions.";
+        setQuizMsg(message);
+        showResultsImportResultStatus("daily", message, "error");
         return;
       }
 
@@ -10548,23 +10808,30 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
       const dedupedPayloads = dedupeImportedAttemptPayloads(payloads);
       if (!dedupedPayloads.length) {
-        setQuizMsg("Import failed: no daily result rows were recognized.");
+        const message = "Import failed: no daily result rows were recognized.";
+        setQuizMsg(message);
+        showResultsImportResultStatus("daily", message, "error");
         return;
       }
 
       const result = await replaceImportedSummaryAttempts(dedupedPayloads);
       if (!result.ok) {
-        setQuizMsg(`Import failed: ${result.message}`);
+        const message = `Import failed: ${result.message}`;
+        setQuizMsg(message);
+        showResultsImportResultStatus("daily", message, "error");
         return;
       }
 
       await runSearch("daily");
-      setQuizMsg(
+      const message = 
         `Imported ${result.inserted} daily result entr${result.inserted === 1 ? "y" : "ies"}`
-        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".")
-      );
+        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".");
+      setQuizMsg(message);
+      showResultsImportResultStatus("daily", message, "success");
     } catch (error) {
-      setQuizMsg(`Import failed: ${error instanceof Error ? error.message : error}`);
+      const message = `Import failed: ${error instanceof Error ? error.message : error}`;
+      setQuizMsg(message);
+      showResultsImportResultStatus("daily", message, "error");
     } finally {
       if (resultsImportInputRef.current) resultsImportInputRef.current.value = "";
     }
@@ -10572,23 +10839,52 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   async function importModelResultsGoogleSheetsCsv(file) {
     if (!file) return;
-    const sessions = modelResultsMatrix.sessions ?? [];
-    if (!sessions.length) {
-      setQuizMsg("Import failed: no model test sessions are visible.");
+    const testsForCategory = selectedModelCategory?.tests ?? modelTests;
+    if (!testsForCategory.length) {
+      const message = "Import failed: no model tests are available in this category.";
+      setQuizMsg(message);
+      showResultsImportResultStatus("mock", message, "error");
       return;
     }
+    const testByVersion = new Map((testsForCategory ?? []).map((test) => [test.version, test]));
+    const importSessions = (testSessions ?? [])
+      .filter((session) => testByVersion.has(session.problem_set_id))
+      .filter((session) => !isRetakeSessionTitle(session.title))
+      .map((session) => ({
+        ...session,
+        linkedTest: testByVersion.get(session.problem_set_id) ?? null,
+      }));
     setQuizMsg("Importing CSV...");
+    showResultsImportLoadingStatus("mock", "Reading uploaded CSV...");
     try {
       const text = await file.text();
       const rows = parseSeparatedRows(text, detectDelimiter(text));
       if (rows.length < 5) {
-        setQuizMsg("Import failed: CSV format is not recognized.");
+        const message = "Import failed: CSV format is not recognized.";
+        setQuizMsg(message);
+        showResultsImportResultStatus("mock", message, "error");
         return;
       }
 
+      const headerRowIndex = rows.findIndex((row) => {
+        const normalized = (row ?? []).map((cell) => normalizeLookupValue(cell));
+        return normalized.includes("no.") && normalized.includes("student name");
+      });
+      if (headerRowIndex < 0 || rows.length < headerRowIndex + 5) {
+        const message = "Import failed: CSV header rows are not recognized.";
+        setQuizMsg(message);
+        showResultsImportResultStatus("mock", message, "error");
+        return;
+      }
+      const titleRowIndex = headerRowIndex;
+      const sectionRowIndex = headerRowIndex + 1;
+      const dateRowIndex = headerRowIndex + 2;
+      const sampleValueRowIndex = headerRowIndex + 3;
+      const dataStartRowIndex = headerRowIndex + 4;
+
       const sessionKeyMap = new Map();
       const uniqueTitleMap = new Map();
-      sessions.forEach((session, index) => {
+      importSessions.forEach((session, index) => {
         const title = String(session.title ?? session.problem_set_id ?? "").trim();
         const dateKey = formatSlashDateShortYear(session.starts_at || session.created_at);
         sessionKeyMap.set(`${normalizeLookupValue(title)}::${dateKey}`, session);
@@ -10597,36 +10893,190 @@ function openDailyRecordModal(record = null, recordDate = "") {
         uniqueTitleMap.get(titleKey).push({ session, index });
       });
 
-      const mappedColumns = [];
-      let currentTitle = "";
-      for (let col = 5; col < Math.max(rows[0]?.length ?? 0, rows[1]?.length ?? 0, rows[2]?.length ?? 0); col += 1) {
-        const titleCell = String(rows[0]?.[col] ?? "").trim();
-        if (titleCell) currentTitle = titleCell;
-        const sectionCell = String(rows[1]?.[col] ?? "").trim();
-        if (sectionCell !== "Total") continue;
-        const dateCell = String(rows[2]?.[col] ?? "").trim();
-        const matchedByKey = sessionKeyMap.get(`${normalizeLookupValue(currentTitle)}::${dateCell}`);
-        const matchedByTitle = uniqueTitleMap.get(normalizeLookupValue(currentTitle)) ?? [];
-        const session = matchedByKey ?? matchedByTitle[0]?.session ?? sessions[mappedColumns.length] ?? null;
-        if (session?.id) {
-          mappedColumns.push({
+      const existingResultTitles = new Set(
+        (modelResultsMatrix.sessions ?? [])
+          .map((session) => String(session?.title ?? session?.problem_set_id ?? "").trim())
+          .filter(Boolean)
+      );
+
+      const csvBlocks = [];
+      let currentBlock = null;
+      const maxHeaderColumns = Math.max(
+        rows[titleRowIndex]?.length ?? 0,
+        rows[sectionRowIndex]?.length ?? 0,
+        rows[dateRowIndex]?.length ?? 0,
+        rows[sampleValueRowIndex]?.length ?? 0
+      );
+      for (let col = 5; col < maxHeaderColumns; col += 1) {
+        const titleCell = String(rows[titleRowIndex]?.[col] ?? "").trim();
+        if (titleCell) {
+          currentBlock = {
+            blockIndex: csvBlocks.length,
+            importTitle: titleCell,
+            importDateCell: String(rows[dateRowIndex]?.[col] ?? "").trim(),
+            importDateIso: parseSlashDateShortYearToIso(rows[dateRowIndex]?.[col]),
+            sections: [],
+            total: null,
+            blockStartColumnIndex: col,
+            session: null,
+            linkedTest: null,
+          };
+          csvBlocks.push(currentBlock);
+        }
+        if (!currentBlock) continue;
+        const sectionCell = String(rows[sectionRowIndex]?.[col] ?? "").trim();
+        if (!sectionCell || sectionCell === "Ranking") continue;
+        if (!currentBlock.importDateCell) {
+          currentBlock.importDateCell = String(rows[dateRowIndex]?.[col] ?? "").trim();
+        }
+        if (!currentBlock.importDateIso) {
+          currentBlock.importDateIso = parseSlashDateShortYearToIso(rows[dateRowIndex]?.[col]);
+        }
+        if (sectionCell === "Total") {
+          currentBlock.total = {
             rateColumnIndex: col,
             scoreColumnIndex: col + 1,
-            session,
-          });
+          };
+          continue;
+        }
+        currentBlock.sections.push({
+          sectionTitle: sectionCell,
+          rateColumnIndex: col,
+          scoreColumnIndex: col + 1,
+        });
+      }
+
+      csvBlocks.forEach((block, blockIndex) => {
+        if (block.total) return;
+        const nextBlockStart = csvBlocks[blockIndex + 1]?.blockStartColumnIndex ?? maxHeaderColumns;
+        let inferredTotal = null;
+        for (let col = block.blockStartColumnIndex; col < nextBlockStart - 1; col += 1) {
+          const percentValue = rows[sampleValueRowIndex]?.[col];
+          const scoreValue = rows[sampleValueRowIndex]?.[col + 1];
+          if (parsePercentCell(percentValue) == null) continue;
+          if (!parseScoreFractionCell(scoreValue)) continue;
+          inferredTotal = {
+            rateColumnIndex: col,
+            scoreColumnIndex: col + 1,
+          };
+        }
+        if (inferredTotal) block.total = inferredTotal;
+      });
+
+      const mappedBlocks = csvBlocks.filter((block) => block.total);
+      if (!mappedBlocks.length) {
+        const message = "Import failed: no model result columns were found in the CSV.";
+        setQuizMsg(message);
+        showResultsImportResultStatus("mock", message, "error");
+        return;
+      }
+
+      const duplicateTitles = mappedBlocks
+        .map((block) => String(block.importTitle ?? "").trim())
+        .filter((title, index, list) => title && list.indexOf(title) === index && existingResultTitles.has(title));
+      let selectedBlocks = mappedBlocks;
+
+      if (duplicateTitles.length) {
+        showResultsImportResultStatus("mock", "Duplicate test titles found. Choose how to continue.", "info", "Model Results Import Warning");
+        const importChoice = await promptModelResultsImportConflict(duplicateTitles);
+        if (importChoice === "cancel") {
+          const message = "Import cancelled.";
+          setQuizMsg(message);
+          showResultsImportResultStatus("mock", message, "info", "Model Results Import Cancelled");
+          return;
+        }
+        if (importChoice === "new_only") {
+          selectedBlocks = mappedBlocks.filter((block) => !existingResultTitles.has(String(block.importTitle ?? "").trim()));
+          if (!selectedBlocks.length) {
+            const message = "Import skipped: all CSV test titles already exist in the current results, and only new tests was selected.";
+            setQuizMsg(message);
+            showResultsImportResultStatus("mock", message, "info");
+            return;
+          }
         }
       }
 
-      if (!mappedColumns.length) {
-        setQuizMsg("Import failed: no model result columns matched the current sessions.");
+      showResultsImportLoadingStatus("mock", "Preparing model result sessions...");
+      const unresolvedBlocks = [];
+      selectedBlocks.forEach((block) => {
+        const titleKey = normalizeLookupValue(block.importTitle);
+        const matchedByKey = sessionKeyMap.get(`${titleKey}::${block.importDateCell}`);
+        const matchedByTitle = uniqueTitleMap.get(titleKey) ?? [];
+        const session = matchedByKey ?? matchedByTitle[0]?.session ?? null;
+        if (session?.id) {
+          block.session = session;
+          block.linkedTest = session.linkedTest ?? testByVersion.get(session.problem_set_id) ?? null;
+          return;
+        }
+        const linkedTest = testsForCategory[block.blockIndex] ?? null;
+        if (!linkedTest?.version) {
+          unresolvedBlocks.push(block.importTitle || `Column ${block.blockIndex + 1}`);
+          return;
+        }
+        block.linkedTest = linkedTest;
+      });
+
+      if (unresolvedBlocks.length) {
+        const message = `Import failed: could not assign model tests for ${unresolvedBlocks.length} CSV block${unresolvedBlocks.length === 1 ? "" : "s"}.`;
+        setQuizMsg(message);
+        showResultsImportResultStatus("mock", message, "error");
         return;
       }
+
+      const blocksToCreate = selectedBlocks.filter((block) => !block.session?.id);
+      if (blocksToCreate.length) {
+        const createPayloads = blocksToCreate.map((block) => {
+          const sessionDateIso = block.importDateIso
+            ? new Date(`${block.importDateIso}T00:00:00`).toISOString()
+            : new Date().toISOString();
+          return {
+            school_id: activeSchoolId,
+            problem_set_id: block.linkedTest.version,
+            title: block.importTitle,
+            starts_at: sessionDateIso,
+            ends_at: sessionDateIso,
+            time_limit_min: null,
+            is_published: false,
+            show_answers: false,
+            allow_multiple_attempts: false,
+          };
+        });
+        const { data: createdSessions, error: createError } = await supabase
+          .from("test_sessions")
+          .insert(createPayloads)
+          .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at");
+        if (createError) {
+          const message = `Import failed: ${createError.message}`;
+          setQuizMsg(message);
+          showResultsImportResultStatus("mock", message, "error");
+          return;
+        }
+        createdSessions?.forEach((sessionRow, index) => {
+          const block = blocksToCreate[index];
+          block.session = {
+            retake_source_session_id: null,
+            retake_release_scope: "all",
+            ...sessionRow,
+            linkedTest: block.linkedTest,
+          };
+        });
+      }
+
+      const overwriteSessionIds = Array.from(
+        new Set(
+          selectedBlocks
+            .filter((block) => existingResultTitles.has(String(block.importTitle ?? "").trim()))
+            .map((block) => block.session?.id)
+            .filter(Boolean)
+        )
+      );
 
       const matchStudent = createImportedStudentMatcher(sortedStudents);
       const payloads = [];
       const unmatchedRows = [];
+      showResultsImportLoadingStatus("mock", "Matching students and saving imported results...");
 
-      for (let rowIndex = 4; rowIndex < rows.length; rowIndex += 1) {
+      for (let rowIndex = dataStartRowIndex; rowIndex < rows.length; rowIndex += 1) {
         const row = rows[rowIndex] ?? [];
         if (!rowHasCsvValues(row)) continue;
         const sectionMarker = normalizeLookupValue(row[3]);
@@ -10643,12 +11093,32 @@ function openDailyRecordModal(record = null, recordDate = "") {
           continue;
         }
 
-        mappedColumns.forEach(({ rateColumnIndex, scoreColumnIndex, session }) => {
-          const rate = parsePercentCell(row[rateColumnIndex]);
+        selectedBlocks.forEach(({ session, total: totalColumns, sections: blockSections }) => {
+          const rate = parsePercentCell(row[totalColumns.rateColumnIndex]);
           if (rate == null) return;
-          const score = parseScoreFractionCell(row[scoreColumnIndex]);
+          const score = parseScoreFractionCell(row[totalColumns.scoreColumnIndex]);
           const total = score?.total ?? Math.max(0, Number(session?.linkedTest?.question_count ?? 0));
           const correct = score?.correct ?? (total > 0 ? Math.round(rate * total) : 0);
+          const mainSectionSummary = blockSections
+            .map((section) => {
+              const sectionRate = parsePercentCell(row[section.rateColumnIndex]);
+              const sectionScore = parseScoreFractionCell(row[section.scoreColumnIndex]);
+              if (sectionRate == null && !sectionScore) return null;
+              const sectionTotal = Number(sectionScore?.total ?? 0);
+              const sectionCorrect = Number(
+                sectionScore?.correct
+                ?? (sectionRate != null && sectionTotal > 0 ? Math.round(sectionRate * sectionTotal) : 0)
+              );
+              return {
+                section: section.sectionTitle,
+                correct: Number.isFinite(sectionCorrect) ? sectionCorrect : 0,
+                total: Number.isFinite(sectionTotal) ? sectionTotal : 0,
+                rate: sectionRate != null
+                  ? sectionRate
+                  : (sectionTotal > 0 ? sectionCorrect / sectionTotal : 0),
+              };
+            })
+            .filter(Boolean);
           payloads.push({
             student_id: student.id,
             display_name: student.display_name ?? null,
@@ -10660,7 +11130,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
             score_rate: rate,
             started_at: session.starts_at ?? null,
             ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
-            answers_json: buildImportedSummaryAnswersJson("model_results_csv"),
+            answers_json: buildImportedSummaryAnswersJson("model_results_csv", {
+              main_section_summary: mainSectionSummary,
+            }),
             tab_left_count: 0,
           });
         });
@@ -10668,23 +11140,40 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
       const dedupedPayloads = dedupeImportedAttemptPayloads(payloads);
       if (!dedupedPayloads.length) {
-        setQuizMsg("Import failed: no model result rows were recognized.");
+        const message = "Import failed: no model result rows were recognized.";
+        setQuizMsg(message);
+        showResultsImportResultStatus("mock", message, "error");
         return;
       }
 
-      const result = await replaceImportedSummaryAttempts(dedupedPayloads);
+      const result = await replaceImportedSummaryAttempts(dedupedPayloads, {
+        overwriteSessionIds,
+      });
       if (!result.ok) {
-        setQuizMsg(`Import failed: ${result.message}`);
+        const message = `Import failed: ${result.message}`;
+        setQuizMsg(message);
+        showResultsImportResultStatus("mock", message, "error");
         return;
       }
 
+      await fetchTestSessions();
       await runSearch("mock");
-      setQuizMsg(
+      const skippedExistingCount = duplicateTitles.length && !overwriteSessionIds.length
+        ? duplicateTitles.length
+        : 0;
+      const createdSessionCount = blocksToCreate.length;
+      const message =
         `Imported ${result.inserted} model result entr${result.inserted === 1 ? "y" : "ies"}`
-        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".")
-      );
+        + (createdSessionCount ? `, created ${createdSessionCount} new result session${createdSessionCount === 1 ? "" : "s"}` : "")
+        + (overwriteSessionIds.length ? `, replaced ${overwriteSessionIds.length} existing test result set${overwriteSessionIds.length === 1 ? "" : "s"}` : "")
+        + (skippedExistingCount ? `, skipped ${skippedExistingCount} existing test title${skippedExistingCount === 1 ? "" : "s"}` : "")
+        + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".");
+      setQuizMsg(message);
+      showResultsImportResultStatus("mock", message, "success");
     } catch (error) {
-      setQuizMsg(`Import failed: ${error instanceof Error ? error.message : error}`);
+      const message = `Import failed: ${error instanceof Error ? error.message : error}`;
+      setQuizMsg(message);
+      showResultsImportResultStatus("mock", message, "error");
     } finally {
       if (resultsImportInputRef.current) resultsImportInputRef.current.value = "";
     }
@@ -10954,6 +11443,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
   function renderSessionDetailView() {
     if (!selectedSessionDetail) return null;
     const isMockSessionDetail = sessionDetail.type === "mock";
+    const isImportedModelSummarySession = sessionDetailUsesImportedModelSummary;
     const analysisPopupQuestions = Array.isArray(sessionDetailAnalysisPopup.questions)
       ? sessionDetailAnalysisPopup.questions
       : [];
@@ -10965,12 +11455,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
         return String(a.qid).localeCompare(String(b.qid));
       })
       .slice(0, 5);
-    const sessionDetailTabs = [
-      ["analysis", "Result Analysis"],
-      ["questions", "Questions"],
-      ["attempts", "Attempts"],
-      ["studentRanking", "Student Ranking"],
-    ];
+    const sessionDetailTabs = isImportedModelSummarySession
+      ? [
+        ["analysis", "Result Analysis"],
+        ["studentRanking", "Student Ranking"],
+      ]
+      : [
+        ["analysis", "Result Analysis"],
+        ["questions", "Questions"],
+        ["attempts", "Attempts"],
+        ["studentRanking", "Student Ranking"],
+      ];
     const analysisRadarData = sessionDetailMainSectionAverages.map((row) => ({
       label: row.section,
       value: row.averageRate ?? 0,
@@ -11142,7 +11637,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "studentRanking" ? (
           <div className="session-detail-section">
             <div className="admin-table-wrap">
-              <table className="admin-table session-student-ranking-table" style={{ minWidth: Math.max(900, 420 + sessionDetailSectionAverages.length * 120) }}>
+              <table className="admin-table session-student-ranking-table" style={{ minWidth: Math.max(900, 420 + sessionDetailRankingSections.length * 120) }}>
                 <thead>
                   <tr>
                     <th>Rank</th>
@@ -11150,7 +11645,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     <th>Student<br />No.</th>
                     <th>Total Score</th>
                     <th>Total %</th>
-                    {sessionDetailSectionAverages.map((section) => (
+                    {sessionDetailRankingSections.map((section) => (
                       <th key={`student-ranking-col-${section.section}`}>
                         <span className="session-ranking-section-header">
                           {getSectionLabelLines(section.section).map((line, index) => (
@@ -11169,7 +11664,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       <td>{row.student_code || "—"}</td>
                       <td>{row.totalCorrect}/{row.totalQuestions}</td>
                       <td>{(row.totalRate * 100).toFixed(1)}%</td>
-                      {sessionDetailSectionAverages.map((section) => (
+                      {sessionDetailRankingSections.map((section) => (
                         <td key={`student-ranking-cell-${row.student_id}-${section.section}`}>
                           {((row.sectionRates?.[section.section] ?? 0) * 100).toFixed(1)}%
                         </td>
@@ -11178,7 +11673,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   ))}
                   {!sessionDetailStudentRankingRows.length ? (
                     <tr>
-                      <td colSpan={Math.max(5, 5 + sessionDetailSectionAverages.length)}>No ranking data available.</td>
+                      <td colSpan={Math.max(5, 5 + sessionDetailRankingSections.length)}>No ranking data available.</td>
                     </tr>
                   ) : null}
                 </tbody>
@@ -11281,7 +11776,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </div>
               </div>
 
-              {isMockSessionDetail && sessionDetailNestedSectionAverages.length ? (
+              {isMockSessionDetail && (isImportedModelSummarySession || sessionDetailNestedSectionAverages.length) ? (
                 <div className="admin-panel session-analysis-performance-panel">
                   <div className="admin-title" style={{ fontSize: 18 }}>Average Section Performance</div>
                   <div className="session-analysis-summary-grid">
@@ -11293,176 +11788,215 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       )}
                     </div>
                     <div className="admin-table-wrap">
-                      <table className="admin-table session-section-average-table" style={{ minWidth: 640 }}>
-                        <colgroup>
-                          <col className="session-section-average-col-section" />
-                          <col className="session-section-average-col-subsection" />
-                          <col className="session-section-average-col-total" />
-                          <col className="session-section-average-col-correct" />
-                          <col className="session-section-average-col-rate" />
-                        </colgroup>
-                        <thead>
-                          <tr>
-                            <th className="session-section-average-head-section">Section</th>
-                            <th className="session-section-average-head-subsection">Sub-section</th>
-                            <th className="session-section-average-head-total">Total</th>
-                            <th className="session-section-average-head-correct">Average</th>
-                            <th className="session-section-average-head-rate">Average %</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sessionDetailNestedSectionAverages.map((group) => {
-                            const rowSpan = 1 + group.subSections.length;
-                            const isGroupBelowPass = group.averageRate < sessionDetailPassRate;
-                            return (
-                              <Fragment key={`session-average-group-${group.mainSection}`}>
-                                <tr className="attempt-overview-total-row session-section-average-total-row">
-                                  <td rowSpan={rowSpan} className="attempt-overview-area-cell session-section-average-cell-section">
-                                    <button
-                                      type="button"
-                                      className="session-section-average-trigger session-section-average-section-trigger"
-                                      onClick={() => openSessionDetailAnalysisPopupFor("section", group.mainSection)}
-                                    >
-                                      <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
-                                    </button>
+                      {isImportedModelSummarySession ? (
+                        <table className="admin-table session-section-average-table" style={{ minWidth: 520 }}>
+                          <thead>
+                            <tr>
+                              <th>Section</th>
+                              <th>Total</th>
+                              <th>Average</th>
+                              <th>Average %</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sessionDetailMainSectionAverages.map((row) => {
+                              const isBelowPass = row.averageRate < sessionDetailPassRate;
+                              return (
+                                <tr key={`session-average-main-${row.section}`}>
+                                  <td><span className="session-ranking-section-header">{renderTwoLineHeader(row.section)}</span></td>
+                                  <td>{row.total}</td>
+                                  <td className={isBelowPass ? "attempt-score-detail-below-pass" : ""}>
+                                    {row.averageCorrect.toFixed(2)}
                                   </td>
-                                  <td className="session-section-average-cell-subsection">
-                                    <button
-                                      type="button"
-                                      className="session-section-average-trigger session-section-average-total-trigger"
-                                      onClick={() => openSessionDetailAnalysisPopupFor("section", group.mainSection)}
-                                    >
-                                      <span className="attempt-score-detail-total-label">Total</span>
-                                    </button>
-                                  </td>
-                                  <td className="session-section-average-cell-total">{group.total}</td>
-                                  <td className={`session-section-average-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
-                                    {group.averageCorrect.toFixed(2)}
-                                  </td>
-                                  <td className={`session-section-average-cell-rate ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
-                                    {(group.averageRate * 100).toFixed(1)}%
+                                  <td className={isBelowPass ? "attempt-score-detail-below-pass" : ""}>
+                                    {(row.averageRate * 100).toFixed(1)}%
                                   </td>
                                 </tr>
-                                {group.subSections.map((subSection) => {
-                                  const isSubSectionBelowPass = subSection.averageRate < sessionDetailPassRate;
-                                  return (
-                                    <tr
-                                      key={`session-average-sub-${group.mainSection}-${subSection.section}`}
-                                      className="session-section-average-subsection-row"
-                                      onClick={() => openSessionDetailAnalysisPopupFor("subSection", subSection.section)}
-                                      onKeyDown={(event) => handleSessionDetailAnalysisRowKeyDown(event, "subSection", subSection.section)}
-                                      tabIndex={0}
-                                      role="button"
-                                    >
-                                      <td className="session-section-average-cell-subsection">{subSection.section}</td>
-                                      <td className="session-section-average-cell-total">{subSection.total}</td>
-                                      <td className={`session-section-average-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
-                                        {subSection.averageCorrect.toFixed(2)}
-                                      </td>
-                                      <td className={`session-section-average-cell-rate ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
-                                        {(subSection.averageRate * 100).toFixed(1)}%
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </Fragment>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                              );
+                            })}
+                            {!sessionDetailMainSectionAverages.length ? (
+                              <tr>
+                                <td colSpan={4}>No section average data yet.</td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <table className="admin-table session-section-average-table" style={{ minWidth: 640 }}>
+                          <colgroup>
+                            <col className="session-section-average-col-section" />
+                            <col className="session-section-average-col-subsection" />
+                            <col className="session-section-average-col-total" />
+                            <col className="session-section-average-col-correct" />
+                            <col className="session-section-average-col-rate" />
+                          </colgroup>
+                          <thead>
+                            <tr>
+                              <th className="session-section-average-head-section">Section</th>
+                              <th className="session-section-average-head-subsection">Sub-section</th>
+                              <th className="session-section-average-head-total">Total</th>
+                              <th className="session-section-average-head-correct">Average</th>
+                              <th className="session-section-average-head-rate">Average %</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sessionDetailNestedSectionAverages.map((group) => {
+                              const rowSpan = 1 + group.subSections.length;
+                              const isGroupBelowPass = group.averageRate < sessionDetailPassRate;
+                              return (
+                                <Fragment key={`session-average-group-${group.mainSection}`}>
+                                  <tr className="attempt-overview-total-row session-section-average-total-row">
+                                    <td rowSpan={rowSpan} className="attempt-overview-area-cell session-section-average-cell-section">
+                                      <button
+                                        type="button"
+                                        className="session-section-average-trigger session-section-average-section-trigger"
+                                        onClick={() => openSessionDetailAnalysisPopupFor("section", group.mainSection)}
+                                      >
+                                        <span className="session-ranking-section-header">{renderTwoLineHeader(group.mainSection)}</span>
+                                      </button>
+                                    </td>
+                                    <td className="session-section-average-cell-subsection">
+                                      <button
+                                        type="button"
+                                        className="session-section-average-trigger session-section-average-total-trigger"
+                                        onClick={() => openSessionDetailAnalysisPopupFor("section", group.mainSection)}
+                                      >
+                                        <span className="attempt-score-detail-total-label">Total</span>
+                                      </button>
+                                    </td>
+                                    <td className="session-section-average-cell-total">{group.total}</td>
+                                    <td className={`session-section-average-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
+                                      {group.averageCorrect.toFixed(2)}
+                                    </td>
+                                    <td className={`session-section-average-cell-rate ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
+                                      {(group.averageRate * 100).toFixed(1)}%
+                                    </td>
+                                  </tr>
+                                  {group.subSections.map((subSection) => {
+                                    const isSubSectionBelowPass = subSection.averageRate < sessionDetailPassRate;
+                                    return (
+                                      <tr
+                                        key={`session-average-sub-${group.mainSection}-${subSection.section}`}
+                                        className="session-section-average-subsection-row"
+                                        onClick={() => openSessionDetailAnalysisPopupFor("subSection", subSection.section)}
+                                        onKeyDown={(event) => handleSessionDetailAnalysisRowKeyDown(event, "subSection", subSection.section)}
+                                        tabIndex={0}
+                                        role="button"
+                                      >
+                                        <td className="session-section-average-cell-subsection">{subSection.section}</td>
+                                        <td className="session-section-average-cell-total">{subSection.total}</td>
+                                        <td className={`session-section-average-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
+                                          {subSection.averageCorrect.toFixed(2)}
+                                        </td>
+                                        <td className={`session-section-average-cell-rate ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>
+                                          {(subSection.averageRate * 100).toFixed(1)}%
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </Fragment>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
                     </div>
                   </div>
                 </div>
               ) : null}
             </div>
 
-            <div className="session-detail-analysis-grid">
-              <div className="admin-panel">
-                <div className="session-analysis-heading">Top 5 Best Questions</div>
-                <div className="session-analysis-list">
-                  {bestQuestions.map((row) => (
-                    <div key={`best-${row.qid}`} className="session-analysis-item">
-                      <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
-                      <div>
-                        <div className="session-analysis-title">{row.qid}</div>
-                        <div className="admin-help">{row.prompt}</div>
-                      </div>
-                    </div>
-                  ))}
-                  {!bestQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
-                </div>
-              </div>
-
-              <div className="admin-panel">
-                <div className="session-analysis-heading">Top 5 Worst Questions</div>
-                <div className="session-analysis-list">
-                  {worstQuestions.map((row) => (
-                    <div key={`worst-${row.qid}`} className="session-analysis-item">
-                      <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
-                      <div>
-                        <div className="session-analysis-title">{row.qid}</div>
-                        <div className="admin-help">{row.prompt}</div>
-                      </div>
-                    </div>
-                  ))}
-                  {!worstQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 14 }}>
-              <button
-                className="link-btn"
-                type="button"
-                onClick={() => setSessionDetailShowAllAnalysis((current) => !current)}
-              >
-                {sessionDetailShowAllAnalysis ? "Hide all v" : "View all ->"}
-              </button>
-            </div>
-
-            {sessionDetailShowAllAnalysis ? (
-              <div className="admin-table-wrap" style={{ marginTop: 12 }}>
-                <table className="admin-table session-analysis-table" style={{ minWidth: 1100 }}>
-                  <thead>
-                    <tr>
-                      <th>Question</th>
-                      <th>Accuracy</th>
-                      {sessionDetailQuestionStudents.map((student) => (
-                        <th key={`analysis-student-${student.id}`}>
-                          <div>{student.display_name}</div>
-                          {student.student_code ? (
-                            <div className="session-analysis-student-code">{student.student_code}</div>
-                          ) : null}
-                        </th>
+            {!isImportedModelSummarySession ? (
+              <>
+                <div className="session-detail-analysis-grid">
+                  <div className="admin-panel">
+                    <div className="session-analysis-heading">Top 5 Best Questions</div>
+                    <div className="session-analysis-list">
+                      {bestQuestions.map((row) => (
+                        <div key={`best-${row.qid}`} className="session-analysis-item">
+                          <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
+                          <div>
+                            <div className="session-analysis-title">{row.qid}</div>
+                            <div className="admin-help">{row.prompt}</div>
+                          </div>
+                        </div>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sessionDetailQuestionAnalysis.map((row) => (
-                      <tr key={`analysis-row-${row.qid}`}>
-                        <td>
-                          <div style={{ fontWeight: 800 }}>{row.qid}</div>
-                          <div className="admin-help">{row.prompt}</div>
-                        </td>
-                        <td>{(row.rate * 100).toFixed(1)}%</td>
-                        {sessionDetailQuestionStudents.map((student) => {
-                          const status = row.byStudent[student.id];
-                          return (
-                            <td key={`analysis-cell-${row.qid}-${student.id}`} className="session-analysis-cell">
-                              {status == null ? "—" : status ? "○" : "×"}
+                      {!bestQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
+                    </div>
+                  </div>
+
+                  <div className="admin-panel">
+                    <div className="session-analysis-heading">Top 5 Worst Questions</div>
+                    <div className="session-analysis-list">
+                      {worstQuestions.map((row) => (
+                        <div key={`worst-${row.qid}`} className="session-analysis-item">
+                          <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
+                          <div>
+                            <div className="session-analysis-title">{row.qid}</div>
+                            <div className="admin-help">{row.prompt}</div>
+                          </div>
+                        </div>
+                      ))}
+                      {!worstQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
+                    </div>
+                  </div>
+                </div>
+ 
+                <div style={{ marginTop: 14 }}>
+                  <button
+                    className="link-btn"
+                    type="button"
+                    onClick={() => setSessionDetailShowAllAnalysis((current) => !current)}
+                  >
+                    {sessionDetailShowAllAnalysis ? "Hide all v" : "View all ->"}
+                  </button>
+                </div>
+
+                {sessionDetailShowAllAnalysis ? (
+                  <div className="admin-table-wrap" style={{ marginTop: 12 }}>
+                    <table className="admin-table session-analysis-table" style={{ minWidth: 1100 }}>
+                      <thead>
+                        <tr>
+                          <th>Question</th>
+                          <th>Accuracy</th>
+                          {sessionDetailQuestionStudents.map((student) => (
+                            <th key={`analysis-student-${student.id}`}>
+                              <div>{student.display_name}</div>
+                              {student.student_code ? (
+                                <div className="session-analysis-student-code">{student.student_code}</div>
+                              ) : null}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sessionDetailQuestionAnalysis.map((row) => (
+                          <tr key={`analysis-row-${row.qid}`}>
+                            <td>
+                              <div style={{ fontWeight: 800 }}>{row.qid}</div>
+                              <div className="admin-help">{row.prompt}</div>
                             </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                    {!sessionDetailQuestionAnalysis.length ? (
-                      <tr>
-                        <td colSpan={Math.max(2, sessionDetailQuestionStudents.length + 2)}>No question analysis available.</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
+                            <td>{(row.rate * 100).toFixed(1)}%</td>
+                            {sessionDetailQuestionStudents.map((student) => {
+                              const status = row.byStudent[student.id];
+                              return (
+                                <td key={`analysis-cell-${row.qid}-${student.id}`} className="session-analysis-cell">
+                                  {status == null ? "—" : status ? "○" : "×"}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                        {!sessionDetailQuestionAnalysis.length ? (
+                          <tr>
+                            <td colSpan={Math.max(2, sessionDetailQuestionStudents.length + 2)}>No question analysis available.</td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </>
             ) : null}
           </div>
         ) : null}
@@ -14524,7 +15058,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <div className="admin-title">Set Upload (CSV)</div>
-                  <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => setModelUploadOpen(true)}>
+                  <button
+                    className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn"
+                    onClick={() => openModelUploadCategoryPicker({ launchUploadModal: true })}
+                  >
                     <svg viewBox="0 0 20 20" aria-hidden="true">
                       <path
                         d="M10 13V4.5"
@@ -14714,6 +15251,63 @@ function openDailyRecordModal(record = null, recordDate = "") {
           {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
           {groupedModelUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
+          {modelUploadCategoryOpen ? (
+            <div className="admin-modal-overlay" onClick={closeModelUploadCategoryPicker}>
+              <div className="admin-modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Choose Model Category</div>
+                  <button className="admin-modal-close" onClick={closeModelUploadCategoryPicker} aria-label="Close">
+                    &times;
+                  </button>
+                </div>
+                <div className="admin-help" style={{ marginTop: 8 }}>
+                  The uploaded CSV will be registered under this category.
+                </div>
+                {modelUploadCategoryMsg ? (
+                  <div className="admin-msg" style={{ marginTop: 10 }}>{modelUploadCategoryMsg}</div>
+                ) : null}
+                <div className="admin-form" style={{ marginTop: 12 }}>
+                  <div className="field">
+                    <label>Category</label>
+                    <select
+                      value={assetCategorySelect}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setAssetCategorySelect(next);
+                        if (next !== "__custom__") {
+                          setAssetForm((current) => ({ ...current, category: next }));
+                        }
+                      }}
+                    >
+                      {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((category) => (
+                        <option key={`asset-category-picker-${category.name}`} value={category.name}>
+                          {category.name}
+                        </option>
+                      ))}
+                      <option value="__custom__">Custom...</option>
+                    </select>
+                    {assetCategorySelect === "__custom__" ? (
+                      <input
+                        value={assetForm.category}
+                        onChange={(e) => setAssetForm((current) => ({ ...current, category: e.target.value }))}
+                        placeholder="Book Review"
+                        style={{ marginTop: 6 }}
+                      />
+                    ) : null}
+                  </div>
+                </div>
+                <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button className="btn" type="button" onClick={closeModelUploadCategoryPicker}>
+                    Cancel
+                  </button>
+                  <button className="btn btn-primary" type="button" onClick={confirmModelUploadCategory}>
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {modelUploadOpen ? (
             <div className="admin-modal-overlay" onClick={() => setModelUploadOpen(false)}>
               <div className="admin-modal upload-question-modal" onClick={(e) => e.stopPropagation()}>
@@ -14741,29 +15335,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </div>
                   <div className="field">
                     <label>Category</label>
-                    <select
-                      value={assetCategorySelect}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setAssetCategorySelect(next);
-                        if (next !== "__custom__") {
-                          setAssetForm((s) => ({ ...s, category: next }));
-                        }
-                      }}
-                    >
-                      {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((c) => (
-                        <option key={`asset-cat-${c.name}`} value={c.name}>{c.name}</option>
-                      ))}
-                      <option value="__custom__">Custom...</option>
-                    </select>
-                    {assetCategorySelect === "__custom__" ? (
-                      <input
-                        value={assetForm.category}
-                        onChange={(e) => setAssetForm((s) => ({ ...s, category: e.target.value }))}
-                        placeholder="Book Review"
-                        style={{ marginTop: 6 }}
-                      />
-                    ) : null}
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <input value={assetForm.category} readOnly />
+                      <button className="btn" type="button" onClick={() => openModelUploadCategoryPicker()}>
+                        Change
+                      </button>
+                    </div>
                   </div>
                   <div className="field">
                     <label>CSV File (required)</label>
@@ -17015,6 +17592,49 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ), document.body) : null}
 
+        {resultsImportStatus?.open && typeof document !== "undefined" ? createPortal((
+          <div
+            className="admin-modal-overlay"
+            onClick={() => {
+              if (!resultsImportStatus.loading) closeResultsImportStatus();
+            }}
+          >
+            <div className="admin-modal attendance-import-status-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">{resultsImportStatus.title}</div>
+                {!resultsImportStatus.loading ? (
+                  <button
+                    className="admin-modal-close"
+                    aria-label="Close"
+                    onClick={closeResultsImportStatus}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+
+              <div className={`attendance-import-status-body tone-${resultsImportStatus.tone ?? "info"}`}>
+                {resultsImportStatus.loading ? (
+                  <div className="attendance-import-status-loading">
+                    <span className="attendance-import-status-spinner" aria-hidden="true" />
+                    <span>{resultsImportStatus.message}</span>
+                  </div>
+                ) : (
+                  <div className="attendance-import-status-message">{resultsImportStatus.message}</div>
+                )}
+              </div>
+
+              {!resultsImportStatus.loading ? (
+                <div className="attendance-import-status-actions">
+                  <button className="btn" type="button" onClick={() => resultsImportInputRef.current?.click()}>
+                    Select CSV File
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ), document.body) : null}
+
         {attendanceImportConflict && typeof document !== "undefined" ? createPortal((
           <div
             className="admin-modal-overlay"
@@ -17077,6 +17697,76 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   className="btn btn-danger"
                   type="button"
                   onClick={() => resolveAttendanceImportConflict("cancel")}
+                >
+                  Cancel Import
+                </button>
+              </div>
+            </div>
+          </div>
+        ), document.body) : null}
+
+        {modelResultsImportConflict && typeof document !== "undefined" ? createPortal((
+          <div
+            className="admin-modal-overlay"
+            onClick={() => resolveModelResultsImportConflict("cancel")}
+          >
+            <div className="admin-modal attendance-import-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">Model Results Import Warning</div>
+                <button
+                  className="admin-modal-close"
+                  aria-label="Close"
+                  onClick={() => resolveModelResultsImportConflict("cancel")}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="attendance-import-modal-body">
+                <div className="admin-help">
+                  This CSV includes {modelResultsImportConflict.testTitles.length} test title{modelResultsImportConflict.testTitles.length === 1 ? "" : "s"} that already exist in the current results.
+                </div>
+                <div className="attendance-import-modal-note">
+                  Choose how to handle those same-name tests:
+                </div>
+                <div className="attendance-import-modal-option-list">
+                  <div><strong>Overwrite and Import All</strong>: replace the existing results for those tests with the CSV data. Existing detailed attempts for those sessions will be deleted.</div>
+                  <div><strong>Only Import New Tests</strong>: skip the same-name tests and import only CSV tests whose titles are not already in the current results.</div>
+                  <div><strong>Cancel Import</strong>: stop this upload without changing anything.</div>
+                </div>
+                <div className="attendance-import-modal-date-list">
+                  {modelResultsImportConflict.previewTitles.map((title) => (
+                    <span key={`model-results-import-conflict-${title}`} className="attendance-import-modal-date-pill">
+                      {title}
+                    </span>
+                  ))}
+                  {modelResultsImportConflict.testTitles.length > modelResultsImportConflict.previewTitles.length ? (
+                    <span className="attendance-import-modal-more">
+                      +{modelResultsImportConflict.testTitles.length - modelResultsImportConflict.previewTitles.length} more
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="attendance-import-modal-actions">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => resolveModelResultsImportConflict("overwrite")}
+                >
+                  Overwrite and Import All
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => resolveModelResultsImportConflict("new_only")}
+                >
+                  Only Import New Tests
+                </button>
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  onClick={() => resolveModelResultsImportConflict("cancel")}
                 >
                   Cancel Import
                 </button>
@@ -17270,7 +17960,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <button
                     className="btn results-page-action-btn"
                     type="button"
-                    onClick={() => resultsImportInputRef.current?.click()}
+                    onClick={() => openResultsImportStatus(resultContext.type)}
                   >
                     <span className="results-page-action-icon" aria-hidden="true">↑</span>
                     <span>Import CSV</span>
@@ -17282,7 +17972,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     style={{ display: "none" }}
                     onChange={(event) => {
                       const file = event.target.files?.[0] ?? null;
-                      if (resultContext.type === "daily") {
+                      const importType = resultsImportStatus?.type || resultContext.type;
+                      if (importType === "daily") {
                         importDailyResultsGoogleSheetsCsv(file);
                         return;
                       }
@@ -17381,7 +18072,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                         ) : null}
                                       </>
                                     );
-                                    if (!attemptHasDetailData(attempt)) {
+                                    if (!attemptCanOpenDetail(attempt)) {
                                       return (
                                         <div
                                           key={`daily-cell-${row.student.id}-${idx}-${attempt.id || attemptIdx}`}
@@ -17714,7 +18405,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
             const attemptTitle = getAttemptTitle(selectedAttempt) || selectedAttempt.test_version || "";
             const tabLeftCount = getTabLeftCount(selectedAttempt);
             const selectedAttemptRankInfo = studentAttemptRanks[selectedAttempt.id] ?? null;
-            const showRankingMainSectionsOnly = attemptDetailSource === "sessionRanking";
+            const showSummaryOnly = selectedAttemptUsesImportedSummary;
+            const showRankingMainSectionsOnly = attemptDetailSource === "sessionRanking" || selectedAttemptUsesImportedModelSummary;
             const radarData = selectedAttemptMainSectionSummary.map((row) => ({
               label: row.section,
               value: row.total ? row.correct / row.total : 0,
@@ -17826,13 +18518,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     >
                       Overview
                     </button>
-                    <button
-                      className={`admin-top-tab ${attemptDetailTab === "questions" ? "active" : ""}`}
-                      type="button"
-                      onClick={() => setAttemptDetailTab("questions")}
-                    >
-                      All Questions
-                    </button>
+                    {!showSummaryOnly ? (
+                      <button
+                        className={`admin-top-tab ${attemptDetailTab === "questions" ? "active" : ""}`}
+                        type="button"
+                        onClick={() => setAttemptDetailTab("questions")}
+                      >
+                        All Questions
+                      </button>
+                    ) : null}
                   </div>
 
                   {attemptDetailTab === "overview" ? (
@@ -17940,38 +18634,44 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               </table>
                             </div>
                           </div>
-                          {!showRankingMainSectionsOnly ? (
+                          {!showRankingMainSectionsOnly && !showSummaryOnly ? (
                             <div className="admin-help">
                               Main section totals are shown with their sub-section breakdown underneath.
                             </div>
                           ) : null}
                         </>
                       ) : (
-                        <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                          <table className="admin-table" style={{ minWidth: 520 }}>
-                            <thead>
-                              <tr>
-                                <th>Section</th>
-                                <th>Correct</th>
-                                <th>Total</th>
-                                <th>Rate</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {selectedAttemptSectionSummary.map((section) => (
-                                <tr key={`attempt-overview-${section.section}`}>
-                                  <td>{section.section}</td>
-                                  <td>{section.correct}</td>
-                                  <td>{section.total}</td>
-                                  <td>{(section.rate * 100).toFixed(1)}%</td>
+                        selectedAttemptUsesImportedSummary ? (
+                          <div className="admin-help" style={{ marginTop: 10 }}>
+                            Imported summary results do not include question-level detail.
+                          </div>
+                        ) : (
+                          <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                            <table className="admin-table" style={{ minWidth: 520 }}>
+                              <thead>
+                                <tr>
+                                  <th>Section</th>
+                                  <th>Correct</th>
+                                  <th>Total</th>
+                                  <th>Rate</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                              </thead>
+                              <tbody>
+                                {selectedAttemptSectionSummary.map((section) => (
+                                  <tr key={`attempt-overview-${section.section}`}>
+                                    <td>{section.section}</td>
+                                    <td>{section.correct}</td>
+                                    <td>{section.total}</td>
+                                    <td>{(section.rate * 100).toFixed(1)}%</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )
                       )}
                     </div>
-                  ) : (
+                  ) : !showSummaryOnly ? (
                     <div className="attempt-detail-pane">
                       <div className="student-detail-tab-row" style={{ marginBottom: 2 }}>
                         <label className="attempt-detail-toggle">
@@ -18089,7 +18789,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         </div>
                       )}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             );
