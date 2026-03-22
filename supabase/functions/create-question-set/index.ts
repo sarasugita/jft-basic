@@ -43,111 +43,123 @@ serve(async (req) => {
   }
   if (!legacySchoolId) return bad("No active school found for legacy test sync");
 
-  const { data: existingSet, error: existingSetError } = await context.adminClient
-    .from("question_sets")
-    .select("id, title, test_type, version_label")
-    .eq("title", parsed.metadata.title)
-    .eq("test_type", parsed.metadata.test_type)
-    .limit(1)
-    .maybeSingle();
-  if (existingSetError) return bad(existingSetError.message);
-  if (existingSet) {
-    return bad("That SetID already exists for this test type. Use Upload on the existing set to add a new version.", {
-      existing_question_set_id: existingSet.id,
-      existing_version_label: existingSet.version_label,
-    });
-  }
-
-  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, parsed.metadata.test_type);
+  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, {
+    testType: parsed.metadata.test_type,
+  });
   if (!validation.valid) {
     return bad("Validation failed", { validation });
   }
 
-  const { data: inserted, error: insertError } = await context.adminClient
+  const requestedSetIds = validation.question_sets.map((group) => group.set_id);
+  const { data: existingSet, error: existingSetError } = await context.adminClient
     .from("question_sets")
-    .insert({
-      title: parsed.metadata.title,
-      description: parsed.metadata.description,
-      test_type: parsed.metadata.test_type,
-      version: 1,
-      version_label: parsed.metadata.version_label,
-      status: parsed.metadata.status,
-      visibility_scope: parsed.metadata.visibility_scope,
-      created_by: context.callerUserId,
-    })
-    .select("id, library_key, version, version_label")
-    .single();
+    .select("id, title, test_type, version_label")
+    .eq("test_type", parsed.metadata.test_type)
+    .in("title", requestedSetIds);
+  if (existingSetError) return bad(existingSetError.message);
 
-  if (insertError || !inserted) {
-    return bad(insertError?.message ?? "Failed to create question set");
+  const duplicateSets = (existingSet ?? []).filter((item) => requestedSetIds.includes(item.title));
+  if (duplicateSets.length) {
+    return bad("One or more SetIDs already exist for this test type. Use Upload on the existing set to add a new version.", {
+      existing_set_ids: duplicateSets.map((item) => item.title),
+    });
   }
 
+  const createdSetIds: string[] = [];
+  const createdQuestionSets: Array<{ id: string; library_key: string; version: number; version_label: string; title: string }> = [];
+
   try {
-    const uploadedAssets = await uploadAssets(
-      context.adminClient,
-      inserted.library_key,
-      inserted.version_label,
-      parsed.assetFiles,
-    );
+    for (const questionSetGroup of validation.question_sets) {
+      const { data: inserted, error: insertError } = await context.adminClient
+        .from("question_sets")
+        .insert({
+          title: questionSetGroup.set_id,
+          description: parsed.metadata.description,
+          test_type: parsed.metadata.test_type,
+          version: 1,
+          version_label: parsed.metadata.version_label,
+          status: parsed.metadata.status,
+          visibility_scope: parsed.metadata.visibility_scope,
+          created_by: context.callerUserId,
+        })
+        .select("id, library_key, version, version_label, title")
+        .single();
 
-    const questionRows = validation.questions.map((question) => ({
-      question_set_id: inserted.id,
-      qid: question.qid,
-      question_text: question.question_text,
-      question_type: question.question_type,
-      correct_answer: question.correct_answer,
-      options: question.options,
-      media_type: question.media_type,
-      media_path: question.media_file ? uploadedAssets.get(question.media_file) ?? null : null,
-      media_url: question.media_file ? uploadedAssets.get(question.media_file) ?? null : null,
-      order_index: question.order_index,
-      metadata: question.metadata,
-    }));
+      if (insertError || !inserted) {
+        throw new Error(insertError?.message ?? `Failed to create question set "${questionSetGroup.set_id}"`);
+      }
+      createdSetIds.push(inserted.id);
 
-    const { error: questionError } = await context.adminClient
-      .from("question_set_questions")
-      .insert(questionRows);
-    if (questionError) throw new Error(questionError.message);
+      const uploadedAssets = await uploadAssets(
+        context.adminClient,
+        inserted.library_key,
+        inserted.version_label,
+        parsed.assetFiles,
+      );
 
-    await replaceVisibility(
-      context.adminClient,
-      inserted.id,
-      parsed.metadata.visibility_scope === "restricted" ? parsed.metadata.school_ids : [],
-    );
+      const questionRows = questionSetGroup.questions.map((question) => ({
+        question_set_id: inserted.id,
+        qid: question.qid,
+        question_text: question.question_text,
+        question_type: question.question_type,
+        correct_answer: question.correct_answer,
+        options: question.options,
+        media_type: question.media_type,
+        media_path: question.media_file ? uploadedAssets.get(question.media_file) ?? null : null,
+        media_url: question.media_file ? uploadedAssets.get(question.media_file) ?? null : null,
+        order_index: question.order_index,
+        metadata: question.metadata,
+      }));
 
-    await syncLegacyTestCatalog(context.adminClient, {
-      setId: parsed.metadata.title,
-      testType: parsed.metadata.test_type,
-      category: parsed.metadata.category,
-      schoolId: legacySchoolId,
-      questions: validation.questions,
-      uploadedAssets,
-    });
+      const { error: questionError } = await context.adminClient
+        .from("question_set_questions")
+        .insert(questionRows);
+      if (questionError) throw new Error(questionError.message);
 
-    await logAuditEvent(context.adminClient, context, {
-      actionType: "upload",
-      entityType: "question_set",
-      entityId: inserted.id,
-      metadata: {
-        title: parsed.metadata.title,
+      await replaceVisibility(
+        context.adminClient,
+        inserted.id,
+        parsed.metadata.visibility_scope === "restricted" ? parsed.metadata.school_ids : [],
+      );
+
+      await syncLegacyTestCatalog(context.adminClient, {
+        setId: questionSetGroup.set_id,
+        testType: parsed.metadata.test_type,
         category: parsed.metadata.category,
-        version_label: parsed.metadata.version_label,
-        test_type: parsed.metadata.test_type,
-        status: parsed.metadata.status,
-        visibility_scope: parsed.metadata.visibility_scope,
-        school_ids: parsed.metadata.school_ids,
-      },
-    });
+        schoolId: legacySchoolId,
+        questions: questionSetGroup.questions,
+        uploadedAssets,
+      });
+
+      await logAuditEvent(context.adminClient, context, {
+        actionType: "upload",
+        entityType: "question_set",
+        entityId: inserted.id,
+        metadata: {
+          title: questionSetGroup.set_id,
+          category: parsed.metadata.category,
+          version_label: parsed.metadata.version_label,
+          test_type: parsed.metadata.test_type,
+          status: parsed.metadata.status,
+          visibility_scope: parsed.metadata.visibility_scope,
+          school_ids: parsed.metadata.school_ids,
+        },
+      });
+
+      createdQuestionSets.push(inserted);
+    }
 
     return ok({
       ok: true,
-      question_set: inserted,
+      question_sets: createdQuestionSets,
       validation,
     });
   } catch (error) {
-    await context.adminClient.from("question_set_questions").delete().eq("question_set_id", inserted.id);
-    await context.adminClient.from("question_set_school_access").delete().eq("question_set_id", inserted.id);
-    await context.adminClient.from("question_sets").delete().eq("id", inserted.id);
+    if (createdSetIds.length) {
+      await context.adminClient.from("question_set_questions").delete().in("question_set_id", createdSetIds);
+      await context.adminClient.from("question_set_school_access").delete().in("question_set_id", createdSetIds);
+      await context.adminClient.from("question_sets").delete().in("id", createdSetIds);
+    }
     return bad(String(error instanceof Error ? error.message : error));
   }
 });

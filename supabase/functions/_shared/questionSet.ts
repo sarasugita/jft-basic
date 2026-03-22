@@ -121,7 +121,7 @@ export async function logAuditEvent(
 }
 
 export type UploadMetadata = {
-  title: string;
+  title: string | null;
   description: string | null;
   test_type: "daily" | "model";
   category: string | null;
@@ -175,14 +175,12 @@ export async function parseUploadForm(req: Request): Promise<{ metadata: UploadM
     return bad("Restricted visibility requires at least one school");
   }
 
-  const title = normalizeText(parsed.title);
   const versionLabel = normalizeText(parsed.version_label);
-  if (!title) return bad("title is required");
   if (!versionLabel) return bad("version_label is required");
 
   return {
     metadata: {
-      title,
+      title: normalizeText(parsed.title),
       description: normalizeText(parsed.description),
       test_type: testType as "daily" | "model",
       category: normalizeText(parsed.category),
@@ -466,7 +464,7 @@ function normalizeAssetName(value: string | null | undefined) {
     ?.toLowerCase() ?? "";
 }
 
-export type ValidationResult = {
+export type QuestionSetValidation = {
   valid: boolean;
   errors: string[];
   warnings: string[];
@@ -487,7 +485,16 @@ export type ValidationResult = {
   }>;
 };
 
-function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): ValidationResult {
+export type ValidationResult = QuestionSetValidation & {
+  summary: QuestionSetValidation["summary"] & {
+    set_count: number;
+  };
+  question_sets: Array<QuestionSetValidation & {
+    set_id: string;
+  }>;
+};
+
+function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): QuestionSetValidation {
   const header = rows[0].map(normalizeHeader);
   const findIdx = (names: string[]) => {
     for (const name of names) {
@@ -508,7 +515,7 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Vali
   const errors: string[] = [];
   const warnings: string[] = [];
   const assetNames = new Set(assetFiles.map((file) => normalizeAssetName(file.name)));
-  const questions: ValidationResult["questions"] = [];
+  const questions: QuestionSetValidation["questions"] = [];
   let assetReferenceCount = 0;
 
   if (idxQuestion === -1 || idxCorrect === -1) {
@@ -590,7 +597,7 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Vali
   };
 }
 
-function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): ValidationResult {
+function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): QuestionSetValidation {
   const header = rows[0].map(normalizeHeader);
   const findIdx = (names: string[]) => {
     for (const name of names) {
@@ -619,7 +626,7 @@ function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): 
   const warnings: string[] = [];
   const assetNames = new Set(assetFiles.map((file) => normalizeAssetName(file.name)));
   const seenQids = new Set<string>();
-  const questions: ValidationResult["questions"] = [];
+  const questions: QuestionSetValidation["questions"] = [];
   let assetReferenceCount = 0;
 
   if (idxQid === -1 || idxSubSection === -1 || idxCorrect === -1) {
@@ -751,10 +758,22 @@ function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): 
   };
 }
 
-export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[], testType?: string | null): Promise<ValidationResult> {
-  const text = await csvFile.text();
-  const rows = parseCsvRows(text);
+function hasFlatModelColumns(normalizedHeader: string[]) {
+  const findIdx = (names: string[]) => {
+    for (const name of names) {
+      const idx = normalizedHeader.indexOf(normalizeHeader(name));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+  return (
+    findIdx(["qid"]) !== -1
+    && findIdx(["sub_section", "sub section"]) !== -1
+    && findIdx(["correct_option", "correct option"]) !== -1
+  );
+}
 
+function validateSingleQuestionSetCsv(rows: string[][], assetFiles: File[], testType?: string | null): QuestionSetValidation {
   if (rows.length === 0) {
     return {
       valid: false,
@@ -770,22 +789,7 @@ export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[], 
   }
 
   const normalizedHeader = rows[0].map(normalizeHeader);
-  const hasFlatModelColumns = (() => {
-    const findIdx = (names: string[]) => {
-      for (const name of names) {
-        const idx = normalizedHeader.indexOf(normalizeHeader(name));
-        if (idx !== -1) return idx;
-      }
-      return -1;
-    };
-    return (
-      findIdx(["qid"]) !== -1
-      && findIdx(["sub_section", "sub section"]) !== -1
-      && findIdx(["correct_option", "correct option"]) !== -1
-    );
-  })();
-
-  if (hasFlatModelColumns) {
+  if (hasFlatModelColumns(normalizedHeader)) {
     return validateFlatModelQuestionSetCsv(rows, assetFiles);
   }
 
@@ -802,7 +806,7 @@ export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[], 
 
   const assetNames = new Set(assetFiles.map((file) => normalizeAssetName(file.name)));
   const seenQids = new Set<string>();
-  const questions: ValidationResult["questions"] = [];
+  const questions: QuestionSetValidation["questions"] = [];
   let assetReferenceCount = 0;
 
   for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
@@ -918,6 +922,122 @@ export async function validateQuestionSetCsv(csvFile: File, assetFiles: File[], 
       asset_reference_count: assetReferenceCount,
     },
     questions,
+  };
+}
+
+function isCsvDataRowEmpty(row: string[]) {
+  return row.every((cell) => !normalizeCsvCellValue(cell));
+}
+
+function findSetIdColumnIndex(normalizedHeader: string[], testType?: string | null) {
+  const candidates = testType === "daily"
+    ? ["set_id", "set id", "testid", "test_id", "test id"]
+    : ["set_id", "set id", "test_version", "test version"];
+  for (const name of candidates) {
+    const idx = normalizedHeader.indexOf(normalizeHeader(name));
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
+function prefixValidationMessages(setId: string, messages: string[]) {
+  return messages.map((message) => `[${setId}] ${message}`);
+}
+
+export async function validateQuestionSetCsv(
+  csvFile: File,
+  assetFiles: File[],
+  options: {
+    testType?: string | null;
+    defaultSetId?: string | null;
+  } = {},
+): Promise<ValidationResult> {
+  const text = await csvFile.text();
+  const rows = parseCsvRows(text);
+  const testType = options.testType ?? null;
+  const defaultSetId = normalizeText(options.defaultSetId);
+
+  if (rows.length === 0) {
+    return {
+      valid: false,
+      errors: ["CSV is empty."],
+      warnings: [],
+      summary: { question_count: 0, asset_reference_count: 0, set_count: 0 },
+      questions: [],
+      question_sets: [],
+    };
+  }
+
+  const header = rows[0];
+  const normalizedHeader = header.map(normalizeHeader);
+  const setIdColumnIndex = findSetIdColumnIndex(normalizedHeader, testType);
+  const groupedRows = new Map<string, string[][]>();
+  const topLevelErrors: string[] = [];
+
+  if (setIdColumnIndex === -1 && !defaultSetId) {
+    return {
+      valid: false,
+      errors: ["CSV must include a set_id column."],
+      warnings: [],
+      summary: { question_count: 0, asset_reference_count: 0, set_count: 0 },
+      questions: [],
+      question_sets: [],
+    };
+  }
+
+  for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (isCsvDataRowEmpty(row)) continue;
+    const rowSetId = setIdColumnIndex === -1
+      ? defaultSetId
+      : normalizeText(row[setIdColumnIndex]) ?? defaultSetId;
+    if (!rowSetId) {
+      topLevelErrors.push(`Row ${rowIndex + 1}: set_id is required.`);
+      continue;
+    }
+    if (!groupedRows.has(rowSetId)) {
+      groupedRows.set(rowSetId, []);
+    }
+    groupedRows.get(rowSetId)?.push(row);
+  }
+
+  if (groupedRows.size === 0) {
+    return {
+      valid: false,
+      errors: topLevelErrors.length ? topLevelErrors : ["CSV has no question rows."],
+      warnings: [],
+      summary: { question_count: 0, asset_reference_count: 0, set_count: 0 },
+      questions: [],
+      question_sets: [],
+    };
+  }
+
+  const questionSets = Array.from(groupedRows.entries()).map(([setId, groupRows]) => {
+    const validation = validateSingleQuestionSetCsv([header, ...groupRows], assetFiles, testType);
+    return {
+      set_id: setId,
+      ...validation,
+    };
+  });
+
+  const questions = questionSets.flatMap((group) => group.questions);
+  const warnings = questionSets.flatMap((group) => prefixValidationMessages(group.set_id, group.warnings));
+  const errors = [
+    ...topLevelErrors,
+    ...questionSets.flatMap((group) => prefixValidationMessages(group.set_id, group.errors)),
+  ];
+
+  return {
+    valid: errors.length === 0 && questionSets.every((group) => group.valid),
+    errors,
+    warnings,
+    summary: {
+      question_count: questionSets.reduce((sum, group) => sum + (group.summary?.question_count ?? 0), 0),
+      asset_reference_count: questionSets.reduce((sum, group) => sum + (group.summary?.asset_reference_count ?? 0), 0),
+      set_count: questionSets.length,
+    },
+    questions,
+    question_sets: questionSets,
   };
 }
 

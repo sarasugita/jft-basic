@@ -17,7 +17,6 @@ function emptyUploadForm() {
   return {
     mode: "create",
     source_question_set_id: "",
-    title: "",
     test_type: "daily",
     category: DEFAULT_DAILY_CATEGORY,
     version_label: "v1",
@@ -47,6 +46,90 @@ function getUploadFileKey(file) {
     Number(file?.size) || 0,
     Number(file?.lastModified) || 0,
   ].join("::");
+}
+
+function splitCsvLine(line) {
+  const out = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    const next = line[i + 1];
+    if (char === "\"") {
+      if (inQuotes && next === "\"") {
+        current += "\"";
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  out.push(current);
+  return out;
+}
+
+function parseCsvRows(text) {
+  const rows = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (char === "\"") {
+      current += char;
+      if (inQuotes && next === "\"") {
+        current += next;
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") i += 1;
+      if (current.trim().length > 0) {
+        rows.push(splitCsvLine(current).map((value) => String(value ?? "").trim().replace(/^\uFEFF/, "")));
+      }
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim().length > 0) {
+    rows.push(splitCsvLine(current).map((value) => String(value ?? "").trim().replace(/^\uFEFF/, "")));
+  }
+
+  return rows;
+}
+
+function detectFirstSetIdFromCsvText(text, testType) {
+  const rows = parseCsvRows(text);
+  if (rows.length < 2) return "";
+  const header = rows[0].map((value) => String(value ?? "").trim().toLowerCase().replace(/^\uFEFF/, ""));
+  const candidates = testType === "daily"
+    ? ["set_id", "set id", "testid", "test_id", "test id"]
+    : ["set_id", "set id", "test_version", "test version"];
+  const idx = candidates
+    .map((name) => header.indexOf(name))
+    .find((value) => value !== -1);
+  if (idx == null || idx === -1) return "";
+  for (let i = 1; i < rows.length; i += 1) {
+    const value = String(rows[i]?.[idx] ?? "").trim();
+    if (value) return value;
+  }
+  return "";
 }
 
 function getUploadFiles(csvFile, assetFiles) {
@@ -236,10 +319,17 @@ function ValidationReport({ validation }) {
   return (
     <div className="super-validation-panel">
       <div className="super-validation-summary">
+        <div className="admin-chip">Sets: {validation.summary?.set_count ?? validation.question_sets?.length ?? 0}</div>
         <div className="admin-chip">Questions: {validation.summary?.question_count ?? 0}</div>
         <div className="admin-chip">Asset refs: {validation.summary?.asset_reference_count ?? 0}</div>
         <div className="admin-chip">{validation.valid ? "Validation passed" : "Validation failed"}</div>
       </div>
+
+      {validation.question_sets?.length ? (
+        <div className="admin-help" style={{ marginTop: 8 }}>
+          Detected SetIDs: {validation.question_sets.map((item) => item.set_id).join(", ")}
+        </div>
+      ) : null}
 
       {validation.errors?.length ? (
         <div className="super-validation-block error">
@@ -450,6 +540,10 @@ export default function SuperTestsImportPage() {
       ...metadataInput,
       school_ids: metadataInput.visibility_scope === "restricted" ? metadataInput.school_ids : [],
     };
+    if (!metadata.title && selectedCsvFile) {
+      const detectedTitle = detectFirstSetIdFromCsvText(await selectedCsvFile.text(), metadata.test_type);
+      if (detectedTitle) metadata.title = detectedTitle;
+    }
     const uploadFiles = getUploadFiles(selectedCsvFile, selectedAssetFiles);
     const formData = new FormData();
     formData.append("metadata", JSON.stringify(metadata));
@@ -599,17 +693,6 @@ export default function SuperTestsImportPage() {
     setSaving(true);
     setValidationMsg("");
     try {
-      if (uploadForm.mode === "create") {
-        const normalizedSetId = String(uploadForm.title ?? "").trim();
-        const duplicate = questionSets.find(
-          (item) => item.title === normalizedSetId && item.test_type === uploadForm.test_type,
-        );
-        if (duplicate) {
-          setValidationMsg("That SetID already exists for this test type. Use Upload on the existing set to add a new version.");
-          return;
-        }
-      }
-
       const nextValidation = await validateUpload();
       if (!nextValidation?.valid) {
         if (!nextValidation) {
@@ -621,13 +704,20 @@ export default function SuperTestsImportPage() {
       const functionName = uploadForm.mode === "version" ? "upload-question-set-version" : "create-question-set";
       const totalFiles = getUploadFiles(csvFile, assetFiles).length;
       setUploadProgress({ phase: "Uploading files", uploaded: 0, total: totalFiles });
-      await invokeUploadFunction(functionName, uploadForm, csvFile, assetFiles, setUploadProgress);
+      const result = await invokeUploadFunction(functionName, uploadForm, csvFile, assetFiles, setUploadProgress);
       setUploadProgress((current) => ({ ...current, uploaded: current.total }));
       setUploadOpen(false);
       setValidation(null);
       setValidationMsg("");
       setUploadProgress({ phase: "", uploaded: 0, total: 0 });
-      setMsg(uploadForm.mode === "version" ? "Set version uploaded." : "Set created.");
+      const createdCount = result?.question_sets?.length ?? 0;
+      setMsg(
+        uploadForm.mode === "version"
+          ? "Set version uploaded."
+          : createdCount > 1
+            ? `${createdCount} question sets created.`
+            : "Question set created.",
+      );
       await loadLibrary();
     } catch (error) {
       setValidationMsg(String(error.message ?? error));
@@ -820,7 +910,7 @@ export default function SuperTestsImportPage() {
                   strokeLinejoin="round"
                 />
               </svg>
-              Upload Question Set
+              Upload Question Sets
             </button>
           </div>
         </div>
@@ -878,7 +968,7 @@ export default function SuperTestsImportPage() {
         <div className="admin-modal-overlay" onClick={() => setUploadOpen(false)}>
           <div className="admin-modal upload-question-modal" onClick={(event) => event.stopPropagation()}>
             <div className="admin-modal-header">
-              <div className="admin-title">Upload Question Set</div>
+              <div className="admin-title">Upload Question Sets</div>
               <button className="admin-modal-close" onClick={() => setUploadOpen(false)} aria-label="Close">
                 ×
               </button>
@@ -895,13 +985,6 @@ export default function SuperTestsImportPage() {
                   <option value="daily">Daily Test</option>
                   <option value="model">Model Test</option>
                 </select>
-              </div>
-              <div className="field">
-                <label>SetID</label>
-                <input
-                  value={uploadForm.title}
-                  onChange={(event) => setUploadForm((prev) => ({ ...prev, title: event.target.value }))}
-                />
               </div>
               <div className="field">
                 <label>Category</label>
@@ -980,7 +1063,7 @@ export default function SuperTestsImportPage() {
               ) : null}
               <div className="upload-question-actions">
                 <button className="btn btn-primary" onClick={saveUpload} disabled={saving}>
-                  {saving ? "Uploading..." : "Upload Question Set"}
+                  {saving ? "Uploading..." : "Upload Question Sets"}
                 </button>
               </div>
               {uploadProgress.total > 0 ? (
@@ -991,6 +1074,9 @@ export default function SuperTestsImportPage() {
             </div>
             {validationMsg ? <div className="admin-msg">{validationMsg}</div> : null}
             <ValidationReport validation={validation} />
+            <div className="admin-help" style={{ marginTop: 8 }}>
+              SetID is read from the CSV `set_id` column. If the file contains multiple `set_id` values, each one is imported as a separate question set.
+            </div>
             <div className="admin-help" style={{ marginTop: 8 }}>
               Template: <a href="/daily_question_csv_template.csv" download>Daily CSV template</a>
             </div>

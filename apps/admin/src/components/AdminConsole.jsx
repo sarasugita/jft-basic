@@ -2086,6 +2086,9 @@ function QuestionPreviewCard({ question, index, children }) {
   const stemLines = splitStemLines(stemExtra);
   const textBoxLines = splitTextBoxStemLines(stemExtra || stemText);
   const sectionLabel = getQuestionSectionLabel(question) || question.sectionKey;
+  const displayQuestionId = String(question.sourceQuestionId ?? "").trim()
+    || String(question.id ?? "").split("__").filter(Boolean)[1]
+    || String(question.id ?? "").trim();
 
   const renderChoices = () => (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
@@ -2117,13 +2120,13 @@ function QuestionPreviewCard({ question, index, children }) {
     <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 700 }}>
-          {question.id} {sectionLabel ? `(${sectionLabel})` : ""} {index != null ? `#${index + 1}` : ""}
+          {displayQuestionId} {sectionLabel ? `(${sectionLabel})` : ""} {index != null ? `#${index + 1}` : ""}
         </div>
         {children ? <div style={{ display: "flex", justifyContent: "flex-end" }}>{children}</div> : null}
       </div>
-      {prompt ? <div style={{ marginTop: 6 }}>{prompt}</div> : null}
+      {prompt ? <div style={{ marginTop: 6, whiteSpace: question.type === "daily" ? "pre-wrap" : "normal" }}>{prompt}</div> : null}
       {question.type === "daily" && stemExtra ? (
-        <div style={{ marginTop: 6, fontSize: 13, color: "#333333" }}>
+        <div style={{ marginTop: 6, fontSize: 13, color: "#333333", whiteSpace: "pre-wrap" }}>
           {stemExtra}
         </div>
       ) : null}
@@ -2684,7 +2687,7 @@ function parseQuestionCsv(text, defaultTestVersion = "") {
         continue;
       }
       if (!testVersion) {
-        errors.push(`Row ${r + 1}: set_id is required when no SetID is entered in the form.`);
+        errors.push(`Row ${r + 1}: set_id is required.`);
         continue;
       }
       if (!rawQid) {
@@ -2864,7 +2867,7 @@ function parseDailyCsv(text, defaultTestVersion = "") {
     }
     return -1;
   };
-  const idxTest = findIdx(["testid", "test_id", "test id"]);
+  const idxTest = findIdx(["set_id", "set id", "testid", "test_id", "test id"]);
   const idxNo = findIdx(["qid", "q_id", "q id", "no", "no.", "number"]);
   const idxQuestion = findIdx(["question"]);
   const idxCorrect = findIdx(["correct_option", "correct option", "correct_answer", "correct answer", "correct"]);
@@ -2993,13 +2996,37 @@ function detectDailyTestIdFromCsvText(text) {
   const rows = parseSeparatedRows(text, delimiter);
   if (rows.length < 2) return "";
   const header = rows[0].map(normalizeHeaderName);
-  const idx = header.indexOf("testid");
+  const idx = (() => {
+    const setIdIdx = header.indexOf("set_id");
+    if (setIdIdx !== -1) return setIdIdx;
+    return header.indexOf("testid");
+  })();
   if (idx === -1) return "";
   for (let i = 1; i < rows.length; i += 1) {
     const value = String(rows[i]?.[idx] ?? "").trim();
     if (value) return value;
   }
   return "";
+}
+
+function groupParsedCsvByVersion(questions, choices) {
+  const groups = new Map();
+
+  for (const question of questions) {
+    const version = String(question?.test_version ?? "").trim();
+    if (!version) continue;
+    if (!groups.has(version)) groups.set(version, { questions: [], choices: [] });
+    groups.get(version).questions.push(question);
+  }
+
+  for (const choice of choices) {
+    const version = String(choice?.test_version ?? "").trim();
+    if (!version) continue;
+    if (!groups.has(version)) groups.set(version, { questions: [], choices: [] });
+    groups.get(version).choices.push(choice);
+  }
+
+  return groups;
 }
 
 function resolveAssetValue(value, assetMap) {
@@ -3151,6 +3178,7 @@ export default function AdminConsole({
   const [dailyResultsCategory, setDailyResultsCategory] = useState("");
   const [modelResultsCategory, setModelResultsCategory] = useState("");
   const [dailyCategorySelect, setDailyCategorySelect] = useState("__custom__");
+  const CUSTOM_CATEGORY_OPTION = "__custom__";
   const [editingTestId, setEditingTestId] = useState("");
   const [editingTestMsg, setEditingTestMsg] = useState("");
   const [editingCategorySelect, setEditingCategorySelect] = useState("__custom__");
@@ -3256,9 +3284,6 @@ export default function AdminConsole({
   const [linkMsg, setLinkMsg] = useState("");
   const [modelConductOpen, setModelConductOpen] = useState(false);
   const [modelUploadOpen, setModelUploadOpen] = useState(false);
-  const [modelUploadCategoryOpen, setModelUploadCategoryOpen] = useState(false);
-  const [modelUploadCategoryLaunchUpload, setModelUploadCategoryLaunchUpload] = useState(false);
-  const [modelUploadCategoryMsg, setModelUploadCategoryMsg] = useState("");
   const [dailyConductOpen, setDailyConductOpen] = useState(false);
   const [dailyUploadOpen, setDailyUploadOpen] = useState(false);
   const [modelConductMode, setModelConductMode] = useState("normal");
@@ -3266,8 +3291,10 @@ export default function AdminConsole({
   const [modelRetakeSourceId, setModelRetakeSourceId] = useState("");
   const [dailyRetakeSourceId, setDailyRetakeSourceId] = useState("");
   const [activeModelTimePicker, setActiveModelTimePicker] = useState("");
+  const [dailySourceCategoryDropdownOpen, setDailySourceCategoryDropdownOpen] = useState(false);
   const [dailySetDropdownOpen, setDailySetDropdownOpen] = useState(false);
   const [activeDailyTimePicker, setActiveDailyTimePicker] = useState("");
+  const dailySourceCategoryDropdownRef = useRef(null);
   const dailySetDropdownRef = useRef(null);
   const assetFolderInputRef = useRef(null);
   const dailyFolderInputRef = useRef(null);
@@ -3318,7 +3345,6 @@ export default function AdminConsole({
   const [attemptQuestionsLoading, setAttemptQuestionsLoading] = useState(false);
   const [attemptQuestionsError, setAttemptQuestionsError] = useState("");
   const [assetForm, setAssetForm] = useState({
-    test_version: "test_exam",
     category: DEFAULT_MODEL_CATEGORY
   });
   const [assetCategorySelect, setAssetCategorySelect] = useState(DEFAULT_MODEL_CATEGORY);
@@ -3328,7 +3354,6 @@ export default function AdminConsole({
   const [assetUploadMsg, setAssetUploadMsg] = useState("");
   const [assetImportMsg, setAssetImportMsg] = useState("");
   const [dailyForm, setDailyForm] = useState({
-    test_version: "",
     category: ""
   });
   const modelCategorySeededRef = useRef(false);
@@ -3341,6 +3366,8 @@ export default function AdminConsole({
     selection_mode: "single",
     problem_set_id: "",
     problem_set_ids: [],
+    source_categories: [],
+    session_category: "",
     title: "",
     session_date: "",
     start_time: "",
@@ -3780,6 +3807,11 @@ export default function AdminConsole({
     return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
   }, [studentAttempts, testMetaByVersion]);
 
+  const dailyResultCategories = useMemo(() => {
+    const sessionVersions = new Set((dailySessions ?? []).map((session) => session.problem_set_id).filter(Boolean));
+    return buildCategories((dailyTests ?? []).filter((test) => sessionVersions.has(test.version)));
+  }, [dailySessions, dailyTests]);
+
   const studentModelAttemptsByCategory = useMemo(() => {
     const grouped = new Map();
     (studentModelAttempts ?? []).forEach((attempt) => {
@@ -3809,14 +3841,14 @@ export default function AdminConsole({
       grouped.get(category).push(a);
     });
     const ordered = [];
-    dailyCategories.forEach((c) => {
+    dailyResultCategories.forEach((c) => {
       if (grouped.has(c.name)) ordered.push([c.name, grouped.get(c.name)]);
     });
     for (const entry of grouped.entries()) {
       if (!ordered.some((o) => o[0] === entry[0])) ordered.push(entry);
     }
     return ordered;
-  }, [studentDailyAttempts, testMetaByVersion, dailyCategories]);
+  }, [studentDailyAttempts, testMetaByVersion, dailyResultCategories]);
 
   const studentAttemptSummaryById = useMemo(() => {
     const summaryMap = {};
@@ -3894,13 +3926,35 @@ export default function AdminConsole({
     return modelCategories.find((c) => c.name === modelConductCategory) ?? modelCategories[0];
   }, [modelCategories, modelConductCategory]);
 
-  const selectedDailyConductCategory = useMemo(() => {
-    if (!dailyCategories.length) return null;
-    return dailyCategories.find((c) => c.name === dailyConductCategory) ?? dailyCategories[0];
-  }, [dailyCategories, dailyConductCategory]);
-
   const modelConductTests = selectedModelConductCategory?.tests ?? [];
-  const dailyConductTests = selectedDailyConductCategory?.tests ?? [];
+  const selectedDailySourceCategoryNames = useMemo(() => {
+    if (!dailyCategories.length) return [];
+    const validNames = new Set(dailyCategories.map((category) => category.name));
+    const requestedNames = [dailyConductCategory, ...(dailySessionForm.source_categories ?? [])];
+    return Array.from(new Set(requestedNames.filter((name) => validNames.has(name))));
+  }, [dailyCategories, dailyConductCategory, dailySessionForm.selection_mode, dailySessionForm.source_categories]);
+
+  const dailyConductTests = useMemo(() => {
+    if (!selectedDailySourceCategoryNames.length) return [];
+    const categorySet = new Set(selectedDailySourceCategoryNames);
+    const byVersion = new Map();
+    dailyCategories.forEach((category) => {
+      if (!categorySet.has(category.name)) return;
+      category.tests.forEach((test) => {
+        if (!test?.version || byVersion.has(test.version)) return;
+        byVersion.set(test.version, test);
+      });
+    });
+    return Array.from(byVersion.values());
+  }, [dailyCategories, selectedDailySourceCategoryNames]);
+
+  const dailySessionCategorySelectValue = useMemo(() => {
+    if (!dailyCategories.length) return CUSTOM_CATEGORY_OPTION;
+    return dailyCategories.some((category) => category.name === dailySessionForm.session_category)
+      ? dailySessionForm.session_category
+      : CUSTOM_CATEGORY_OPTION;
+  }, [dailyCategories, dailySessionForm.session_category]);
+
   const selectedDailyProblemSetIds = useMemo(() => {
     const availableIds = new Set(dailyConductTests.map((test) => test.version).filter(Boolean));
     const selectedIds = dailySessionForm.selection_mode === "multiple"
@@ -3937,9 +3991,9 @@ export default function AdminConsole({
   );
 
   const selectedDailyCategory = useMemo(() => {
-    if (!dailyCategories.length) return null;
-    return dailyCategories.find((c) => c.name === dailyResultsCategory) ?? dailyCategories[0];
-  }, [dailyCategories, dailyResultsCategory]);
+    if (!dailyResultCategories.length) return null;
+    return dailyResultCategories.find((c) => c.name === dailyResultsCategory) ?? dailyResultCategories[0];
+  }, [dailyResultCategories, dailyResultsCategory]);
 
   const selectedModelCategory = useMemo(() => {
     if (!modelCategories.length || !modelResultsCategory) return null;
@@ -3947,11 +4001,11 @@ export default function AdminConsole({
   }, [modelCategories, modelResultsCategory]);
 
   useEffect(() => {
-    if (!dailyCategories.length) return;
-    if (!dailyResultsCategory || !dailyCategories.some((c) => c.name === dailyResultsCategory)) {
-      setDailyResultsCategory(dailyCategories[0].name);
+    if (!dailyResultCategories.length) return;
+    if (!dailyResultsCategory || !dailyResultCategories.some((c) => c.name === dailyResultsCategory)) {
+      setDailyResultsCategory(dailyResultCategories[0].name);
     }
-  }, [dailyCategories, dailyResultsCategory]);
+  }, [dailyResultCategories, dailyResultsCategory]);
 
   useEffect(() => {
     if (!modelCategories.length) {
@@ -3989,13 +4043,16 @@ export default function AdminConsole({
       setAssetCategorySelect(assetForm.category);
       return;
     }
-    if (!assetForm.category && modelCategories.length) {
-      setAssetCategorySelect(modelCategories[0].name);
-      setAssetForm((s) => ({ ...s, category: modelCategories[0].name }));
-    } else {
+    if (assetCategorySelect === "__custom__") {
       setAssetCategorySelect("__custom__");
+      return;
     }
-  }, [modelCategories, assetForm.category]);
+    const fallbackCategory = modelCategories[0]?.name ?? DEFAULT_MODEL_CATEGORY;
+    setAssetCategorySelect(fallbackCategory);
+    if (assetForm.category !== fallbackCategory) {
+      setAssetForm((s) => ({ ...s, category: fallbackCategory }));
+    }
+  }, [modelCategories, assetForm.category, assetCategorySelect]);
 
   useEffect(() => {
     if (!modelCategories.length) return;
@@ -4004,50 +4061,19 @@ export default function AdminConsole({
     }
   }, [modelCategories, modelConductCategory]);
 
-  function openModelUploadCategoryPicker({ launchUploadModal = false } = {}) {
+  function openModelUploadModal() {
     const normalizedCategory = String(assetForm.category ?? "").trim();
     const availableCategories = modelCategories.length
       ? modelCategories
       : [{ name: DEFAULT_MODEL_CATEGORY }];
     if (normalizedCategory && availableCategories.some((category) => category.name === normalizedCategory)) {
       setAssetCategorySelect(normalizedCategory);
-    } else if (normalizedCategory) {
-      setAssetCategorySelect("__custom__");
     } else {
       const fallbackCategory = availableCategories[0]?.name ?? DEFAULT_MODEL_CATEGORY;
       setAssetCategorySelect(fallbackCategory);
       setAssetForm((current) => ({ ...current, category: fallbackCategory }));
     }
-    setModelUploadCategoryMsg("");
-    setModelUploadCategoryLaunchUpload(launchUploadModal);
-    setModelUploadCategoryOpen(true);
-  }
-
-  function closeModelUploadCategoryPicker() {
-    setModelUploadCategoryOpen(false);
-    setModelUploadCategoryLaunchUpload(false);
-    setModelUploadCategoryMsg("");
-  }
-
-  function confirmModelUploadCategory() {
-    const selectedCategory = String(
-      assetCategorySelect === "__custom__" ? assetForm.category : assetCategorySelect
-    ).trim();
-    if (!selectedCategory) {
-      setModelUploadCategoryMsg("Category is required.");
-      return;
-    }
-    setAssetForm((current) => ({ ...current, category: selectedCategory }));
-    setAssetCategorySelect(
-      modelCategories.some((category) => category.name === selectedCategory) ? selectedCategory : "__custom__"
-    );
-    const shouldOpenUploadModal = modelUploadCategoryLaunchUpload || !modelUploadOpen;
-    setModelUploadCategoryOpen(false);
-    setModelUploadCategoryLaunchUpload(false);
-    setModelUploadCategoryMsg("");
-    if (shouldOpenUploadModal) {
-      setModelUploadOpen(true);
-    }
+    setModelUploadOpen(true);
   }
 
   useEffect(() => {
@@ -4055,6 +4081,26 @@ export default function AdminConsole({
     if (!dailyConductCategory || !dailyCategories.some((c) => c.name === dailyConductCategory)) {
       setDailyConductCategory(dailyCategories[0].name);
     }
+  }, [dailyCategories, dailyConductCategory]);
+
+  useEffect(() => {
+    if (!dailyCategories.length) return;
+    const validNames = new Set(dailyCategories.map((category) => category.name));
+    setDailySessionForm((current) => {
+      const nextSourceCategories = Array.from(
+        new Set((current.source_categories ?? []).filter((name) => validNames.has(name) && name !== dailyConductCategory))
+      );
+      if (
+        nextSourceCategories.length === (current.source_categories ?? []).length
+        && nextSourceCategories.every((name, index) => name === (current.source_categories ?? [])[index])
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        source_categories: nextSourceCategories,
+      };
+    });
   }, [dailyCategories, dailyConductCategory]);
 
   useEffect(() => {
@@ -4090,6 +4136,21 @@ export default function AdminConsole({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [dailySetDropdownOpen]);
+
+  useEffect(() => {
+    if (!dailySourceCategoryDropdownOpen) return;
+    function handleClickOutside(event) {
+      const root = dailySourceCategoryDropdownRef.current;
+      if (!root) return;
+      if (!root.contains(event.target)) {
+        setDailySourceCategoryDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [dailySourceCategoryDropdownOpen]);
 
   useEffect(() => {
     if (!activeDailyTimePicker) return;
@@ -7849,6 +7910,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setDailyConductMode(mode);
     setDailyConductOpen(true);
     setDailySessionsMsg("");
+    setDailySourceCategoryDropdownOpen(false);
     setDailySetDropdownOpen(false);
     setActiveDailyTimePicker("");
     if (mode !== "retake") {
@@ -7857,6 +7919,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
         ...current,
         selection_mode: "single",
         problem_set_ids: current.problem_set_id ? [current.problem_set_id] : [],
+        source_categories: [],
+        session_category: dailyConductCategory || current.session_category || "",
         title: "",
         session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
         start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
@@ -7882,11 +7946,43 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   function selectDailyRetakeSource(sessionId) {
+    setDailySourceCategoryDropdownOpen(false);
     setDailySetDropdownOpen(false);
     setActiveDailyTimePicker("");
     setDailyRetakeSourceId(sessionId);
     const source = pastDailySessions.find((session) => session.id === sessionId);
     if (source) applySourceSessionToForm(source, setDailySessionForm);
+  }
+
+  function toggleDailySourceCategorySelection(categoryName) {
+    const normalizedName = String(categoryName ?? "").trim();
+    if (!normalizedName) return;
+    const currentlySelected = selectedDailySourceCategoryNames;
+    const isSelected = currentlySelected.includes(normalizedName);
+
+    if (isSelected) {
+      if (currentlySelected.length <= 1) return;
+      const remainingNames = currentlySelected.filter((name) => name !== normalizedName);
+      const nextPrimary = dailyConductCategory === normalizedName
+        ? remainingNames[0] ?? ""
+        : dailyConductCategory;
+      setDailyConductCategory(nextPrimary);
+      setDailySessionForm((current) => ({
+        ...current,
+        source_categories: remainingNames.filter((name) => name !== nextPrimary),
+      }));
+      return;
+    }
+
+    if (!dailyConductCategory) {
+      setDailyConductCategory(normalizedName);
+      return;
+    }
+
+    setDailySessionForm((current) => ({
+      ...current,
+      source_categories: Array.from(new Set([...(current.source_categories ?? []), normalizedName])),
+    }));
   }
 
   function toggleDailyProblemSetSelection(problemSetId) {
@@ -8213,6 +8309,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const endsAtInput = combineBangladeshDateTime(sessionDate, closeTime)
       || (dailyConductMode === "retake" ? dailySessionForm.ends_at : "");
     const title = dailySessionForm.title.trim();
+    const sessionCategory = String(dailySessionForm.session_category ?? "").trim()
+      || dailyConductCategory
+      || selectedDailySourceCategoryNames[0]
+      || "Daily Test";
     const endsAt = endsAtInput;
     const passRate = Number(dailySessionForm.pass_rate);
     if (!selectedSetIds.length) {
@@ -8267,7 +8367,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     try {
       problemSetId = await materializeDailyProblemSet({
         sourceSetIds: selectedSetIds,
-        category: dailyConductCategory,
+        category: sessionCategory,
         questionCountMode: dailySessionForm.question_count_mode,
         questionCount: dailySessionForm.question_count,
         passRate,
@@ -8320,6 +8420,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setDailySessionsMsg("Created (session + link).");
     setDailySessionForm((s) => ({
       ...s,
+      source_categories: [],
+      session_category: dailyConductCategory || "",
       title: "",
       question_count_mode: "all",
       question_count: "",
@@ -8332,6 +8434,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setDailyConductMode("normal");
     setDailyRetakeSourceId("");
     setDailyConductOpen(false);
+    setDailySourceCategoryDropdownOpen(false);
     setDailySetDropdownOpen(false);
     setActiveDailyTimePicker("");
     fetchTests();
@@ -9410,10 +9513,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
     uploadFiles,
     testVersion,
     parseCsv,
-    multipleVersionMessage,
     missingVersionMessage,
     isCsvLike,
     onResolvedVersion,
+    allowMultipleVersions = false,
   }) {
     if (!csvFile) {
       return { ok: false, summary: "CSV file is required." };
@@ -9432,36 +9535,32 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return { ok: false, summary: "Upload stopped: no questions found in CSV." };
     }
 
-    const versionSet = new Set(questions.map((q) => q.test_version).filter(Boolean));
-    if (versionSet.size > 1) {
-      return { ok: false, summary: multipleVersionMessage };
-    }
-
-    const resolvedVersion = Array.from(versionSet)[0] || testVersion;
-    if (!resolvedVersion) {
+    const versionSet = Array.from(new Set(questions.map((q) => q.test_version).filter(Boolean)));
+    if (!versionSet.length) {
       return { ok: false, summary: missingVersionMessage };
     }
-    if (resolvedVersion !== testVersion && typeof onResolvedVersion === "function") {
+    const resolvedVersion = versionSet.length === 1 ? versionSet[0] : "";
+    if (resolvedVersion && resolvedVersion !== testVersion && typeof onResolvedVersion === "function") {
       onResolvedVersion(resolvedVersion);
     }
-
-    const { data: assetRows, error: assetErr } = await supabase
-      .from("test_assets")
-      .select("path, original_name")
-      .eq("test_version", resolvedVersion);
-    if (assetErr) {
-      console.error("upload asset preflight lookup error:", assetErr);
-      return {
-        ok: false,
-        summary: "Upload stopped: asset lookup failed.",
-        detail: `Asset lookup failed: ${assetErr.message}`,
-      };
-    }
-
     const existingAssetMap = {};
-    for (const row of assetRows ?? []) {
-      const name = row.original_name || row.path?.split("/").pop();
-      if (name) existingAssetMap[name] = true;
+    for (const version of versionSet) {
+      const { data: assetRows, error: assetErr } = await supabase
+        .from("test_assets")
+        .select("path, original_name")
+        .eq("test_version", version);
+      if (assetErr) {
+        console.error("upload asset preflight lookup error:", assetErr);
+        return {
+          ok: false,
+          summary: "Upload stopped: asset lookup failed.",
+          detail: `Asset lookup failed: ${assetErr.message}`,
+        };
+      }
+      for (const row of assetRows ?? []) {
+        const name = row.original_name || row.path?.split("/").pop();
+        if (name) existingAssetMap[name] = true;
+      }
     }
     const localAssetMap = buildLocalAssetNameMap(uploadFiles, isCsvLike);
     const { missing, invalid } = validateAssetRefs(questions, choices, {
@@ -9484,7 +9583,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
       };
     }
 
-    return { ok: true, resolvedVersion };
+    if (!allowMultipleVersions && versionSet.length > 1) {
+      return { ok: false, summary: missingVersionMessage };
+    }
+
+    return { ok: true, resolvedVersion, versions: versionSet };
   }
 
   async function uploadAssets() {
@@ -9496,30 +9599,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     const singleFile = assetFile;
     const folderFiles = assetFiles || [];
-    let testVersion = assetForm.test_version.trim();
     const type = "mock";
     const category = assetForm.category.trim();
     if (!category) {
       setAssetUploadMsg("Category is required.");
       return;
     }
-    const title = type === "mock" ? (category || DEFAULT_MODEL_CATEGORY) : testVersion;
-
-    if (!testVersion && assetCsvFile) {
-      const csvText = await assetCsvFile.text();
-      const detectedVersion = detectTestVersionFromCsvText(csvText);
-      if (detectedVersion && detectedVersion !== testVersion) {
-        testVersion = detectedVersion;
-        setAssetForm((s) => ({ ...s, test_version: detectedVersion }));
-      }
-    }
 
     if (!singleFile && folderFiles.length === 0) {
       setAssetUploadMsg("File or folder is required.");
-      return;
-    }
-    if (!testVersion) {
-      setAssetUploadMsg("test_version is required.");
       return;
     }
     const files = [];
@@ -9544,61 +9632,61 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const preflight = await validateCsvAssetsBeforeUpload({
       csvFile,
       uploadFiles: files,
-      testVersion,
+      testVersion: "",
       parseCsv: parseQuestionCsv,
-      multipleVersionMessage: "Upload stopped: multiple test_version values detected. Split CSV per test_version.",
-      missingVersionMessage: "Upload stopped: test_version is required (either in form or CSV).",
+      missingVersionMessage: "Upload stopped: set_id is required in the CSV.",
       isCsvLike: (name) => String(name ?? "").toLowerCase().endsWith(".csv"),
-      onResolvedVersion: (resolvedVersion) => setAssetForm((s) => ({ ...s, test_version: resolvedVersion })),
+      allowMultipleVersions: true,
     });
     if (!preflight.ok) {
       setAssetUploadMsg(preflight.summary);
       if (preflight.detail) setAssetImportMsg(preflight.detail);
       return;
     }
-    if (preflight.resolvedVersion && preflight.resolvedVersion !== testVersion) {
-      testVersion = preflight.resolvedVersion;
-    }
+    const versions = preflight.versions ?? [];
 
     setAssetUploadMsg("Uploading...");
-
-    const ensure = await ensureTestRecord(testVersion, title, type, null, activeSchoolId);
-    if (!ensure.ok) {
-      setAssetUploadMsg(ensure.message);
-      return;
+    for (const version of versions) {
+      const ensure = await ensureTestRecord(version, category || DEFAULT_MODEL_CATEGORY, type, null, activeSchoolId);
+      if (!ensure.ok) {
+        setAssetUploadMsg(ensure.message);
+        return;
+      }
     }
 
     let ok = 0;
     let ng = 0;
-    for (const file of files) {
-      const { error } = await uploadSingleAsset(file, testVersion, type, activeSchoolId);
-      if (error) {
-        ng += 1;
-        console.error("asset upload error:", error);
-      } else {
-        ok += 1;
+    const totalUploads = files.length * Math.max(versions.length, 1);
+    for (const version of versions) {
+      for (const file of files) {
+        const { error } = await uploadSingleAsset(file, version, type, activeSchoolId);
+        if (error) {
+          ng += 1;
+          console.error("asset upload error:", error);
+        } else {
+          ok += 1;
+        }
+        setAssetUploadMsg(`Uploading... ${ok + ng}/${totalUploads}`);
       }
-      setAssetUploadMsg(`Uploading... ${ok + ng}/${files.length}`);
     }
 
     setAssetUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
     fetchTests();
     fetchAssets();
 
-    await importQuestionsFromCsv(testVersion);
+    await importQuestionsFromCsv();
 
     setAssetFile(null);
     setAssetFiles([]);
   }
 
-  async function importQuestionsFromCsv(forcedTestVersion = "") {
+  async function importQuestionsFromCsv() {
     setAssetImportMsg("");
     if (!activeSchoolId) {
       setAssetImportMsg("School scope is required.");
       return;
     }
     const file = assetCsvFile || assetFile;
-    const testVersion = String(forcedTestVersion || assetForm.test_version || "").trim();
     const type = "mock";
     const category = assetForm.category.trim();
     if (!category) {
@@ -9620,7 +9708,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     setAssetImportMsg("Parsing...");
     const text = await file.text();
-    const { questions, choices, errors } = parseQuestionCsv(text, testVersion);
+    const { questions, choices, errors } = parseQuestionCsv(text, "");
     if (errors.length) {
       setAssetImportMsg(`CSV errors:\n${errors.slice(0, 5).join("\n")}`);
       return;
@@ -9629,139 +9717,132 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setAssetImportMsg("No questions found.");
       return;
     }
-    const versionSet = new Set(questions.map((q) => q.test_version));
-    if (versionSet.size > 1) {
-      setAssetImportMsg("Multiple test_version values detected. Split CSV per test_version.");
+    const groupedByVersion = groupParsedCsvByVersion(questions, choices);
+    const versions = Array.from(groupedByVersion.keys());
+    if (!versions.length) {
+      setAssetImportMsg("set_id is required in the CSV.");
       return;
     }
-    const resolvedVersion = Array.from(versionSet)[0] || testVersion;
-    if (resolvedVersion && resolvedVersion !== testVersion) {
-      setAssetForm((s) => ({ ...s, test_version: resolvedVersion }));
-    }
-    if (!resolvedVersion) {
-      setAssetImportMsg("test_version is required (either in form or CSV).");
-      return;
-    }
-    const resolvedTitle = type === "mock" ? (category || DEFAULT_MODEL_CATEGORY) : resolvedVersion;
 
     setAssetImportMsg("Resolving assets...");
-    const { data: assetRows, error: assetErr } = await supabase
-      .from("test_assets")
-      .select("path, original_name")
-      .eq("test_version", resolvedVersion);
-    if (assetErr) {
-      console.error("assets fetch error:", assetErr);
-      setAssetImportMsg(`Asset lookup failed: ${assetErr.message}`);
-      return;
-    }
-    const assetMap = {};
-    for (const row of assetRows ?? []) {
-      const name = row.original_name || row.path?.split("/").pop();
-      if (name) assetMap[name] = resolveAdminAssetUrl(row.path);
-    }
-    const { missing, invalid } = validateAssetRefs(questions, choices, assetMap);
-    if (invalid.length) {
-      setAssetImportMsg(`Invalid asset paths (use filename only):\n${invalid.slice(0, 5).join("\n")}`);
-      return;
-    }
-    if (missing.length) {
-      setAssetImportMsg(`Missing assets (upload first):\n${missing.slice(0, 5).join("\n")}`);
-      return;
-    }
-    applyAssetMap(questions, choices, assetMap);
+    let totalQuestions = 0;
+    let totalChoiceRows = 0;
 
-    setAssetImportMsg("Upserting tests...");
-    const ensure = await ensureTestRecord(resolvedVersion, resolvedTitle, type, null, activeSchoolId);
-    if (!ensure.ok) {
-      setAssetImportMsg(ensure.message);
-      return;
-    }
+    for (const version of versions) {
+      const group = groupedByVersion.get(version);
+      if (!group) continue;
+      const groupQuestions = group.questions.map((question) => ({ ...question }));
+      const groupChoices = group.choices.map((choice) => ({ ...choice }));
 
-    const questionIds = questions.map((q) => q.question_id);
-    if (questionIds.length) {
-      const notIn = `(${questionIds.map((id) => `"${id}"`).join(",")})`;
-      const { error: cleanupErr } = await supabase
+      const { data: assetRows, error: assetErr } = await supabase
+        .from("test_assets")
+        .select("path, original_name")
+        .eq("test_version", version);
+      if (assetErr) {
+        console.error("assets fetch error:", assetErr);
+        setAssetImportMsg(`Asset lookup failed: ${assetErr.message}`);
+        return;
+      }
+      const assetMap = {};
+      for (const row of assetRows ?? []) {
+        const name = row.original_name || row.path?.split("/").pop();
+        if (name) assetMap[name] = resolveAdminAssetUrl(row.path);
+      }
+      const { missing, invalid } = validateAssetRefs(groupQuestions, groupChoices, assetMap);
+      if (invalid.length) {
+        setAssetImportMsg(`Invalid asset paths for ${version} (use filename only):\n${invalid.slice(0, 5).join("\n")}`);
+        return;
+      }
+      if (missing.length) {
+        setAssetImportMsg(`Missing assets for ${version} (upload first):\n${missing.slice(0, 5).join("\n")}`);
+        return;
+      }
+      applyAssetMap(groupQuestions, groupChoices, assetMap);
+
+      const ensure = await ensureTestRecord(version, category || DEFAULT_MODEL_CATEGORY, type, null, activeSchoolId);
+      if (!ensure.ok) {
+        setAssetImportMsg(ensure.message);
+        return;
+      }
+
+      const questionIds = groupQuestions.map((q) => q.question_id);
+      if (questionIds.length) {
+        const notIn = `(${questionIds.map((id) => `"${id}"`).join(",")})`;
+        const { error: cleanupErr } = await supabase
+          .from("questions")
+          .delete()
+          .eq("test_version", version)
+          .not("question_id", "in", notIn);
+        if (cleanupErr) {
+          console.error("questions cleanup error:", cleanupErr);
+          setAssetImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+          return;
+        }
+      }
+
+      const scopedQuestions = groupQuestions.map((question) => ({
+        ...question,
+        school_id: activeSchoolId,
+      }));
+
+      const { error: qError } = await supabase.from("questions").upsert(scopedQuestions, {
+        onConflict: "test_version,question_id"
+      });
+      if (qError) {
+        console.error("questions upsert error:", qError);
+        setAssetImportMsg(`Question upsert failed: ${qError.message}`);
+        return;
+      }
+      const { data: qRows, error: qFetchErr } = await supabase
         .from("questions")
-        .delete()
-        .eq("test_version", resolvedVersion)
-        .not("question_id", "in", notIn);
-      if (cleanupErr) {
-        console.error("questions cleanup error:", cleanupErr);
-        setAssetImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+        .select("id, question_id")
+        .eq("test_version", version)
+        .in("question_id", questionIds);
+      if (qFetchErr) {
+        console.error("questions fetch error:", qFetchErr);
+        setAssetImportMsg(`Question fetch failed: ${qFetchErr.message}`);
         return;
       }
-    } else {
-      const { error: cleanupErr } = await supabase
-        .from("questions")
-        .delete()
-        .eq("test_version", resolvedVersion);
-      if (cleanupErr) {
-        console.error("questions cleanup error:", cleanupErr);
-        setAssetImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
-        return;
+
+      const idMap = {};
+      for (const row of qRows ?? []) {
+        idMap[row.question_id] = row.id;
       }
-    }
 
-    setAssetImportMsg("Upserting questions...");
-    const scopedQuestions = questions.map((question) => ({
-      ...question,
-      school_id: activeSchoolId,
-    }));
+      const choiceRows = groupChoices
+        .map((c) => ({
+          question_id: idMap[c.question_key],
+          part_index: c.part_index,
+          choice_index: c.choice_index,
+          label: c.label,
+          choice_image: c.choice_image
+        }))
+        .filter((c) => c.question_id);
 
-    const { error: qError } = await supabase.from("questions").upsert(scopedQuestions, {
-      onConflict: "test_version,question_id"
-    });
-    if (qError) {
-      console.error("questions upsert error:", qError);
-      setAssetImportMsg(`Question upsert failed: ${qError.message}`);
-      return;
-    }
-    const { data: qRows, error: qFetchErr } = await supabase
-      .from("questions")
-      .select("id, question_id")
-      .eq("test_version", resolvedVersion)
-      .in("question_id", questionIds);
-    if (qFetchErr) {
-      console.error("questions fetch error:", qFetchErr);
-      setAssetImportMsg(`Question fetch failed: ${qFetchErr.message}`);
-      return;
-    }
-
-    const idMap = {};
-    for (const row of qRows ?? []) {
-      idMap[row.question_id] = row.id;
-    }
-
-    const choiceRows = choices
-      .map((c) => ({
-        question_id: idMap[c.question_key],
-        part_index: c.part_index,
-        choice_index: c.choice_index,
-        label: c.label,
-        choice_image: c.choice_image
-      }))
-      .filter((c) => c.question_id);
-
-    const qUuidList = Object.values(idMap);
-    if (qUuidList.length) {
-      const { error: delErr } = await supabase.from("choices").delete().in("question_id", qUuidList);
-      if (delErr) {
-        console.error("choices delete error:", delErr);
-        setAssetImportMsg(`Choice cleanup failed: ${delErr.message}`);
-        return;
+      const qUuidList = Object.values(idMap);
+      if (qUuidList.length) {
+        const { error: delErr } = await supabase.from("choices").delete().in("question_id", qUuidList);
+        if (delErr) {
+          console.error("choices delete error:", delErr);
+          setAssetImportMsg(`Choice cleanup failed: ${delErr.message}`);
+          return;
+        }
       }
-    }
 
-    if (choiceRows.length) {
-      const { error: cErr } = await supabase.from("choices").insert(choiceRows);
-      if (cErr) {
-        console.error("choices insert error:", cErr);
-        setAssetImportMsg(`Choice insert failed: ${cErr.message}`);
-        return;
+      if (choiceRows.length) {
+        const { error: cErr } = await supabase.from("choices").insert(choiceRows);
+        if (cErr) {
+          console.error("choices insert error:", cErr);
+          setAssetImportMsg(`Choice insert failed: ${cErr.message}`);
+          return;
+        }
       }
+
+      totalQuestions += groupQuestions.length;
+      totalChoiceRows += choiceRows.length;
     }
 
-    setAssetImportMsg(`Imported ${questions.length} questions / ${choiceRows.length} choices.`);
+    setAssetImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versions.length} set${versions.length === 1 ? "" : "s"}.`);
     fetchTests();
     setAssetCsvFile(null);
   }
@@ -9775,25 +9856,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     const singleFile = dailyFile;
     const folderFiles = dailyFiles || [];
-    let testVersion = dailyForm.test_version.trim();
     const category = dailyForm.category.trim();
     const type = "daily";
 
-    if (!testVersion && dailyCsvFile) {
-      const csvText = await dailyCsvFile.text();
-      const detectedVersion = detectDailyTestIdFromCsvText(csvText);
-      if (detectedVersion && detectedVersion !== testVersion) {
-        testVersion = detectedVersion;
-        setDailyForm((s) => ({ ...s, test_version: detectedVersion }));
-      }
-    }
-
     if (!singleFile && folderFiles.length === 0) {
       setDailyUploadMsg("File or folder is required.");
-      return;
-    }
-    if (!testVersion) {
-      setDailyUploadMsg("SetID is required.");
       return;
     }
 
@@ -9823,60 +9890,61 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const preflight = await validateCsvAssetsBeforeUpload({
       csvFile,
       uploadFiles: files,
-      testVersion,
+      testVersion: "",
       parseCsv: parseDailyCsv,
-      multipleVersionMessage: "Upload stopped: multiple SetID values detected. Split CSV per SetID.",
-      missingVersionMessage: "Upload stopped: SetID is required (either in form or CSV).",
+      missingVersionMessage: "Upload stopped: set_id is required in the CSV.",
       isCsvLike,
-      onResolvedVersion: (resolvedVersion) => setDailyForm((s) => ({ ...s, test_version: resolvedVersion })),
+      allowMultipleVersions: true,
     });
     if (!preflight.ok) {
       setDailyUploadMsg(preflight.summary);
       if (preflight.detail) setDailyImportMsg(preflight.detail);
       return;
     }
-    if (preflight.resolvedVersion && preflight.resolvedVersion !== testVersion) {
-      testVersion = preflight.resolvedVersion;
-    }
+    const versions = preflight.versions ?? [];
 
     setDailyUploadMsg("Uploading...");
-    const ensure = await ensureTestRecord(testVersion, category || testVersion, type, null, activeSchoolId);
-    if (!ensure.ok) {
-      setDailyUploadMsg(ensure.message);
-      return;
+    for (const version of versions) {
+      const ensure = await ensureTestRecord(version, category || version, type, null, activeSchoolId);
+      if (!ensure.ok) {
+        setDailyUploadMsg(ensure.message);
+        return;
+      }
     }
 
     let ok = 0;
     let ng = 0;
-    for (const file of files) {
-      const { error } = await uploadSingleAsset(file, testVersion, type, activeSchoolId);
-      if (error) {
-        ng += 1;
-        console.error("daily asset upload error:", error);
-      } else {
-        ok += 1;
+    const totalUploads = files.length * Math.max(versions.length, 1);
+    for (const version of versions) {
+      for (const file of files) {
+        const { error } = await uploadSingleAsset(file, version, type, activeSchoolId);
+        if (error) {
+          ng += 1;
+          console.error("daily asset upload error:", error);
+        } else {
+          ok += 1;
+        }
+        setDailyUploadMsg(`Uploading... ${ok + ng}/${totalUploads}`);
       }
-      setDailyUploadMsg(`Uploading... ${ok + ng}/${files.length}`);
     }
 
     setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
     fetchTests();
     fetchAssets();
 
-    await importDailyQuestionsFromCsv(testVersion);
+    await importDailyQuestionsFromCsv();
 
     setDailyFile(null);
     setDailyFiles([]);
   }
 
-  async function importDailyQuestionsFromCsv(forcedTestVersion = "") {
+  async function importDailyQuestionsFromCsv() {
     setDailyImportMsg("");
     if (!activeSchoolId) {
       setDailyImportMsg("School scope is required.");
       return;
     }
     const file = dailyCsvFile || dailyFile;
-    const testVersion = String(forcedTestVersion || dailyForm.test_version || "").trim();
     const category = dailyForm.category.trim();
     const type = "daily";
 
@@ -9895,7 +9963,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
     setDailyImportMsg("Parsing...");
     const text = await file.text();
-    const { questions, choices, errors } = parseDailyCsv(text, testVersion);
+    const { questions, choices, errors } = parseDailyCsv(text, "");
     if (errors.length) {
       setDailyImportMsg(`CSV errors:\n${errors.slice(0, 5).join("\n")}`);
       return;
@@ -9904,139 +9972,133 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setDailyImportMsg("No questions found.");
       return;
     }
-    const versionSet = new Set(questions.map((q) => q.test_version));
-    if (versionSet.size > 1) {
-      setDailyImportMsg("Multiple SetID values detected. Split CSV per SetID.");
-      return;
-    }
-    const resolvedVersion = Array.from(versionSet)[0] || testVersion;
-    if (resolvedVersion && resolvedVersion !== testVersion) {
-      setDailyForm((s) => ({ ...s, test_version: resolvedVersion }));
-    }
-    if (!resolvedVersion) {
-      setDailyImportMsg("SetID is required (either in form or CSV).");
+    const groupedByVersion = groupParsedCsvByVersion(questions, choices);
+    const versions = Array.from(groupedByVersion.keys());
+    if (!versions.length) {
+      setDailyImportMsg("set_id is required in the CSV.");
       return;
     }
 
     setDailyImportMsg("Resolving assets...");
-    const { data: assetRows, error: assetErr } = await supabase
-      .from("test_assets")
-      .select("path, original_name")
-      .eq("test_version", resolvedVersion);
-    if (assetErr) {
-      console.error("daily assets fetch error:", assetErr);
-      setDailyImportMsg(`Asset lookup failed: ${assetErr.message}`);
-      return;
-    }
-    const assetMap = {};
-    for (const row of assetRows ?? []) {
-      const name = row.original_name || row.path?.split("/").pop();
-      if (name) assetMap[name] = resolveAdminAssetUrl(row.path);
-    }
-    const { missing, invalid } = validateAssetRefs(questions, choices, assetMap);
-    if (invalid.length) {
-      setDailyImportMsg(`Invalid asset paths (use filename only):\n${invalid.slice(0, 5).join("\n")}`);
-      return;
-    }
-    if (missing.length) {
-      setDailyImportMsg(`Missing assets (upload first):\n${missing.slice(0, 5).join("\n")}`);
-      return;
-    }
-    applyAssetMap(questions, choices, assetMap);
+    let totalQuestions = 0;
+    let totalChoiceRows = 0;
 
-    setDailyImportMsg("Upserting tests...");
-    const ensure = await ensureTestRecord(resolvedVersion, category || resolvedVersion, type, null, activeSchoolId);
-    if (!ensure.ok) {
-      setDailyImportMsg(ensure.message);
-      return;
-    }
+    for (const version of versions) {
+      const group = groupedByVersion.get(version);
+      if (!group) continue;
+      const groupQuestions = group.questions.map((question) => ({ ...question }));
+      const groupChoices = group.choices.map((choice) => ({ ...choice }));
 
-    const questionIds = questions.map((q) => q.question_id);
-    if (questionIds.length) {
-      const notIn = `(${questionIds.map((id) => `"${id}"`).join(",")})`;
-      const { error: cleanupErr } = await supabase
+      const { data: assetRows, error: assetErr } = await supabase
+        .from("test_assets")
+        .select("path, original_name")
+        .eq("test_version", version);
+      if (assetErr) {
+        console.error("daily assets fetch error:", assetErr);
+        setDailyImportMsg(`Asset lookup failed: ${assetErr.message}`);
+        return;
+      }
+      const assetMap = {};
+      for (const row of assetRows ?? []) {
+        const name = row.original_name || row.path?.split("/").pop();
+        if (name) assetMap[name] = resolveAdminAssetUrl(row.path);
+      }
+      const { missing, invalid } = validateAssetRefs(groupQuestions, groupChoices, assetMap);
+      if (invalid.length) {
+        setDailyImportMsg(`Invalid asset paths for ${version} (use filename only):\n${invalid.slice(0, 5).join("\n")}`);
+        return;
+      }
+      if (missing.length) {
+        setDailyImportMsg(`Missing assets for ${version} (upload first):\n${missing.slice(0, 5).join("\n")}`);
+        return;
+      }
+      applyAssetMap(groupQuestions, groupChoices, assetMap);
+
+      const ensure = await ensureTestRecord(version, category || version, type, null, activeSchoolId);
+      if (!ensure.ok) {
+        setDailyImportMsg(ensure.message);
+        return;
+      }
+
+      const questionIds = groupQuestions.map((q) => q.question_id);
+      if (questionIds.length) {
+        const notIn = `(${questionIds.map((id) => `"${id}"`).join(",")})`;
+        const { error: cleanupErr } = await supabase
+          .from("questions")
+          .delete()
+          .eq("test_version", version)
+          .not("question_id", "in", notIn);
+        if (cleanupErr) {
+          console.error("daily questions cleanup error:", cleanupErr);
+          setDailyImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+          return;
+        }
+      }
+
+      const scopedQuestions = groupQuestions.map((question) => ({
+        ...question,
+        school_id: activeSchoolId,
+      }));
+
+      const { error: qError } = await supabase.from("questions").upsert(scopedQuestions, {
+        onConflict: "test_version,question_id"
+      });
+      if (qError) {
+        console.error("daily questions upsert error:", qError);
+        setDailyImportMsg(`Question upsert failed: ${qError.message}`);
+        return;
+      }
+
+      const { data: qRows, error: qFetchErr } = await supabase
         .from("questions")
-        .delete()
-        .eq("test_version", resolvedVersion)
-        .not("question_id", "in", notIn);
-      if (cleanupErr) {
-        console.error("daily questions cleanup error:", cleanupErr);
-        setDailyImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+        .select("id, question_id")
+        .eq("test_version", version)
+        .in("question_id", questionIds);
+      if (qFetchErr) {
+        console.error("daily questions fetch error:", qFetchErr);
+        setDailyImportMsg(`Question fetch failed: ${qFetchErr.message}`);
         return;
       }
-    } else {
-      const { error: cleanupErr } = await supabase
-        .from("questions")
-        .delete()
-        .eq("test_version", resolvedVersion);
-      if (cleanupErr) {
-        console.error("daily questions cleanup error:", cleanupErr);
-        setDailyImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
-        return;
+
+      const idMap = {};
+      for (const row of qRows ?? []) {
+        idMap[row.question_id] = row.id;
       }
-    }
 
-    setDailyImportMsg("Upserting questions...");
-    const scopedQuestions = questions.map((question) => ({
-      ...question,
-      school_id: activeSchoolId,
-    }));
+      const choiceRows = groupChoices
+        .map((c) => ({
+          question_id: idMap[c.question_key],
+          part_index: c.part_index,
+          choice_index: c.choice_index,
+          label: c.label,
+          choice_image: c.choice_image
+        }))
+        .filter((c) => c.question_id);
 
-    const { error: qError } = await supabase.from("questions").upsert(scopedQuestions, {
-      onConflict: "test_version,question_id"
-    });
-    if (qError) {
-      console.error("daily questions upsert error:", qError);
-      setDailyImportMsg(`Question upsert failed: ${qError.message}`);
-      return;
-    }
-
-    const { data: qRows, error: qFetchErr } = await supabase
-      .from("questions")
-      .select("id, question_id")
-      .eq("test_version", resolvedVersion)
-      .in("question_id", questionIds);
-    if (qFetchErr) {
-      console.error("daily questions fetch error:", qFetchErr);
-      setDailyImportMsg(`Question fetch failed: ${qFetchErr.message}`);
-      return;
-    }
-
-    const idMap = {};
-    for (const row of qRows ?? []) {
-      idMap[row.question_id] = row.id;
-    }
-
-    const choiceRows = choices
-      .map((c) => ({
-        question_id: idMap[c.question_key],
-        part_index: c.part_index,
-        choice_index: c.choice_index,
-        label: c.label,
-        choice_image: c.choice_image
-      }))
-      .filter((c) => c.question_id);
-
-    const qUuidList = Object.values(idMap);
-    if (qUuidList.length) {
-      const { error: delErr } = await supabase.from("choices").delete().in("question_id", qUuidList);
-      if (delErr) {
-        console.error("daily choices delete error:", delErr);
-        setDailyImportMsg(`Choice cleanup failed: ${delErr.message}`);
-        return;
+      const qUuidList = Object.values(idMap);
+      if (qUuidList.length) {
+        const { error: delErr } = await supabase.from("choices").delete().in("question_id", qUuidList);
+        if (delErr) {
+          console.error("daily choices delete error:", delErr);
+          setDailyImportMsg(`Choice cleanup failed: ${delErr.message}`);
+          return;
+        }
       }
-    }
 
-    if (choiceRows.length) {
-      const { error: cErr } = await supabase.from("choices").insert(choiceRows);
-      if (cErr) {
-        console.error("daily choices insert error:", cErr);
-        setDailyImportMsg(`Choice insert failed: ${cErr.message}`);
-        return;
+      if (choiceRows.length) {
+        const { error: cErr } = await supabase.from("choices").insert(choiceRows);
+        if (cErr) {
+          console.error("daily choices insert error:", cErr);
+          setDailyImportMsg(`Choice insert failed: ${cErr.message}`);
+          return;
+        }
       }
+
+      totalQuestions += groupQuestions.length;
+      totalChoiceRows += choiceRows.length;
     }
 
-    setDailyImportMsg(`Imported ${questions.length} questions / ${choiceRows.length} choices.`);
+    setDailyImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versions.length} set${versions.length === 1 ? "" : "s"}.`);
     fetchTests();
     setDailyCsvFile(null);
   }
@@ -15060,7 +15122,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <div className="admin-title">Set Upload (CSV)</div>
                   <button
                     className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn"
-                    onClick={() => openModelUploadCategoryPicker({ launchUploadModal: true })}
+                    onClick={openModelUploadModal}
                   >
                     <svg viewBox="0 0 20 20" aria-hidden="true">
                       <path
@@ -15251,63 +15313,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
           {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
           {groupedModelUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
-          {modelUploadCategoryOpen ? (
-            <div className="admin-modal-overlay" onClick={closeModelUploadCategoryPicker}>
-              <div className="admin-modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
-                <div className="admin-modal-header">
-                  <div className="admin-title">Choose Model Category</div>
-                  <button className="admin-modal-close" onClick={closeModelUploadCategoryPicker} aria-label="Close">
-                    &times;
-                  </button>
-                </div>
-                <div className="admin-help" style={{ marginTop: 8 }}>
-                  The uploaded CSV will be registered under this category.
-                </div>
-                {modelUploadCategoryMsg ? (
-                  <div className="admin-msg" style={{ marginTop: 10 }}>{modelUploadCategoryMsg}</div>
-                ) : null}
-                <div className="admin-form" style={{ marginTop: 12 }}>
-                  <div className="field">
-                    <label>Category</label>
-                    <select
-                      value={assetCategorySelect}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setAssetCategorySelect(next);
-                        if (next !== "__custom__") {
-                          setAssetForm((current) => ({ ...current, category: next }));
-                        }
-                      }}
-                    >
-                      {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((category) => (
-                        <option key={`asset-category-picker-${category.name}`} value={category.name}>
-                          {category.name}
-                        </option>
-                      ))}
-                      <option value="__custom__">Custom...</option>
-                    </select>
-                    {assetCategorySelect === "__custom__" ? (
-                      <input
-                        value={assetForm.category}
-                        onChange={(e) => setAssetForm((current) => ({ ...current, category: e.target.value }))}
-                        placeholder="Book Review"
-                        style={{ marginTop: 6 }}
-                      />
-                    ) : null}
-                  </div>
-                </div>
-                <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                  <button className="btn" type="button" onClick={closeModelUploadCategoryPicker}>
-                    Cancel
-                  </button>
-                  <button className="btn btn-primary" type="button" onClick={confirmModelUploadCategory}>
-                    Continue
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
           {modelUploadOpen ? (
             <div className="admin-modal-overlay" onClick={() => setModelUploadOpen(false)}>
               <div className="admin-modal upload-question-modal" onClick={(e) => e.stopPropagation()}>
@@ -15326,21 +15331,32 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
                 <div className="admin-form upload-question-form" style={{ marginTop: 10 }}>
                   <div className="field">
-                    <label>SetID</label>
-                    <input
-                      value={assetForm.test_version}
-                      onChange={(e) => setAssetForm((s) => ({ ...s, test_version: e.target.value }))}
-                      placeholder="problem_set_v1"
-                    />
-                  </div>
-                  <div className="field">
                     <label>Category</label>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <input value={assetForm.category} readOnly />
-                      <button className="btn" type="button" onClick={() => openModelUploadCategoryPicker()}>
-                        Change
-                      </button>
-                    </div>
+                    <select
+                      value={assetCategorySelect}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setAssetCategorySelect(next);
+                        if (next !== "__custom__") {
+                          setAssetForm((current) => ({ ...current, category: next }));
+                        }
+                      }}
+                    >
+                      {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((category) => (
+                        <option key={`asset-upload-category-${category.name}`} value={category.name}>
+                          {category.name}
+                        </option>
+                      ))}
+                      <option value="__custom__">Custom...</option>
+                    </select>
+                    {assetCategorySelect === "__custom__" ? (
+                      <input
+                        value={assetForm.category}
+                        onChange={(e) => setAssetForm((current) => ({ ...current, category: e.target.value }))}
+                        placeholder="Book Review"
+                        style={{ marginTop: 6 }}
+                      />
+                    ) : null}
                   </div>
                   <div className="field">
                     <label>CSV File (required)</label>
@@ -15352,14 +15368,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         setAssetFile(file);
                         if (file && file.name.toLowerCase().endsWith(".csv")) {
                           setAssetCsvFile(file);
-                          if (!assetForm.test_version) {
-                            file.text().then((text) => {
-                              const detected = detectTestVersionFromCsvText(text);
-                              if (detected) {
-                                setAssetForm((s) => ({ ...s, test_version: detected }));
-                              }
-                            });
-                          }
                         }
                       }}
                     />
@@ -15386,14 +15394,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                           const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv"));
                           if (csvFile) {
                             setAssetCsvFile(csvFile);
-                            if (!assetForm.test_version) {
-                              csvFile.text().then((text) => {
-                                const detected = detectTestVersionFromCsvText(text);
-                                if (detected) {
-                                  setAssetForm((s) => ({ ...s, test_version: detected }));
-                                }
-                              });
-                            }
                           }
                         }}
                       />
@@ -15437,6 +15437,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       Upload & Register Set
                     </button>
                   </div>
+                </div>
+                <div className="admin-help" style={{ marginTop: 8 }}>
+                  SetID is read from the CSV `set_id` column. If the file contains multiple `set_id` values, each one is imported as a separate model test set.
                 </div>
                 <div className="admin-help" style={{ marginTop: 8 }}>
                   Template: <a href="/question_csv_template.csv" download>Model CSV template</a>
@@ -15547,13 +15550,29 @@ function openDailyRecordModal(record = null, recordDate = "") {
           ) : (
             <>
               <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                <table className="admin-table" style={{ minWidth: 860 }}>
+                <table className="admin-table daily-sessions-table" style={{ minWidth: 860 }}>
+                  <colgroup>
+                    <col />
+                    <col />
+                    <col />
+                    <col className="daily-sessions-col-setid" />
+                    <col className="daily-sessions-col-show-answers" />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>Created</th>
                       <th>Test Title</th>
+                      <th>Category</th>
                       <th>SetID</th>
-                      <th>Show Answers</th>
+                      <th><span className="daily-sessions-show-answers-head">Show Answers</span></th>
                       <th>Start</th>
                       <th>End</th>
                       <th>Time (min)</th>
@@ -15578,6 +15597,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                             t.title ?? ""
                           )}
                         </td>
+                        <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
                         <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
                         <td>
                           {editingSessionId === t.id ? (
@@ -15996,21 +16016,87 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         </label>
                       </div>
                       <div className="daily-session-create-field">
-                        <label>Category</label>
-                        <select
-                          value={dailyConductCategory}
-                          onChange={(e) => setDailyConductCategory(e.target.value)}
-                        >
-                          {dailyCategories.length ? (
-                            dailyCategories.map((c) => (
-                              <option key={`daily-cat-${c.name}`} value={c.name}>
-                                {c.name}
-                              </option>
-                            ))
-                          ) : (
-                            <option value="">No categories</option>
-                          )}
-                        </select>
+                        <label>Source Categories</label>
+                        {dailySessionForm.selection_mode === "multiple" ? (
+                          <>
+                            <div className="daily-session-create-multi-select" ref={dailySourceCategoryDropdownRef}>
+                              <button
+                                className="daily-session-create-multi-trigger"
+                                type="button"
+                                onClick={() => {
+                                  setActiveDailyTimePicker("");
+                                  setDailySetDropdownOpen(false);
+                                  setDailySourceCategoryDropdownOpen((open) => !open);
+                                }}
+                                disabled={!dailyCategories.length}
+                              >
+                                <span className="daily-session-create-multi-trigger-value">
+                                  {selectedDailySourceCategoryNames.length
+                                    ? (
+                                      <span className="daily-session-create-trigger-chip-list">
+                                        {selectedDailySourceCategoryNames.map((categoryName) => (
+                                          <span key={`selected-source-category-${categoryName}`} className="daily-session-create-selected-chip">
+                                            {categoryName}
+                                          </span>
+                                        ))}
+                                      </span>
+                                    )
+                                    : "Select Source Categories"}
+                                </span>
+                                <span className={`daily-session-create-multi-arrow ${dailySourceCategoryDropdownOpen ? "open" : ""}`}>▾</span>
+                              </button>
+                              {dailySourceCategoryDropdownOpen ? (
+                                <div className="daily-session-create-set-list">
+                                  {dailyCategories.length ? (
+                                    dailyCategories.map((category) => {
+                                      const checked = selectedDailySourceCategoryNames.includes(category.name);
+                                      return (
+                                        <label
+                                          key={`daily-source-category-${category.name}`}
+                                          className="daily-session-create-set-option"
+                                        >
+                                          <span className="daily-session-create-set-option-main">
+                                            <input
+                                              className="daily-session-create-set-option-check"
+                                              type="checkbox"
+                                              checked={checked}
+                                              onChange={() => toggleDailySourceCategorySelection(category.name)}
+                                            />
+                                            <span className="daily-session-create-set-option-id">{category.name}</span>
+                                          </span>
+                                          <span className="daily-session-create-set-meta">{Number(category.tests?.length ?? 0)} Sets</span>
+                                        </label>
+                                      );
+                                    })
+                                  ) : (
+                                    <div className="daily-session-create-help">No categories available.</div>
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="daily-session-create-help">
+                              Checked categories determine which Set IDs are available below.
+                            </div>
+                          </>
+                        ) : (
+                          <select
+                            value={dailyConductCategory}
+                            onChange={(e) => {
+                              setDailySourceCategoryDropdownOpen(false);
+                              setDailyConductCategory(e.target.value);
+                            }}
+                          >
+                            {dailyCategories.length ? (
+                              dailyCategories.map((category) => (
+                                <option key={`daily-source-single-${category.name}`} value={category.name}>
+                                  {category.name}
+                                </option>
+                              ))
+                            ) : (
+                              <option value="">No categories</option>
+                            )}
+                          </select>
+                        )}
                       </div>
                       <div className="daily-session-create-field">
                         <label>Set ID</label>
@@ -16064,7 +16150,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                     );
                                   })
                                 ) : (
-                                  <div className="daily-session-create-help">No daily tests in this category.</div>
+                                  <div className="daily-session-create-help">No daily tests in the selected categories.</div>
                                 )}
                               </div>
                             ) : null}
@@ -16091,6 +16177,53 @@ function openDailyRecordModal(record = null, recordDate = "") {
                             )}
                           </select>
                         )}
+                      </div>
+                      <div className="daily-session-create-field">
+                        <label>Session Category</label>
+                        {dailyCategories.length ? (
+                          <>
+                            <select
+                              value={dailySessionCategorySelectValue}
+                              onChange={(e) => {
+                                const next = e.target.value;
+                                if (next === CUSTOM_CATEGORY_OPTION) {
+                                  setDailySessionForm((s) => ({
+                                    ...s,
+                                    session_category: dailyCategories.some((category) => category.name === s.session_category)
+                                      ? ""
+                                      : s.session_category,
+                                  }));
+                                  return;
+                                }
+                                setDailySessionForm((s) => ({ ...s, session_category: next }));
+                              }}
+                            >
+                              {dailyCategories.map((category) => (
+                                <option key={`daily-session-category-${category.name}`} value={category.name}>
+                                  {category.name}
+                                </option>
+                              ))}
+                              <option value={CUSTOM_CATEGORY_OPTION}>Custom...</option>
+                            </select>
+                            {dailySessionCategorySelectValue === CUSTOM_CATEGORY_OPTION ? (
+                              <input
+                                value={dailySessionForm.session_category}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, session_category: e.target.value }))}
+                                placeholder="Mixed Practice"
+                                style={{ marginTop: 6 }}
+                              />
+                            ) : null}
+                          </>
+                        ) : (
+                          <input
+                            value={dailySessionForm.session_category}
+                            onChange={(e) => setDailySessionForm((s) => ({ ...s, session_category: e.target.value }))}
+                            placeholder="Mixed Practice"
+                          />
+                        )}
+                        <div className="daily-session-create-help">
+                          This category will be used for the generated daily test session.
+                        </div>
                       </div>
                       <div className="daily-session-create-field">
                         <label>Test Title</label>
@@ -16561,14 +16694,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
                 <div className="admin-form upload-question-form" style={{ marginTop: 10 }}>
                   <div className="field">
-                    <label>SetID</label>
-                    <input
-                      value={dailyForm.test_version}
-                      onChange={(e) => setDailyForm((s) => ({ ...s, test_version: e.target.value }))}
-                      placeholder="daily_vocab_01"
-                    />
-                  </div>
-                  <div className="field">
                     <label>Category</label>
                     {dailyCategories.length ? (
                       <>
@@ -16614,14 +16739,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         setDailyFile(file);
                         if (file && (file.name.toLowerCase().endsWith(".csv") || file.name.toLowerCase().endsWith(".tsv"))) {
                           setDailyCsvFile(file);
-                          if (!dailyForm.test_version) {
-                            file.text().then((text) => {
-                              const detected = detectDailyTestIdFromCsvText(text);
-                              if (detected) {
-                                setDailyForm((s) => ({ ...s, test_version: detected }));
-                              }
-                            });
-                          }
                         }
                       }}
                     />
@@ -16648,14 +16765,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
                           const csvFile = files.find((f) => f.name.toLowerCase().endsWith(".csv") || f.name.toLowerCase().endsWith(".tsv"));
                           if (csvFile) {
                             setDailyCsvFile(csvFile);
-                            if (!dailyForm.test_version) {
-                              csvFile.text().then((text) => {
-                                const detected = detectDailyTestIdFromCsvText(text);
-                                if (detected) {
-                                  setDailyForm((s) => ({ ...s, test_version: detected }));
-                                }
-                              });
-                            }
                           }
                         }}
                       />
@@ -16699,6 +16808,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       Upload & Register Daily Test
                     </button>
                   </div>
+                </div>
+                <div className="admin-help" style={{ marginTop: 8 }}>
+                  SetID is read from the CSV `set_id` column. If the file contains multiple `set_id` values, each one is imported as a separate daily test set.
                 </div>
                 <div className="admin-help" style={{ marginTop: 8 }}>
                   Template: <a href="/daily_question_csv_template.csv" download>Daily CSV template</a>
@@ -17890,7 +18002,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           <>
             <div className="results-page-header">
               <div className="results-page-header-row">
-                {(resultContext.type === "daily" ? dailyCategories : modelCategories).length ? (
+                {(resultContext.type === "daily" ? dailyResultCategories : modelCategories).length ? (
                   <div className="admin-mini-tabs results-category-tabs">
                     {resultContext.type === "mock" ? (
                       <button
@@ -17901,7 +18013,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         All
                       </button>
                     ) : null}
-                    {(resultContext.type === "daily" ? dailyCategories : modelCategories).map((c) => (
+                    {(resultContext.type === "daily" ? dailyResultCategories : modelCategories).map((c) => (
                       <button
                         key={`daily-cat-${c.name}`}
                         className={`admin-mini-tab results-category-tab ${((resultContext.type === "daily"
@@ -17987,7 +18099,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
             {resultContext.type === "daily" || resultContext.type === "mock" ? (
               <>
-                {!(resultContext.type === "daily" ? dailyCategories : modelCategories).length ? (
+                {!(resultContext.type === "daily" ? dailyResultCategories : modelCategories).length ? (
                   <div className="admin-msg">No test categories yet.</div>
                 ) : null}
 

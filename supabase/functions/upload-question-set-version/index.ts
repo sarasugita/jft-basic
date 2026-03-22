@@ -51,9 +51,19 @@ serve(async (req) => {
   }
   if (!legacySchoolId) return bad("No active school found for legacy test sync");
 
-  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, parsed.metadata.test_type);
+  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, {
+    testType: parsed.metadata.test_type,
+    defaultSetId: sourceSet.title,
+  });
   if (!validation.valid) {
     return bad("Validation failed", { validation });
+  }
+  if (validation.question_sets.length !== 1) {
+    return bad("Version uploads must contain exactly one set_id.", { validation });
+  }
+  const uploadedSet = validation.question_sets[0];
+  if (uploadedSet.set_id !== sourceSet.title) {
+    return bad(`Uploaded set_id "${uploadedSet.set_id}" must match "${sourceSet.title}".`, { validation });
   }
 
   const { data: maxVersionRow } = await context.adminClient
@@ -71,7 +81,7 @@ serve(async (req) => {
     .insert({
       library_key: sourceSet.library_key,
       source_question_set_id: sourceSet.id,
-      title: parsed.metadata.title || sourceSet.title,
+      title: sourceSet.title,
       description: parsed.metadata.description ?? sourceSet.description,
       test_type: parsed.metadata.test_type || sourceSet.test_type,
       version: nextVersion,
@@ -95,7 +105,7 @@ serve(async (req) => {
       parsed.assetFiles,
     );
 
-    const questionRows = validation.questions.map((question) => ({
+    const questionRows = uploadedSet.questions.map((question) => ({
       question_set_id: inserted.id,
       qid: question.qid,
       question_text: question.question_text,
@@ -121,11 +131,11 @@ serve(async (req) => {
     );
 
     await syncLegacyTestCatalog(context.adminClient, {
-      setId: parsed.metadata.title || sourceSet.title,
+      setId: sourceSet.title,
       testType: parsed.metadata.test_type || sourceSet.test_type,
       category: parsed.metadata.category,
       schoolId: legacySchoolId,
-      questions: validation.questions,
+      questions: uploadedSet.questions,
       uploadedAssets,
     });
 

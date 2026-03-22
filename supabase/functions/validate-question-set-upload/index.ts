@@ -11,7 +11,10 @@ serve(async (req) => {
   const parsed = await parseUploadForm(req);
   if (parsed instanceof Response) return parsed;
 
-  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, parsed.metadata.test_type);
+  const validation = await validateQuestionSetCsv(parsed.csvFile, parsed.assetFiles, {
+    testType: parsed.metadata.test_type,
+    defaultSetId: parsed.metadata.source_question_set_id ? parsed.metadata.title : null,
+  });
 
   return ok({
     ok: true,

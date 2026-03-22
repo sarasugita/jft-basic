@@ -2616,11 +2616,12 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
   const testTitle = getActiveTestTitle();
   const testLabel =
     testTitle?.trim() || (testType === "daily" ? "Daily Test" : "Model Test");
+  const isDailyActive = testType === "daily" && !hideQA;
   const metaHtml = hideQA
     ? `<div><span class="muted">Question:</span> <b>—</b></div>
        <div><span class="muted">Section:</span> <b>—</b></div>`
-    : `<div><span class="muted">Question:</span> <b>${state.questionIndexInSection + 1}</b></div>
-       <div><span class="muted">Section:</span> <b>${sec?.title ?? "—"}</b></div>`;
+    : `<div class="${isDailyActive ? "topbar-question" : ""}"><span class="muted">Question:</span> <b>${state.questionIndexInSection + 1}</b></div>
+       <div class="${isDailyActive ? "topbar-section" : ""}"><span class="muted">Section:</span> <b>${sec?.title ?? "—"}</b></div>`;
   const timerHtml = hideTimer
     ? ""
     : `
@@ -2631,7 +2632,7 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
   return `
     <header class="topbar">
       <div class="topbar-left">
-        <div class="topbar-meta">
+        <div class="topbar-meta ${isDailyActive ? "daily-meta" : ""}">
           ${metaHtml}
         </div>
         <div class="topbar-test">${escapeHtml(testLabel)}</div>
@@ -2759,8 +2760,10 @@ function promptBoxHTML(q, opts = {}) {
   const main = q.promptEn ?? "";
   const sub = q.promptBn ?? "";
   const lines = [];
-  if (showPrompt && main) lines.push(`<div class="prompt">${escapeHtml(main)}</div>`);
-  if (showPrompt && state.showBangla && sub) lines.push(`<div class="prompt-sub">${escapeHtml(sub)}</div>`);
+  const promptClass = getActiveTestType() === "daily" ? "prompt preserve-lines" : "prompt";
+  const promptSubClass = getActiveTestType() === "daily" ? "prompt-sub preserve-lines" : "prompt-sub";
+  if (showPrompt && main) lines.push(`<div class="${promptClass}">${escapeHtml(main)}</div>`);
+  if (showPrompt && state.showBangla && sub) lines.push(`<div class="${promptSubClass}">${escapeHtml(sub)}</div>`);
   if (includeStemInPrompt) {
     const stemLines = splitStemLines(q.stemText || q.stemExtra || "");
     if (stemLines.length) {
@@ -5214,10 +5217,13 @@ function renderQuiz(app) {
   const secQs = getSectionQuestions(sec.key);
   const group = getCurrentQuestion();
   const isDaily = getActiveTestType() === "daily";
+  const isLastQuestion = state.questionIndexInSection >= secQs.length - 1;
+  const finishLabel = isDaily ? "Finish Test" : "Finish Section";
+  const nextLabel = isLastQuestion ? "Finish Test ▶" : "Next ▶";
 
   app.innerHTML = `
     <div class="app has-topbar ${isDaily ? "" : "has-bottombar"}">
-      ${topbarHTML({ rightButtonLabel: "Finish Section", rightButtonId: "finishBtn" })}
+      ${topbarHTML({ rightButtonLabel: finishLabel, rightButtonId: "finishBtn" })}
       <div class="body">
         ${sidebarHTML()}
         <main class="content">
@@ -5228,7 +5234,7 @@ function renderQuiz(app) {
               ? `
                 <div class="question-nav">
                   <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
-                  <button class="nav-btn" id="nextBtn">Next ▶</button>
+                  <button class="nav-btn" id="nextBtn">${nextLabel}</button>
                 </div>
               `
               : ""
@@ -5243,7 +5249,7 @@ function renderQuiz(app) {
               <div class="bottom-left"><button class="icon-btn">⚙️</button><button class="icon-btn">▦</button></div>
               <div class="bottom-right">
                 <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
-                <button class="nav-btn" id="nextBtn">Next ▶</button>
+                <button class="nav-btn" id="nextBtn">${nextLabel}</button>
               </div>
             </footer>
           `

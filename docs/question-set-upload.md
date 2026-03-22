@@ -37,6 +37,12 @@ Headers used:
 
 ## Column Rules
 
+`set_id`
+
+- required for new uploads
+- used as the Question Set SetID
+- if one CSV contains multiple `set_id` values, the upload creates one question set per distinct `set_id`
+
 `qid`
 
 - unique inside the uploaded CSV

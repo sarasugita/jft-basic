@@ -9,7 +9,8 @@ Admin UI の `Upload & Register Set` で利用する Model Test CSV 形式です
 set_id,qid,sub_section,prompt_en,prompt_bn,stem_kind,stem_text,stem_image,stem_audio,sub_question,option_type,correct_option,wrong_option_1,wrong_option_2,wrong_option_3
 ```
 
-- `set_id` は自動入力補助に使えますが、問題変換では必須ではありません
+- `set_id` は必須です
+- 1 つの CSV に複数の `set_id` がある場合は、`set_id` ごとに別の Question Set として取り込みます
 - 上記以外の header は無視されます
 - ファイル名はパスなしで記載してください
 
