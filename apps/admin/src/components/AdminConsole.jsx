@@ -957,6 +957,12 @@ function isImportedModelResultsSummaryAttempt(attempt) {
     && String(attempt?.answers_json?.__meta?.imported_source ?? "") === "model_results_csv";
 }
 
+function isImportedResultsSummaryAttempt(attempt) {
+  const source = String(attempt?.answers_json?.__meta?.imported_source ?? "");
+  return isImportedSummaryAttempt(attempt)
+    && (source === "daily_results_csv" || source === "model_results_csv");
+}
+
 function getImportedModelSectionSummaries(attempt) {
   const rows = Array.isArray(attempt?.answers_json?.__meta?.main_section_summary)
     ? attempt.answers_json.__meta.main_section_summary
@@ -1050,7 +1056,7 @@ function buildSessionDetailAvailability(matrix) {
   sessions.forEach((session, sessionIndex) => {
     availability[session.id] = rows.some((row) =>
       (row?.cells?.[sessionIndex] ?? []).some((attempt) =>
-        attemptHasDetailData(attempt) || isImportedModelResultsSummaryAttempt(attempt)
+        attemptHasDetailData(attempt) || isImportedResultsSummaryAttempt(attempt)
       )
     );
   });
@@ -3289,6 +3295,7 @@ export default function AdminConsole({
   const [modelConductMode, setModelConductMode] = useState("normal");
   const [dailyConductMode, setDailyConductMode] = useState("normal");
   const [modelRetakeSourceId, setModelRetakeSourceId] = useState("");
+  const [dailyRetakeCategory, setDailyRetakeCategory] = useState("");
   const [dailyRetakeSourceId, setDailyRetakeSourceId] = useState("");
   const [activeModelTimePicker, setActiveModelTimePicker] = useState("");
   const [dailySourceCategoryDropdownOpen, setDailySourceCategoryDropdownOpen] = useState(false);
@@ -3413,6 +3420,8 @@ export default function AdminConsole({
   const attendanceImportChoiceResolverRef = useRef(null);
   const [attendanceImportConflict, setAttendanceImportConflict] = useState(null);
   const [attendanceImportStatus, setAttendanceImportStatus] = useState(null);
+  const dailyResultsImportChoiceResolverRef = useRef(null);
+  const [dailyResultsImportConflict, setDailyResultsImportConflict] = useState(null);
   const modelResultsImportChoiceResolverRef = useRef(null);
   const [modelResultsImportConflict, setModelResultsImportConflict] = useState(null);
   const [approvedAbsenceByStudent, setApprovedAbsenceByStudent] = useState({});
@@ -3543,10 +3552,38 @@ export default function AdminConsole({
     () => modelSessions.filter((session) => !isRetakeSessionTitle(session.title) && isPastSession(session)),
     [modelSessions]
   );
-  const pastDailySessions = useMemo(
-    () => dailySessions.filter((session) => !isRetakeSessionTitle(session.title) && isPastSession(session)),
-    [dailySessions]
-  );
+  const dailyRetakeSessions = useMemo(() => {
+    const nonRetakeSessions = dailySessions.filter((session) => !isRetakeSessionTitle(session.title));
+    const pastSessions = nonRetakeSessions.filter((session) => isPastSession(session));
+    const sourceSessions = pastSessions.length ? pastSessions : nonRetakeSessions;
+    return sourceSessions.slice().sort((left, right) => {
+      const leftTime = new Date(left.ends_at || left.starts_at || left.created_at || 0).getTime();
+      const rightTime = new Date(right.ends_at || right.starts_at || right.created_at || 0).getTime();
+      return rightTime - leftTime;
+    });
+  }, [dailySessions]);
+  const pastDailySessionCategories = useMemo(() => {
+    const dailyCategoryByVersion = new Map(
+      (dailyTests ?? []).map((test) => [test.version, String(test.title ?? "").trim() || "Uncategorized"])
+    );
+    const grouped = new Map();
+    dailyRetakeSessions.forEach((session) => {
+      const category = dailyCategoryByVersion.get(session.problem_set_id) || "Uncategorized";
+      if (!grouped.has(category)) grouped.set(category, []);
+      grouped.get(category).push(session);
+    });
+    return Array.from(grouped.entries())
+      .map(([name, sessions]) => ({
+        name,
+        sessions,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [dailyRetakeSessions, dailyTests]);
+  const selectedPastDailyRetakeCategory = useMemo(() => {
+    if (!pastDailySessionCategories.length) return null;
+    return pastDailySessionCategories.find((category) => category.name === dailyRetakeCategory) ?? pastDailySessionCategories[0];
+  }, [dailyRetakeCategory, pastDailySessionCategories]);
+  const filteredPastDailySessions = selectedPastDailyRetakeCategory?.sessions ?? [];
   const isModelPreview = useMemo(() => {
     if (previewSession?.problem_set_id) {
       return modelTests.some((test) => test.version === previewSession.problem_set_id);
@@ -3632,6 +3669,7 @@ export default function AdminConsole({
   };
 
   const dailyCategories = useMemo(() => buildCategories(dailyQuestionSets), [dailyQuestionSets]);
+  const dailySessionCategories = useMemo(() => buildCategories(dailyTests), [dailyTests]);
   const modelCategories = useMemo(() => buildCategories(modelTests, DEFAULT_MODEL_CATEGORY), [modelTests]);
 
   const testMetaByVersion = useMemo(() => {
@@ -3646,9 +3684,15 @@ export default function AdminConsole({
     return map;
   }, [tests]);
 
+  const sessionDetailDisplayAttempts = useMemo(() => {
+    const attemptsList = Array.isArray(sessionDetailAttempts) ? sessionDetailAttempts : [];
+    const actualAttempts = attemptsList.filter((attempt) => !isImportedResultsSummaryAttempt(attempt));
+    return actualAttempts.length ? actualAttempts : attemptsList;
+  }, [sessionDetailAttempts]);
+
   const sessionDetailStudentOptions = useMemo(() => {
     const unique = new Map();
-    (sessionDetailAttempts ?? []).forEach((attempt) => {
+    (sessionDetailDisplayAttempts ?? []).forEach((attempt) => {
       if (!attempt?.student_id || unique.has(attempt.student_id)) return;
       const student = students.find((item) => item.id === attempt.student_id) ?? null;
       unique.set(attempt.student_id, {
@@ -3662,12 +3706,12 @@ export default function AdminConsole({
       if (nameCompare !== 0) return nameCompare;
       return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
     });
-  }, [sessionDetailAttempts, students]);
+  }, [sessionDetailDisplayAttempts, students]);
 
   const sessionDetailLatestAttempts = useMemo(() => {
-    const latestMap = buildLatestAttemptMapByStudent(sessionDetailAttempts);
+    const latestMap = buildLatestAttemptMapByStudent(sessionDetailDisplayAttempts);
     return Array.from(latestMap.values()).sort((a, b) => getRowTimestamp(a) - getRowTimestamp(b));
-  }, [sessionDetailAttempts]);
+  }, [sessionDetailDisplayAttempts]);
 
   const sessionDetailPassRate = useMemo(() => {
     const value = Number(testPassRateByVersion[selectedSessionDetail?.problem_set_id] ?? 0.8);
@@ -3688,11 +3732,16 @@ export default function AdminConsole({
     };
   }, [sessionDetailLatestAttempts, sessionDetailPassRate]);
 
+  const sessionDetailUsesImportedResultsSummary = useMemo(() => {
+    return sessionDetailDisplayAttempts.length > 0
+      && sessionDetailDisplayAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt));
+  }, [sessionDetailDisplayAttempts]);
+
   const sessionDetailUsesImportedModelSummary = useMemo(() => {
     return sessionDetail.type === "mock"
-      && sessionDetailLatestAttempts.length > 0
+      && sessionDetailUsesImportedResultsSummary
       && sessionDetailLatestAttempts.every((attempt) => isImportedModelResultsSummaryAttempt(attempt));
-  }, [sessionDetail.type, sessionDetailLatestAttempts]);
+  }, [sessionDetail.type, sessionDetailLatestAttempts, sessionDetailUsesImportedResultsSummary]);
 
   const sessionDetailAnalysisSummary = useMemo(() => {
     const attendedCount = sessionDetailLatestAttempts.length;
@@ -3700,7 +3749,7 @@ export default function AdminConsole({
     const absentCount = Math.max(0, activeStudentCount - attendedCount);
     const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
     const failCount = Math.max(0, attendedCount - passCount);
-    const totalQuestions = sessionDetailUsesImportedModelSummary
+    const totalQuestions = sessionDetailUsesImportedResultsSummary
       ? Math.max(0, ...sessionDetailLatestAttempts.map((attempt) => Number(attempt.total ?? 0)))
       : sessionDetailQuestions.length;
     const averageCorrect = attendedCount
@@ -3736,19 +3785,19 @@ export default function AdminConsole({
     sessionDetailOverview.averageScore,
     sessionDetailPassRate,
     sessionDetailQuestions.length,
-    sessionDetailUsesImportedModelSummary,
+    sessionDetailUsesImportedResultsSummary,
     students,
   ]);
 
   const sessionDetailQuestionAnalysis = useMemo(() => {
-    if (sessionDetailUsesImportedModelSummary) return [];
+    if (sessionDetailUsesImportedResultsSummary) return [];
     if (!sessionDetailQuestions.length || !sessionDetailLatestAttempts.length) return [];
     return buildQuestionAnalysisRows(sessionDetailLatestAttempts, sessionDetailQuestions)
       .sort((a, b) => {
         if (b.rate !== a.rate) return b.rate - a.rate;
         return String(a.qid).localeCompare(String(b.qid));
       });
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedResultsSummary]);
 
   const sessionDetailQuestionStudents = useMemo(() => {
     return sessionDetailLatestAttempts
@@ -3768,40 +3817,46 @@ export default function AdminConsole({
   }, [sessionDetailLatestAttempts, students]);
 
   const sessionDetailSectionAverages = useMemo(() => {
-    if (sessionDetailUsesImportedModelSummary) return [];
+    if (sessionDetailUsesImportedResultsSummary) return [];
     return buildSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedResultsSummary]);
 
   const sessionDetailMainSectionAverages = useMemo(() => {
     if (sessionDetailUsesImportedModelSummary) {
       return buildImportedMainSectionAverageRows(sessionDetailLatestAttempts);
     }
+    if (sessionDetailUsesImportedResultsSummary) return [];
     return buildMainSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary, sessionDetailUsesImportedResultsSummary]);
 
   const sessionDetailNestedSectionAverages = useMemo(() => {
-    if (sessionDetailUsesImportedModelSummary) return [];
+    if (sessionDetailUsesImportedResultsSummary) return [];
     return buildNestedSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions);
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedResultsSummary]);
 
   const sessionDetailStudentRankingRows = useMemo(() => {
-    if (sessionDetailUsesImportedModelSummary) {
+    if (sessionDetailUsesImportedResultsSummary) {
       return buildImportedSessionStudentRankingRows(sessionDetailLatestAttempts, students);
     }
     return buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, students);
-  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedModelSummary, students]);
+  }, [sessionDetailLatestAttempts, sessionDetailQuestions, sessionDetailUsesImportedResultsSummary, students]);
 
   const sessionDetailRankingSections = useMemo(() => {
-    return sessionDetailUsesImportedModelSummary
-      ? sessionDetailMainSectionAverages
-      : sessionDetailSectionAverages;
-  }, [sessionDetailMainSectionAverages, sessionDetailSectionAverages, sessionDetailUsesImportedModelSummary]);
+    if (sessionDetailUsesImportedModelSummary) return sessionDetailMainSectionAverages;
+    if (sessionDetailUsesImportedResultsSummary) return [];
+    return sessionDetailSectionAverages;
+  }, [
+    sessionDetailMainSectionAverages,
+    sessionDetailSectionAverages,
+    sessionDetailUsesImportedModelSummary,
+    sessionDetailUsesImportedResultsSummary,
+  ]);
 
   useEffect(() => {
-    if (!sessionDetailUsesImportedModelSummary) return;
+    if (!sessionDetailUsesImportedResultsSummary) return;
     if (sessionDetailTab === "analysis" || sessionDetailTab === "studentRanking") return;
     setSessionDetailTab("analysis");
-  }, [sessionDetailTab, sessionDetailUsesImportedModelSummary]);
+  }, [sessionDetailTab, sessionDetailUsesImportedResultsSummary]);
 
   const studentModelAttempts = useMemo(() => {
     return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
@@ -3949,11 +4004,11 @@ export default function AdminConsole({
   }, [dailyCategories, selectedDailySourceCategoryNames]);
 
   const dailySessionCategorySelectValue = useMemo(() => {
-    if (!dailyCategories.length) return CUSTOM_CATEGORY_OPTION;
-    return dailyCategories.some((category) => category.name === dailySessionForm.session_category)
+    if (!dailySessionCategories.length) return CUSTOM_CATEGORY_OPTION;
+    return dailySessionCategories.some((category) => category.name === dailySessionForm.session_category)
       ? dailySessionForm.session_category
       : CUSTOM_CATEGORY_OPTION;
-  }, [dailyCategories, dailySessionForm.session_category]);
+  }, [dailySessionCategories, dailySessionForm.session_category]);
 
   const selectedDailyProblemSetIds = useMemo(() => {
     const availableIds = new Set(dailyConductTests.map((test) => test.version).filter(Boolean));
@@ -4006,6 +4061,28 @@ export default function AdminConsole({
       setDailyResultsCategory(dailyResultCategories[0].name);
     }
   }, [dailyResultCategories, dailyResultsCategory]);
+
+  useEffect(() => {
+    if (!pastDailySessionCategories.length) {
+      if (dailyRetakeCategory) setDailyRetakeCategory("");
+      return;
+    }
+    if (!dailyRetakeCategory || !pastDailySessionCategories.some((category) => category.name === dailyRetakeCategory)) {
+      setDailyRetakeCategory(pastDailySessionCategories[0].name);
+    }
+  }, [dailyRetakeCategory, pastDailySessionCategories]);
+
+  useEffect(() => {
+    if (dailyConductMode !== "retake") return;
+    if (!filteredPastDailySessions.length) {
+      if (dailyRetakeSourceId) setDailyRetakeSourceId("");
+      return;
+    }
+    if (filteredPastDailySessions.some((session) => session.id === dailyRetakeSourceId)) return;
+    const source = filteredPastDailySessions[0];
+    setDailyRetakeSourceId(source?.id ?? "");
+    if (source) applyDailyRetakeSourceSession(source);
+  }, [dailyConductMode, dailyRetakeSourceId, filteredPastDailySessions]);
 
   useEffect(() => {
     if (!modelCategories.length) {
@@ -4179,6 +4256,7 @@ export default function AdminConsole({
   }, [modelConductTests, testSessionForm.problem_set_id]);
 
   useEffect(() => {
+    if (dailyConductMode === "retake") return;
     if (!dailyConductTests.length) return;
     const availableIds = dailyConductTests.map((t) => t.version).filter(Boolean);
     const firstVersion = availableIds[0] ?? "";
@@ -4201,7 +4279,7 @@ export default function AdminConsole({
         problem_set_ids: normalizedIds,
       };
     });
-  }, [dailyConductTests, dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
+  }, [dailyConductMode, dailyConductTests, dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
 
   const resultContext = useMemo(() => {
     if (activeTab === "model" && modelSubTab === "results") {
@@ -4423,7 +4501,15 @@ export default function AdminConsole({
     const sessionList = categorySessions
       .map((session) => getCanonicalSession(session))
       .filter((session, idx, list) => session?.id && list.findIndex((item) => item?.id === session.id) === idx)
-      .filter((session) => canonicalSessionIdsWithAttempts.has(session.id));
+      .filter((session) => canonicalSessionIdsWithAttempts.has(session.id))
+      .sort((left, right) => {
+        const leftTime = new Date(left.starts_at || left.created_at || 0).getTime();
+        const rightTime = new Date(right.starts_at || right.created_at || 0).getTime();
+        if (leftTime !== rightTime) return leftTime - rightTime;
+        return String(left.title ?? left.problem_set_id ?? "").localeCompare(
+          String(right.title ?? right.problem_set_id ?? "")
+        );
+      });
 
     if (!sessionList.length) return { sessions: [], rows: [] };
 
@@ -4458,6 +4544,32 @@ export default function AdminConsole({
   const modelResultsMatrix = useMemo(
     () => buildSessionResultsMatrix(selectedModelCategory ?? { tests: modelTests }),
     [buildSessionResultsMatrix, selectedModelCategory, modelTests]
+  );
+
+  const buildSessionHeaderAverageMap = useCallback((matrix) => {
+    const sessions = Array.isArray(matrix?.sessions) ? matrix.sessions : [];
+    const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
+    return Object.fromEntries(
+      sessions.map((session, index) => {
+        const visibleAttempts = rows
+          .map((row) => row?.cells?.[index]?.[0] ?? null)
+          .filter(Boolean);
+        const averageRate = visibleAttempts.length
+          ? visibleAttempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / visibleAttempts.length
+          : 0;
+        return [session.id, { averageRate }];
+      })
+    );
+  }, []);
+
+  const dailyResultsSessionHeaderAverages = useMemo(
+    () => buildSessionHeaderAverageMap(dailyResultsMatrix),
+    [buildSessionHeaderAverageMap, dailyResultsMatrix]
+  );
+
+  const modelResultsSessionHeaderAverages = useMemo(
+    () => buildSessionHeaderAverageMap(modelResultsMatrix),
+    [buildSessionHeaderAverageMap, modelResultsMatrix]
   );
 
   const dailyResultsSessionDetailAvailability = useMemo(
@@ -4851,6 +4963,26 @@ export default function AdminConsole({
     if (resolve) resolve(choice);
   }, []);
 
+  const resolveDailyResultsImportConflict = useCallback((choice) => {
+    const resolve = dailyResultsImportChoiceResolverRef.current;
+    dailyResultsImportChoiceResolverRef.current = null;
+    setDailyResultsImportConflict(null);
+    if (resolve) resolve(choice);
+  }, []);
+
+  const promptDailyResultsImportConflict = useCallback((testTitles) => {
+    return new Promise((resolve) => {
+      if (dailyResultsImportChoiceResolverRef.current) {
+        dailyResultsImportChoiceResolverRef.current("cancel");
+      }
+      dailyResultsImportChoiceResolverRef.current = resolve;
+      setDailyResultsImportConflict({
+        testTitles,
+        previewTitles: testTitles.slice(0, 8),
+      });
+    });
+  }, []);
+
   const promptModelResultsImportConflict = useCallback((testTitles) => {
     return new Promise((resolve) => {
       if (modelResultsImportChoiceResolverRef.current) {
@@ -4870,6 +5002,10 @@ export default function AdminConsole({
         attendanceImportChoiceResolverRef.current("cancel");
         attendanceImportChoiceResolverRef.current = null;
       }
+      if (dailyResultsImportChoiceResolverRef.current) {
+        dailyResultsImportChoiceResolverRef.current("cancel");
+        dailyResultsImportChoiceResolverRef.current = null;
+      }
       if (modelResultsImportChoiceResolverRef.current) {
         modelResultsImportChoiceResolverRef.current("cancel");
         modelResultsImportChoiceResolverRef.current = null;
@@ -4882,16 +5018,31 @@ export default function AdminConsole({
   }, []);
 
   const openResultsImportStatus = useCallback((type) => {
+    if (type === "daily" && !selectedDailyCategory?.name) {
+      setResultsImportStatus({
+        open: true,
+        type,
+        loading: false,
+        tone: "error",
+        title: "Import Daily Results CSV",
+        message: "Select a daily test category first.",
+      });
+      return;
+    }
     setResultsImportStatus({
       open: true,
       type,
       loading: false,
       tone: "info",
-      title: type === "daily" ? "Import Daily Results CSV" : "Import Model Results CSV",
-      message: "Select a CSV file to import.",
+      title: type === "daily"
+        ? `Import Daily Results CSV${selectedDailyCategory?.name ? ` (${selectedDailyCategory.name})` : ""}`
+        : "Import Model Results CSV",
+      message: type === "daily" && selectedDailyCategory?.name
+        ? `Select a CSV file to import into ${selectedDailyCategory.name}.`
+        : "Select a CSV file to import.",
     });
     if (resultsImportInputRef.current) resultsImportInputRef.current.value = "";
-  }, []);
+  }, [selectedDailyCategory]);
 
   const showResultsImportLoadingStatus = useCallback((type, message) => {
     setResultsImportStatus({
@@ -5712,6 +5863,8 @@ export default function AdminConsole({
 
     const questionsList = (questionsData ?? []).map(mapDbQuestion);
     const attemptsList = attemptsResult.data ?? [];
+    const actualAttemptsList = attemptsList.filter((attempt) => !isImportedResultsSummaryAttempt(attempt));
+    const detailAttemptsList = actualAttemptsList.length ? actualAttemptsList : attemptsList;
     const allowancesMap = {};
     if (allowancesResult.error) {
       if (!isMissingSessionAttemptOverrideTableError(allowancesResult.error)) {
@@ -5728,8 +5881,8 @@ export default function AdminConsole({
     setSessionDetailAttempts(attemptsList);
     setSessionDetailAllowances(allowancesMap);
     setSessionDetailAllowStudentId((current) => {
-      if (current && attemptsList.some((attempt) => attempt.student_id === current)) return current;
-      return attemptsList[0]?.student_id ?? "";
+      if (current && detailAttemptsList.some((attempt) => attempt.student_id === current)) return current;
+      return detailAttemptsList[0]?.student_id ?? "";
     });
     setSessionDetailMsg("");
     setSessionDetailLoading(false);
@@ -7869,10 +8022,44 @@ function openDailyRecordModal(record = null, recordDate = "") {
         : session.starts_at
           ? getBangladeshDateInput(session.starts_at)
           : current.session_date,
+      start_time: "",
+      close_time: "",
+      starts_at: "",
+      ends_at: "",
+      time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
+      show_answers: false,
+      allow_multiple_attempts: false,
+      retake_release_scope: current.retake_release_scope || "all",
+      pass_rate: "0.8",
+    }));
+  }
+
+  function applyDailyRetakeSourceSession(session) {
+    if (!session) return;
+    const sourceCategory = testMetaByVersion[session.problem_set_id]?.category || "";
+    if (sourceCategory) {
+      setDailyRetakeCategory(sourceCategory);
+      setDailyConductCategory(sourceCategory);
+    }
+    setDailySessionForm((current) => ({
+      ...current,
+      selection_mode: "single",
+      problem_set_id: session.problem_set_id ?? current.problem_set_id,
+      problem_set_ids: session.problem_set_id ? [session.problem_set_id] : [],
+      source_categories: [],
+      session_category: sourceCategory || current.session_category || "",
+      title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
+      session_date: session.ends_at
+        ? getBangladeshDateInput(session.ends_at)
+        : session.starts_at
+          ? getBangladeshDateInput(session.starts_at)
+          : current.session_date,
       start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
       close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
       starts_at: "",
       ends_at: "",
+      question_count_mode: "all",
+      question_count: "",
       time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
       show_answers: false,
       allow_multiple_attempts: false,
@@ -7914,6 +8101,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setDailySetDropdownOpen(false);
     setActiveDailyTimePicker("");
     if (mode !== "retake") {
+      setDailyRetakeCategory("");
       setDailyRetakeSourceId("");
       setDailySessionForm((current) => ({
         ...current,
@@ -7934,9 +8122,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
       }));
       return;
     }
-    const source = pastDailySessions[0] ?? null;
+    const firstCategory = pastDailySessionCategories[0]?.name ?? "";
+    if (firstCategory) setDailyRetakeCategory(firstCategory);
+    const source = pastDailySessionCategories[0]?.sessions?.[0] ?? null;
     setDailyRetakeSourceId(source?.id ?? "");
-    if (source) applySourceSessionToForm(source, setDailySessionForm);
+    if (source) applyDailyRetakeSourceSession(source);
   }
 
   function selectModelRetakeSource(sessionId) {
@@ -7950,8 +8140,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setDailySetDropdownOpen(false);
     setActiveDailyTimePicker("");
     setDailyRetakeSourceId(sessionId);
-    const source = pastDailySessions.find((session) => session.id === sessionId);
-    if (source) applySourceSessionToForm(source, setDailySessionForm);
+    const source = dailyRetakeSessions.find((session) => session.id === sessionId);
+    if (source) applyDailyRetakeSourceSession(source);
   }
 
   function toggleDailySourceCategorySelection(categoryName) {
@@ -8364,17 +8554,19 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
     let problemSetId = selectedSetIds[0] ?? "";
-    try {
-      problemSetId = await materializeDailyProblemSet({
-        sourceSetIds: selectedSetIds,
-        category: sessionCategory,
-        questionCountMode: dailySessionForm.question_count_mode,
-        questionCount: dailySessionForm.question_count,
-        passRate,
-      });
-    } catch (error) {
-      setDailySessionsMsg(error.message);
-      return;
+    if (dailyConductMode !== "retake") {
+      try {
+        problemSetId = await materializeDailyProblemSet({
+          sourceSetIds: selectedSetIds,
+          category: sessionCategory,
+          questionCountMode: dailySessionForm.question_count_mode,
+          questionCount: dailySessionForm.question_count,
+          passRate,
+        });
+      } catch (error) {
+        setDailySessionsMsg(error.message);
+        return;
+      }
     }
     const payload = {
       school_id: activeSchoolId,
@@ -8549,18 +8741,28 @@ function openDailyRecordModal(record = null, recordDate = "") {
     fetchTests();
   }
 
-  async function deleteTestSession(id) {
+  async function deleteTestSession(id, options = {}) {
     if (!id) return;
-    const ok = window.confirm(`Delete test session ${id}?`);
+    const label = String(options?.title ?? id).trim() || id;
+    const ok = window.confirm(`Delete test session "${label}"?\n\nThis removes the test session record overall.`);
     if (!ok) return;
     const { error } = await supabase.from("test_sessions").delete().eq("id", id);
     if (error) {
       console.error("test_sessions delete error:", error);
       setTestSessionsMsg(`Delete failed: ${error.message}`);
+      if (options?.surface === "results") setQuizMsg(`Delete failed: ${error.message}`);
       return;
     }
-    setTestSessionsMsg(`Deleted: ${id}`);
-    fetchTestSessions();
+    setTestSessionsMsg(`Deleted: ${label}`);
+    if (options?.surface === "results") setQuizMsg(`Deleted: ${label}`);
+    if (sessionDetail.sessionId === id) {
+      closeSessionDetail();
+    }
+    await fetchTestSessions();
+    fetchExamLinks();
+    if (options?.refreshResults && options?.type) {
+      await runSearch(options.type);
+    }
   }
 
   async function ensureTestRecord(testVersion, title, type, passRate, schoolId = activeSchoolId) {
@@ -10775,13 +10977,29 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   async function importDailyResultsGoogleSheetsCsv(file) {
     if (!file) return;
-    const sessions = dailyResultsMatrix.sessions ?? [];
-    if (!sessions.length) {
-      const message = "Import failed: no daily test sessions are visible.";
+    if (!selectedDailyCategory?.name) {
+      const message = "Import failed: select a daily test category first.";
       setQuizMsg(message);
       showResultsImportResultStatus("daily", message, "error");
       return;
     }
+    const testsForCategory = (dailyTests ?? []).filter(
+      (test) => String(test.title ?? "").trim() === selectedDailyCategory.name
+    );
+    if (!testsForCategory.length) {
+      const message = `Import failed: no daily tests are available in ${selectedDailyCategory.name}.`;
+      setQuizMsg(message);
+      showResultsImportResultStatus("daily", message, "error");
+      return;
+    }
+    const testByVersion = new Map((testsForCategory ?? []).map((test) => [test.version, test]));
+    const importSessions = (testSessions ?? [])
+      .filter((session) => testByVersion.has(session.problem_set_id))
+      .filter((session) => !isRetakeSessionTitle(session.title))
+      .map((session) => ({
+        ...session,
+        linkedTest: testByVersion.get(session.problem_set_id) ?? null,
+      }));
     setQuizMsg("Importing CSV...");
     showResultsImportLoadingStatus("daily", "Reading uploaded CSV...");
     try {
@@ -10796,7 +11014,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
       const sessionKeyMap = new Map();
       const uniqueTitleMap = new Map();
-      sessions.forEach((session, index) => {
+      importSessions.forEach((session, index) => {
         const title = String(session.title ?? session.problem_set_id ?? "").trim();
         const dateKey = formatSlashDateShortYear(session.starts_at || session.created_at);
         sessionKeyMap.set(`${normalizeLookupValue(title)}::${dateKey}`, session);
@@ -10805,29 +11023,136 @@ function openDailyRecordModal(record = null, recordDate = "") {
         uniqueTitleMap.get(titleKey).push({ session, index });
       });
 
-      const mappedColumns = [];
+      const existingResultTitles = new Set(
+        importSessions
+          .map((session) => String(session?.title ?? session?.problem_set_id ?? "").trim())
+          .filter(Boolean)
+      );
+      const csvColumns = [];
       for (let col = 5; col < Math.max(rows[0]?.length ?? 0, rows[1]?.length ?? 0); col += 1) {
         const rawTitle = String(rows[0]?.[col] ?? "").trim();
         const rawDate = String(rows[1]?.[col] ?? "").trim();
         if (!rawTitle) continue;
-        const matchedByKey = sessionKeyMap.get(`${normalizeLookupValue(rawTitle)}::${rawDate}`);
-        const matchedByTitle = uniqueTitleMap.get(normalizeLookupValue(rawTitle)) ?? [];
-        const session = matchedByKey ?? matchedByTitle[0]?.session ?? sessions[mappedColumns.length] ?? null;
-        if (session?.id) {
-          mappedColumns.push({ colIndex: col, session });
-        }
+        csvColumns.push({
+          columnIndex: csvColumns.length,
+          colIndex: col,
+          importTitle: rawTitle,
+          importDateCell: rawDate,
+          importDateIso: parseSlashDateShortYearToIso(rawDate),
+          session: null,
+          linkedTest: null,
+        });
       }
 
-      if (!mappedColumns.length) {
-        const message = "Import failed: no daily result columns matched the current sessions.";
+      if (!csvColumns.length) {
+        const message = "Import failed: no daily result columns were found in the CSV.";
         setQuizMsg(message);
         showResultsImportResultStatus("daily", message, "error");
         return;
       }
 
+      const duplicateTitles = csvColumns
+        .map((column) => String(column.importTitle ?? "").trim())
+        .filter((title, index, list) => title && list.indexOf(title) === index && existingResultTitles.has(title));
+      let selectedColumns = csvColumns;
+      let overwriteSessionIds = [];
+
+      if (duplicateTitles.length) {
+        showResultsImportResultStatus("daily", "Duplicate test titles found. Choose how to continue.", "info", "Daily Results Import Warning");
+        const importChoice = await promptDailyResultsImportConflict(duplicateTitles);
+        if (importChoice === "cancel") {
+          const message = "Import cancelled.";
+          setQuizMsg(message);
+          showResultsImportResultStatus("daily", message, "info", "Daily Results Import Cancelled");
+          return;
+        }
+        if (importChoice === "new_only") {
+          selectedColumns = csvColumns.filter((column) => !existingResultTitles.has(String(column.importTitle ?? "").trim()));
+          if (!selectedColumns.length) {
+            const message = "Import skipped: all CSV test titles already exist in the current category, and only new tests was selected.";
+            setQuizMsg(message);
+            showResultsImportResultStatus("daily", message, "info");
+            return;
+          }
+        } else {
+          overwriteSessionIds = Array.from(new Set(
+            importSessions
+              .filter((session) => duplicateTitles.includes(String(session.title ?? "").trim()))
+              .map((session) => session.id)
+          ));
+        }
+      }
+
+      showResultsImportLoadingStatus("daily", `Preparing daily result sessions for ${selectedDailyCategory.name}...`);
+      const unresolvedColumns = [];
+      selectedColumns.forEach((column) => {
+        const titleKey = normalizeLookupValue(column.importTitle);
+        const matchedByKey = sessionKeyMap.get(`${titleKey}::${column.importDateCell}`);
+        const matchedByTitle = uniqueTitleMap.get(titleKey) ?? [];
+        const session = matchedByKey ?? matchedByTitle[0]?.session ?? null;
+        if (session?.id) {
+          column.session = session;
+          column.linkedTest = session.linkedTest ?? testByVersion.get(session.problem_set_id) ?? null;
+          return;
+        }
+        const linkedTest = testsForCategory[column.columnIndex] ?? testsForCategory[0] ?? null;
+        if (!linkedTest?.version) {
+          unresolvedColumns.push(column.importTitle || `Column ${column.columnIndex + 1}`);
+          return;
+        }
+        column.linkedTest = linkedTest;
+      });
+
+      if (unresolvedColumns.length) {
+        const message = `Import failed: could not assign daily tests for ${unresolvedColumns.length} CSV column${unresolvedColumns.length === 1 ? "" : "s"} in ${selectedDailyCategory.name}.`;
+        setQuizMsg(message);
+        showResultsImportResultStatus("daily", message, "error");
+        return;
+      }
+
+      const columnsToCreate = selectedColumns.filter((column) => !column.session?.id);
+      if (columnsToCreate.length) {
+        const createPayloads = columnsToCreate.map((column) => {
+          const sessionDateIso = column.importDateIso
+            ? new Date(`${column.importDateIso}T00:00:00`).toISOString()
+            : new Date().toISOString();
+          return {
+            school_id: activeSchoolId,
+            problem_set_id: column.linkedTest.version,
+            title: column.importTitle,
+            starts_at: sessionDateIso,
+            ends_at: sessionDateIso,
+            time_limit_min: null,
+            is_published: false,
+            show_answers: false,
+            allow_multiple_attempts: false,
+          };
+        });
+        const { data: createdSessions, error: createError } = await supabase
+          .from("test_sessions")
+          .insert(createPayloads)
+          .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at");
+        if (createError) {
+          const message = `Import failed: ${createError.message}`;
+          setQuizMsg(message);
+          showResultsImportResultStatus("daily", message, "error");
+          return;
+        }
+        createdSessions?.forEach((sessionRow, index) => {
+          const column = columnsToCreate[index];
+          column.session = {
+            retake_source_session_id: null,
+            retake_release_scope: "all",
+            ...sessionRow,
+            linkedTest: column.linkedTest,
+          };
+        });
+      }
+
       const matchStudent = createImportedStudentMatcher(sortedStudents);
       const payloads = [];
       const unmatchedRows = [];
+      showResultsImportLoadingStatus("daily", `Matching students and saving imported results into ${selectedDailyCategory.name}...`);
 
       for (let rowIndex = 3; rowIndex < rows.length; rowIndex += 1) {
         const row = rows[rowIndex] ?? [];
@@ -10846,7 +11171,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           continue;
         }
 
-        mappedColumns.forEach(({ colIndex, session }) => {
+        selectedColumns.forEach(({ colIndex, session }) => {
           const rate = parsePercentCell(row[colIndex]);
           if (rate == null) return;
           const total = Math.max(0, Number(session?.linkedTest?.question_count ?? 0));
@@ -10876,7 +11201,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
         return;
       }
 
-      const result = await replaceImportedSummaryAttempts(dedupedPayloads);
+      const result = await replaceImportedSummaryAttempts(dedupedPayloads, {
+        overwriteSessionIds,
+      });
       if (!result.ok) {
         const message = `Import failed: ${result.message}`;
         setQuizMsg(message);
@@ -10884,9 +11211,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
         return;
       }
 
+      await fetchTestSessions();
       await runSearch("daily");
+      const skippedExistingCount = duplicateTitles.length && !overwriteSessionIds.length
+        ? duplicateTitles.length
+        : 0;
+      const createdSessionCount = columnsToCreate.length;
       const message = 
         `Imported ${result.inserted} daily result entr${result.inserted === 1 ? "y" : "ies"}`
+        + (createdSessionCount ? `, created ${createdSessionCount} new result session${createdSessionCount === 1 ? "" : "s"}` : "")
+        + (overwriteSessionIds.length ? `, replaced ${overwriteSessionIds.length} existing test result set${overwriteSessionIds.length === 1 ? "" : "s"}` : "")
+        + (skippedExistingCount ? `, skipped ${skippedExistingCount} existing test title${skippedExistingCount === 1 ? "" : "s"}` : "")
         + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : ".");
       setQuizMsg(message);
       showResultsImportResultStatus("daily", message, "success");
@@ -11505,6 +11840,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
   function renderSessionDetailView() {
     if (!selectedSessionDetail) return null;
     const isMockSessionDetail = sessionDetail.type === "mock";
+    const isImportedSummarySession = sessionDetailUsesImportedResultsSummary;
     const isImportedModelSummarySession = sessionDetailUsesImportedModelSummary;
     const analysisPopupQuestions = Array.isArray(sessionDetailAnalysisPopup.questions)
       ? sessionDetailAnalysisPopup.questions
@@ -11517,7 +11853,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         return String(a.qid).localeCompare(String(b.qid));
       })
       .slice(0, 5);
-    const sessionDetailTabs = isImportedModelSummarySession
+    const sessionDetailTabs = isImportedSummarySession
       ? [
         ["analysis", "Result Analysis"],
         ["studentRanking", "Student Ranking"],
@@ -11537,24 +11873,38 @@ function openDailyRecordModal(record = null, recordDate = "") {
       <div className="session-detail-page">
         <div className="session-detail-header">
           <div className="session-detail-head-main">
-            <button
-              className="session-detail-back-btn"
-              type="button"
-              onClick={closeSessionDetail}
-              aria-label="Back to sessions"
-              title="Back to sessions"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 18, height: 18 }}>
-                <path
-                  d="m15 6-6 6 6 6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
+            <div className="session-detail-head-top">
+              <button
+                className="session-detail-back-btn"
+                type="button"
+                onClick={closeSessionDetail}
+                aria-label="Back to sessions"
+                title="Back to sessions"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" style={{ width: 18, height: 18 }}>
+                  <path
+                    d="m15 6-6 6 6 6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <button
+                className="btn btn-danger"
+                type="button"
+                onClick={() => deleteTestSession(selectedSessionDetail.id, {
+                  title: selectedSessionDetail.title || selectedSessionDetail.problem_set_id,
+                  type: sessionDetail.type,
+                  refreshResults: true,
+                  surface: "results",
+                })}
+              >
+                Delete test
+              </button>
+            </div>
             <div className="admin-title session-detail-title">
               {selectedSessionDetail.title || selectedSessionDetail.problem_set_id}
             </div>
@@ -11670,7 +12020,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </tr>
                 </thead>
                 <tbody>
-                  {sessionDetailAttempts.map((attempt, index) => {
+                  {sessionDetailDisplayAttempts.map((attempt, index) => {
                     const passed = getScoreRate(attempt) >= sessionDetailPassRate;
                     return (
                       <tr key={`session-attempt-${attempt.id}`} onClick={() => openAttemptDetail(attempt)}>
@@ -11685,7 +12035,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       </tr>
                     );
                   })}
-                  {!sessionDetailAttempts.length ? (
+                  {!sessionDetailDisplayAttempts.length ? (
                     <tr>
                       <td colSpan={8}>No attempts yet.</td>
                     </tr>
@@ -11968,7 +12318,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               ) : null}
             </div>
 
-            {!isImportedModelSummarySession ? (
+            {!isImportedSummarySession ? (
               <>
                 <div className="session-detail-analysis-grid">
                   <div className="admin-panel">
@@ -15722,6 +16072,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
               onClick={() => {
                 setDailyConductOpen(false);
                 setDailyConductMode("normal");
+                setDailyRetakeCategory("");
                 setDailyRetakeSourceId("");
                 setDailySetDropdownOpen(false);
                 setActiveDailyTimePicker("");
@@ -15738,6 +16089,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     onClick={() => {
                       setDailyConductOpen(false);
                       setDailyConductMode("normal");
+                      setDailyRetakeCategory("");
                       setDailyRetakeSourceId("");
                       setDailySetDropdownOpen(false);
                       setActiveDailyTimePicker("");
@@ -15752,19 +16104,41 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   {dailyConductMode === "retake" ? (
                     <div className="daily-session-create-layout">
                       <div className="daily-session-create-field">
+                        <label>Session Category</label>
+                        <select
+                          value={dailyRetakeCategory}
+                          onChange={(e) => {
+                            setDailyRetakeCategory(e.target.value);
+                            setDailyRetakeSourceId("");
+                          }}
+                        >
+                          {pastDailySessionCategories.length ? (
+                            pastDailySessionCategories.map((category) => (
+                              <option key={`daily-retake-category-${category.name}`} value={category.name}>
+                                {category.name}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">No past daily session categories</option>
+                          )}
+                        </select>
+                      </div>
+                      <div className="daily-session-create-field">
                         <label>Original Session</label>
                         <select
                           value={dailyRetakeSourceId}
                           onChange={(e) => selectDailyRetakeSource(e.target.value)}
                         >
-                          {pastDailySessions.length ? (
-                            pastDailySessions.map((session) => (
+                          {filteredPastDailySessions.length ? (
+                            filteredPastDailySessions.map((session) => (
                               <option key={`daily-retake-${session.id}`} value={session.id}>
                                 {session.title || session.problem_set_id} ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
                               </option>
                             ))
                           ) : (
-                            <option value="">No past daily sessions</option>
+                            <option value="">
+                              {dailyRetakeCategory ? "No past daily sessions in this category" : "No past daily sessions"}
+                            </option>
                           )}
                         </select>
                       </div>
@@ -16180,7 +16554,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       </div>
                       <div className="daily-session-create-field">
                         <label>Session Category</label>
-                        {dailyCategories.length ? (
+                        {dailySessionCategories.length ? (
                           <>
                             <select
                               value={dailySessionCategorySelectValue}
@@ -16189,7 +16563,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                 if (next === CUSTOM_CATEGORY_OPTION) {
                                   setDailySessionForm((s) => ({
                                     ...s,
-                                    session_category: dailyCategories.some((category) => category.name === s.session_category)
+                                    session_category: dailySessionCategories.some((category) => category.name === s.session_category)
                                       ? ""
                                       : s.session_category,
                                   }));
@@ -16198,7 +16572,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                 setDailySessionForm((s) => ({ ...s, session_category: next }));
                               }}
                             >
-                              {dailyCategories.map((category) => (
+                              {dailySessionCategories.map((category) => (
                                 <option key={`daily-session-category-${category.name}`} value={category.name}>
                                   {category.name}
                                 </option>
@@ -17817,6 +18191,76 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ), document.body) : null}
 
+        {dailyResultsImportConflict && typeof document !== "undefined" ? createPortal((
+          <div
+            className="admin-modal-overlay"
+            onClick={() => resolveDailyResultsImportConflict("cancel")}
+          >
+            <div className="admin-modal attendance-import-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">Daily Results Import Warning</div>
+                <button
+                  className="admin-modal-close"
+                  aria-label="Close"
+                  onClick={() => resolveDailyResultsImportConflict("cancel")}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="attendance-import-modal-body">
+                <div className="admin-help">
+                  This CSV includes {dailyResultsImportConflict.testTitles.length} test title{dailyResultsImportConflict.testTitles.length === 1 ? "" : "s"} that already exist in the current category results.
+                </div>
+                <div className="attendance-import-modal-note">
+                  Choose how to handle those same-name tests:
+                </div>
+                <div className="attendance-import-modal-option-list">
+                  <div><strong>Overwrite and Import All</strong>: replace the existing results for those tests with the CSV data. Existing attempts for those sessions will be deleted.</div>
+                  <div><strong>Only Import New Tests</strong>: skip the same-name tests and import only CSV tests whose titles are not already in the current category.</div>
+                  <div><strong>Cancel Import</strong>: stop this upload without changing anything.</div>
+                </div>
+                <div className="attendance-import-modal-date-list">
+                  {dailyResultsImportConflict.previewTitles.map((title) => (
+                    <span key={`daily-results-import-conflict-${title}`} className="attendance-import-modal-date-pill">
+                      {title}
+                    </span>
+                  ))}
+                  {dailyResultsImportConflict.testTitles.length > dailyResultsImportConflict.previewTitles.length ? (
+                    <span className="attendance-import-modal-more">
+                      +{dailyResultsImportConflict.testTitles.length - dailyResultsImportConflict.previewTitles.length} more
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="attendance-import-modal-actions">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => resolveDailyResultsImportConflict("overwrite")}
+                >
+                  Overwrite and Import All
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => resolveDailyResultsImportConflict("new_only")}
+                >
+                  Only Import New Tests
+                </button>
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  onClick={() => resolveDailyResultsImportConflict("cancel")}
+                >
+                  Cancel Import
+                </button>
+              </div>
+            </div>
+          </div>
+        ), document.body) : null}
+
         {modelResultsImportConflict && typeof document !== "undefined" ? createPortal((
           <div
             className="admin-modal-overlay"
@@ -18119,7 +18563,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       <tr>
                         <th className="daily-sticky-1 daily-col-no">Student<br />No.</th>
                         <th className="daily-sticky-2 daily-col-name">Student Name</th>
-                        {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem) => (
+                      {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem) => {
+                        const sessionAverage = (resultContext.type === "daily"
+                          ? dailyResultsSessionHeaderAverages
+                          : modelResultsSessionHeaderAverages)[sessionItem.id] ?? null;
+                        return (
                           <th key={`daily-col-${sessionItem.id}`}>
                             {((resultContext.type === "daily"
                               ? dailyResultsSessionDetailAvailability
@@ -18131,15 +18579,22 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               >
                                 <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
                                 <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
+                                <div className="daily-col-average">
+                                  Avg {(((sessionAverage?.averageRate ?? 0) * 100)).toFixed(1)}%
+                                </div>
                               </button>
                             ) : (
                               <div className="session-column-link" style={{ cursor: "default" }}>
                                 <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
                                 <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
+                                <div className="daily-col-average">
+                                  Avg {(((sessionAverage?.averageRate ?? 0) * 100)).toFixed(1)}%
+                                </div>
                               </div>
                             )}
                           </th>
-                        ))}
+                        );
+                      })}
                       </tr>
                     </thead>
                     <tbody>
@@ -18757,7 +19212,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                           <div className="admin-help" style={{ marginTop: 10 }}>
                             Imported summary results do not include question-level detail.
                           </div>
-                        ) : (
+                        ) : selectedAttemptIsModel ? (
                           <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                             <table className="admin-table" style={{ minWidth: 520 }}>
                               <thead>
@@ -18780,7 +19235,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               </tbody>
                             </table>
                           </div>
-                        )
+                        ) : null
                       )}
                     </div>
                   ) : !showSummaryOnly ? (

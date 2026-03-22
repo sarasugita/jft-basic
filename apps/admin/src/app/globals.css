@@ -1085,6 +1085,14 @@ body { padding: 0; }
   justify-items: flex-start;
 }
 
+.session-detail-head-top {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .session-detail-back-btn {
   display: inline-flex;
   align-items: center;
@@ -4153,6 +4161,12 @@ body { padding: 0; }
 .daily-sticky-2 { left: 60px; }
 
 .daily-col-title { font-weight: 900; }
+.daily-col-average {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: #475569;
+}
 .daily-col-subtitle { font-size: 11px; color: #333333; }
 .daily-col-date { font-size: 12px; color: #333333; }
 
@@ -4166,6 +4180,7 @@ body { padding: 0; }
   font: inherit;
   color: inherit;
 }
+
 
 .session-column-link:hover .daily-col-title,
 .session-column-link:focus-visible .daily-col-title {
