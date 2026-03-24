@@ -2125,6 +2125,8 @@ body { overflow-x: hidden; }
 .attendance-status.status-l { color: #1e40af; }
 .attendance-status.status-e { color: #b45309; }
 .attendance-status.status-a { color: #b91c1c; }
+.attendance-status.status-na { color: #475569; }
+.attendance-status.status-w { color: #7c3aed; }
 
 @media (max-width: 520px) {
   .attendance-pie {

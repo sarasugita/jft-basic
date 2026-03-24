@@ -1426,6 +1426,27 @@ function formatOrdinal(value) {
   return `${num}${suffix}`;
 }
 
+function normalizeAttendanceStatusToken(value) {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (!raw) return "";
+  const compact = raw.replace(/\s+/g, "");
+  if (compact === "NA" || compact === "N/A") return "N/A";
+  return compact;
+}
+
+function getAttendanceStatusClassSuffix(value) {
+  const token = normalizeAttendanceStatusToken(value);
+  const suffixMap = {
+    P: "p",
+    L: "l",
+    E: "e",
+    A: "a",
+    "N/A": "na",
+    W: "w",
+  };
+  return suffixMap[token] || "";
+}
+
 function buildAttendanceSummary(list) {
   const monthKeys = Array.from(
     new Set(
@@ -1437,11 +1458,15 @@ function buildAttendanceSummary(list) {
   ).sort();
 
   const calc = (rows) => {
-    const total = rows.length;
-    const present = rows.filter((r) => r.status === "P" || r.status === "L").length;
-    const late = rows.filter((r) => r.status === "L").length;
-    const excused = rows.filter((r) => r.status === "E").length;
-    const unexcused = rows.filter((r) => r.status === "A").length;
+    const countedRows = rows.filter((row) => ["P", "L", "E", "A"].includes(normalizeAttendanceStatusToken(row.status)));
+    const total = countedRows.length;
+    const present = countedRows.filter((r) => {
+      const status = normalizeAttendanceStatusToken(r.status);
+      return status === "P" || status === "L";
+    }).length;
+    const late = countedRows.filter((r) => normalizeAttendanceStatusToken(r.status) === "L").length;
+    const excused = countedRows.filter((r) => normalizeAttendanceStatusToken(r.status) === "E").length;
+    const unexcused = countedRows.filter((r) => normalizeAttendanceStatusToken(r.status) === "A").length;
     const rate = total ? (present / total) * 100 : null;
     return { total, present, late, excused, unexcused, rate };
   };
@@ -4381,7 +4406,7 @@ function renderTestSelect(app) {
                         (r) => `
                           <tr>
                             <td>${escapeHtml(`${formatDateShort(r.day_date)} (${formatWeekday(r.day_date)})`)}</td>
-                            <td><span class="attendance-status status-${escapeHtml((r.status || "").toLowerCase())}">${escapeHtml(r.status ?? "")}</span></td>
+                            <td><span class="attendance-status status-${escapeHtml(getAttendanceStatusClassSuffix(r.status))}">${escapeHtml(r.status ?? "")}</span></td>
                             <td>${escapeHtml(r.comment ?? "")}</td>
                           </tr>
                         `

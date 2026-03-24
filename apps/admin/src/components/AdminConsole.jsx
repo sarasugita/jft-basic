@@ -827,6 +827,8 @@ const ATTENDANCE_EXPORT_RULES = [
   "3. If your attendance rate is less than 75%, we will ask you if you would like to continue or quit. If you don't have a strong will to continue, you will be eliminated.",
   "4. We will call you one by one if you are absent without any reason.",
 ];
+const ATTENDANCE_COUNTED_STATUSES = ["P", "L", "E", "A"];
+const ATTENDANCE_SUPPORTED_STATUSES = [...ATTENDANCE_COUNTED_STATUSES, "N/A", "W"];
 
 function padCsvRow(row, length) {
   const next = [...(row ?? [])];
@@ -904,6 +906,39 @@ function rowHasCsvValues(row) {
   return Array.isArray(row) && row.some((cell) => String(cell ?? "").trim());
 }
 
+function normalizeAttendanceStatusToken(value) {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (!raw) return "";
+  const compact = raw.replace(/\s+/g, "");
+  if (compact === "NA" || compact === "N/A") return "N/A";
+  return compact;
+}
+
+function normalizeAttendanceImportStatus(value) {
+  const token = normalizeAttendanceStatusToken(value);
+  if (!token) return "N/A";
+  return ATTENDANCE_SUPPORTED_STATUSES.includes(token) ? token : "";
+}
+
+function isCountedAttendanceStatus(value) {
+  return ATTENDANCE_COUNTED_STATUSES.includes(normalizeAttendanceStatusToken(value));
+}
+
+function getAttendanceStatusClassName(value, prefix = "att") {
+  const token = normalizeAttendanceStatusToken(value);
+  if (!token) return "";
+  const suffixMap = {
+    P: "P",
+    L: "L",
+    E: "E",
+    A: "A",
+    "N/A": "NA",
+    W: "W",
+  };
+  const suffix = suffixMap[token];
+  return suffix ? `${prefix}-${suffix}` : "";
+}
+
 function detectAttendanceImportLayout(rows) {
   const headerRow = Array.isArray(rows?.[0]) ? rows[0] : [];
   if (!headerRow.length) return null;
@@ -969,13 +1004,24 @@ function parseScoreFractionCell(value) {
 function parseSlashDateShortYearToIso(value) {
   const text = String(value ?? "").trim();
   if (!text) return "";
-  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  const compact = text.replace(/\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?$/i, "");
+  let match = compact.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (match) {
+    const month = Number(match[1]);
+    const day = Number(match[2]);
+    const rawYear = Number(match[3]);
+    if (!Number.isFinite(month) || !Number.isFinite(day) || !Number.isFinite(rawYear)) return "";
+    const year = match[3].length === 2 ? 2000 + rawYear : rawYear;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  match = compact.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
   if (!match) return "";
-  const month = Number(match[1]);
-  const day = Number(match[2]);
-  const rawYear = Number(match[3]);
+  const rawYear = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
   if (!Number.isFinite(month) || !Number.isFinite(day) || !Number.isFinite(rawYear)) return "";
-  const year = match[3].length === 2 ? 2000 + rawYear : rawYear;
+  const year = rawYear;
   if (month < 1 || month > 12 || day < 1 || day > 31) return "";
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
@@ -1259,7 +1305,7 @@ function normalizeImportedModelSectionTitle(value) {
 }
 
 function buildAttendanceStats(statuses) {
-  const marked = (statuses ?? []).filter((status) => status && status !== "W");
+  const marked = (statuses ?? []).map(normalizeAttendanceStatusToken).filter(isCountedAttendanceStatus);
   const total = marked.length;
   const present = marked.filter((status) => status === "P" || status === "L").length;
   const unexcused = marked.filter((status) => status === "A").length;
@@ -3856,6 +3902,11 @@ export default function AdminConsole({
     return map;
   }, [tests]);
 
+  const testSessionsById = useMemo(
+    () => new Map((testSessions ?? []).map((session) => [session.id, session])),
+    [testSessions]
+  );
+
   const sessionDetailDisplayAttempts = useMemo(() => {
     const attemptsList = Array.isArray(sessionDetailAttempts) ? sessionDetailAttempts : [];
     const actualAttempts = attemptsList.filter((attempt) => !isImportedResultsSummaryAttempt(attempt));
@@ -4043,8 +4094,79 @@ export default function AdminConsole({
   }, [sessionDetailTab, sessionDetailUsesImportedResultsSummary]);
 
   const studentModelAttempts = useMemo(() => {
-    return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type === "mock");
-  }, [studentAttempts, testMetaByVersion]);
+    const modelAttempts = (studentAttempts ?? []).filter((attempt) => testMetaByVersion[attempt.test_version]?.type === "mock");
+    const actualSessionIds = new Set(
+      modelAttempts
+        .filter((attempt) => !isImportedResultsSummaryAttempt(attempt))
+        .map((attempt) => attempt.test_session_id)
+        .filter(Boolean)
+    );
+
+    const choosePreferredImportedAttempt = (left, right) => {
+      const buildScore = (attempt) => {
+        const category = normalizeLookupValue(testMetaByVersion[attempt?.test_version]?.category || DEFAULT_MODEL_CATEGORY);
+        const title = normalizeLookupValue(getAttemptTitle(attempt));
+        let score = 0;
+        if (attempt?.test_session_id && testSessionsById.has(attempt.test_session_id)) score += 4;
+        if (title && title !== category) score += 8;
+        if (String(attempt?.answers_json?.__meta?.imported_test_title ?? "").trim()) score += 2;
+        return score;
+      };
+      const leftScore = buildScore(left);
+      const rightScore = buildScore(right);
+      if (leftScore !== rightScore) return leftScore > rightScore ? left : right;
+      return getRowTimestamp(left) >= getRowTimestamp(right) ? left : right;
+    };
+
+    const visibleActualAttempts = [];
+    const importedBySessionId = new Map();
+    const importedWithoutSession = [];
+
+    modelAttempts.forEach((attempt) => {
+      if (!isImportedResultsSummaryAttempt(attempt)) {
+        visibleActualAttempts.push(attempt);
+        return;
+      }
+      if (attempt.test_session_id && actualSessionIds.has(attempt.test_session_id)) return;
+      if (attempt.test_session_id) {
+        const existing = importedBySessionId.get(attempt.test_session_id);
+        importedBySessionId.set(
+          attempt.test_session_id,
+          existing ? choosePreferredImportedAttempt(existing, attempt) : attempt
+        );
+        return;
+      }
+      importedWithoutSession.push(attempt);
+    });
+
+    const importedCandidates = [...importedBySessionId.values(), ...importedWithoutSession];
+    const importedBySummaryKey = new Map();
+
+    importedCandidates.forEach((attempt) => {
+      const category = normalizeLookupValue(testMetaByVersion[attempt?.test_version]?.category || DEFAULT_MODEL_CATEGORY);
+      const dateLabel = formatDateFull(getAttemptDisplayDateValue(attempt));
+      const key = `${category}::${dateLabel}::${Number(attempt?.correct ?? 0)}::${Number(attempt?.total ?? 0)}::${getScoreRate(attempt).toFixed(6)}`;
+      if (!importedBySummaryKey.has(key)) importedBySummaryKey.set(key, []);
+      importedBySummaryKey.get(key).push(attempt);
+    });
+
+    const visibleImportedAttempts = [];
+    importedBySummaryKey.forEach((group) => {
+      const genericRows = group.filter((attempt) => isAttemptUsingCategoryTitle(attempt));
+      const specificRows = group.filter((attempt) => !isAttemptUsingCategoryTitle(attempt));
+      if (genericRows.length && specificRows.length) {
+        visibleImportedAttempts.push(...specificRows);
+        return;
+      }
+      visibleImportedAttempts.push(...group);
+    });
+
+    return [...visibleActualAttempts, ...visibleImportedAttempts].sort((left, right) => {
+      const timeDiff = getAttemptDisplayTimestamp(right) - getAttemptDisplayTimestamp(left);
+      if (timeDiff !== 0) return timeDiff;
+      return getRowTimestamp(right) - getRowTimestamp(left);
+    });
+  }, [studentAttempts, testMetaByVersion, testSessionsById]);
 
   const dailyResultCategories = useMemo(() => {
     const sessionVersions = new Set((dailySessions ?? []).map((session) => session.problem_set_id).filter(Boolean));
@@ -5141,10 +5263,9 @@ export default function AdminConsole({
     const minAbsences = attendanceFilter.minAbsences === "" ? null : Number(attendanceFilter.minAbsences);
     return activeStudents.filter((s) => {
       const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
-      const total = perDay.filter(Boolean).length;
-      const present = perDay.filter((v) => v === "P" || v === "L").length;
-      const absences = perDay.filter((v) => v === "A").length;
-      const rate = total ? (present / total) * 100 : 0;
+      const stats = buildAttendanceStats(perDay);
+      const rate = stats.total ? (stats.present / stats.total) * 100 : 0;
+      const absences = stats.unexcused;
       if (minRate != null && rate >= minRate) return false;
       if (minAbsences != null && absences < minAbsences) return false;
       return true;
@@ -7841,14 +7962,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setStudentAttemptsMsg("Loading...");
     let { data, error } = await supabase
       .from("attempts")
-      .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json, tab_left_count")
+      .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, created_at, ended_at, answers_json, tab_left_count")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false })
       .limit(200);
     if (error && isMissingTabLeftCountError(error)) {
       ({ data, error } = await supabase
         .from("attempts")
-        .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, created_at, ended_at, answers_json")
+        .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, created_at, ended_at, answers_json")
         .eq("student_id", studentId)
         .order("created_at", { ascending: false })
         .limit(200));
@@ -8312,7 +8433,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         status: v.status,
         comment: v.comment?.trim() || null
       }))
-      .filter((r) => r.status);
+      .filter((row) => ATTENDANCE_SUPPORTED_STATUSES.includes(normalizeAttendanceStatusToken(row.status)));
     const { error } = await supabase
       .from("attendance_entries")
       .upsert(rows, { onConflict: "day_id,student_id" });
@@ -9654,11 +9775,42 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   function getAttemptTitle(attempt) {
     if (!attempt) return "";
+    const importedTitle = String(attempt?.answers_json?.__meta?.imported_test_title ?? "").trim();
+    if (isImportedResultsSummaryAttempt(attempt) && importedTitle) return importedTitle;
     if (attempt.test_session_id) {
-      const session = testSessions.find((s) => s.id === attempt.test_session_id);
+      const session = testSessionsById.get(attempt.test_session_id);
       if (session?.title) return session.title;
     }
     return getProblemSetTitle(attempt.test_version, tests);
+  }
+
+  function getAttemptDisplayDateValue(attempt) {
+    if (!attempt) return "";
+    const importedDate = String(
+      attempt?.answers_json?.__meta?.imported_test_date
+      ?? attempt?.answers_json?.__meta?.imported_date_iso
+      ?? ""
+    ).trim();
+    if (importedDate) return importedDate;
+    const session = attempt?.test_session_id ? testSessionsById.get(attempt.test_session_id) : null;
+    return session?.starts_at || session?.ends_at || attempt?.ended_at || attempt?.started_at || attempt?.created_at || "";
+  }
+
+  function getAttemptDisplayTimestamp(attempt) {
+    const value = getAttemptDisplayDateValue(attempt);
+    if (!value) return getRowTimestamp(attempt);
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const time = new Date(`${value}T00:00:00`).getTime();
+      return Number.isFinite(time) ? time : getRowTimestamp(attempt);
+    }
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) ? time : getRowTimestamp(attempt);
+  }
+
+  function isAttemptUsingCategoryTitle(attempt) {
+    const category = normalizeLookupValue(testMetaByVersion[attempt?.test_version]?.category || DEFAULT_MODEL_CATEGORY);
+    const title = normalizeLookupValue(getAttemptTitle(attempt));
+    return Boolean(category && title && category === title);
   }
 
   function setPreviewAnswer(questionId, choiceIndex) {
@@ -11376,6 +11528,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       const importedByDay = new Map();
       const unmatchedRows = [];
       let skippedEmptyDayCount = 0;
+      let skippedAllNaDayCount = 0;
       const getCell = (row, index) => (index >= 0 ? row[index] : "");
 
       for (let rowIndex = 3; rowIndex < rows.length; rowIndex += 1) {
@@ -11396,8 +11549,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
         }
 
         dayColumns.forEach(({ colIndex, dayDate }) => {
-          const status = normalizeCsvValue(row[colIndex]).toUpperCase();
-          if (["P", "L", "E", "A"].includes(status)) {
+          const status = normalizeAttendanceImportStatus(row[colIndex]);
+          if (ATTENDANCE_SUPPORTED_STATUSES.includes(status)) {
             if (!importedByDay.has(dayDate)) {
               importedByDay.set(dayDate, new Map());
             }
@@ -11411,8 +11564,26 @@ function openDailyRecordModal(record = null, recordDate = "") {
         return;
       }
 
-      skippedEmptyDayCount = dayColumns.filter(({ dayDate }) => !importedByDay.has(dayDate)).length;
-      const importedDayDates = Array.from(importedByDay.keys());
+      const importedDayDates = [];
+      dayColumns.forEach(({ dayDate }) => {
+        const statusMap = importedByDay.get(dayDate);
+        const statuses = Array.from(statusMap?.values?.() ?? []);
+        if (!statuses.length) {
+          skippedEmptyDayCount += 1;
+          return;
+        }
+        if (statuses.every((status) => status === "N/A")) {
+          skippedAllNaDayCount += 1;
+          importedByDay.delete(dayDate);
+          return;
+        }
+        importedDayDates.push(dayDate);
+      });
+
+      if (!importedDayDates.length) {
+        showResultStatus("Import skipped: every detected attendance column was empty or N/A only.", "info");
+        return;
+      }
 
       showLoadingStatus("Checking for existing attendance dates...");
       const { data: existingDaysData, error: existingDaysError } = await supabase
@@ -11486,7 +11657,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
             status: statusMap.get(studentId),
             comment: null,
           }))
-          .filter((row) => ["P", "L", "E", "A"].includes(row.status));
+          .filter((row) => ATTENDANCE_SUPPORTED_STATUSES.includes(row.status));
 
         if (insertRows.length) {
           const { error: insertError } = await supabase
@@ -11521,6 +11692,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         + (updatedExistingDayCount ? `, updated ${updatedExistingDayCount} existing day${updatedExistingDayCount === 1 ? "" : "s"}` : "")
         + (skippedExistingDayCount ? `, skipped ${skippedExistingDayCount} existing day${skippedExistingDayCount === 1 ? "" : "s"}` : "")
         + (skippedEmptyDayCount ? `, ignored ${skippedEmptyDayCount} empty day column${skippedEmptyDayCount === 1 ? "" : "s"}` : "")
+        + (skippedAllNaDayCount ? `, ignored ${skippedAllNaDayCount} N/A-only day column${skippedAllNaDayCount === 1 ? "" : "s"}` : "")
         + (unmatchedRows.length ? ` (${unmatchedRows.length} row${unmatchedRows.length === 1 ? "" : "s"} unmatched).` : "."),
         "success"
       );
@@ -11748,7 +11920,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
             score_rate: rate,
             started_at: session.starts_at ?? null,
             ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
-            answers_json: buildImportedSummaryAnswersJson("daily_results_csv"),
+            answers_json: buildImportedSummaryAnswersJson("daily_results_csv", {
+              imported_test_title: column.importTitle,
+              imported_test_date: column.importDateIso || null,
+            }),
             tab_left_count: 0,
           });
         });
@@ -12115,6 +12290,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
             started_at: session.starts_at ?? null,
             ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
             answers_json: buildImportedSummaryAnswersJson("model_results_csv", {
+              imported_test_title: session.title || block.importTitle || "",
+              imported_test_date: block.importDateIso || null,
               main_section_summary: mainSectionSummary,
             }),
             tab_left_count: 0,
@@ -13958,7 +14135,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               onClick={() => openAttemptDetail(a)}
                             >
                               <td>{getAttemptTitle(a)}</td>
-                              <td>{formatDateFull(a.created_at)}</td>
+                              <td>{formatDateFull(getAttemptDisplayDateValue(a))}</td>
                               <td>{score}</td>
                               <td>{rate}</td>
                               <td>
@@ -14036,7 +14213,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               return (
                                 <tr key={`student-daily-${a.id}`} onClick={() => openAttemptDetail(a)}>
                                   <td>{getAttemptTitle(a)}</td>
-                                  <td>{formatDateFull(a.created_at)}</td>
+                                  <td>{formatDateFull(getAttemptDisplayDateValue(a))}</td>
                                   <td>{score}</td>
                                   <td>{rate}</td>
                                   <td>
@@ -14606,20 +14783,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
               <tbody>
                 {attendanceFilteredStudents.map((s) => {
                   const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
-                  const total = perDay.filter(Boolean).length;
-                  const present = perDay.filter((v) => v === "P" || v === "L").length;
-                  const absences = perDay.filter((v) => v === "A").length;
-                  const rate = total ? (present / total) * 100 : 0;
+                  const stats = buildAttendanceStats(perDay);
+                  const rate = stats.total ? (stats.present / stats.total) * 100 : 0;
                   return (
                     <tr key={s.id}>
                       <td className="att-col-code att-sticky-1">{s.student_code ?? ""}</td>
                       <td className="att-col-name att-sticky-2">{s.display_name ?? s.email ?? s.id}</td>
                       <td className="att-col-rate att-sticky-3">{rate.toFixed(2)}%</td>
-                      <td className="att-col-absent att-sticky-4">{absences}</td>
+                      <td className="att-col-absent att-sticky-4">{stats.unexcused}</td>
                       {attendanceDayColumns.map((d) => {
                         const status = attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "";
                         return (
-                          <td key={`${s.id}-${d.id}`} className={`att-cell ${status ? `att-${status}` : ""}`}>
+                          <td key={`${s.id}-${d.id}`} className={`att-cell ${getAttendanceStatusClassName(status)}`}>
                             {status || ""}
                           </td>
                         );

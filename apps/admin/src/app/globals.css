@@ -4064,6 +4064,8 @@ body { padding: 0; }
 .att-L { background: #dbeafe; color: #1d4ed8; }
 .att-E { background: #ffd1a6; color: #92400e; }
 .att-A { background: #ffc1c1; color: #9b1c1c; }
+.att-NA { background: #e2e8f0; color: #475569; }
+.att-W { background: #f3e8ff; color: #7c3aed; }
 
 .att-status-btn {
   border: 1px solid var(--admin-control-border);

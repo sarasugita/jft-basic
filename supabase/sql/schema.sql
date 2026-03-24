@@ -182,7 +182,7 @@ create table if not exists public.attendance_entries (
   id uuid primary key default gen_random_uuid(),
   day_id uuid not null references public.attendance_days(id) on delete cascade,
   student_id uuid not null references public.profiles(id) on delete cascade,
-  status text not null check (status in ('P','L','E','A')),
+  status text not null check (status in ('P','L','E','A','N/A','W')),
   comment text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
