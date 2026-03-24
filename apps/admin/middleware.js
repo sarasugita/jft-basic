@@ -1,16 +1,33 @@
 import { NextResponse } from "next/server";
+import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout, isTimeoutLikeError } from "./src/lib/requestTimeout";
 import { ADMIN_AUTH_COOKIE } from "./src/lib/schoolScope";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 async function fetchJson(url, token) {
-  const response = await fetch(url, {
-    headers: {
-      apikey: supabaseAnonKey ?? "",
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  let response;
+  try {
+    response = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          apikey: supabaseAnonKey ?? "",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    );
+  } catch (error) {
+    if (isTimeoutLikeError(error)) {
+      console.error("[AdminAuth] Middleware upstream request timed out", {
+        url,
+        timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
+      });
+      return null;
+    }
+    throw error;
+  }
   if (!response.ok) return null;
   return response.json();
 }

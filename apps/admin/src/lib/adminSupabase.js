@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { processLock } from "@supabase/auth-js";
 import { logAdminRequestFailure } from "./adminDiagnostics";
+import { fetchWithTimeout } from "./requestTimeout";
 import { SUPER_ADMIN_SCOPE_HEADER } from "./schoolScope";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -16,7 +17,6 @@ if (adminSupabaseConfigError) {
 let defaultClient;
 const scopedClients = new Map();
 
-const nativeFetch = (...args) => fetch(...args);
 const isBrowser = typeof window !== "undefined";
 
 async function instrumentedAdminFetch(input, init) {
@@ -26,7 +26,7 @@ async function instrumentedAdminFetch(input, init) {
   const schoolScopeId = headers.get(SUPER_ADMIN_SCOPE_HEADER) || null;
 
   try {
-    const response = await nativeFetch(input, init);
+    const response = await fetchWithTimeout(input, init);
     if (response.ok) {
       return response;
     }

@@ -9,6 +9,7 @@ import {
   getAdminSupabaseConfigError,
 } from "../../lib/adminSupabase";
 import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../../lib/adminDiagnostics";
+import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout } from "../../lib/requestTimeout";
 import { syncAdminAuthCookie } from "../../lib/authCookies";
 
 const SuperAdminContext = createContext(null);
@@ -316,6 +317,7 @@ export default function SuperAdminShell({ children }) {
       const response = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", `${supabaseUrl}/functions/v1/${functionName}`);
+        xhr.timeout = DEFAULT_REQUEST_TIMEOUT_MS;
         xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
         xhr.setRequestHeader("apikey", supabaseAnonKey);
         xhr.upload.onprogress = (event) => {
@@ -326,6 +328,7 @@ export default function SuperAdminShell({ children }) {
           });
         };
         xhr.onerror = () => reject(new Error(`Failed to call ${functionName}`));
+        xhr.ontimeout = () => reject(new Error(`Request timed out after ${DEFAULT_REQUEST_TIMEOUT_MS}ms`));
         xhr.onload = () => {
           const text = xhr.responseText ?? "";
           let data = null;
@@ -348,15 +351,19 @@ export default function SuperAdminShell({ children }) {
       return response;
     }
 
-    const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        apikey: supabaseAnonKey,
-        ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    const response = await fetchWithTimeout(
+      `${supabaseUrl}/functions/v1/${functionName}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          apikey: supabaseAnonKey,
+          ...(isFormData ? {} : { "Content-Type": "application/json" }),
+        },
+        body: isFormData ? body : JSON.stringify(body ?? {}),
       },
-      body: isFormData ? body : JSON.stringify(body ?? {}),
-    });
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    );
 
     const text = await response.text();
     let data = null;
