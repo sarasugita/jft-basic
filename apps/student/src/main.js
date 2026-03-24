@@ -941,7 +941,6 @@ async function fetchPublicTests() {
       state.selectedTestVersion = list[0].version;
       saveState();
     }
-    ensureQuestionsLoaded();
   } catch (error) {
     logUnexpectedError("tests fetch failed", error);
     if (!hadData) {
@@ -998,7 +997,6 @@ async function fetchTestSessions() {
       state.selectedTestSessionId = list[0].id;
       saveState();
     }
-    ensureQuestionsLoaded();
   } catch (error) {
     logUnexpectedError("test_sessions fetch failed", error);
     if (!hadData) {
@@ -3320,16 +3318,6 @@ function renderTestSelect(app) {
   }
   if (authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
-  }
-  if (
-    authState.session &&
-    !sessionAttemptOverrideState.loading &&
-    (
-      !sessionAttemptOverrideState.loaded ||
-      Date.now() - Number(sessionAttemptOverrideState.lastFetchedAt ?? 0) >= SESSION_ATTEMPT_OVERRIDE_REFRESH_MS
-    )
-  ) {
-    fetchSessionAttemptOverrides().finally(render);
   }
   if (showHome && !announcementsState.loaded && !announcementsState.loading) {
     fetchAnnouncements().finally(render);
@@ -5951,7 +5939,10 @@ function registerAuthStateListener() {
     existingSubscription.unsubscribe();
   }
 
-  const { data } = supabase.auth.onAuthStateChange(() => {
+  const { data } = supabase.auth.onAuthStateChange((event) => {
+    if (event === "INITIAL_SESSION") {
+      return;
+    }
     window.setTimeout(() => {
       handleAuthStateChange().finally(render);
     }, 0);

@@ -1,5 +1,6 @@
 // src/supabaseClient.js
 import { createClient } from "@supabase/supabase-js";
+import { fetchWithTimeout } from "./requestTimeout";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -22,6 +23,9 @@ function getOrCreateBrowserSupabaseClient() {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+    },
+    global: {
+      fetch: fetchWithTimeout,
     },
   });
   globalScope[CLIENT_CACHE_KEY] = {

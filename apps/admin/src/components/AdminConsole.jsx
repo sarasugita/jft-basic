@@ -5865,12 +5865,37 @@ export default function AdminConsole({
 
   useEffect(() => {
     if (!session || !canUseAdminConsole) return;
-    fetchExamLinks();
-    fetchStudents();
-    fetchTests();
-    fetchTestSessions();
-    fetchAssets();
-  }, [activeSchoolId, session, canUseAdminConsole]);
+    if (activeTab === "students") {
+      fetchStudents();
+      fetchTests();
+      return;
+    }
+
+    if (activeTab === "attendance") {
+      if (attendanceSubTab === "sheet") {
+        fetchStudents();
+      }
+      return;
+    }
+
+    if (activeTab === "dailyRecord" || activeTab === "ranking") {
+      fetchStudents();
+      fetchTests();
+      return;
+    }
+
+    if (activeTab === "model" || activeTab === "daily") {
+      fetchTests();
+      fetchTestSessions();
+      fetchExamLinks();
+      const isUploadTab =
+        (activeTab === "model" && modelSubTab === "upload")
+        || (activeTab === "daily" && dailySubTab === "upload");
+      if (isUploadTab) {
+        fetchAssets();
+      }
+    }
+  }, [activeSchoolId, session, canUseAdminConsole, activeTab, attendanceSubTab, modelSubTab, dailySubTab]);
 
   useEffect(() => {
     if (activeTab !== "students") return;
@@ -5892,9 +5917,6 @@ export default function AdminConsole({
 
   useEffect(() => {
     if (!session || !canUseAdminConsole) return;
-    if (activeTab === "model" && modelSubTab === "results") {
-      runSearch("mock");
-    }
     if (activeTab === "daily" && dailySubTab === "results") {
       if (!students.length) fetchStudents();
       runSearch("daily");

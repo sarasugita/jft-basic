@@ -159,9 +159,14 @@ create table if not exists public.absence_applications (
 
 -- attempts relation (optional)
 create index if not exists attempts_test_version_idx on public.attempts (test_version);
+create index if not exists attempts_student_created_idx on public.attempts (student_id, created_at desc);
 alter table public.attempts
   add column if not exists test_session_id uuid,
   add column if not exists tab_left_count integer not null default 0;
+create index if not exists attempts_test_session_created_idx on public.attempts (test_session_id, created_at desc);
+
+create index if not exists absence_applications_student_created_idx
+  on public.absence_applications (student_id, created_at desc);
 
 -- exam links may reference test_session_id
 alter table public.exam_links
