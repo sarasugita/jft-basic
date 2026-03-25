@@ -1,5 +1,5 @@
-import AdminConsole from "../components/AdminConsole";
+import AdminEntryPage from "../components/AdminEntryPage";
 
 export default function AdminPage() {
-  return <AdminConsole homeHref="/" />;
+  return <AdminEntryPage />;
 }

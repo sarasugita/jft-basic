@@ -3484,6 +3484,7 @@ export default function AdminConsole({
   });
   const [studentWarnings, setStudentWarnings] = useState([]);
   const [studentWarningsLoading, setStudentWarningsLoading] = useState(false);
+  const [studentWarningsLoaded, setStudentWarningsLoaded] = useState(false);
   const [studentWarningsMsg, setStudentWarningsMsg] = useState("");
   const [studentWarningIssueOpen, setStudentWarningIssueOpen] = useState(false);
   const [studentWarningIssueSaving, setStudentWarningIssueSaving] = useState(false);
@@ -3495,6 +3496,7 @@ export default function AdminConsole({
   const [studentListAttendanceMap, setStudentListAttendanceMap] = useState({});
   const [studentListAttempts, setStudentListAttempts] = useState([]);
   const [studentListLoading, setStudentListLoading] = useState(false);
+  const [studentListMetricsLoaded, setStudentListMetricsLoaded] = useState(false);
   const [studentDetailOpen, setStudentDetailOpen] = useState(false);
   const [studentReportExporting, setStudentReportExporting] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -6082,9 +6084,20 @@ export default function AdminConsole({
 
   useEffect(() => {
     if (activeTab !== "students") return;
-    fetchStudentListMetrics();
-    fetchStudentWarnings();
-  }, [activeSchoolId, activeTab, studentListFilters.from, studentListFilters.to, students, tests]);
+    setStudentListMetricsLoaded(false);
+    setStudentListAttendanceMap({});
+    setStudentListAttempts([]);
+  }, [activeSchoolId, activeTab, studentListFilters.from, studentListFilters.to]);
+
+  useEffect(() => {
+    if (activeTab !== "students") return;
+    setStudentWarningsLoaded(false);
+    setStudentWarnings([]);
+    setStudentWarningsLoaded(false);
+    setStudentWarningsMsg("");
+    setSelectedStudentWarning(null);
+    setStudentWarningPreviewStudentId("");
+  }, [activeSchoolId, activeTab]);
 
   useEffect(() => {
     if (activeTab !== "dailyRecord") return;
@@ -6733,6 +6746,7 @@ export default function AdminConsole({
     if (!activeSchoolId) {
       setStudentListAttendanceMap({});
       setStudentListAttempts([]);
+      setStudentListMetricsLoaded(false);
       setStudentListLoading(false);
       return;
     }
@@ -6804,6 +6818,7 @@ export default function AdminConsole({
     } else {
       setStudentListAttempts(attemptsData ?? []);
     }
+    setStudentListMetricsLoaded(true);
     setStudentListLoading(false);
   }
 
@@ -6834,6 +6849,7 @@ export default function AdminConsole({
     const warningsList = warningRows ?? [];
     if (!warningsList.length) {
       setStudentWarnings([]);
+      setStudentWarningsLoaded(true);
       setStudentWarningsLoading(false);
       return;
     }
@@ -6878,12 +6894,30 @@ export default function AdminConsole({
       });
 
       setStudentWarnings(storedWarnings);
+      setStudentWarningsLoaded(true);
       setStudentWarningsLoading(false);
     } catch (error) {
       console.error("student warnings hydrate error:", error);
       setStudentWarnings([]);
       setStudentWarningsLoading(false);
       setStudentWarningsMsg(`Warnings load failed: ${error.message || error}`);
+    }
+  }
+
+  async function handleLoadStudentMetrics() {
+    await fetchStudentListMetrics();
+  }
+
+  async function handleLoadStudentWarnings() {
+    await fetchStudentWarnings();
+  }
+
+  function openStudentWarningsModal() {
+    setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters));
+    setStudentWarningIssueMsg("");
+    setStudentWarningIssueOpen(true);
+    if (!studentWarningsLoaded && !studentWarningsLoading) {
+      void fetchStudentWarnings();
     }
   }
 
@@ -13981,16 +14015,66 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </button>
                 <button
                   className="btn student-list-primary-btn student-warning-launch-btn"
-                  onClick={() => {
-                    setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters));
-                    setStudentWarningIssueMsg("");
-                    setStudentWarningIssueOpen(true);
-                  }}
+                  onClick={openStudentWarningsModal}
                 >
                   <svg viewBox="0 0 20 20" aria-hidden="true">
                     <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
                   <span>Warnings</span>
+                </button>
+                <button
+                  className="btn student-list-primary-btn"
+                  type="button"
+                  onClick={() => void handleLoadStudentMetrics()}
+                  disabled={studentListLoading}
+                  aria-label={studentListLoading ? "Loading metrics" : studentListMetricsLoaded ? "Refresh metrics" : "Load metrics"}
+                  title={studentListLoading ? "Loading metrics..." : studentListMetricsLoaded ? "Refresh metrics" : "Load metrics"}
+                >
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path
+                      d="M16 10a6 6 0 1 1-1.76-4.24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M16 4.5v3.75h-3.75"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span>{studentListLoading ? "Loading Metrics..." : studentListMetricsLoaded ? "Refresh Metrics" : "Load Metrics"}</span>
+                </button>
+                <button
+                  className="btn student-list-primary-btn"
+                  type="button"
+                  onClick={() => void handleLoadStudentWarnings()}
+                  disabled={studentWarningsLoading}
+                  aria-label={studentWarningsLoading ? "Loading warnings" : studentWarningsLoaded ? "Refresh warnings" : "Load warnings"}
+                  title={studentWarningsLoading ? "Loading warnings..." : studentWarningsLoaded ? "Refresh warnings" : "Load warnings"}
+                >
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path
+                      d="M16 10a6 6 0 1 1-1.76-4.24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M16 4.5v3.75h-3.75"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span>{studentWarningsLoading ? "Loading Warnings..." : studentWarningsLoaded ? "Refresh Warnings" : "Load Warnings"}</span>
                 </button>
               </div>
 
@@ -14119,7 +14203,18 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </tbody>
                 </table>
               </div>
+              {!studentListMetricsLoaded && !studentListLoading ? (
+                <div className="admin-help" style={{ marginTop: 6 }}>
+                  Metrics are not loaded yet. Click <b>Load Metrics</b> to calculate attendance and test averages.
+                </div>
+              ) : null}
+              {!studentWarningsLoaded && !studentWarningsLoading ? (
+                <div className="admin-help" style={{ marginTop: 6 }}>
+                  Warnings are not loaded yet. Click <b>Load Warnings</b> to show warning badges and warning history.
+                </div>
+              ) : null}
               {studentListLoading ? <div className="admin-help" style={{ marginTop: 6 }}>Loading metrics...</div> : null}
+              {studentWarningsLoading ? <div className="admin-help" style={{ marginTop: 6 }}>Loading warnings...</div> : null}
               <div className="admin-msg">{studentMsg}</div>
 
               <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
