@@ -1,0 +1,16 @@
+{
+  "name": "JFT Navi",
+  "short_name": "JFT Navi",
+  "description": "Student login for JFT Navi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2f7730",
+  "icons": [
+    {
+      "src": "/branding/jft-navi-color.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
