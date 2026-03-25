@@ -13336,9 +13336,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
       <div className="admin-login-screen">
         <div className="admin-login admin-login-card admin-password-card">
           <div className="admin-password-change-head">
-            <h2 className="admin-password-change-title">Change Temporary Password</h2>
+            <h2 className="admin-password-change-title">Set New Password</h2>
             <p className="admin-password-change-copy">
-              This account must change its temporary password before continuing.
+              This account must set a new password before continuing.
             </p>
             <p className="admin-password-change-note">Use at least 8 characters for your new password.</p>
           </div>
