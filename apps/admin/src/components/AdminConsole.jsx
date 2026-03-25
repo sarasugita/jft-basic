@@ -6852,92 +6852,35 @@ export default function AdminConsole({
       return;
     }
     try {
-      const storedRecipientsByWarning = new Map();
+      const recipientsByWarning = new Map();
       (recipientRows ?? []).forEach((recipient) => {
-        const list = storedRecipientsByWarning.get(recipient.warning_id) || [];
+        const list = recipientsByWarning.get(recipient.warning_id) || [];
         list.push({
           ...recipient,
           issues: normalizeWarningIssueList(recipient.issues),
         });
-        storedRecipientsByWarning.set(recipient.warning_id, list);
+        recipientsByWarning.set(recipient.warning_id, list);
       });
-      const metricRowsByRange = new Map();
-      const liveWarnings = await Promise.all(
-        warningsList.map(async (warning) => {
-          const criteria = normalizeStudentWarningCriteria(
+
+      // Treat warnings as stored records on read. Recomputing recipients for every
+      // warning during startup creates a heavy client-side load and can also turn a
+      // page view into a write storm against Supabase.
+      const storedWarnings = warningsList.map((warning) => {
+        const recipients = recipientsByWarning.get(warning.id) || [];
+        return {
+          ...warning,
+          criteria: normalizeStudentWarningCriteria(
             warning.criteria && typeof warning.criteria === "object" ? warning.criteria : {}
-          );
-          const rangeKey = getStudentWarningMetricRangeKey(criteria);
-          let rowsPromise = metricRowsByRange.get(rangeKey);
-          if (!rowsPromise) {
-            rowsPromise = loadStudentWarningMetrics(criteria);
-            metricRowsByRange.set(rangeKey, rowsPromise);
-          }
-          const rows = await rowsPromise;
-          const recipients = rows
-            .filter((row) => !isAnalyticsExcludedStudent(row.student))
-            .map((row) => ({
-              row,
-              issues: getStudentWarningIssues(row, criteria),
-            }))
-            .filter((item) => item.issues.length > 0)
-            .sort((left, right) => String(left.row.student?.id ?? "").localeCompare(String(right.row.student?.id ?? "")))
-            .map(({ row, issues }) => ({
-              id: `${warning.id}:${row.student.id}`,
-              warning_id: warning.id,
-              student_id: row.student.id,
-              issues,
-              created_at: warning.created_at,
-            }));
-          return {
-            ...warning,
-            criteria,
-            stored_student_count: Number(warning.student_count ?? 0),
-            student_count: recipients.length,
-            recipients,
-          };
-        })
-      );
-      const warningsNeedingSync = liveWarnings.filter((warning) => {
-        const storedRecipients = storedRecipientsByWarning.get(warning.id) || [];
-        return Number(warning.stored_student_count ?? 0) !== warning.recipients.length
-          || !warningRecipientsMatch(storedRecipients, warning.recipients);
+          ),
+          student_count: Number(warning.student_count ?? recipients.length ?? 0),
+          recipients,
+        };
       });
-      if (warningsNeedingSync.length) {
-        await Promise.all(
-          warningsNeedingSync.map(async (warning) => {
-            const { error: deleteError } = await supabase
-              .from("student_warning_recipients")
-              .delete()
-              .eq("warning_id", warning.id);
-            if (deleteError) throw deleteError;
 
-            if (warning.recipients.length) {
-              const { error: insertError } = await supabase
-                .from("student_warning_recipients")
-                .insert(
-                  warning.recipients.map((recipient) => ({
-                    warning_id: warning.id,
-                    school_id: activeSchoolId,
-                    student_id: recipient.student_id,
-                    issues: normalizeWarningIssueList(recipient.issues),
-                  }))
-                );
-              if (insertError) throw insertError;
-            }
-
-            const { error: updateError } = await supabase
-              .from("student_warnings")
-              .update({ student_count: warning.recipients.length })
-              .eq("id", warning.id);
-            if (updateError) throw updateError;
-          })
-        );
-      }
-      setStudentWarnings(liveWarnings);
+      setStudentWarnings(storedWarnings);
       setStudentWarningsLoading(false);
     } catch (error) {
-      console.error("student warning live refresh error:", error);
+      console.error("student warnings hydrate error:", error);
       setStudentWarnings([]);
       setStudentWarningsLoading(false);
       setStudentWarningsMsg(`Warnings load failed: ${error.message || error}`);
