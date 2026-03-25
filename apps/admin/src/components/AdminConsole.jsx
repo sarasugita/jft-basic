@@ -6052,7 +6052,6 @@ export default function AdminConsole({
     if (!session || !canUseAdminConsole) return;
     if (activeTab === "students") {
       fetchStudents();
-      fetchTests();
       return;
     }
 
@@ -6905,6 +6904,15 @@ export default function AdminConsole({
   }
 
   async function handleLoadStudentMetrics() {
+    if (studentListLoading) return;
+    if (!tests.length) {
+      setStudentListLoading(true);
+      try {
+        await fetchTests();
+      } finally {
+        setStudentListLoading(false);
+      }
+    }
     await fetchStudentListMetrics();
   }
 

@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import AdminConsole from "./AdminConsole";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+
+const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
+  loading: () => (
+    <div className="admin-login">
+      <h2>Loading...</h2>
+    </div>
+  ),
+});
 
 export default function SchoolScopedAdminPage({ schoolId }) {
   const router = useRouter();
@@ -17,16 +25,6 @@ export default function SchoolScopedAdminPage({ schoolId }) {
   const [schoolOptions, setSchoolOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [startupError, setStartupError] = useState("");
-  const profileRef = useRef(null);
-  const schoolRef = useRef(null);
-
-  useEffect(() => {
-    profileRef.current = profile;
-  }, [profile]);
-
-  useEffect(() => {
-    schoolRef.current = school;
-  }, [school]);
 
   useEffect(() => {
     if (supabaseConfigError) {
@@ -37,7 +35,6 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     if (!supabase) return;
     let mounted = true;
     let loadAbortController = null;
-    let authEventTimeout = null;
 
     function redirect(target, reason, extra = {}) {
       logAdminEvent("School scoped page redirect", {
@@ -133,31 +130,13 @@ export default function SchoolScopedAdminPage({ schoolId }) {
           return;
         }
         setSchool(schoolRow);
-
-        const { data: schoolsData, error: schoolsError } = await supabase
-          .from("schools")
-          .select("id, name, status")
-          .order("created_at", { ascending: true })
-          .abortSignal(loadAbortController.signal);
-
-        if (!mounted) return;
-        if (schoolsError) {
-          logAdminRequestFailure("School scoped school options lookup failed", schoolsError, {
-            schoolId,
-            reason,
-            userId: nextSession.user.id,
-          });
-          setSchoolOptions([]);
-          return;
-        }
-
-        setSchoolOptions(
-          (schoolsData ?? []).map((row) => ({
-            school_id: row.id,
-            school_name: row.name ?? row.id,
-            school_status: row.status ?? null,
-          })),
-        );
+        setSchoolOptions([
+          {
+            school_id: schoolRow.id,
+            school_name: schoolRow.name ?? schoolRow.id,
+            school_status: schoolRow.status ?? null,
+          },
+        ]);
       } catch (error) {
         if (!mounted) return;
         if (isAbortLikeError(error)) {
@@ -192,20 +171,15 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       if (!mounted || event === "INITIAL_SESSION") {
         return;
       }
-      if (event === "TOKEN_REFRESHED") {
-        setSession(nextSession ?? null);
-        if ((!profileRef.current || !schoolRef.current) && nextSession) {
-          if (authEventTimeout) clearTimeout(authEventTimeout);
-          authEventTimeout = setTimeout(() => {
-            void load(`auth:${event}`);
-          }, 0);
-        }
+      if (!nextSession || event === "SIGNED_OUT") {
+        setSession(null);
+        setProfile(null);
+        setSchool(null);
+        setSchoolOptions([]);
+        redirect("/", "signed-out", { source: event });
         return;
       }
-      if (authEventTimeout) clearTimeout(authEventTimeout);
-      authEventTimeout = setTimeout(() => {
-        void load(`auth:${event}`);
-      }, 0);
+      setSession(nextSession);
     });
 
     return () => {
@@ -213,12 +187,61 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       if (loadAbortController) {
         loadAbortController.abort();
       }
-      if (authEventTimeout) {
-        clearTimeout(authEventTimeout);
-      }
       listener.subscription.unsubscribe();
     };
   }, [router, schoolId, supabase, supabaseConfigError]);
+
+  useEffect(() => {
+    if (!supabase || !session || !profile || !school) return;
+    let cancelled = false;
+    const schoolOptionsAbortController = new AbortController();
+
+    async function loadSchoolOptions() {
+      try {
+        const { data: schoolsData, error: schoolsError } = await supabase
+          .from("schools")
+          .select("id, name, status")
+          .order("created_at", { ascending: true })
+          .abortSignal(schoolOptionsAbortController.signal);
+
+        if (cancelled) return;
+        if (schoolsError) {
+          logAdminRequestFailure("School scoped school options lookup failed", schoolsError, {
+            schoolId,
+            userId: session.user.id,
+          });
+          return;
+        }
+
+        const nextOptions = (schoolsData ?? []).map((row) => ({
+          school_id: row.id,
+          school_name: row.name ?? row.id,
+          school_status: row.status ?? null,
+        }));
+        setSchoolOptions(nextOptions.length ? nextOptions : [
+          {
+            school_id: school.id,
+            school_name: school.name ?? school.id,
+            school_status: school.status ?? null,
+          },
+        ]);
+      } catch (error) {
+        if (cancelled || isAbortLikeError(error)) {
+          return;
+        }
+        logAdminRequestFailure("School scoped school options lookup failed", error, {
+          schoolId,
+          userId: session.user.id,
+        });
+      }
+    }
+
+    void loadSchoolOptions();
+    return () => {
+      cancelled = true;
+      schoolOptionsAbortController.abort();
+    };
+  }, [profile, school, schoolId, session, supabase]);
 
   if (startupError) {
     return (
@@ -247,7 +270,7 @@ export default function SchoolScopedAdminPage({ schoolId }) {
   }
 
   return (
-    <AdminConsole
+    <LazyAdminConsole
       forcedSchoolScope={school}
       changeSchoolHref="/super/schools"
       homeHref="/super/schools"
