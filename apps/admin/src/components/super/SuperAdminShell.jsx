@@ -268,10 +268,14 @@ export default function SuperAdminShell({ children }) {
   const [loading, setLoading] = useState(true);
   const [startupError, setStartupError] = useState("");
   const profileRef = useRef(null);
+  const pathnameRef = useRef(pathname);
 
   useEffect(() => {
     profileRef.current = profile;
   }, [profile]);
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -297,7 +301,7 @@ export default function SuperAdminShell({ children }) {
       const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
       if (refreshError) {
         logAdminRequestFailure("Super shell refreshSession failed", refreshError, {
-          pathname,
+          pathname: pathnameRef.current,
         });
         throw new Error(refreshError.message || "Failed to refresh session");
       }
@@ -426,11 +430,6 @@ export default function SuperAdminShell({ children }) {
   }
 
   useEffect(() => {
-    if (bypassShellAuth) {
-      setLoading(false);
-      setStartupError("");
-      return;
-    }
     if (supabaseConfigError) {
       setSession(null);
       setProfile(null);
@@ -446,7 +445,7 @@ export default function SuperAdminShell({ children }) {
     function redirectToLogin(reason, extra = {}) {
       logAdminEvent("Super shell redirecting to login", {
         reason,
-        pathname,
+        pathname: pathnameRef.current,
         ...extra,
       });
       router.replace("/");
@@ -455,7 +454,7 @@ export default function SuperAdminShell({ children }) {
     function redirectToPasswordChange(reason, extra = {}) {
       logAdminEvent("Super shell redirecting for password change", {
         reason,
-        pathname,
+        pathname: pathnameRef.current,
         ...extra,
       });
       router.replace("/");
@@ -490,7 +489,7 @@ export default function SuperAdminShell({ children }) {
 
         if (error) {
           logAdminRequestFailure("Super shell profile lookup failed", error, {
-            pathname,
+            pathname: pathnameRef.current,
             reason,
             userId: nextSession.user.id,
           });
@@ -536,7 +535,7 @@ export default function SuperAdminShell({ children }) {
         if (!mounted) return;
         if (isAbortLikeError(error)) {
           logAdminRequestFailure("Super shell profile lookup aborted", error, {
-            pathname,
+            pathname: pathnameRef.current,
             reason,
             userId: nextSession?.user?.id ?? null,
           });
@@ -544,7 +543,7 @@ export default function SuperAdminShell({ children }) {
           return;
         }
         logAdminRequestFailure("Super shell profile lookup threw", error, {
-          pathname,
+          pathname: pathnameRef.current,
           reason,
           userId: nextSession?.user?.id ?? null,
         });
@@ -559,7 +558,7 @@ export default function SuperAdminShell({ children }) {
         const { data, error } = await supabase.auth.getSession();
         if (error) {
           logAdminRequestFailure("Super shell getSession failed", error, {
-            pathname,
+            pathname: pathnameRef.current,
             reason,
           });
         }
@@ -572,14 +571,14 @@ export default function SuperAdminShell({ children }) {
         if (!mounted) return;
         if (isAbortLikeError(error)) {
           logAdminRequestFailure("Super shell bootstrap aborted", error, {
-            pathname,
+            pathname: pathnameRef.current,
             reason,
           });
           setLoading(false);
           return;
         }
         logAdminRequestFailure("Super shell bootstrap failed", error, {
-          pathname,
+          pathname: pathnameRef.current,
           reason,
         });
         setStartupError(error instanceof Error ? error.message : "Failed to bootstrap admin session.");
@@ -592,7 +591,7 @@ export default function SuperAdminShell({ children }) {
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       logAdminEvent("Super shell auth event", {
         event,
-        pathname,
+        pathname: pathnameRef.current,
         hasSession: Boolean(nextSession),
         userId: nextSession?.user?.id ?? null,
       });
@@ -629,44 +628,37 @@ export default function SuperAdminShell({ children }) {
       }
       listener.subscription.unsubscribe();
     };
-  }, [bypassShellAuth, pathname, router, supabase, supabaseConfigError]);
+  }, [router, supabase, supabaseConfigError]);
 
+  const contextValue = { supabase, session, profile, invokeWithAuth, loading, startupError };
+
+  let content = null;
   if (bypassShellAuth) {
-    return children;
-  }
-
-  if (loading) {
-    return (
+    content = children;
+  } else if (loading) {
+    content = (
       <div className="admin-login">
         <h2>Loading...</h2>
       </div>
     );
-  }
-
-  if (startupError) {
-    return (
+  } else if (startupError) {
+    content = (
       <div className="admin-login">
         <h2>Startup Error</h2>
         <div className="admin-msg">{startupError}</div>
       </div>
     );
-  }
-
-  if (!session || !profile) {
-    return null;
-  }
-
-  const pageMeta = getPageMeta(pathname);
-  const displayName = profile.display_name?.trim() || session.user.email || "User";
-  function handleSidebarNavigate(href) {
-    if (sidebarCollapsed) {
-      setSidebarCollapsed(false);
+  } else if (session && profile) {
+    const pageMeta = getPageMeta(pathname);
+    const displayName = profile.display_name?.trim() || session.user.email || "User";
+    function handleSidebarNavigate(href) {
+      if (sidebarCollapsed) {
+        setSidebarCollapsed(false);
+      }
+      router.push(href);
     }
-    router.push(href);
-  }
 
-  return (
-    <SuperAdminContext.Provider value={{ supabase, session, profile, invokeWithAuth }}>
+    content = (
       <div className="admin-shell">
         <SuperSidebar
           pathname={pathname}
@@ -692,6 +684,12 @@ export default function SuperAdminShell({ children }) {
           </div>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <SuperAdminContext.Provider value={contextValue}>
+      {content}
     </SuperAdminContext.Provider>
   );
 }

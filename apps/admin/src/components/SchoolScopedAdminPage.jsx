@@ -1,11 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
-import { syncAdminAuthCookie } from "../lib/authCookies";
 import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { useSuperAdmin } from "./super/SuperAdminShell";
 
 const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
   loading: () => (
@@ -17,24 +16,16 @@ const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
 
 export default function SchoolScopedAdminPage({ schoolId }) {
   const router = useRouter();
-  const supabaseConfigError = getAdminSupabaseConfigError();
-  const supabase = useMemo(() => (supabaseConfigError ? null : createAdminSupabaseClient()), [supabaseConfigError]);
-  const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const { supabase, session, profile, loading: authLoading, startupError: authStartupError } = useSuperAdmin();
   const [school, setSchool] = useState(null);
   const [schoolOptions, setSchoolOptions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [startupError, setStartupError] = useState("");
 
   useEffect(() => {
-    if (supabaseConfigError) {
-      setStartupError(supabaseConfigError);
-      setLoading(false);
-      return;
-    }
-    if (!supabase) return;
+    if (!supabase || !session || !profile) return;
     let mounted = true;
-    let loadAbortController = null;
+    const loadAbortController = new AbortController();
 
     function redirect(target, reason, extra = {}) {
       logAdminEvent("School scoped page redirect", {
@@ -46,66 +37,11 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       router.replace(target);
     }
 
-    async function load(reason) {
-      if (loadAbortController) {
-        loadAbortController.abort();
-      }
-      loadAbortController = new AbortController();
+    async function loadSchool() {
       setLoading(true);
+      setStartupError("");
 
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          logAdminRequestFailure("School scoped getSession failed", error, {
-            schoolId,
-            reason,
-          });
-        }
-        syncAdminAuthCookie(data?.session ?? null);
-
-        const nextSession = data?.session ?? null;
-        if (!mounted) return;
-        setSession(nextSession);
-        setStartupError("");
-
-        if (!nextSession) {
-          setProfile(null);
-          setSchool(null);
-          setSchoolOptions([]);
-          redirect("/", "no-session", { source: reason });
-          return;
-        }
-
-        const { data: nextProfile, error: profileError } = await supabase
-          .from("profiles")
-          .select("id, role, account_status")
-          .eq("id", nextSession.user.id)
-          .single()
-          .abortSignal(loadAbortController.signal);
-
-        if (!mounted) return;
-        if (profileError) {
-          logAdminRequestFailure("School scoped profile lookup failed", profileError, {
-            schoolId,
-            reason,
-            userId: nextSession.user.id,
-          });
-          setProfile(null);
-          setStartupError(profileError.message || "Failed to load admin profile.");
-          return;
-        }
-
-        setProfile(nextProfile ?? null);
-        if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
-          redirect("/", "super-admin-profile-required", {
-            source: reason,
-            userId: nextSession.user.id,
-            role: nextProfile?.role ?? null,
-            accountStatus: nextProfile?.account_status ?? null,
-          });
-          return;
-        }
-
         const { data: schoolRow, error: schoolError } = await supabase
           .from("schools")
           .select("id, name, status")
@@ -118,17 +54,17 @@ export default function SchoolScopedAdminPage({ schoolId }) {
           if (schoolError) {
             logAdminRequestFailure("School scoped school lookup failed", schoolError, {
               schoolId,
-              reason,
-              userId: nextSession.user.id,
+              userId: session.user.id,
             });
           }
           setSchool(null);
+          setSchoolOptions([]);
           redirect("/super/schools", "school-not-found", {
-            source: reason,
-            userId: nextSession.user.id,
+            userId: session.user.id,
           });
           return;
         }
+
         setSchool(schoolRow);
         setSchoolOptions([
           {
@@ -142,13 +78,12 @@ export default function SchoolScopedAdminPage({ schoolId }) {
         if (isAbortLikeError(error)) {
           logAdminRequestFailure("School scoped bootstrap aborted", error, {
             schoolId,
-            reason,
           });
           return;
         }
         logAdminRequestFailure("School scoped bootstrap failed", error, {
           schoolId,
-          reason,
+          userId: session.user.id,
         });
         setStartupError(error instanceof Error ? error.message : "Failed to load school admin page.");
       } finally {
@@ -158,38 +93,12 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       }
     }
 
-    load("initial");
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      logAdminEvent("School scoped auth event", {
-        event,
-        schoolId,
-        hasSession: Boolean(nextSession),
-        userId: nextSession?.user?.id ?? null,
-      });
-      syncAdminAuthCookie(nextSession ?? null);
-      if (!mounted || event === "INITIAL_SESSION") {
-        return;
-      }
-      if (!nextSession || event === "SIGNED_OUT") {
-        setSession(null);
-        setProfile(null);
-        setSchool(null);
-        setSchoolOptions([]);
-        redirect("/", "signed-out", { source: event });
-        return;
-      }
-      setSession(nextSession);
-    });
-
+    void loadSchool();
     return () => {
       mounted = false;
-      if (loadAbortController) {
-        loadAbortController.abort();
-      }
-      listener.subscription.unsubscribe();
+      loadAbortController.abort();
     };
-  }, [router, schoolId, supabase, supabaseConfigError]);
+  }, [profile, router, schoolId, session, supabase]);
 
   useEffect(() => {
     if (!supabase || !session || !profile || !school) return;
@@ -252,7 +161,16 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     );
   }
 
-  if (loading) {
+  if (authStartupError) {
+    return (
+      <div className="admin-login">
+        <h2>Startup Error</h2>
+        <div className="admin-msg">{authStartupError}</div>
+      </div>
+    );
+  }
+
+  if (authLoading || loading) {
     return (
       <div className="admin-login">
         <h2>Loading...</h2>
