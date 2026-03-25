@@ -829,11 +829,23 @@ const ATTENDANCE_EXPORT_RULES = [
 ];
 const ATTENDANCE_COUNTED_STATUSES = ["P", "L", "E", "A"];
 const ATTENDANCE_SUPPORTED_STATUSES = [...ATTENDANCE_COUNTED_STATUSES, "N/A", "W"];
+const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
+const IMPORTED_ATTEMPT_QUERY_BATCH_SIZE = 50;
 
 function padCsvRow(row, length) {
   const next = [...(row ?? [])];
   while (next.length < length) next.push("");
   return next;
+}
+
+function chunkItems(items, size) {
+  const list = Array.isArray(items) ? items : [];
+  const chunkSize = Math.max(1, Number(size) || 1);
+  const chunks = [];
+  for (let index = 0; index < list.length; index += chunkSize) {
+    chunks.push(list.slice(index, index + chunkSize));
+  }
+  return chunks;
 }
 
 function formatPercentNumber(value, digits = 2) {
@@ -1024,6 +1036,12 @@ function parseSlashDateShortYearToIso(value) {
   const year = rawYear;
   if (month < 1 || month > 12 || day < 1 || day > 31) return "";
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function extractIsoDatePart(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : "";
 }
 
 function hasDailyResultValues(rows, colIndex, startRowIndex = 0) {
@@ -1230,6 +1248,13 @@ function dedupeImportedAttemptPayloads(payloads) {
     payloadMap.set(key, payload);
   });
   return Array.from(payloadMap.values());
+}
+
+function formatPercentInputValue(rate) {
+  const number = Number(rate);
+  if (!Number.isFinite(number)) return "";
+  const percent = number * 100;
+  return Number.isInteger(percent) ? `${percent}` : percent.toFixed(1).replace(/\.0$/, "");
 }
 
 function sanitizeImportedCategorySlug(value) {
@@ -3537,6 +3562,17 @@ export default function AdminConsole({
   const [assetsMsg, setAssetsMsg] = useState("");
   const [quizMsg, setQuizMsg] = useState("");
   const [resultsImportStatus, setResultsImportStatus] = useState(null);
+  const [dailyManualEntryMode, setDailyManualEntryMode] = useState(false);
+  const [dailyManualEntryModal, setDailyManualEntryModal] = useState({
+    open: false,
+    studentId: "",
+    sessionId: "",
+    rateInput: "",
+    hasImportedAttempt: false,
+    importedAttemptId: "",
+    saving: false,
+    msg: "",
+  });
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTest, setPreviewTest] = useState("");
   const [previewQuestions, setPreviewQuestions] = useState([]);
@@ -4888,6 +4924,16 @@ export default function AdminConsole({
     [buildSessionResultsMatrix, selectedModelCategory, modelTests]
   );
 
+  const dailyManualEntryStudent = useMemo(
+    () => sortedStudents.find((student) => student.id === dailyManualEntryModal.studentId) ?? null,
+    [dailyManualEntryModal.studentId, sortedStudents]
+  );
+
+  const dailyManualEntrySession = useMemo(
+    () => dailyResultsMatrix.sessions.find((session) => session.id === dailyManualEntryModal.sessionId) ?? null,
+    [dailyManualEntryModal.sessionId, dailyResultsMatrix.sessions]
+  );
+
   const buildSessionHeaderAverageMap = useCallback((matrix) => {
     const sessions = Array.isArray(matrix?.sessions) ? matrix.sessions : [];
     const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
@@ -5423,6 +5469,141 @@ export default function AdminConsole({
       message,
     });
   }, []);
+
+  const closeDailyManualEntryModal = useCallback(() => {
+    setDailyManualEntryModal((current) => (current?.saving ? current : {
+      open: false,
+      studentId: "",
+      sessionId: "",
+      rateInput: "",
+      hasImportedAttempt: false,
+      importedAttemptId: "",
+      saving: false,
+      msg: "",
+    }));
+  }, []);
+
+  const openDailyManualEntryModal = useCallback((student, session, attemptList = []) => {
+    if (!student?.id || !session?.id) return;
+    const importedAttempt = (attemptList ?? []).find((attempt) => isImportedSummaryAttempt(attempt)) ?? null;
+    setDailyManualEntryModal({
+      open: true,
+      studentId: student.id,
+      sessionId: session.id,
+      rateInput: importedAttempt ? formatPercentInputValue(getScoreRate(importedAttempt)) : "",
+      hasImportedAttempt: Boolean(importedAttempt?.id),
+      importedAttemptId: importedAttempt?.id ?? "",
+      saving: false,
+      msg: "",
+    });
+  }, []);
+
+  const saveDailyManualEntry = useCallback(async () => {
+    const student = sortedStudents.find((item) => item.id === dailyManualEntryModal.studentId) ?? null;
+    const session = dailyResultsMatrix.sessions.find((item) => item.id === dailyManualEntryModal.sessionId) ?? null;
+    if (!student || !session) {
+      setDailyManualEntryModal((current) => ({ ...current, msg: "Student or test session was not found." }));
+      return;
+    }
+
+    const rate = parsePercentCell(dailyManualEntryModal.rateInput);
+    if (rate == null || rate < 0 || rate > 1) {
+      setDailyManualEntryModal((current) => ({ ...current, msg: "Enter a score between 0 and 100." }));
+      return;
+    }
+
+    const total = Math.max(0, Number(session?.linkedTest?.question_count ?? 0));
+    const correct = total > 0 ? Math.round(rate * total) : 0;
+    const payload = {
+      student_id: student.id,
+      display_name: student.display_name ?? null,
+      student_code: student.student_code ?? null,
+      test_version: session.problem_set_id,
+      test_session_id: session.id,
+      correct,
+      total,
+      score_rate: rate,
+      started_at: session.starts_at ?? null,
+      ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
+      answers_json: buildImportedSummaryAnswersJson("daily_results_csv", {
+        imported_test_title: session.title ?? session.problem_set_id ?? "",
+        imported_test_date: extractIsoDatePart(session.starts_at || session.created_at) || null,
+        imported_entry_mode: "manual",
+      }),
+      tab_left_count: 0,
+    };
+
+    setDailyManualEntryModal((current) => ({ ...current, saving: true, msg: "" }));
+    const result = await replaceImportedSummaryAttempts([payload]);
+    if (!result.ok) {
+      setDailyManualEntryModal((current) => ({
+        ...current,
+        saving: false,
+        msg: result.message || "Failed to save manual result.",
+      }));
+      return;
+    }
+
+    await runSearch("daily");
+    await recordAuditEvent({
+      actionType: dailyManualEntryModal.hasImportedAttempt ? "update" : "create",
+      entityType: "daily_results",
+      entityId: `${session.id}:${student.id}`,
+      summary: `${dailyManualEntryModal.hasImportedAttempt ? "Updated" : "Saved"} manual daily result for ${student.display_name ?? student.id}.`,
+      metadata: {
+        source: "manual",
+        session_id: session.id,
+        student_id: student.id,
+        rate,
+      },
+    });
+    closeDailyManualEntryModal();
+    setQuizMsg(`Saved manual result for ${student.display_name ?? student.id} in ${session.title ?? session.problem_set_id}.`);
+  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, sortedStudents]);
+
+  const clearDailyManualEntry = useCallback(async () => {
+    const student = sortedStudents.find((item) => item.id === dailyManualEntryModal.studentId) ?? null;
+    const session = dailyResultsMatrix.sessions.find((item) => item.id === dailyManualEntryModal.sessionId) ?? null;
+    if (!student || !session) {
+      setDailyManualEntryModal((current) => ({ ...current, msg: "Student or test session was not found." }));
+      return;
+    }
+    setDailyManualEntryModal((current) => ({ ...current, saving: true, msg: "" }));
+    const result = await removeImportedSummaryAttemptsForPairs([
+      { student_id: student.id, test_session_id: session.id },
+    ]);
+    if (!result.ok) {
+      setDailyManualEntryModal((current) => ({
+        ...current,
+        saving: false,
+        msg: result.message || "Failed to clear manual result.",
+      }));
+      return;
+    }
+    await runSearch("daily");
+    await recordAuditEvent({
+      actionType: "delete",
+      entityType: "daily_results",
+      entityId: `${session.id}:${student.id}`,
+      summary: `Cleared manual daily result for ${student.display_name ?? student.id}.`,
+      metadata: {
+        source: "manual",
+        session_id: session.id,
+        student_id: student.id,
+      },
+    });
+    closeDailyManualEntryModal();
+    setQuizMsg(`Cleared manual result for ${student.display_name ?? student.id} in ${session.title ?? session.problem_set_id}.`);
+  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, sortedStudents]);
+
+  useEffect(() => {
+    if (!dailyManualEntryModal.open) return;
+    const sessionStillVisible = dailyResultsMatrix.sessions.some((session) => session.id === dailyManualEntryModal.sessionId);
+    const studentStillVisible = sortedStudents.some((student) => student.id === dailyManualEntryModal.studentId);
+    if (!sessionStillVisible || !studentStillVisible) {
+      closeDailyManualEntryModal();
+    }
+  }, [closeDailyManualEntryModal, dailyManualEntryModal.open, dailyManualEntryModal.sessionId, dailyManualEntryModal.studentId, dailyResultsMatrix.sessions, sortedStudents]);
 
   const closeResultsImportStatus = useCallback(() => {
     setResultsImportStatus((current) => (current?.loading ? current : null));
@@ -6060,6 +6241,10 @@ export default function AdminConsole({
     setLoading(true);
     setMsg("Loading...");
     const { code, name, from, to, limit, testVersion } = filters;
+    const isResultsMatrixSearch =
+      (testType === "daily" && activeTab === "daily" && dailySubTab === "results")
+      || (testType === "mock" && activeTab === "model" && modelSubTab === "results");
+    const effectiveLimit = isResultsMatrixSearch ? Math.max(Number(limit || 200), 5000) : Number(limit || 200);
 
     let allowedVersions = [];
     if (testType) {
@@ -6081,7 +6266,7 @@ export default function AdminConsole({
         .from("attempts")
         .select(fields)
         .order("created_at", { ascending: false })
-        .limit(Number(limit || 200));
+        .limit(effectiveLimit);
       if (testType) query = query.in("test_version", allowedVersions);
       if (code) query = query.ilike("student_code", `%${code}%`);
       if (name) query = query.ilike("display_name", `%${name}%`);
@@ -11447,48 +11632,49 @@ function openDailyRecordModal(record = null, recordDate = "") {
     downloadText(`model_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
   }
 
-  async function replaceImportedSummaryAttempts(payloads, options = {}) {
-    if (!payloads.length) return { ok: true, inserted: 0 };
-
-    const overwriteSessionIds = Array.from(new Set((options?.overwriteSessionIds ?? []).filter(Boolean)));
-    if (overwriteSessionIds.length) {
-      const { error: overwriteDeleteError } = await supabase
-        .from("attempts")
-        .delete()
-        .in("test_session_id", overwriteSessionIds);
-      if (overwriteDeleteError) {
-        return { ok: false, message: overwriteDeleteError.message };
-      }
+  async function fetchExistingImportedAttemptIdsForPairs(pairs) {
+    const normalizedPairs = (pairs ?? []).filter((pair) => pair?.student_id && pair?.test_session_id);
+    if (!normalizedPairs.length) {
+      return { ids: [], error: null };
     }
+    const sessionIds = Array.from(new Set(normalizedPairs.map((pair) => pair.test_session_id)));
+    const studentIds = Array.from(new Set(normalizedPairs.map((pair) => pair.student_id)));
+    const pairKeys = new Set(normalizedPairs.map((pair) => `${pair.student_id}::${pair.test_session_id}`));
 
-    const sessionIds = Array.from(
-      new Set(
-        payloads
-          .map((payload) => payload.test_session_id)
-          .filter((sessionId) => sessionId && !overwriteSessionIds.includes(sessionId))
-      )
-    );
-    const studentIds = Array.from(new Set(payloads.map((payload) => payload.student_id).filter(Boolean)));
-
-    if (sessionIds.length && studentIds.length) {
+    const deleteIds = [];
+    for (const sessionIdChunk of chunkItems(sessionIds, IMPORTED_ATTEMPT_QUERY_BATCH_SIZE)) {
       const { data: existingRows, error: existingError } = await supabase
         .from("attempts")
-        .select("id, answers_json")
-        .in("test_session_id", sessionIds)
+        .select("id, answers_json, student_id, test_session_id")
+        .in("test_session_id", sessionIdChunk)
         .in("student_id", studentIds);
       if (existingError) {
-        return { ok: false, message: existingError.message };
+        return { ids: [], error: existingError };
       }
-      const deleteIds = (existingRows ?? []).filter((row) => isImportedSummaryAttempt(row)).map((row) => row.id);
-      if (deleteIds.length) {
-        const { error: deleteError } = await supabase.from("attempts").delete().in("id", deleteIds);
-        if (deleteError) {
-          return { ok: false, message: deleteError.message };
-        }
-      }
+      deleteIds.push(
+        ...(existingRows ?? [])
+          .filter((row) => pairKeys.has(`${row.student_id}::${row.test_session_id}`))
+          .filter((row) => isImportedSummaryAttempt(row))
+          .map((row) => row.id)
+      );
     }
 
-    let payloadsToInsert = payloads;
+    return {
+      ids: Array.from(new Set(deleteIds)),
+      error: null,
+    };
+  }
+
+  async function deleteAttemptIdsInChunks(attemptIds) {
+    for (const attemptIdChunk of chunkItems(attemptIds, IMPORTED_ATTEMPT_BATCH_SIZE)) {
+      const { error } = await supabase.from("attempts").delete().in("id", attemptIdChunk);
+      if (error) return error;
+    }
+    return null;
+  }
+
+  async function insertImportedAttemptPayloadChunk(payloadChunk) {
+    let payloadsToInsert = payloadChunk;
     let { error: insertError } = await supabase.from("attempts").insert(payloadsToInsert);
     if (insertError && isMissingTabLeftCountError(insertError)) {
       payloadsToInsert = payloadsToInsert.map(({ tab_left_count, ...payload }) => payload);
@@ -11498,8 +11684,63 @@ function openDailyRecordModal(record = null, recordDate = "") {
       payloadsToInsert = payloadsToInsert.map(({ score_rate, ...payload }) => payload);
       ({ error: insertError } = await supabase.from("attempts").insert(payloadsToInsert));
     }
-    if (insertError) {
-      return { ok: false, message: insertError.message };
+    return insertError ?? null;
+  }
+
+  async function removeImportedSummaryAttemptsForPairs(pairs) {
+    const normalizedPairs = (pairs ?? []).filter((pair) => pair?.student_id && pair?.test_session_id);
+    if (!normalizedPairs.length) return { ok: true, deleted: 0 };
+    const { ids: deleteIds, error } = await fetchExistingImportedAttemptIdsForPairs(normalizedPairs);
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+    if (!deleteIds.length) {
+      return { ok: true, deleted: 0 };
+    }
+    const deleteError = await deleteAttemptIdsInChunks(deleteIds);
+    if (deleteError) {
+      return { ok: false, message: deleteError.message };
+    }
+    return { ok: true, deleted: deleteIds.length };
+  }
+
+  async function replaceImportedSummaryAttempts(payloads, options = {}) {
+    if (!payloads.length) return { ok: true, inserted: 0 };
+
+    const overwriteSessionIds = Array.from(new Set((options?.overwriteSessionIds ?? []).filter(Boolean)));
+    for (const sessionIdChunk of chunkItems(overwriteSessionIds, IMPORTED_ATTEMPT_QUERY_BATCH_SIZE)) {
+      const { error: overwriteDeleteError } = await supabase
+        .from("attempts")
+        .delete()
+        .in("test_session_id", sessionIdChunk);
+      if (overwriteDeleteError) {
+        return { ok: false, message: overwriteDeleteError.message };
+      }
+    }
+
+    const replacementPairs = payloads
+      .filter((payload) => payload.student_id && payload.test_session_id && !overwriteSessionIds.includes(payload.test_session_id))
+      .map((payload) => ({
+        student_id: payload.student_id,
+        test_session_id: payload.test_session_id,
+      }));
+
+    const { ids: deleteIds, error: existingError } = await fetchExistingImportedAttemptIdsForPairs(replacementPairs);
+    if (existingError) {
+      return { ok: false, message: existingError.message };
+    }
+    if (deleteIds.length) {
+      const deleteError = await deleteAttemptIdsInChunks(deleteIds);
+      if (deleteError) {
+        return { ok: false, message: deleteError.message };
+      }
+    }
+
+    for (const payloadChunk of chunkItems(payloads, IMPORTED_ATTEMPT_BATCH_SIZE)) {
+      const insertError = await insertImportedAttemptPayloadChunk(payloadChunk);
+      if (insertError) {
+        return { ok: false, message: insertError.message };
+      }
     }
     return { ok: true, inserted: payloads.length };
   }
@@ -11929,7 +12170,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
           continue;
         }
 
-        selectedColumns.forEach(({ colIndex, session }) => {
+        selectedColumns.forEach((column) => {
+          const { colIndex, session } = column;
           const rate = parsePercentCell(row[colIndex]);
           if (rate == null) return;
           const total = Math.max(0, Number(session?.linkedTest?.question_count ?? 0));
@@ -19037,6 +19279,105 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </div>
         ), document.body) : null}
 
+        {dailyManualEntryModal.open && typeof document !== "undefined" ? createPortal((
+          <div
+            className="admin-modal-overlay"
+            onClick={() => {
+              if (!dailyManualEntryModal.saving) closeDailyManualEntryModal();
+            }}
+          >
+            <div className="admin-modal attendance-import-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div className="admin-title">{dailyManualEntryModal.hasImportedAttempt ? "Edit Manual Daily Result" : "Add Manual Daily Result"}</div>
+                {!dailyManualEntryModal.saving ? (
+                  <button
+                    className="admin-modal-close"
+                    aria-label="Close"
+                    onClick={closeDailyManualEntryModal}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="attendance-import-modal-body">
+                <div className="admin-form" style={{ gridTemplateColumns: "1fr", gap: 12 }}>
+                  <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                    <label>Student</label>
+                    <div className="form-input readonly">
+                      {dailyManualEntryStudent?.display_name ?? dailyManualEntryStudent?.email ?? dailyManualEntryStudent?.id ?? "-"}
+                      {dailyManualEntryStudent?.student_code ? ` (${dailyManualEntryStudent.student_code})` : ""}
+                    </div>
+                  </div>
+                  <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                    <label>Test Session</label>
+                    <div className="form-input readonly">
+                      {dailyManualEntrySession?.title ?? dailyManualEntrySession?.problem_set_id ?? "-"}
+                    </div>
+                  </div>
+                  <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                    <label>Score (%)</label>
+                    <input
+                      value={dailyManualEntryModal.rateInput}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setDailyManualEntryModal((current) => ({
+                          ...current,
+                          rateInput: nextValue,
+                          msg: "",
+                        }));
+                      }}
+                      placeholder="e.g. 82.5"
+                      inputMode="decimal"
+                      disabled={dailyManualEntryModal.saving}
+                    />
+                  </div>
+                </div>
+                <div className="attendance-import-modal-note">
+                  This saves a summary result for the selected daily test session. Real submitted attempts are not modified.
+                </div>
+                {Number(dailyManualEntrySession?.linkedTest?.question_count ?? 0) <= 0 ? (
+                  <div className="attendance-import-modal-note">
+                    This session has no question count, so the manual entry will store the percentage only.
+                  </div>
+                ) : null}
+                {dailyManualEntryModal.msg ? (
+                  <div className="admin-msg" style={{ marginTop: 10 }}>{dailyManualEntryModal.msg}</div>
+                ) : null}
+              </div>
+
+              <div className="attendance-import-modal-actions">
+                {dailyManualEntryModal.hasImportedAttempt ? (
+                  <button
+                    className="btn btn-danger"
+                    type="button"
+                    onClick={clearDailyManualEntry}
+                    disabled={dailyManualEntryModal.saving}
+                  >
+                    Clear Manual Result
+                  </button>
+                ) : null}
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={closeDailyManualEntryModal}
+                  disabled={dailyManualEntryModal.saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={saveDailyManualEntry}
+                  disabled={dailyManualEntryModal.saving}
+                >
+                  {dailyManualEntryModal.saving ? "Saving..." : "Save Result"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ), document.body) : null}
+
         {attendanceImportConflict && typeof document !== "undefined" ? createPortal((
           <div
             className="admin-modal-overlay"
@@ -19439,6 +19780,17 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   </button>
                   {resultContext.type === "daily" ? (
                     <button
+                      className={`btn results-page-action-btn ${dailyManualEntryMode ? "active" : ""}`}
+                      type="button"
+                      onClick={() => setDailyManualEntryMode((current) => !current)}
+                      disabled={!selectedDailyCategory}
+                    >
+                      <span className="results-page-action-icon" aria-hidden="true">M</span>
+                      <span>{dailyManualEntryMode ? "Manual Entry On" : "Manual Entry"}</span>
+                    </button>
+                  ) : null}
+                  {resultContext.type === "daily" ? (
+                    <button
                       className="btn btn-danger results-page-action-btn"
                       type="button"
                       onClick={() => clearDailyResultsForCategory(selectedDailyCategory)}
@@ -19466,6 +19818,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </div>
               </div>
               {quizMsg ? <div className="admin-help">{quizMsg}</div> : null}
+              {resultContext.type === "daily" && dailyManualEntryMode ? (
+                <div className="admin-help" style={{ marginTop: 6 }}>
+                  Manual entry mode is on. Click an empty cell to add a score, or click an imported summary cell to update it. Cells with real submitted attempts stay read-only.
+                </div>
+              ) : null}
             </div>
 
             {resultContext.type === "daily" || resultContext.type === "mock" ? (
@@ -19537,7 +19894,26 @@ function openDailyRecordModal(record = null, recordDate = "") {
                             const sessionItem = (resultContext.type === "daily"
                               ? dailyResultsMatrix.sessions
                               : modelResultsMatrix.sessions)[idx];
-                            if (!attemptList?.length) return <td key={`daily-cell-${row.student.id}-${idx}`}>—</td>;
+                            const canEditManualCell = resultContext.type === "daily"
+                              && dailyManualEntryMode
+                              && Array.isArray(attemptList)
+                              && attemptList.every((attempt) => isImportedSummaryAttempt(attempt));
+                            const editableImportedAttempt = attemptList?.find((attempt) => isImportedSummaryAttempt(attempt)) ?? null;
+                            if (!attemptList?.length) {
+                              return (
+                                <td key={`daily-cell-${row.student.id}-${idx}`} className="daily-score-cell">
+                                  {resultContext.type === "daily" && dailyManualEntryMode ? (
+                                    <button
+                                      className="daily-manual-cell-btn"
+                                      type="button"
+                                      onClick={() => openDailyManualEntryModal(row.student, sessionItem, [])}
+                                    >
+                                      Add result
+                                    </button>
+                                  ) : "—"}
+                                </td>
+                              );
+                            }
                             const passRate = getSessionEffectivePassRate(sessionItem, attemptList);
                             const cellKey = `${row.student.id}:${sessionItem.id}`;
                             const extraAttempts = attemptList.slice(1);
@@ -19604,6 +19980,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                       {expandedResultCells[cellKey]
                                         ? "Hide extra attempts"
                                         : `${extraAttempts.length} more attempt${extraAttempts.length > 1 ? "s" : ""}`}
+                                    </button>
+                                  ) : null}
+                                  {canEditManualCell ? (
+                                    <button
+                                      className="daily-manual-cell-btn"
+                                      type="button"
+                                      onClick={() => openDailyManualEntryModal(row.student, sessionItem, attemptList)}
+                                    >
+                                      {editableImportedAttempt ? "Edit manual result" : "Add result"}
                                     </button>
                                   ) : null}
                                 </div>

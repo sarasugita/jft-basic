@@ -959,6 +959,12 @@ body { padding: 0; }
   border-color: #650013;
 }
 
+.results-page-action-btn.active {
+  background: #e8f4df;
+  border-color: #5e8a34;
+  color: #25420b;
+}
+
 .results-category-tabs {
   margin-bottom: 0;
   margin-top: 0;
@@ -4293,6 +4299,18 @@ body { padding: 0; }
 }
 
 .daily-more-btn {
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 0 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.daily-manual-cell-btn {
   border: 0;
   background: transparent;
   color: #1d4ed8;
