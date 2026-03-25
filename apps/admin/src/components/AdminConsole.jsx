@@ -3397,6 +3397,8 @@ export default function AdminConsole({
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginMsg, setLoginMsg] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showPasswordChangePassword, setShowPasswordChangePassword] = useState(false);
+  const [showPasswordChangeConfirmPassword, setShowPasswordChangeConfirmPassword] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [passwordChangeForm, setPasswordChangeForm] = useState({
     password: "",
@@ -5954,7 +5956,8 @@ export default function AdminConsole({
     if (
       !forcedSchoolId &&
       profile.role === "super_admin" &&
-      profile.account_status === "active"
+      profile.account_status === "active" &&
+      !profile.force_password_change
     ) {
       router.replace("/super/schools");
     }
@@ -13330,34 +13333,79 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   if (profile.account_status === "active" && profile.force_password_change) {
     return (
-      <div className="admin-login">
-        <h2>Change Temporary Password</h2>
-        <div className="admin-help">
-          This account must change its temporary password before continuing.
+      <div className="admin-login-screen">
+        <div className="admin-login admin-login-card admin-password-card">
+          <div className="admin-password-change-head">
+            <h2 className="admin-password-change-title">Change Temporary Password</h2>
+            <p className="admin-password-change-copy">
+              This account must change its temporary password before continuing.
+            </p>
+            <p className="admin-password-change-note">Use at least 8 characters for your new password.</p>
+          </div>
+          <form
+            className="admin-login-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handlePasswordChange();
+            }}
+          >
+            <label className="admin-login-label" htmlFor="adminPasswordChangeNew">New Password</label>
+            <div className="admin-login-password">
+              <input
+                id="adminPasswordChangeNew"
+                className="admin-login-input admin-login-input-password"
+                type={showPasswordChangePassword ? "text" : "password"}
+                autoComplete="new-password"
+                placeholder="new password"
+                value={passwordChangeForm.password}
+                onChange={(e) => setPasswordChangeForm((s) => ({ ...s, password: e.target.value }))}
+              />
+              <button
+                className="admin-login-toggle"
+                type="button"
+                aria-label={showPasswordChangePassword ? "Hide password" : "Show password"}
+                onClick={() => setShowPasswordChangePassword((current) => !current)}
+              >
+                <PasswordVisibilityIcon visible={showPasswordChangePassword} />
+              </button>
+            </div>
+
+            <label className="admin-login-label" htmlFor="adminPasswordChangeConfirm">Confirm Password</label>
+            <div className="admin-login-password">
+              <input
+                id="adminPasswordChangeConfirm"
+                className="admin-login-input admin-login-input-password"
+                type={showPasswordChangeConfirmPassword ? "text" : "password"}
+                autoComplete="new-password"
+                placeholder="confirm password"
+                value={passwordChangeForm.confirmPassword}
+                onChange={(e) => setPasswordChangeForm((s) => ({ ...s, confirmPassword: e.target.value }))}
+              />
+              <button
+                className="admin-login-toggle"
+                type="button"
+                aria-label={showPasswordChangeConfirmPassword ? "Hide password" : "Show password"}
+                onClick={() => setShowPasswordChangeConfirmPassword((current) => !current)}
+              >
+                <PasswordVisibilityIcon visible={showPasswordChangeConfirmPassword} />
+              </button>
+            </div>
+
+            <button className="admin-login-submit" type="submit" disabled={passwordChangeLoading}>
+              {passwordChangeLoading ? "SAVING..." : "UPDATE PASSWORD"}
+            </button>
+            <button
+              className="admin-password-change-secondary"
+              type="button"
+              onClick={() => supabase.auth.signOut()}
+            >
+              SIGN OUT
+            </button>
+          </form>
+          <div className={`admin-login-msg ${passwordChangeMsg ? "visible" : ""}`}>
+            {passwordChangeMsg || "\u00a0"}
+          </div>
         </div>
-        <div style={{ marginTop: 12 }}>
-          <label>New Password</label>
-          <input
-            type="password"
-            value={passwordChangeForm.password}
-            onChange={(e) => setPasswordChangeForm((s) => ({ ...s, password: e.target.value }))}
-          />
-        </div>
-        <div style={{ marginTop: 10 }}>
-          <label>Confirm Password</label>
-          <input
-            type="password"
-            value={passwordChangeForm.confirmPassword}
-            onChange={(e) => setPasswordChangeForm((s) => ({ ...s, confirmPassword: e.target.value }))}
-          />
-        </div>
-        <div className="admin-actions" style={{ marginTop: 14 }}>
-          <button className="btn btn-primary" disabled={passwordChangeLoading} onClick={handlePasswordChange}>
-            {passwordChangeLoading ? "Saving..." : "Update Password"}
-          </button>
-          <button className="btn" onClick={() => supabase.auth.signOut()}>Sign out</button>
-        </div>
-        <div className="admin-msg">{passwordChangeMsg}</div>
       </div>
     );
   }

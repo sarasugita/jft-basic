@@ -61,16 +61,18 @@ export async function middleware(request) {
   }
 
   const profile = await fetchJson(
-    `${supabaseUrl}/rest/v1/profiles?select=role,account_status&id=eq.${encodeURIComponent(user.id)}`,
+    `${supabaseUrl}/rest/v1/profiles?select=role,account_status,force_password_change&id=eq.${encodeURIComponent(user.id)}`,
     token
   );
   const role = Array.isArray(profile) ? profile[0]?.role : null;
   const accountStatus = Array.isArray(profile) ? profile[0]?.account_status : null;
-  if (role !== "super_admin" || accountStatus !== "active") {
+  const forcePasswordChange = Array.isArray(profile) ? profile[0]?.force_password_change : null;
+  if (role !== "super_admin" || accountStatus !== "active" || forcePasswordChange) {
     return redirectToRoot(request, "profile-not-active-super-admin", {
       userId: user.id,
       role,
       accountStatus,
+      forcePasswordChange,
     });
   }
 

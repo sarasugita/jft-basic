@@ -452,6 +452,15 @@ export default function SuperAdminShell({ children }) {
       router.replace("/");
     }
 
+    function redirectToPasswordChange(reason, extra = {}) {
+      logAdminEvent("Super shell redirecting for password change", {
+        reason,
+        pathname,
+        ...extra,
+      });
+      router.replace("/");
+    }
+
     async function loadProfile(nextSession, reason) {
       if (profileAbortController) {
         profileAbortController.abort();
@@ -472,7 +481,7 @@ export default function SuperAdminShell({ children }) {
 
         const { data: nextProfile, error } = await supabase
           .from("profiles")
-          .select("id, role, display_name, account_status")
+          .select("id, role, display_name, account_status, force_password_change")
           .eq("id", nextSession.user.id)
           .single()
           .abortSignal(profileAbortController.signal);
@@ -503,6 +512,18 @@ export default function SuperAdminShell({ children }) {
             userId: nextSession.user.id,
             role: nextProfile?.role ?? null,
             accountStatus: nextProfile?.account_status ?? null,
+          });
+          return;
+        }
+
+        if (nextProfile.force_password_change) {
+          setSession(nextSession);
+          setProfile(null);
+          setStartupError("");
+          setLoading(true);
+          redirectToPasswordChange("force-password-change-required", {
+            source: reason,
+            userId: nextSession.user.id,
           });
           return;
         }

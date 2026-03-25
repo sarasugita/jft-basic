@@ -4534,6 +4534,52 @@ body { padding: 0; }
   font-weight: 600;
 }
 
+.admin-password-card {
+  width: min(100%, 462px);
+  max-width: 462px;
+  padding: 22px 28px 26px;
+}
+
+.admin-password-change-head {
+  margin-bottom: 18px;
+}
+
+.admin-password-change-title {
+  margin: 0;
+  color: #2f7730;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.admin-password-change-copy {
+  margin: 10px 0 0;
+  color: #4b5563;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.admin-password-change-note {
+  margin: 8px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.admin-password-change-secondary {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 12px;
+  border: 1px solid #2f7730;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #2f7730;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 @media (max-width: 640px) {
   .admin-login-screen {
     padding: 48px 14px 20px;
@@ -4541,6 +4587,11 @@ body { padding: 0; }
 
   .admin-login-card {
     padding: 16px;
+  }
+
+  .admin-password-card {
+    width: min(100%, 420px);
+    padding: 18px 18px 22px;
   }
 
   .admin-login-divider {
@@ -4558,6 +4609,14 @@ body { padding: 0; }
 
   .admin-login-submit {
     min-height: 46px;
+  }
+
+  .admin-password-change-title {
+    font-size: 22px;
+  }
+
+  .admin-password-change-secondary {
+    min-height: 44px;
   }
 }
 
