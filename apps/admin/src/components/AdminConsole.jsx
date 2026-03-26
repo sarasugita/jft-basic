@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { createAdminSupabaseClient, getAdminSupabaseConfig, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
-import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 
 const DEFAULT_MODEL_CATEGORY = "Book Review";
 const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
@@ -6093,6 +6093,26 @@ export default function AdminConsole({
   }, [activeSchoolId, forcedSchoolId, isManagedAuth, profile, schoolScopeId, session]);
 
   useEffect(() => {
+    if (!session || !canUseAdminConsole || activeTab !== "students") return;
+    logAdminEvent("Admin console student tab bootstrap", {
+      role: profile?.role ?? null,
+      activeSchoolId,
+      forcedSchoolId,
+      schoolScopeId,
+      isManagedAuth,
+    });
+  }, [
+    activeSchoolId,
+    activeTab,
+    canUseAdminConsole,
+    forcedSchoolId,
+    isManagedAuth,
+    profile?.role,
+    schoolScopeId,
+    session,
+  ]);
+
+  useEffect(() => {
     if (selectedStudentId) return;
     setSelectedStudentDetail(null);
     setStudentDetailLoading(false);
@@ -6821,7 +6841,17 @@ export default function AdminConsole({
   }
 
   async function fetchStudents() {
+    const finishTrace = createAdminTrace("Admin console fetchStudents", {
+      activeSchoolId,
+      role: profile?.role ?? null,
+      isManagedAuth,
+      forcedSchoolId,
+      schoolScopeId,
+    });
     if (!activeSchoolId) {
+      finishTrace("skipped", {
+        reason: "missing-active-school-id",
+      });
       setStudents([]);
       setStudentMsg("Select a school.");
       setSelectedStudentId("");
@@ -6842,12 +6872,21 @@ export default function AdminConsole({
       .limit(500);
     const { data, error } = await query;
     if (error) {
+      finishTrace("failed", {
+        message: error.message || "",
+        code: error.code || "",
+        status: error.status ?? null,
+      });
       console.error("profiles fetch error:", error);
       setStudents([]);
       setStudentMsg(`Load failed: ${error.message}`);
       return;
     }
     const list = data ?? [];
+    finishTrace("success", {
+      count: list.length,
+      firstStudentId: list[0]?.id ?? null,
+    });
     setStudents(list);
     setStudentMsg(list.length ? "" : "No students.");
     if (!list.length) {
