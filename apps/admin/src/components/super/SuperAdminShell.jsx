@@ -8,7 +8,7 @@ import {
   getAdminSupabaseConfig,
   getAdminSupabaseConfigError,
 } from "../../lib/adminSupabase";
-import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../../lib/adminDiagnostics";
+import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../../lib/adminDiagnostics";
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout } from "../../lib/requestTimeout";
 import { syncAdminAuthCookie } from "../../lib/authCookies";
 
@@ -461,6 +461,11 @@ export default function SuperAdminShell({ children }) {
     }
 
     async function loadProfile(nextSession, reason) {
+      const finishTrace = createAdminTrace("Super shell profile lookup", {
+        pathname: pathnameRef.current,
+        reason,
+        userId: nextSession?.user?.id ?? null,
+      });
       if (profileAbortController) {
         profileAbortController.abort();
       }
@@ -475,7 +480,7 @@ export default function SuperAdminShell({ children }) {
             setLoading(false);
           }
           redirectToLogin("no-session", { source: reason });
-          return;
+          return { ok: false, status: "no-session" };
         }
 
         const { data: nextProfile, error } = await supabase
@@ -488,6 +493,11 @@ export default function SuperAdminShell({ children }) {
         if (!mounted) return;
 
         if (error) {
+          finishTrace("failed", {
+            message: error.message || "",
+            code: error.code || "",
+            status: error.status ?? null,
+          });
           logAdminRequestFailure("Super shell profile lookup failed", error, {
             pathname: pathnameRef.current,
             reason,
@@ -497,10 +507,14 @@ export default function SuperAdminShell({ children }) {
           setProfile(null);
           setStartupError(error.message || "Failed to load admin profile.");
           setLoading(false);
-          return;
+          return { ok: false, status: "lookup-failed" };
         }
 
         if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
+          finishTrace("rejected", {
+            role: nextProfile?.role ?? null,
+            accountStatus: nextProfile?.account_status ?? null,
+          });
           setSession(null);
           setProfile(null);
           syncAdminAuthCookie(null);
@@ -512,10 +526,13 @@ export default function SuperAdminShell({ children }) {
             role: nextProfile?.role ?? null,
             accountStatus: nextProfile?.account_status ?? null,
           });
-          return;
+          return { ok: false, status: "profile-rejected" };
         }
 
         if (nextProfile.force_password_change) {
+          finishTrace("force-password-change", {
+            role: nextProfile.role,
+          });
           setSession(nextSession);
           setProfile(null);
           setStartupError("");
@@ -524,24 +541,34 @@ export default function SuperAdminShell({ children }) {
             source: reason,
             userId: nextSession.user.id,
           });
-          return;
+          return { ok: false, status: "force-password-change" };
         }
 
         setSession(nextSession);
         setProfile(nextProfile);
         setStartupError("");
         setLoading(false);
+        finishTrace("success", {
+          role: nextProfile.role,
+        });
+        return { ok: true, status: "success", profile: nextProfile };
       } catch (error) {
         if (!mounted) return;
         if (isAbortLikeError(error)) {
+          finishTrace("aborted", {
+            message: error?.message ?? "",
+          });
           logAdminRequestFailure("Super shell profile lookup aborted", error, {
             pathname: pathnameRef.current,
             reason,
             userId: nextSession?.user?.id ?? null,
           });
           setLoading(false);
-          return;
+          return { ok: false, status: "aborted" };
         }
+        finishTrace("threw", {
+          message: error instanceof Error ? error.message : String(error ?? ""),
+        });
         logAdminRequestFailure("Super shell profile lookup threw", error, {
           pathname: pathnameRef.current,
           reason,
@@ -549,27 +576,61 @@ export default function SuperAdminShell({ children }) {
         });
         setStartupError(error instanceof Error ? error.message : "Failed to load admin profile.");
         setLoading(false);
+        return { ok: false, status: "threw" };
       }
     }
 
     async function bootstrap(reason) {
+      const finishTrace = createAdminTrace("Super shell bootstrap", {
+        pathname: pathnameRef.current,
+        reason,
+      });
       setLoading(true);
       try {
+        const finishGetSessionTrace = createAdminTrace("Super shell getSession", {
+          pathname: pathnameRef.current,
+          reason,
+        });
         const { data, error } = await supabase.auth.getSession();
         if (error) {
+          finishGetSessionTrace("failed", {
+            message: error.message || "",
+            code: error.code || "",
+            status: error.status ?? null,
+          });
           logAdminRequestFailure("Super shell getSession failed", error, {
             pathname: pathnameRef.current,
             reason,
+          });
+        } else {
+          finishGetSessionTrace("success", {
+            hasSession: Boolean(data?.session),
+            userId: data?.session?.user?.id ?? null,
           });
         }
         syncAdminAuthCookie(data?.session ?? null);
         if (!mounted) return;
         const nextSession = data?.session ?? null;
         setSession(nextSession);
-        await loadProfile(nextSession, reason);
+        const profileResult = await loadProfile(nextSession, reason);
+        if (profileResult?.ok) {
+          finishTrace("success", {
+            hasSession: Boolean(nextSession),
+            userId: nextSession?.user?.id ?? null,
+          });
+        } else {
+          finishTrace("completed-without-profile", {
+            hasSession: Boolean(nextSession),
+            userId: nextSession?.user?.id ?? null,
+            profileStatus: profileResult?.status ?? "unknown",
+          });
+        }
       } catch (error) {
         if (!mounted) return;
         if (isAbortLikeError(error)) {
+          finishTrace("aborted", {
+            message: error?.message ?? "",
+          });
           logAdminRequestFailure("Super shell bootstrap aborted", error, {
             pathname: pathnameRef.current,
             reason,
@@ -577,6 +638,9 @@ export default function SuperAdminShell({ children }) {
           setLoading(false);
           return;
         }
+        finishTrace("failed", {
+          message: error instanceof Error ? error.message : String(error ?? ""),
+        });
         logAdminRequestFailure("Super shell bootstrap failed", error, {
           pathname: pathnameRef.current,
           reason,

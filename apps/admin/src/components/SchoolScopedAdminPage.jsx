@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import { useSuperAdmin } from "./super/SuperAdminShell";
 
 const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
@@ -38,6 +38,11 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     }
 
     async function loadSchool() {
+      const finishTrace = createAdminTrace("School scoped school fetch", {
+        schoolId,
+        userId: session.user.id,
+        role: profile.role,
+      });
       setLoading(true);
       setStartupError("");
 
@@ -52,10 +57,17 @@ export default function SchoolScopedAdminPage({ schoolId }) {
         if (!mounted) return;
         if (schoolError || !schoolRow) {
           if (schoolError) {
+            finishTrace("failed", {
+              message: schoolError.message || "",
+              code: schoolError.code || "",
+              status: schoolError.status ?? null,
+            });
             logAdminRequestFailure("School scoped school lookup failed", schoolError, {
               schoolId,
               userId: session.user.id,
             });
+          } else {
+            finishTrace("missing-row");
           }
           setSchool(null);
           setSchoolOptions([]);
@@ -73,14 +85,24 @@ export default function SchoolScopedAdminPage({ schoolId }) {
             school_status: schoolRow.status ?? null,
           },
         ]);
+        finishTrace("success", {
+          schoolRowId: schoolRow.id,
+          schoolStatus: schoolRow.status ?? null,
+        });
       } catch (error) {
         if (!mounted) return;
         if (isAbortLikeError(error)) {
+          finishTrace("aborted", {
+            message: error?.message ?? "",
+          });
           logAdminRequestFailure("School scoped bootstrap aborted", error, {
             schoolId,
           });
           return;
         }
+        finishTrace("threw", {
+          message: error instanceof Error ? error.message : String(error ?? ""),
+        });
         logAdminRequestFailure("School scoped bootstrap failed", error, {
           schoolId,
           userId: session.user.id,
@@ -106,6 +128,10 @@ export default function SchoolScopedAdminPage({ schoolId }) {
     const schoolOptionsAbortController = new AbortController();
 
     async function loadSchoolOptions() {
+      const finishTrace = createAdminTrace("School scoped school options fetch", {
+        schoolId,
+        userId: session.user.id,
+      });
       try {
         const { data: schoolsData, error: schoolsError } = await supabase
           .from("schools")
@@ -115,6 +141,11 @@ export default function SchoolScopedAdminPage({ schoolId }) {
 
         if (cancelled) return;
         if (schoolsError) {
+          finishTrace("failed", {
+            message: schoolsError.message || "",
+            code: schoolsError.code || "",
+            status: schoolsError.status ?? null,
+          });
           logAdminRequestFailure("School scoped school options lookup failed", schoolsError, {
             schoolId,
             userId: session.user.id,
@@ -134,10 +165,21 @@ export default function SchoolScopedAdminPage({ schoolId }) {
             school_status: school.status ?? null,
           },
         ]);
+        finishTrace("success", {
+          optionCount: nextOptions.length,
+        });
       } catch (error) {
         if (cancelled || isAbortLikeError(error)) {
+          if (!cancelled) {
+            finishTrace("aborted", {
+              message: error?.message ?? "",
+            });
+          }
           return;
         }
+        finishTrace("threw", {
+          message: error instanceof Error ? error.message : String(error ?? ""),
+        });
         logAdminRequestFailure("School scoped school options lookup failed", error, {
           schoolId,
           userId: session.user.id,
@@ -151,6 +193,16 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       schoolOptionsAbortController.abort();
     };
   }, [profile, school, schoolId, session, supabase]);
+
+  useEffect(() => {
+    if (!session || !profile || !school) return;
+    logAdminEvent("School scoped ready for admin console", {
+      schoolId,
+      schoolRowId: school.id,
+      role: profile.role,
+      schoolOptionsCount: schoolOptions.length,
+    });
+  }, [profile, school, schoolId, schoolOptions.length, session]);
 
   if (startupError) {
     return (

@@ -48,6 +48,26 @@ export function logAdminEvent(event, details = {}) {
   console.info(`[AdminAuth] ${event}`, details);
 }
 
+export function createAdminTrace(step, details = {}) {
+  const start = typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+
+  logAdminEvent(`${step} start`, details);
+
+  return function finish(status, extra = {}) {
+    const end = typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+    const durationMs = Math.round((end - start) * 10) / 10;
+    logAdminEvent(`${step} ${status}`, {
+      ...details,
+      ...extra,
+      durationMs,
+    });
+  };
+}
+
 export function logAdminRequestFailure(context, error, extra = {}) {
   const payload = getAdminErrorInfo(error, extra);
   const logger = payload.aborted ? console.warn : console.error;

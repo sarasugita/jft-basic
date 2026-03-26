@@ -6083,6 +6083,16 @@ export default function AdminConsole({
   }, [activeSchoolId]);
 
   useEffect(() => {
+    if (!isManagedAuth || !session || !profile || !activeSchoolId) return;
+    logAdminEvent("Admin console managed auth ready", {
+      role: profile.role,
+      activeSchoolId,
+      forcedSchoolId,
+      schoolScopeId,
+    });
+  }, [activeSchoolId, forcedSchoolId, isManagedAuth, profile, schoolScopeId, session]);
+
+  useEffect(() => {
     if (selectedStudentId) return;
     setSelectedStudentDetail(null);
     setStudentDetailLoading(false);
