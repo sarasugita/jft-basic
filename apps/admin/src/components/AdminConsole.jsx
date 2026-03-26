@@ -11,7 +11,17 @@ import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/
 
 const DEFAULT_MODEL_CATEGORY = "Book Review";
 const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
-const PROFILE_SELECT_FIELDS = [
+const STUDENT_LIST_SELECT_FIELDS = [
+  "id",
+  "email",
+  "display_name",
+  "student_code",
+  "phone_number",
+  "created_at",
+  "is_withdrawn",
+  "is_test_account"
+].join(", ");
+const STUDENT_DETAIL_SELECT_FIELDS = [
   "id",
   "email",
   "role",
@@ -229,6 +239,18 @@ function getPersonalInfoForm(student) {
     passport_number: student?.passport_number ?? "",
     profile_uploads: getProfileUploads(student?.profile_uploads)
   };
+}
+
+function hasStudentDetailFields(student) {
+  return Boolean(
+    student
+    && (
+      Object.prototype.hasOwnProperty.call(student, "date_of_birth")
+      || Object.prototype.hasOwnProperty.call(student, "profile_uploads")
+      || Object.prototype.hasOwnProperty.call(student, "nursing_certificate")
+      || Object.prototype.hasOwnProperty.call(student, "passport_number")
+    )
+  );
 }
 
 function getFileExtension(filename) {
@@ -3441,6 +3463,7 @@ export default function AdminConsole({
   const [reissueLoading, setReissueLoading] = useState(false);
   const [reissueMsg, setReissueMsg] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [selectedStudentDetail, setSelectedStudentDetail] = useState(null);
   const [selectedStudentTab, setSelectedStudentTab] = useState("information");
   const [studentAttempts, setStudentAttempts] = useState([]);
   const [studentAttemptsMsg, setStudentAttemptsMsg] = useState("");
@@ -3498,6 +3521,8 @@ export default function AdminConsole({
   const [studentListLoading, setStudentListLoading] = useState(false);
   const [studentListMetricsLoaded, setStudentListMetricsLoaded] = useState(false);
   const [studentDetailOpen, setStudentDetailOpen] = useState(false);
+  const [studentDetailLoading, setStudentDetailLoading] = useState(false);
+  const [studentDetailMsg, setStudentDetailMsg] = useState("");
   const [studentReportExporting, setStudentReportExporting] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [studentAttendanceMonthKey, setStudentAttendanceMonthKey] = useState("__all__");
@@ -3716,9 +3741,18 @@ export default function AdminConsole({
     return attempts.find((a) => a.id === selectedId) ?? null;
   }, [attempts, selectedAttemptObj, selectedId]);
 
-  const selectedStudent = useMemo(
+  const selectedStudentSummary = useMemo(
     () => students.find((s) => s.id === selectedStudentId) ?? null,
     [students, selectedStudentId]
+  );
+  const selectedStudent = useMemo(
+    () => {
+      if (selectedStudentDetail?.id === selectedStudentId) {
+        return { ...(selectedStudentSummary ?? {}), ...selectedStudentDetail };
+      }
+      return selectedStudentSummary;
+    },
+    [selectedStudentDetail, selectedStudentId, selectedStudentSummary]
   );
 
   const studentWarningCounts = useMemo(() => {
@@ -6049,6 +6083,13 @@ export default function AdminConsole({
   }, [activeSchoolId]);
 
   useEffect(() => {
+    if (selectedStudentId) return;
+    setSelectedStudentDetail(null);
+    setStudentDetailLoading(false);
+    setStudentDetailMsg("");
+  }, [selectedStudentId]);
+
+  useEffect(() => {
     if (!session || !canUseAdminConsole) return;
     if (activeTab === "students") {
       fetchStudents();
@@ -6166,8 +6207,11 @@ export default function AdminConsole({
     setSelectedId(null);
     setSelectedAttemptObj(null);
     setSelectedStudentId("");
+    setSelectedStudentDetail(null);
     setStudentAttempts([]);
     setStudentAttendance([]);
+    setStudentDetailLoading(false);
+    setStudentDetailMsg("");
     setAbsenceApplications([]);
     setAnnouncements([]);
     setAnnouncementCreateOpen(false);
@@ -6683,6 +6727,77 @@ export default function AdminConsole({
     return process.env.NEXT_PUBLIC_STUDENT_BASE_URL || "";
   }
 
+  function mergeStudentIntoState(studentRecord) {
+    if (!studentRecord?.id) return;
+    setStudents((prev) => prev.map((student) => (
+      student.id === studentRecord.id ? { ...student, ...studentRecord } : student
+    )));
+    setSelectedStudentDetail((prev) => {
+      if (prev?.id !== studentRecord.id && selectedStudentId !== studentRecord.id) return prev;
+      return { ...(prev?.id === studentRecord.id ? prev : {}), ...studentRecord };
+    });
+  }
+
+  async function fetchStudentDetail(studentId, options = {}) {
+    if (!studentId || !activeSchoolId) return null;
+    const { silent = false, force = false } = options;
+    if (!force) {
+      const existingDetail = selectedStudentDetail?.id === studentId
+        ? selectedStudentDetail
+        : students.find((student) => student.id === studentId);
+      if (hasStudentDetailFields(existingDetail)) {
+        if (selectedStudentDetail?.id !== studentId) {
+          setSelectedStudentDetail(existingDetail);
+        }
+        return existingDetail;
+      }
+    }
+
+    if (!silent) {
+      setStudentDetailLoading(true);
+      setStudentDetailMsg("");
+    }
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select(STUDENT_DETAIL_SELECT_FIELDS)
+        .eq("id", studentId)
+        .eq("role", "student")
+        .eq("school_id", activeSchoolId)
+        .single();
+      if (error) {
+        console.error("student detail fetch error:", error);
+        if (!silent) {
+          setStudentDetailMsg(`Student details failed to load: ${error.message}`);
+        }
+        return null;
+      }
+      mergeStudentIntoState(data);
+      if (!silent) {
+        setStudentDetailMsg("");
+      }
+      return data;
+    } finally {
+      if (!silent) {
+        setStudentDetailLoading(false);
+      }
+    }
+  }
+
+  async function openStudentDetail(studentId) {
+    if (!studentId) return;
+    setSelectedStudentId(studentId);
+    setSelectedStudentTab("information");
+    setStudentAttendance([]);
+    setStudentAttendanceMsg("");
+    setStudentAttendanceRange({ from: "", to: "" });
+    setStudentDetailOpen(true);
+    if (selectedStudentDetail?.id !== studentId) {
+      setSelectedStudentDetail(null);
+    }
+    await fetchStudentDetail(studentId);
+  }
+
   async function copyLink(id) {
     const base = getStudentBaseUrl();
     const url = base ? `${base}/test?link=${id}` : `/test?link=${id}`;
@@ -6700,6 +6815,7 @@ export default function AdminConsole({
       setStudents([]);
       setStudentMsg("Select a school.");
       setSelectedStudentId("");
+      setSelectedStudentDetail(null);
       setStudentAttempts([]);
       setStudentAttendance([]);
       setStudentAttemptsMsg("");
@@ -6709,7 +6825,7 @@ export default function AdminConsole({
     setStudentMsg("Loading...");
     let query = supabase
       .from("profiles")
-      .select(PROFILE_SELECT_FIELDS)
+      .select(STUDENT_LIST_SELECT_FIELDS)
       .eq("role", "student")
       .eq("school_id", activeSchoolId)
       .order("created_at", { ascending: false })
@@ -6726,6 +6842,7 @@ export default function AdminConsole({
     setStudentMsg(list.length ? "" : "No students.");
     if (!list.length) {
       setSelectedStudentId("");
+      setSelectedStudentDetail(null);
       setStudentAttempts([]);
       setStudentAttendance([]);
       setStudentAttemptsMsg("");
@@ -6733,6 +6850,9 @@ export default function AdminConsole({
       return;
     }
     const exists = selectedStudentId && list.some((s) => s.id === selectedStudentId);
+    if (!exists) {
+      setSelectedStudentDetail(null);
+    }
     if (!exists) {
       const first = list[0];
       setSelectedStudentId(first.id);
@@ -7109,6 +7229,7 @@ export default function AdminConsole({
       setStudentMsg(`Update failed: ${error.message}`);
       return;
     }
+    mergeStudentIntoState({ id: student.id, is_withdrawn: Boolean(nextValue) });
     fetchStudents();
   }
 
@@ -7139,6 +7260,7 @@ export default function AdminConsole({
         is_test_account: isTestAccount,
       },
     });
+    mergeStudentIntoState({ id: student.id, is_test_account: isTestAccount });
     fetchStudents();
   }
 
@@ -7195,7 +7317,7 @@ export default function AdminConsole({
       .from("profiles")
       .update(payload)
       .eq("id", selectedStudentId)
-      .select(PROFILE_SELECT_FIELDS)
+      .select(STUDENT_DETAIL_SELECT_FIELDS)
       .single();
     if (error) {
       console.error("student info update error:", error);
@@ -7207,7 +7329,7 @@ export default function AdminConsole({
       setStudentInfoSaving(false);
       return;
     }
-    setStudents((prev) => prev.map((student) => (student.id === selectedStudentId ? { ...student, ...(data ?? payload) } : student)));
+    mergeStudentIntoState({ id: selectedStudentId, ...(data ?? payload) });
     setStudentInfoForm(getPersonalInfoForm(data ?? payload));
     setStudentInfoUploadFiles({});
     setStudentInfoSaving(false);
@@ -10138,12 +10260,24 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setStudentMsg(`Delete failed: ${data.error}`);
       return;
     }
+    if (selectedStudentId === userId) {
+      setStudentDetailOpen(false);
+      setSelectedStudentId("");
+      setSelectedStudentDetail(null);
+    }
     setStudentMsg(`Deleted: ${email || userId}`);
     fetchStudents();
   }
 
   async function exportStudentReportPdf() {
     if (!selectedStudentId || !selectedStudent || typeof window === "undefined") return;
+    const detailedStudent = hasStudentDetailFields(selectedStudent)
+      ? selectedStudent
+      : await fetchStudentDetail(selectedStudentId, { force: true });
+    if (!detailedStudent) {
+      setStudentMsg("Student details failed to load. Please try again.");
+      return;
+    }
     const reportWindow = window.open("", "_blank", "width=1200,height=900");
     if (!reportWindow) {
       setStudentMsg("Popup blocked. Please allow popups and try again.");
@@ -10212,29 +10346,29 @@ function openDailyRecordModal(record = null, recordDate = "") {
       });
       const modelSectionTitles = [...sectionTitles];
 
-      const uploadMap = getProfileUploads(selectedStudent.profile_uploads);
+      const uploadMap = getProfileUploads(detailedStudent.profile_uploads);
       const personalInfoRows = [
-        { label: "Full Name", value: selectedStudent.display_name || "-" },
-        { label: "Email", value: selectedStudent.email || "-" },
-        { label: "Student No.", value: selectedStudent.student_code || "-" },
-        { label: "Phone Number", value: selectedStudent.phone_number || "-" },
+        { label: "Full Name", value: detailedStudent.display_name || "-" },
+        { label: "Email", value: detailedStudent.email || "-" },
+        { label: "Student No.", value: detailedStudent.student_code || "-" },
+        { label: "Phone Number", value: detailedStudent.phone_number || "-" },
         {
           label: "Date of Birth",
-          value: selectedStudent.date_of_birth
-            ? `${formatDateFull(selectedStudent.date_of_birth)}${calculateAge(selectedStudent.date_of_birth) != null ? ` / Age ${calculateAge(selectedStudent.date_of_birth)}` : ""}`
+          value: detailedStudent.date_of_birth
+            ? `${formatDateFull(detailedStudent.date_of_birth)}${calculateAge(detailedStudent.date_of_birth) != null ? ` / Age ${calculateAge(detailedStudent.date_of_birth)}` : ""}`
             : "-",
         },
-        { label: "Sex", value: selectedStudent.sex || "-" },
-        { label: "Current Working Facility", value: selectedStudent.current_working_facility || "-" },
-        { label: "Years of Experience", value: formatYearsOfExperience(selectedStudent.years_of_experience) || "-" },
-        { label: "Nursing Certificate", value: selectedStudent.nursing_certificate || "-" },
-        { label: "Certificate Status", value: selectedStudent.nursing_certificate_status || "-" },
-        { label: "BNMC Registration Number", value: selectedStudent.bnmc_registration_number || "-" },
+        { label: "Sex", value: detailedStudent.sex || "-" },
+        { label: "Current Working Facility", value: detailedStudent.current_working_facility || "-" },
+        { label: "Years of Experience", value: formatYearsOfExperience(detailedStudent.years_of_experience) || "-" },
+        { label: "Nursing Certificate", value: detailedStudent.nursing_certificate || "-" },
+        { label: "Certificate Status", value: detailedStudent.nursing_certificate_status || "-" },
+        { label: "BNMC Registration Number", value: detailedStudent.bnmc_registration_number || "-" },
         {
           label: "BNMC Registration Expiry Date",
-          value: selectedStudent.bnmc_registration_expiry_date ? formatDateFull(selectedStudent.bnmc_registration_expiry_date) : "-",
+          value: detailedStudent.bnmc_registration_expiry_date ? formatDateFull(detailedStudent.bnmc_registration_expiry_date) : "-",
         },
-        { label: "Passport Number", value: selectedStudent.passport_number || "-" },
+        { label: "Passport Number", value: detailedStudent.passport_number || "-" },
         ...PERSONAL_UPLOAD_FIELDS.map((field) => {
           const asset = uploadMap[field.key];
           const url = String(asset?.url ?? "").trim();
@@ -14172,12 +14306,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         <tr
                           key={s.id}
                           onClick={() => {
-                            setSelectedStudentId(s.id);
-                            setSelectedStudentTab("information");
-                            setStudentAttendance([]);
-                            setStudentAttendanceMsg("");
-                            setStudentAttendanceRange({ from: "", to: "" });
-                            setStudentDetailOpen(true);
+                            void openStudentDetail(s.id);
                           }}
                           className={s.is_withdrawn ? "row-withdrawn" : ""}
                         >
@@ -14272,7 +14401,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <button
                     className="btn student-detail-action-btn"
                     onClick={exportStudentReportPdf}
-                    disabled={studentReportExporting}
+                    disabled={studentReportExporting || studentDetailLoading}
                   >
                     <svg viewBox="0 0 20 20" aria-hidden="true">
                       <path d="M10 3v8m0 0 3-3m-3 3-3-3M4 13.5v1.25C4 15.44 4.56 16 5.25 16h9.5c.69 0 1.25-.56 1.25-1.25V13.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -14378,6 +14507,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       </div>
                       <button
                         className="btn btn-primary"
+                        disabled={studentDetailLoading || !hasStudentDetailFields(selectedStudent)}
                         onClick={() => {
                           setStudentInfoForm(getPersonalInfoForm(selectedStudent));
                           setStudentInfoUploadFiles({});
@@ -14388,6 +14518,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
                         Edit Information
                       </button>
                     </div>
+                    {studentDetailLoading ? (
+                      <div className="admin-help" style={{ marginTop: 10 }}>
+                        Loading full student details...
+                      </div>
+                    ) : null}
+                    {studentDetailMsg ? (
+                      <div className="admin-msg">{studentDetailMsg}</div>
+                    ) : null}
                     <div className="student-info-grid admin-student-info-grid">
                       {[
                         { label: "Full Name", value: selectedStudent?.display_name || "-" },
