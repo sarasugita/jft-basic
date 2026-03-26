@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useSuperAdmin } from "./super/SuperAdminShell";
 
@@ -118,11 +119,13 @@ function computeSummary(schoolId, metrics) {
 }
 
 export default function SuperSchoolsPage() {
+  const router = useRouter();
   const { supabase, invokeWithAuth } = useSuperAdmin();
   const [schools, setSchools] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [metricsLoading, setMetricsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -142,21 +145,16 @@ export default function SuperSchoolsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const schoolsAbortController = new AbortController();
 
-    async function load() {
+    async function loadSchools() {
       setLoading(true);
       setMsg("");
-      const [schoolsRes, metricsRes] = await Promise.all([
-        supabase
-          .from("schools")
-          .select("id, name, status, academic_year, term, start_date, end_date, created_at, updated_at")
-          .order("created_at", { ascending: true }),
-        supabase.rpc("super_school_metrics_summary", {
-          p_date_from: null,
-          p_date_to: null,
-          p_test_type: "all",
-        }),
-      ]);
+      const schoolsRes = await supabase
+        .from("schools")
+        .select("id, name, status, academic_year, term, start_date, end_date, created_at, updated_at")
+        .order("created_at", { ascending: true })
+        .abortSignal(schoolsAbortController.signal);
 
       if (cancelled) return;
 
@@ -167,8 +165,34 @@ export default function SuperSchoolsPage() {
         return;
       }
 
+      setSchools(schoolsRes.data ?? []);
+      setLoading(false);
+    }
+
+    void loadSchools();
+    return () => {
+      cancelled = true;
+      schoolsAbortController.abort();
+    };
+  }, [refreshNonce, supabase]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMetrics() {
+      setMetricsLoading(true);
+      const metricsRes = await supabase.rpc("super_school_metrics_summary", {
+        p_date_from: null,
+        p_date_to: null,
+        p_test_type: "all",
+      });
+
+      if (cancelled) return;
+
       if (metricsRes.error) {
-        setMsg(metricsRes.error.message || "Failed to load school metrics.");
+        setMsg((prev) => prev || metricsRes.error.message || "Failed to load school metrics.");
+        setMetricsLoading(false);
+        return;
       }
 
       const studentsBySchool = {};
@@ -182,19 +206,30 @@ export default function SuperSchoolsPage() {
         modelAverageBySchool[row.school_id] = row.model_avg ?? null;
       }
 
-      setSchools(schoolsRes.data ?? []);
       setMetrics({
         studentsBySchool,
         attendanceRateBySchool,
         dailyAverageBySchool,
         modelAverageBySchool,
       });
-      setLoading(false);
+      setMetricsLoading(false);
     }
 
-    load();
+    const schedule = typeof window !== "undefined" && "requestIdleCallback" in window
+      ? window.requestIdleCallback(() => {
+          void loadMetrics();
+        }, { timeout: 1000 })
+      : window.setTimeout(() => {
+          void loadMetrics();
+        }, 150);
+
     return () => {
       cancelled = true;
+      if (typeof window !== "undefined" && "cancelIdleCallback" in window && typeof schedule === "number") {
+        window.cancelIdleCallback(schedule);
+      } else {
+        window.clearTimeout(schedule);
+      }
     };
   }, [refreshNonce, supabase]);
 
@@ -239,6 +274,11 @@ export default function SuperSchoolsPage() {
     setDeleteConfirmOpen(false);
     setModalOpen(true);
     setMsg("");
+  }
+
+  function prefetchSchoolAdmin(schoolId) {
+    if (!schoolId) return;
+    router.prefetch(`/super/schools/${schoolId}/admin`);
   }
 
   async function invokeManageSchools(payload) {
@@ -420,6 +460,7 @@ export default function SuperSchoolsPage() {
       <section className="super-flat-section super-schools-list-section">
         <div className="super-schools-list-head">
           <div className="super-section-title">Schools List</div>
+          {metricsLoading ? <div className="admin-help">Loading school metrics...</div> : null}
           <button className="btn btn-primary super-create-school-btn" onClick={openCreateModal}>
             <span className="super-btn-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24">
@@ -455,6 +496,8 @@ export default function SuperSchoolsPage() {
                       <Link
                         className="super-enter-btn"
                         href={`/super/schools/${school.id}/admin`}
+                        onMouseEnter={() => prefetchSchoolAdmin(school.id)}
+                        onFocus={() => prefetchSchoolAdmin(school.id)}
                         aria-label={`Enter ${school.name}`}
                         title={`Enter ${school.name}`}
                       >
