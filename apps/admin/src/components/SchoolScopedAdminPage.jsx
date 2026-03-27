@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import { useSuperAdmin } from "./super/SuperAdminShell";
 import { loadAdminConsole } from "./adminConsoleLoader";
+import AdminConsoleBoundary from "./AdminConsoleBoundary";
 
 const ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS = 15000;
 
@@ -338,14 +339,24 @@ export default function SchoolScopedAdminPage({ schoolId }) {
   }
 
   return (
-    <LazyAdminConsole
-      forcedSchoolScope={school}
-      changeSchoolHref="/super/schools"
-      homeHref="/super/schools"
-      homeLabel="SuperAdmin Home"
-      forcedSchoolOptions={schoolOptions}
-      managedSession={session}
-      managedProfile={profile}
-    />
+    <AdminConsoleBoundary
+      context="school-scoped-admin"
+      onRetry={() => {
+        setAdminConsoleRetryNonce((value) => value + 1);
+      }}
+      onBack={() => router.replace("/super/schools")}
+      backLabel="BACK TO SCHOOLS"
+    >
+      <LazyAdminConsole
+        key={adminConsoleRetryNonce}
+        forcedSchoolScope={school}
+        changeSchoolHref="/super/schools"
+        homeHref="/super/schools"
+        homeLabel="SuperAdmin Home"
+        forcedSchoolOptions={schoolOptions}
+        managedSession={session}
+        managedProfile={profile}
+      />
+    </AdminConsoleBoundary>
   );
 }

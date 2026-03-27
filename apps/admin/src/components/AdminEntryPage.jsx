@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import AdminConsoleBoundary from "./AdminConsoleBoundary";
 
 const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
   loading: () => (
@@ -75,6 +76,7 @@ export default function AdminEntryPage() {
   const [passwordChangeMsg, setPasswordChangeMsg] = useState("");
   const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
   const loginValidationInFlightRef = useRef(false);
+  const [adminConsoleRetryNonce, setAdminConsoleRetryNonce] = useState(0);
 
   useEffect(() => {
     if (supabaseConfigError) {
@@ -692,10 +694,20 @@ export default function AdminEntryPage() {
   }
 
   return (
-    <LazyAdminConsole
-      homeHref="/"
-      managedSession={session}
-      managedProfile={profile}
-    />
+    <AdminConsoleBoundary
+      context="admin-entry"
+      onRetry={() => setAdminConsoleRetryNonce((value) => value + 1)}
+      onBack={() => {
+        void handleStartupRecovery();
+      }}
+      backLabel="SIGN OUT AND RETRY"
+    >
+      <LazyAdminConsole
+        key={adminConsoleRetryNonce}
+        homeHref="/"
+        managedSession={session}
+        managedProfile={profile}
+      />
+    </AdminConsoleBoundary>
   );
 }

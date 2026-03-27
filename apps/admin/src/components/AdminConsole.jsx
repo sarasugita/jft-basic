@@ -3390,6 +3390,7 @@ export default function AdminConsole({
   managedProfile = undefined,
 }) {
   const router = useRouter();
+  const renderTraceLoggedRef = useRef(false);
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
   const forcedSchoolName = forcedSchoolScope?.name ?? forcedSchoolId ?? "";
   const isManagedAuth = managedSession !== undefined || managedProfile !== undefined;
@@ -3724,6 +3725,25 @@ export default function AdminConsole({
     () => (supabaseConfigError ? null : createAdminSupabaseClient({ schoolScopeId: activeSchoolId })),
     [activeSchoolId, supabaseConfigError]
   );
+
+  if (!renderTraceLoggedRef.current) {
+    renderTraceLoggedRef.current = true;
+    logAdminEvent("Admin console render start", {
+      forcedSchoolId,
+      activeSchoolId,
+      isManagedAuth,
+      managedRole: managedProfile?.role ?? null,
+    });
+  }
+
+  useEffect(() => {
+    logAdminEvent("Admin console first commit", {
+      forcedSchoolId,
+      activeSchoolId,
+      isManagedAuth,
+      managedRole: managedProfile?.role ?? null,
+    });
+  }, [activeSchoolId, forcedSchoolId, isManagedAuth, managedProfile?.role]);
 
   function generateTempPassword(length = 10) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
