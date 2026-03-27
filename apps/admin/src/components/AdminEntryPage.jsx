@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
-import { isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 
 const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
   loading: () => (
@@ -91,6 +91,10 @@ export default function AdminEntryPage() {
       }
       loadAbortController = new AbortController();
       setProfileLoading(true);
+      const finishProfileTrace = createAdminTrace("Admin entry profile lookup", {
+        reason,
+        userId: nextSession.user.id,
+      });
 
       try {
         const { data: nextProfile, error: profileError } = await supabase
@@ -102,6 +106,10 @@ export default function AdminEntryPage() {
 
         if (!mounted) return null;
         if (profileError) {
+          finishProfileTrace("failed", {
+            code: profileError.code ?? "",
+            message: profileError.message ?? "",
+          });
           logAdminRequestFailure("Admin entry profile lookup failed", profileError, {
             reason,
             userId: nextSession.user.id,
@@ -112,6 +120,10 @@ export default function AdminEntryPage() {
         }
 
         if (!isAllowedAdminProfile(nextProfile)) {
+          finishProfileTrace("rejected", {
+            role: nextProfile?.role ?? null,
+            accountStatus: nextProfile?.account_status ?? null,
+          });
           logAdminEvent("Admin entry rejected profile", {
             reason,
             userId: nextSession.user.id,
@@ -129,16 +141,24 @@ export default function AdminEntryPage() {
 
         setProfile(nextProfile);
         setLoginMsg("");
+        finishProfileTrace("success", {
+          role: nextProfile?.role ?? null,
+          forcePasswordChange: Boolean(nextProfile?.force_password_change),
+        });
         return nextProfile;
       } catch (error) {
         if (!mounted) return null;
         if (isAbortLikeError(error)) {
+          finishProfileTrace("aborted");
           logAdminRequestFailure("Admin entry profile lookup aborted", error, {
             reason,
             userId: nextSession.user.id,
           });
           return null;
         }
+        finishProfileTrace("failed", {
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
         logAdminRequestFailure("Admin entry profile lookup threw", error, {
           reason,
           userId: nextSession.user.id,
@@ -155,10 +175,21 @@ export default function AdminEntryPage() {
 
     async function bootstrap(reason) {
       setAuthReady(false);
+      const finishBootstrapTrace = createAdminTrace("Admin entry bootstrap", { reason });
+      const finishSessionTrace = createAdminTrace("Admin entry getSession", { reason });
       try {
         const { data, error } = await supabase.auth.getSession();
         if (error) {
+          finishSessionTrace("failed", {
+            code: error.code ?? "",
+            message: error.message ?? "",
+          });
           logAdminRequestFailure("Admin entry getSession failed", error, { reason });
+        } else {
+          finishSessionTrace("success", {
+            hasSession: Boolean(data?.session),
+            userId: data?.session?.user?.id ?? null,
+          });
         }
 
         const nextSession = data?.session ?? null;
@@ -170,16 +201,32 @@ export default function AdminEntryPage() {
           setProfile(null);
           setProfileLoading(false);
           setLoginMsg("");
+          finishBootstrapTrace("success", {
+            hasSession: false,
+            userId: null,
+          });
           return;
         }
 
         await loadProfileForSession(nextSession, reason);
+        finishBootstrapTrace("success", {
+          hasSession: true,
+          userId: nextSession.user.id,
+        });
       } catch (error) {
         if (!mounted) return;
         if (isAbortLikeError(error)) {
+          finishSessionTrace("aborted");
+          finishBootstrapTrace("aborted");
           logAdminRequestFailure("Admin entry bootstrap aborted", error, { reason });
           return;
         }
+        finishSessionTrace("failed", {
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+        finishBootstrapTrace("failed", {
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
         logAdminRequestFailure("Admin entry bootstrap failed", error, { reason });
         setLoginMsg(error instanceof Error ? error.message : "Failed to restore admin session.");
       } finally {
@@ -232,6 +279,16 @@ export default function AdminEntryPage() {
       listener.subscription.unsubscribe();
     };
   }, [supabase, supabaseConfigError]);
+
+  useEffect(() => {
+    if (authReady && session && !profile && !profileLoading) {
+      logAdminEvent("Admin entry unresolved profile state", {
+        userId: session.user?.id ?? null,
+        hasSession: true,
+        loginMsg: loginMsg || "",
+      });
+    }
+  }, [authReady, loginMsg, profile, profileLoading, session]);
 
   useEffect(() => {
     if (!session || !profile) return;
