@@ -138,7 +138,7 @@ export function createAdminSupabaseClient({ schoolScopeId } = {}) {
         autoRefreshToken: isBrowser,
         detectSessionInUrl: isBrowser,
         persistSession: isBrowser,
-        ...(isBrowser ? { lock: processLock } : {}),
+        ...(isBrowser ? { lock: processLock, lockAcquireTimeout: 30000 } : {}),
       },
       global: {
         fetch: instrumentedAdminFetch,
