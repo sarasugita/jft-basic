@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS, preloadAdminConsole } from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
 
 const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
@@ -77,6 +78,8 @@ export default function AdminEntryPage() {
   const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
   const loginValidationInFlightRef = useRef(false);
   const [adminConsoleRetryNonce, setAdminConsoleRetryNonce] = useState(0);
+  const [adminConsoleReady, setAdminConsoleReady] = useState(false);
+  const [adminConsoleError, setAdminConsoleError] = useState("");
 
   useEffect(() => {
     if (supabaseConfigError) {
@@ -334,6 +337,77 @@ export default function AdminEntryPage() {
       router.replace("/super/schools");
     }
   }, [profile, router, session]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!session || !profile) {
+      setAdminConsoleReady(false);
+      setAdminConsoleError("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const shouldPreload = (
+      profile.role === "admin"
+      && profile.account_status === "active"
+      && !profile.force_password_change
+    );
+
+    if (!shouldPreload) {
+      setAdminConsoleReady(false);
+      setAdminConsoleError("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setAdminConsoleReady(false);
+    setAdminConsoleError("");
+
+    void preloadAdminConsole(
+      {
+        pathname: "/",
+        role: profile.role,
+        userId: session.user.id,
+        schoolId: profile.school_id ?? null,
+        activeSchoolId: profile.school_id ?? null,
+        attempt: adminConsoleRetryNonce,
+        managedAuth: true,
+        source: "admin-entry-preload",
+      },
+      { timeoutMs: ADMIN_CONSOLE_IMPORT_TIMEOUT_MS }
+    )
+      .then(() => {
+        if (cancelled) return;
+        setAdminConsoleReady(true);
+        setAdminConsoleError("");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        logAdminRequestFailure("Admin entry admin console preload failed", error, {
+          pathname: "/",
+          role: profile.role,
+          userId: session.user.id,
+          schoolId: profile.school_id ?? null,
+          attempt: adminConsoleRetryNonce,
+        });
+        if (String(error?.code ?? "") === "admin-console-import-timeout") {
+          setAdminConsoleError("Admin console is taking too long to load. Retry or sign out and try again.");
+          return;
+        }
+        setAdminConsoleError("Failed to load the admin console. Retry or sign out and try again.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    adminConsoleRetryNonce,
+    profile,
+    session,
+  ]);
 
   async function handleStartupRecovery() {
     if (!supabase) {
@@ -691,6 +765,48 @@ export default function AdminEntryPage() {
         <h2>Redirecting...</h2>
       </div>
     );
+  }
+
+  if (
+    profile.role === "admin"
+    && profile.account_status === "active"
+    && !profile.force_password_change
+  ) {
+    if (adminConsoleError) {
+      return (
+        <div className="admin-login">
+          <h2>Startup Error</h2>
+          <div className="admin-msg">{adminConsoleError}</div>
+          <button
+            className="admin-password-change-secondary"
+            type="button"
+            onClick={() => {
+              setAdminConsoleError("");
+              setAdminConsoleRetryNonce((value) => value + 1);
+            }}
+          >
+            RETRY
+          </button>
+          <button
+            className="admin-password-change-secondary"
+            type="button"
+            onClick={() => {
+              void handleStartupRecovery();
+            }}
+          >
+            SIGN OUT AND RETRY
+          </button>
+        </div>
+      );
+    }
+
+    if (!adminConsoleReady) {
+      return (
+        <div className="admin-login">
+          <h2>Loading...</h2>
+        </div>
+      );
+    }
   }
 
   return (

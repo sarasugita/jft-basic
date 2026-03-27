@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout, isTimeoutLikeError } from "./src/lib/requestTimeout";
-import { ADMIN_AUTH_COOKIE } from "./src/lib/schoolScope";
+import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout, isTimeoutLikeError } from "./lib/requestTimeout";
+import { ADMIN_AUTH_COOKIE } from "./lib/schoolScope";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

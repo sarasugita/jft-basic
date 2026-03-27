@@ -5,12 +5,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import { useSuperAdmin } from "./super/SuperAdminShell";
-import { loadAdminConsole } from "./adminConsoleLoader";
+import { preloadAdminConsole } from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
 
 const ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS = 15000;
 
-const LazyAdminConsole = dynamic(loadAdminConsole, {
+const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
   loading: () => (
     <div className="admin-login">
       <h2>Loading...</h2>
@@ -157,7 +157,19 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       }
     }, ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS);
 
-    loadAdminConsole()
+    void preloadAdminConsole(
+      {
+        pathname: `/super/schools/${schoolId}/admin`,
+        role: profile.role,
+        userId: session.user.id,
+        schoolId,
+        activeSchoolId: schoolId,
+        attempt: adminConsoleRetryNonce,
+        managedAuth: true,
+        source: "school-scoped-preload",
+      },
+      { timeoutMs: ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS }
+    )
       .then(() => {
         window.clearTimeout(timeoutId);
         if (cancelled) return;
