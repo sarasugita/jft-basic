@@ -14,6 +14,13 @@ import { syncAdminAuthCookie } from "../../lib/authCookies";
 
 const SuperAdminContext = createContext(null);
 const ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY = "jft_admin_sidebar_collapsed_v1";
+const PROFILE_LOOKUP_RETRY_DELAYS_MS = [400, 1200];
+
+function waitForRetry(delayMs) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+}
 
 const superNav = [
   {
@@ -483,22 +490,49 @@ export default function SuperAdminShell({ children }) {
           return { ok: false, status: "no-session" };
         }
 
-        const { data: nextProfile, error } = await supabase
+        const initialResult = await supabase
           .from("profiles")
           .select("id, role, display_name, account_status, force_password_change")
           .eq("id", nextSession.user.id)
           .single()
           .abortSignal(profileAbortController.signal);
 
+        let resolvedProfile = initialResult.data ?? null;
+        let resolvedError = initialResult.error ?? null;
+
+        for (
+          let attempt = 0;
+          resolvedError && attempt < PROFILE_LOOKUP_RETRY_DELAYS_MS.length;
+          attempt += 1
+        ) {
+          logAdminRequestFailure("Super shell profile lookup retrying", resolvedError, {
+            pathname: pathnameRef.current,
+            reason,
+            userId: nextSession.user.id,
+            attempt: attempt + 1,
+          });
+          await waitForRetry(PROFILE_LOOKUP_RETRY_DELAYS_MS[attempt]);
+          if (!mounted) return;
+
+          const retryResult = await supabase
+            .from("profiles")
+            .select("id, role, display_name, account_status, force_password_change")
+            .eq("id", nextSession.user.id)
+            .single()
+            .abortSignal(profileAbortController.signal);
+          resolvedProfile = retryResult.data ?? null;
+          resolvedError = retryResult.error ?? null;
+        }
+
         if (!mounted) return;
 
-        if (error) {
+        if (resolvedError) {
           finishTrace("failed", {
-            message: error.message || "",
-            code: error.code || "",
-            status: error.status ?? null,
+            message: resolvedError.message || "",
+            code: resolvedError.code || "",
+            status: resolvedError.status ?? null,
           });
-          logAdminRequestFailure("Super shell profile lookup failed", error, {
+          logAdminRequestFailure("Super shell profile lookup failed", resolvedError, {
             pathname: pathnameRef.current,
             reason,
             userId: nextSession.user.id,
@@ -510,10 +544,10 @@ export default function SuperAdminShell({ children }) {
           return { ok: false, status: "lookup-failed" };
         }
 
-        if (!nextProfile || nextProfile.role !== "super_admin" || nextProfile.account_status !== "active") {
+        if (!resolvedProfile || resolvedProfile.role !== "super_admin" || resolvedProfile.account_status !== "active") {
           finishTrace("rejected", {
-            role: nextProfile?.role ?? null,
-            accountStatus: nextProfile?.account_status ?? null,
+            role: resolvedProfile?.role ?? null,
+            accountStatus: resolvedProfile?.account_status ?? null,
           });
           setSession(null);
           setProfile(null);
@@ -523,15 +557,15 @@ export default function SuperAdminShell({ children }) {
           redirectToLogin("super-admin-profile-required", {
             source: reason,
             userId: nextSession.user.id,
-            role: nextProfile?.role ?? null,
-            accountStatus: nextProfile?.account_status ?? null,
+            role: resolvedProfile?.role ?? null,
+            accountStatus: resolvedProfile?.account_status ?? null,
           });
           return { ok: false, status: "profile-rejected" };
         }
 
-        if (nextProfile.force_password_change) {
+        if (resolvedProfile.force_password_change) {
           finishTrace("force-password-change", {
-            role: nextProfile.role,
+            role: resolvedProfile.role,
           });
           setSession(nextSession);
           setProfile(null);
@@ -545,13 +579,13 @@ export default function SuperAdminShell({ children }) {
         }
 
         setSession(nextSession);
-        setProfile(nextProfile);
+        setProfile(resolvedProfile);
         setStartupError("");
         setLoading(false);
         finishTrace("success", {
-          role: nextProfile.role,
+          role: resolvedProfile.role,
         });
-        return { ok: true, status: "success", profile: nextProfile };
+        return { ok: true, status: "success", profile: resolvedProfile };
       } catch (error) {
         if (!mounted) return;
         if (isAbortLikeError(error)) {

@@ -47,6 +47,14 @@ function isAllowedAdminProfile(profile) {
   );
 }
 
+const PROFILE_LOOKUP_RETRY_DELAYS_MS = [400, 1200];
+
+function waitForRetry(delayMs) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+}
+
 export default function AdminEntryPage() {
   const router = useRouter();
   const supabaseConfigError = getAdminSupabaseConfigError();
@@ -97,15 +105,39 @@ export default function AdminEntryPage() {
       });
 
       try {
-        const { data: nextProfile, error: profileError } = await supabase
-          .from("profiles")
-          .select("id, role, display_name, school_id, account_status, force_password_change")
-          .eq("id", nextSession.user.id)
-          .maybeSingle()
-          .abortSignal(loadAbortController.signal);
+        let nextProfile = null;
+        let profileError = null;
+        let resolved = false;
+
+        for (let attempt = 0; attempt <= PROFILE_LOOKUP_RETRY_DELAYS_MS.length; attempt += 1) {
+          const result = await supabase
+            .from("profiles")
+            .select("id, role, display_name, school_id, account_status, force_password_change")
+            .eq("id", nextSession.user.id)
+            .maybeSingle()
+            .abortSignal(loadAbortController.signal);
+
+          nextProfile = result.data ?? null;
+          profileError = result.error ?? null;
+
+          if (!profileError) {
+            resolved = true;
+            break;
+          }
+
+          if (attempt < PROFILE_LOOKUP_RETRY_DELAYS_MS.length) {
+            logAdminRequestFailure("Admin entry profile lookup retrying", profileError, {
+              reason,
+              userId: nextSession.user.id,
+              attempt: attempt + 1,
+            });
+            await waitForRetry(PROFILE_LOOKUP_RETRY_DELAYS_MS[attempt]);
+            if (!mounted) return null;
+          }
+        }
 
         if (!mounted) return null;
-        if (profileError) {
+        if (!resolved && profileError) {
           finishProfileTrace("failed", {
             code: profileError.code ?? "",
             message: profileError.message ?? "",
@@ -348,9 +380,15 @@ export default function AdminEntryPage() {
     }
 
     try {
+      const finishLoginTrace = createAdminTrace("Admin entry login profile validation", {
+        email,
+      });
       const nextSession = data?.session ?? null;
       const userId = nextSession?.user?.id ?? data?.user?.id ?? "";
       if (!nextSession || !userId) {
+        finishLoginTrace("failed", {
+          reason: "missing-session",
+        });
         await supabase.auth.signOut({ scope: "local" });
         syncAdminAuthCookie(null);
         setSession(null);
@@ -366,6 +404,12 @@ export default function AdminEntryPage() {
         .maybeSingle();
 
       if (profileError || !isAllowedAdminProfile(profileData)) {
+        finishLoginTrace("failed", {
+          reason: profileError ? "profile-error" : "profile-rejected",
+          message: profileError?.message ?? "",
+          role: profileData?.role ?? null,
+          accountStatus: profileData?.account_status ?? null,
+        });
         await supabase.auth.signOut({ scope: "local" });
         syncAdminAuthCookie(null);
         setSession(null);
@@ -379,6 +423,39 @@ export default function AdminEntryPage() {
       setSession(nextSession);
       setAuthReady(true);
       setLoginMsg("");
+      finishLoginTrace("success", {
+        role: profileData?.role ?? null,
+        forcePasswordChange: Boolean(profileData?.force_password_change),
+      });
+    } catch (caughtError) {
+      const nextSession = data?.session ?? null;
+      if (isAbortLikeError(caughtError)) {
+        logAdminRequestFailure("Admin entry login profile validation aborted", caughtError, {
+          email,
+          userId: nextSession?.user?.id ?? data?.user?.id ?? null,
+        });
+        if (nextSession) {
+          syncAdminAuthCookie(nextSession);
+          setSession(nextSession);
+          setProfile(null);
+          setProfileLoading(false);
+          setAuthReady(true);
+          setLoginMsg("Admin profile validation was interrupted. Please wait a moment or use Sign out and retry.");
+        } else {
+          setLoginMsg("Login was interrupted. Please try again.");
+        }
+        return;
+      }
+
+      logAdminRequestFailure("Admin entry login profile validation failed", caughtError, {
+        email,
+        userId: nextSession?.user?.id ?? data?.user?.id ?? null,
+      });
+      await supabase.auth.signOut({ scope: "local" });
+      syncAdminAuthCookie(null);
+      setSession(null);
+      setProfile(null);
+      setLoginMsg(caughtError instanceof Error ? caughtError.message : "Login failed.");
     } finally {
       loginValidationInFlightRef.current = false;
     }
