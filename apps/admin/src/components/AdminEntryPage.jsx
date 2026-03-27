@@ -301,6 +301,32 @@ export default function AdminEntryPage() {
     }
   }, [profile, router, session]);
 
+  async function handleStartupRecovery() {
+    if (!supabase) {
+      setSession(null);
+      setProfile(null);
+      setProfileLoading(false);
+      setAuthReady(true);
+      router.replace("/");
+      return;
+    }
+
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch (error) {
+      logAdminRequestFailure("Admin entry startup recovery sign-out failed", error);
+    } finally {
+      syncAdminAuthCookie(null);
+      loginValidationInFlightRef.current = false;
+      setSession(null);
+      setProfile(null);
+      setProfileLoading(false);
+      setAuthReady(true);
+      setLoginMsg("");
+      router.replace("/");
+    }
+  }
+
   async function handleLogin() {
     if (!supabase) {
       setLoginMsg(supabaseConfigError || "Admin client is unavailable.");
@@ -474,10 +500,26 @@ export default function AdminEntryPage() {
   }
 
   if (!profile) {
+    const unresolvedProfile = Boolean(session) && !loginMsg;
     return (
       <div className="admin-login">
-        <h2>{loginMsg ? "Startup Error" : "Loading..."}</h2>
-        {loginMsg ? <div className="admin-msg">{loginMsg}</div> : null}
+        <h2>{loginMsg || unresolvedProfile ? "Startup Error" : "Loading..."}</h2>
+        {(loginMsg || unresolvedProfile) ? (
+          <div className="admin-msg">
+            {loginMsg || "The admin session was restored, but the admin profile could not be loaded. Sign out and try again."}
+          </div>
+        ) : null}
+        {(loginMsg || unresolvedProfile) ? (
+          <button
+            className="admin-password-change-secondary"
+            type="button"
+            onClick={() => {
+              void handleStartupRecovery();
+            }}
+          >
+            SIGN OUT AND RETRY
+          </button>
+        ) : null}
       </div>
     );
   }

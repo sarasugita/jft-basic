@@ -696,6 +696,28 @@ export default function SuperAdminShell({ children }) {
 
   const contextValue = { supabase, session, profile, invokeWithAuth, loading, startupError };
 
+  async function handleStartupRecovery() {
+    if (!supabase) {
+      router.replace("/");
+      return;
+    }
+
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch (error) {
+      logAdminRequestFailure("Super shell startup recovery sign-out failed", error, {
+        pathname: pathnameRef.current,
+      });
+    } finally {
+      syncAdminAuthCookie(null);
+      setSession(null);
+      setProfile(null);
+      setStartupError("");
+      setLoading(false);
+      router.replace("/");
+    }
+  }
+
   let content = null;
   if (bypassShellAuth) {
     content = children;
@@ -710,6 +732,15 @@ export default function SuperAdminShell({ children }) {
       <div className="admin-login">
         <h2>Startup Error</h2>
         <div className="admin-msg">{startupError}</div>
+        <button
+          className="admin-password-change-secondary"
+          type="button"
+          onClick={() => {
+            void handleStartupRecovery();
+          }}
+        >
+          SIGN OUT AND RETRY
+        </button>
       </div>
     );
   } else if (session && profile) {

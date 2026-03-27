@@ -1,4 +1,4 @@
-const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 
 function createTimeoutError(timeoutMs) {
   const error = new Error(`Request timed out after ${timeoutMs}ms`);
