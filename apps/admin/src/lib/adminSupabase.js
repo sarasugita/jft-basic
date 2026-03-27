@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import { processLock } from "@supabase/auth-js";
 import { logAdminRequestFailure } from "./adminDiagnostics";
 import { fetchWithTimeout } from "./requestTimeout";
 import { SUPER_ADMIN_SCOPE_HEADER } from "./schoolScope";
@@ -138,7 +137,7 @@ export function createAdminSupabaseClient({ schoolScopeId } = {}) {
         autoRefreshToken: isBrowser,
         detectSessionInUrl: isBrowser,
         persistSession: isBrowser,
-        ...(isBrowser ? { lock: processLock, lockAcquireTimeout: 30000 } : {}),
+        ...(isBrowser ? { lockAcquireTimeout: 30000 } : {}),
       },
       global: {
         fetch: instrumentedAdminFetch,
