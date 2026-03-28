@@ -2448,6 +2448,34 @@ function getCurrentQuestion() {
   return qs[state.questionIndexInSection];
 }
 
+function getQuestionProgress() {
+  const activeSections = getActiveSections();
+  let total = 0;
+  let current = 0;
+
+  activeSections.forEach((section, sectionIndex) => {
+    const groups = getSectionQuestions(section.key);
+    const sectionCount = groups.length;
+
+    if (sectionIndex < state.sectionIndex) {
+      current += sectionCount;
+    } else if (sectionIndex === state.sectionIndex) {
+      current += Math.min(state.questionIndexInSection, Math.max(sectionCount - 1, 0)) + 1;
+    }
+
+    total += sectionCount;
+  });
+
+  if (total === 0) {
+    return { current: 0, total: 0 };
+  }
+
+  return {
+    current: Math.min(current, total),
+    total,
+  };
+}
+
 function startTestTimer() {
   if (state.testStartAt) return;      // すでに開始してたら何もしない
   state.testStartAt = Date.now();
@@ -2667,6 +2695,7 @@ async function saveAttemptIfNeeded() {
 /** ===== UI helpers ===== */
 function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishBtn", hideTimer = false } = {}) {
   const sec = getCurrentSection();
+  const questionProgress = getQuestionProgress();
   const hideQA =
     state.phase === "intro" ||
     state.phase === "sectionIntro" ||
@@ -2678,10 +2707,13 @@ function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishB
   const testLabel =
     testTitle?.trim() || (testType === "daily" ? "Daily Test" : "Model Test");
   const isDailyActive = testType === "daily" && !hideQA;
+  const questionLabel = isDailyActive
+    ? `${questionProgress.current}/${questionProgress.total}`
+    : `${state.questionIndexInSection + 1}`;
   const metaHtml = hideQA
     ? `<div><span class="muted">Question:</span> <b>—</b></div>
        <div><span class="muted">Section:</span> <b>—</b></div>`
-    : `<div class="${isDailyActive ? "topbar-question" : ""}"><span class="muted">Question:</span> <b>${state.questionIndexInSection + 1}</b></div>
+    : `<div class="${isDailyActive ? "topbar-question" : ""}"><span class="muted">Question:</span> <b>${questionLabel}</b></div>
        <div class="${isDailyActive ? "topbar-section" : ""}"><span class="muted">Section:</span> <b>${sec?.title ?? "—"}</b></div>`;
   const timerHtml = hideTimer
     ? ""
