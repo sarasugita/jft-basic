@@ -5,7 +5,6 @@ export default function AdminConsoleTestingTabs({
   modelSubTab,
   dailySubTab,
   sessionDetail,
-  renderSessionDetailView,
   openModelConductModal,
   fetchTestSessions,
   fetchExamLinks,
@@ -234,9 +233,7 @@ export default function AdminConsoleTestingTabs({
                 </div>
               ) : null}
 
-              {sessionDetail.type === "mock" && sessionDetail.sessionId ? (
-                renderSessionDetailView()
-              ) : (
+              {sessionDetail.type === "mock" && sessionDetail.sessionId ? null : (
                 <>
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                     <table className="admin-table" style={{ minWidth: 860 }}>

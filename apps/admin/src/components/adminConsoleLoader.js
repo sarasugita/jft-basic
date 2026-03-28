@@ -12,6 +12,22 @@ let adminConsoleCorePromise = null;
 let adminConsoleModule = null;
 let adminConsoleCoreModule = null;
 let startupListenersRegistered = false;
+const workspacePromises = {
+  students: null,
+  attendance: null,
+  dailyRecord: null,
+  ranking: null,
+  announcements: null,
+  testing: null,
+};
+const workspaceModules = {
+  students: null,
+  attendance: null,
+  dailyRecord: null,
+  ranking: null,
+  announcements: null,
+  testing: null,
+};
 
 function now() {
   if (typeof performance !== "undefined" && typeof performance.now === "function") {
@@ -235,6 +251,20 @@ function loadCachedModule(getPromiseRef, setPromiseRef, getModuleRef, setModuleR
   return next;
 }
 
+function loadCachedWorkspaceModule(key, importer) {
+  return loadCachedModule(
+    () => workspacePromises[key],
+    (value) => {
+      workspacePromises[key] = value;
+    },
+    () => workspaceModules[key],
+    (value) => {
+      workspaceModules[key] = value;
+    },
+    importer
+  );
+}
+
 export function loadAdminConsole(context = {}) {
   return loadImport(
     "AdminConsole",
@@ -279,6 +309,48 @@ export function preloadAdminConsoleCore(context = {}, options = {}) {
   return preloadImport("AdminConsoleCore", loadAdminConsoleCore, context, options);
 }
 
+function createWorkspaceLoaders(key, importTarget, importer) {
+  const load = (context = {}) => loadImport(
+    importTarget,
+    () => loadCachedWorkspaceModule(key, importer),
+    context
+  );
+  const preload = (context = {}, options = {}) => preloadImport(importTarget, load, context, options);
+  const getLoaded = () => workspaceModules[key];
+  return { load, preload, getLoaded };
+}
+
+const studentsWorkspace = createWorkspaceLoaders(
+  "students",
+  "AdminConsoleStudentsWorkspace",
+  () => import("./AdminConsoleStudentsWorkspace")
+);
+const attendanceWorkspace = createWorkspaceLoaders(
+  "attendance",
+  "AdminConsoleAttendanceWorkspace",
+  () => import("./AdminConsoleAttendanceWorkspace")
+);
+const dailyRecordWorkspace = createWorkspaceLoaders(
+  "dailyRecord",
+  "AdminConsoleDailyRecordWorkspace",
+  () => import("./AdminConsoleDailyRecordWorkspace")
+);
+const rankingWorkspace = createWorkspaceLoaders(
+  "ranking",
+  "AdminConsoleRankingWorkspace",
+  () => import("./AdminConsoleRankingWorkspace")
+);
+const announcementsWorkspace = createWorkspaceLoaders(
+  "announcements",
+  "AdminConsoleAnnouncementsWorkspace",
+  () => import("./AdminConsoleAnnouncementsWorkspace")
+);
+const testingWorkspace = createWorkspaceLoaders(
+  "testing",
+  "AdminConsoleTestingWorkspace",
+  () => import("./AdminConsoleTestingWorkspace")
+);
+
 export function getLoadedAdminConsole() {
   return adminConsoleModule;
 }
@@ -286,6 +358,30 @@ export function getLoadedAdminConsole() {
 export function getLoadedAdminConsoleCore() {
   return adminConsoleCoreModule;
 }
+
+export const loadAdminConsoleStudentsWorkspace = studentsWorkspace.load;
+export const preloadAdminConsoleStudentsWorkspace = studentsWorkspace.preload;
+export const getLoadedAdminConsoleStudentsWorkspace = studentsWorkspace.getLoaded;
+
+export const loadAdminConsoleAttendanceWorkspace = attendanceWorkspace.load;
+export const preloadAdminConsoleAttendanceWorkspace = attendanceWorkspace.preload;
+export const getLoadedAdminConsoleAttendanceWorkspace = attendanceWorkspace.getLoaded;
+
+export const loadAdminConsoleDailyRecordWorkspace = dailyRecordWorkspace.load;
+export const preloadAdminConsoleDailyRecordWorkspace = dailyRecordWorkspace.preload;
+export const getLoadedAdminConsoleDailyRecordWorkspace = dailyRecordWorkspace.getLoaded;
+
+export const loadAdminConsoleRankingWorkspace = rankingWorkspace.load;
+export const preloadAdminConsoleRankingWorkspace = rankingWorkspace.preload;
+export const getLoadedAdminConsoleRankingWorkspace = rankingWorkspace.getLoaded;
+
+export const loadAdminConsoleAnnouncementsWorkspace = announcementsWorkspace.load;
+export const preloadAdminConsoleAnnouncementsWorkspace = announcementsWorkspace.preload;
+export const getLoadedAdminConsoleAnnouncementsWorkspace = announcementsWorkspace.getLoaded;
+
+export const loadAdminConsoleTestingWorkspace = testingWorkspace.load;
+export const preloadAdminConsoleTestingWorkspace = testingWorkspace.preload;
+export const getLoadedAdminConsoleTestingWorkspace = testingWorkspace.getLoaded;
 
 export function registerAdminConsoleStartupListeners() {
   if (typeof window === "undefined" || startupListenersRegistered) return;

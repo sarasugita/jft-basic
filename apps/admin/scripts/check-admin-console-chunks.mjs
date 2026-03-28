@@ -4,10 +4,18 @@ import path from "node:path";
 const appRoot = path.resolve(process.cwd());
 const manifestPath = path.join(appRoot, ".next", "server", "middleware-react-loadable-manifest.js");
 
-const MAX_CORE_TOTAL_BYTES = 640_000;
-const MAX_CORE_LARGEST_CHUNK_BYTES = 425_000;
-const WARN_CORE_TOTAL_BYTES = 600_000;
-const WARN_CORE_LARGEST_CHUNK_BYTES = 400_000;
+const MAX_SHELL_TOTAL_BYTES = 560_000;
+const MAX_SHELL_LARGEST_CHUNK_BYTES = 340_000;
+const WARN_SHELL_TOTAL_BYTES = 540_000;
+const WARN_SHELL_LARGEST_CHUNK_BYTES = 320_000;
+const REQUIRED_WORKSPACE_ENTRIES = [
+  "components/adminConsoleLoader.js -> ./AdminConsoleStudentsWorkspace",
+  "components/adminConsoleLoader.js -> ./AdminConsoleAttendanceWorkspace",
+  "components/adminConsoleLoader.js -> ./AdminConsoleDailyRecordWorkspace",
+  "components/adminConsoleLoader.js -> ./AdminConsoleRankingWorkspace",
+  "components/adminConsoleLoader.js -> ./AdminConsoleAnnouncementsWorkspace",
+  "components/adminConsoleLoader.js -> ./AdminConsoleTestingWorkspace",
+];
 
 function readManifestJson(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -15,12 +23,16 @@ function readManifestJson(filePath) {
   }
   const raw = fs.readFileSync(filePath, "utf8");
   const prefix = "self.__REACT_LOADABLE_MANIFEST=";
-  if (!raw.startsWith(prefix) || !raw.endsWith(";")) {
+  if (!raw.startsWith(prefix)) {
     throw new Error(`Unexpected manifest format in ${filePath}`);
   }
-  const serialized = raw.slice(prefix.length, -1).trim();
+  const suffixTrimmed = raw.endsWith(";") ? raw.slice(0, -1) : raw;
+  const serialized = suffixTrimmed.slice(prefix.length).trim();
   if (serialized.startsWith("'") && serialized.endsWith("'")) {
     return JSON.parse(serialized.slice(1, -1));
+  }
+  if (serialized.startsWith("\"") && serialized.endsWith("\"")) {
+    return JSON.parse(JSON.parse(serialized));
   }
   return JSON.parse(serialized);
 }
@@ -40,6 +52,14 @@ if (!coreEntry?.files?.length) {
   throw new Error("AdminConsoleCore entry was not found in the loadable manifest.");
 }
 
+const missingWorkspaceEntries = REQUIRED_WORKSPACE_ENTRIES.filter((entryKey) => !manifest[entryKey]?.files?.length);
+
+if (missingWorkspaceEntries.length) {
+  throw new Error(
+    `Admin console workspace entries are missing from the loadable manifest: ${missingWorkspaceEntries.join(", ")}`
+  );
+}
+
 const chunkSizes = coreEntry.files.map((relativeFile) => {
   const chunkPath = path.join(appRoot, ".next", relativeFile);
   return {
@@ -55,32 +75,33 @@ const details = chunkSizes
   .map((chunk) => `${chunk.relativeFile}: ${formatBytes(chunk.bytes)}`)
   .join(", ");
 
-if (totalBytes > MAX_CORE_TOTAL_BYTES || largestChunkBytes > MAX_CORE_LARGEST_CHUNK_BYTES) {
+if (totalBytes > MAX_SHELL_TOTAL_BYTES || largestChunkBytes > MAX_SHELL_LARGEST_CHUNK_BYTES) {
   throw new Error(
     [
-      "AdminConsoleCore startup bundle exceeded the allowed size budget.",
-      `Largest chunk: ${formatBytes(largestChunkBytes)} (limit ${formatBytes(MAX_CORE_LARGEST_CHUNK_BYTES)})`,
-      `Total lazy import: ${formatBytes(totalBytes)} (limit ${formatBytes(MAX_CORE_TOTAL_BYTES)})`,
+      "Admin console shell startup bundle exceeded the allowed size budget.",
+      `Largest chunk: ${formatBytes(largestChunkBytes)} (limit ${formatBytes(MAX_SHELL_LARGEST_CHUNK_BYTES)})`,
+      `Total shell import: ${formatBytes(totalBytes)} (limit ${formatBytes(MAX_SHELL_TOTAL_BYTES)})`,
       `Chunks: ${details}`,
     ].join(" ")
   );
 }
 
-if (totalBytes > WARN_CORE_TOTAL_BYTES || largestChunkBytes > WARN_CORE_LARGEST_CHUNK_BYTES) {
+if (totalBytes > WARN_SHELL_TOTAL_BYTES || largestChunkBytes > WARN_SHELL_LARGEST_CHUNK_BYTES) {
   console.warn(
     [
-      "Warning: AdminConsoleCore startup bundle is approaching the size budget.",
-      `Largest chunk: ${formatBytes(largestChunkBytes)} (warn at ${formatBytes(WARN_CORE_LARGEST_CHUNK_BYTES)})`,
-      `Total lazy import: ${formatBytes(totalBytes)} (warn at ${formatBytes(WARN_CORE_TOTAL_BYTES)})`,
+      "Warning: Admin console shell startup bundle is approaching the size budget.",
+      `Largest chunk: ${formatBytes(largestChunkBytes)} (warn at ${formatBytes(WARN_SHELL_LARGEST_CHUNK_BYTES)})`,
+      `Total shell import: ${formatBytes(totalBytes)} (warn at ${formatBytes(WARN_SHELL_TOTAL_BYTES)})`,
       `Chunks: ${details}`,
     ].join(" ")
   );
 } else {
   console.log(
     [
-      "AdminConsoleCore chunk budget check passed.",
+      "Admin console shell chunk budget check passed.",
       `Largest chunk: ${formatBytes(largestChunkBytes)}`,
-      `Total lazy import: ${formatBytes(totalBytes)}`,
+      `Total shell import: ${formatBytes(totalBytes)}`,
+      `Workspace entries: ${REQUIRED_WORKSPACE_ENTRIES.length}`,
     ].join(" ")
   );
 }
