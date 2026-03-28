@@ -5731,16 +5731,6 @@ export default function AdminConsole({
     setStudentDetailLoading(false);
     setStudentDetailMsg("");
     setAbsenceApplications([]);
-    setAnnouncements([]);
-    setAnnouncementCreateOpen(false);
-    setAnnouncementMsg("");
-    setEditingAnnouncementId("");
-    setEditingAnnouncementForm({
-      title: "",
-      body: "",
-      publish_at: "",
-      end_at: ""
-    });
     setStudentWarnings([]);
     setStudentWarningsLoaded(false);
     setStudentWarningsMsg("");
@@ -5759,10 +5749,6 @@ export default function AdminConsole({
     setAttendanceSaving(false);
     setAttendanceFilter({ minRate: "", minAbsences: "", startDate: "", endDate: "" });
     setApprovedAbsenceByStudent({});
-    setDailyRecordAnnouncementTitleDraft("");
-    setDailyRecordAnnouncementDraft("");
-    setDailyRecordSyllabusAnnouncements([]);
-    setDailyRecordConfirmedDates([]);
   }, [activeSchoolId]);
 
   useEffect(() => {
