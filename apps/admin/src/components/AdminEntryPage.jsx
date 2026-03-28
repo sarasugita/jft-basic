@@ -1,21 +1,13 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
-import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS, preloadAdminConsole } from "./adminConsoleLoader";
+import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS, getLoadedAdminConsole, loadAdminConsole, preloadAdminConsole } from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
-
-const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
-  loading: () => (
-    <div className="admin-login">
-      <h2>Loading...</h2>
-    </div>
-  ),
-});
+import LoadableAdminModule from "./LoadableAdminModule";
 
 function PasswordVisibilityIcon({ visible }) {
   return visible ? (
@@ -818,11 +810,33 @@ export default function AdminEntryPage() {
       }}
       backLabel="SIGN OUT AND RETRY"
     >
-      <LazyAdminConsole
+      <LoadableAdminModule
         key={adminConsoleRetryNonce}
-        homeHref="/"
-        managedSession={session}
-        managedProfile={profile}
+        importTarget="AdminConsole"
+        loadModule={loadAdminConsole}
+        getLoadedModule={getLoadedAdminConsole}
+        context={{
+          pathname: "/",
+          role: profile?.role ?? null,
+          userId: session?.user?.id ?? null,
+          schoolId: profile?.school_id ?? null,
+          activeSchoolId: profile?.school_id ?? null,
+          attempt: adminConsoleRetryNonce,
+          managedAuth: true,
+          source: "admin-entry-mount",
+        }}
+        retryKey={adminConsoleRetryNonce}
+        timeoutMs={ADMIN_CONSOLE_IMPORT_TIMEOUT_MS}
+        errorMessage="Failed to mount the admin console. Retry or sign out and try again."
+        backLabel="SIGN OUT AND RETRY"
+        onBack={() => {
+          void handleStartupRecovery();
+        }}
+        moduleProps={{
+          homeHref: "/",
+          managedSession: session,
+          managedProfile: profile,
+        }}
       />
     </AdminConsoleBoundary>
   );

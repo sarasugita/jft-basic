@@ -9,6 +9,8 @@ const STARTUP_ERROR_PATTERN = /ChunkLoadError|Failed to fetch dynamically import
 
 let adminConsolePromise = null;
 let adminConsoleCorePromise = null;
+let adminConsoleModule = null;
+let adminConsoleCoreModule = null;
 let startupListenersRegistered = false;
 
 function now() {
@@ -212,13 +214,23 @@ async function preloadImport(importTarget, loadFn, context = {}, options = {}) {
   }
 }
 
-function loadCachedModule(getPromiseRef, setPromiseRef, importer) {
+function loadCachedModule(getPromiseRef, setPromiseRef, getModuleRef, setModuleRef, importer) {
+  const loadedModule = getModuleRef();
+  if (loadedModule) {
+    return Promise.resolve(loadedModule);
+  }
+
   const existing = getPromiseRef();
   if (existing) return existing;
-  const next = importer().catch((error) => {
-    setPromiseRef(null);
-    throw error;
-  });
+  const next = importer()
+    .then((mod) => {
+      setModuleRef(mod);
+      return mod;
+    })
+    .catch((error) => {
+      setPromiseRef(null);
+      throw error;
+    });
   setPromiseRef(next);
   return next;
 }
@@ -230,6 +242,10 @@ export function loadAdminConsole(context = {}) {
       () => adminConsolePromise,
       (value) => {
         adminConsolePromise = value;
+      },
+      () => adminConsoleModule,
+      (value) => {
+        adminConsoleModule = value;
       },
       () => import("./AdminConsole")
     ),
@@ -249,6 +265,10 @@ export function loadAdminConsoleCore(context = {}) {
       (value) => {
         adminConsoleCorePromise = value;
       },
+      () => adminConsoleCoreModule,
+      (value) => {
+        adminConsoleCoreModule = value;
+      },
       () => import("./AdminConsoleCore")
     ),
     context
@@ -257,6 +277,14 @@ export function loadAdminConsoleCore(context = {}) {
 
 export function preloadAdminConsoleCore(context = {}, options = {}) {
   return preloadImport("AdminConsoleCore", loadAdminConsoleCore, context, options);
+}
+
+export function getLoadedAdminConsole() {
+  return adminConsoleModule;
+}
+
+export function getLoadedAdminConsoleCore() {
+  return adminConsoleCoreModule;
 }
 
 export function registerAdminConsoleStartupListeners() {

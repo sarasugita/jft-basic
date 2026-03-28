@@ -1,22 +1,14 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import { useSuperAdmin } from "./super/SuperAdminShell";
-import { preloadAdminConsole } from "./adminConsoleLoader";
+import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS, getLoadedAdminConsole, loadAdminConsole, preloadAdminConsole } from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
+import LoadableAdminModule from "./LoadableAdminModule";
 
 const ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS = 15000;
-
-const LazyAdminConsole = dynamic(() => import("./AdminConsole"), {
-  loading: () => (
-    <div className="admin-login">
-      <h2>Loading...</h2>
-    </div>
-  ),
-});
 
 export default function SchoolScopedAdminPage({ schoolId }) {
   const router = useRouter();
@@ -359,15 +351,35 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       onBack={() => router.replace("/super/schools")}
       backLabel="BACK TO SCHOOLS"
     >
-      <LazyAdminConsole
+      <LoadableAdminModule
         key={adminConsoleRetryNonce}
-        forcedSchoolScope={school}
-        changeSchoolHref="/super/schools"
-        homeHref="/super/schools"
-        homeLabel="SuperAdmin Home"
-        forcedSchoolOptions={schoolOptions}
-        managedSession={session}
-        managedProfile={profile}
+        importTarget="AdminConsole"
+        loadModule={loadAdminConsole}
+        getLoadedModule={getLoadedAdminConsole}
+        context={{
+          pathname: `/super/schools/${schoolId}/admin`,
+          role: profile?.role ?? null,
+          userId: session?.user?.id ?? null,
+          schoolId,
+          activeSchoolId: schoolId,
+          attempt: adminConsoleRetryNonce,
+          managedAuth: true,
+          source: "school-scoped-mount",
+        }}
+        retryKey={adminConsoleRetryNonce}
+        timeoutMs={ADMIN_CONSOLE_IMPORT_TIMEOUT_MS}
+        errorMessage="Failed to mount the admin console. Retry or go back to Schools."
+        backLabel="BACK TO SCHOOLS"
+        onBack={() => router.replace("/super/schools")}
+        moduleProps={{
+          forcedSchoolScope: school,
+          changeSchoolHref: "/super/schools",
+          homeHref: "/super/schools",
+          homeLabel: "SuperAdmin Home",
+          forcedSchoolOptions: schoolOptions,
+          managedSession: session,
+          managedProfile: profile,
+        }}
       />
     </AdminConsoleBoundary>
   );

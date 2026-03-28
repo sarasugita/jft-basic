@@ -1,18 +1,15 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
-import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS, preloadAdminConsoleCore } from "./adminConsoleLoader";
-
-const LazyAdminConsoleCore = dynamic(() => import("./AdminConsoleCore"), {
-  loading: () => (
-    <div className="admin-login">
-      <h2>Loading...</h2>
-    </div>
-  ),
-});
+import {
+  ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
+  getLoadedAdminConsoleCore,
+  loadAdminConsoleCore,
+  preloadAdminConsoleCore,
+} from "./adminConsoleLoader";
+import LoadableAdminModule from "./LoadableAdminModule";
 
 export default function AdminConsole(props) {
   const pathname = usePathname();
@@ -127,7 +124,24 @@ export default function AdminConsole(props) {
   ]);
 
   if (!isConsoleReadyForCore) {
-    return <LazyAdminConsoleCore {...props} />;
+    return (
+      <LoadableAdminModule
+        importTarget="AdminConsoleCore"
+        loadModule={loadAdminConsoleCore}
+        getLoadedModule={getLoadedAdminConsoleCore}
+        context={{
+          ...baseContext,
+          source: "core-unmanaged-mount",
+        }}
+        timeoutMs={ADMIN_CONSOLE_IMPORT_TIMEOUT_MS}
+        errorMessage="Failed to mount the admin console core. Retry or go back and try again."
+        backLabel={changeSchoolHref ? "BACK TO SCHOOLS" : homeLabel}
+        onBack={() => {
+          window.location.assign(changeSchoolHref || homeHref || "/");
+        }}
+        moduleProps={props}
+      />
+    );
   }
 
   if (coreError) {
@@ -169,5 +183,24 @@ export default function AdminConsole(props) {
     );
   }
 
-  return <LazyAdminConsoleCore key={coreRetryNonce} {...props} />;
+  return (
+    <LoadableAdminModule
+      key={coreRetryNonce}
+      importTarget="AdminConsoleCore"
+      loadModule={loadAdminConsoleCore}
+      getLoadedModule={getLoadedAdminConsoleCore}
+      context={{
+        ...baseContext,
+        source: "core-managed-mount",
+      }}
+      retryKey={coreRetryNonce}
+      timeoutMs={ADMIN_CONSOLE_IMPORT_TIMEOUT_MS}
+      errorMessage="Failed to mount the admin console core. Retry or go back and try again."
+      backLabel={changeSchoolHref ? "BACK TO SCHOOLS" : homeLabel}
+      onBack={() => {
+        window.location.assign(changeSchoolHref || homeHref || "/");
+      }}
+      moduleProps={props}
+    />
+  );
 }
