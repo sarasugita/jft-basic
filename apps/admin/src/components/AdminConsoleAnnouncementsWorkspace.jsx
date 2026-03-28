@@ -2,33 +2,34 @@
 
 import { useEffect } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
+import { useAnnouncementsWorkspaceState } from "./AdminConsoleAnnouncementsWorkspaceState";
+import { formatDateTime } from "../lib/adminFormatters";
 
 export default function AdminConsoleAnnouncementsWorkspace() {
+  const { supabase, activeSchoolId, session } = useAdminConsoleWorkspaceContext();
   const {
-    activeSchoolId,
-    fetchAnnouncements,
     announcements,
     announcementMsg,
-    formatDateTime,
-    startEditAnnouncement,
-    deleteAnnouncement,
     announcementCreateOpen,
-    closeCreateAnnouncementModal,
     announcementForm,
     setAnnouncementForm,
-    createAnnouncement,
     editingAnnouncementId,
-    cancelEditAnnouncement,
     editingAnnouncementForm,
     setEditingAnnouncementForm,
-    saveAnnouncementEdits,
+    fetchAnnouncements,
+    createAnnouncement,
+    deleteAnnouncement,
+    startEditAnnouncement,
+    cancelEditAnnouncement,
     openCreateAnnouncementModal,
-  } = useAdminConsoleWorkspaceContext();
+    closeCreateAnnouncementModal,
+    saveAnnouncementEdits,
+  } = useAnnouncementsWorkspaceState({ supabase, activeSchoolId, session });
 
   useEffect(() => {
     if (!activeSchoolId) return;
     fetchAnnouncements();
-  }, [activeSchoolId]);
+  }, [activeSchoolId, fetchAnnouncements]);
 
   return (
     <div style={{ marginBottom: 12 }}>
