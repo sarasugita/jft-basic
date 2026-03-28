@@ -2,31 +2,27 @@
 
 import { Fragment, useEffect } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
+import { useRankingWorkspaceState } from "./AdminConsoleRankingWorkspaceState";
 
 export default function AdminConsoleRankingWorkspace() {
+  const { supabase, activeSchoolId } = useAdminConsoleWorkspaceContext();
   const {
-    activeSchoolId,
-    fetchRankingPeriods,
-    students,
-    fetchStudents,
-    addRankingPeriod,
     rankingPeriods,
     rankingDrafts,
+    rankingMsg,
+    rankingRefreshingId,
+    rankingRowCount,
+    fetchRankingPeriods,
+    addRankingPeriod,
     updateRankingDraft,
     saveRankingPeriodLabel,
-    rankingRefreshingId,
     refreshRankingPeriod,
-    rankingRowCount,
-    rankingMsg,
-  } = useAdminConsoleWorkspaceContext();
+  } = useRankingWorkspaceState({ supabase, activeSchoolId });
 
   useEffect(() => {
     if (!activeSchoolId) return;
     fetchRankingPeriods();
-    if (!students.length) {
-      fetchStudents();
-    }
-  }, [activeSchoolId, students.length]);
+  }, [activeSchoolId]);
 
   return (
     <div style={{ marginBottom: 12 }}>
