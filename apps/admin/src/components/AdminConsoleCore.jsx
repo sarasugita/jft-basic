@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { questions, sections } from "../../../../packages/shared/questions.js";
+import { buildScopedAdminHref } from "../lib/adminConsoleRoute";
 import { createAdminSupabaseClient, getAdminSupabaseConfig, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
@@ -11925,7 +11926,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   function handleForcedSchoolScopeChange(nextSchoolId) {
     if (!nextSchoolId || nextSchoolId === forcedSchoolId) return;
-    router.push(`/super/schools/${nextSchoolId}/admin`);
+    router.push(buildScopedAdminHref(nextSchoolId, {
+      adminTab: activeTab,
+      attendanceSubTab,
+      modelSubTab,
+      dailySubTab,
+    }));
   }
 
   if (!authReady) {
@@ -12138,6 +12144,57 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setSidebarCollapsed(false);
     }
     action();
+  }
+
+  function openScopedAdminRoute(nextAdminTab, options = {}) {
+    if (!(forcedSchoolId && profile?.role === "super_admin")) {
+      return false;
+    }
+    router.push(buildScopedAdminHref(forcedSchoolId, {
+      adminTab: nextAdminTab,
+      attendanceSubTab: options.attendanceSubTab ?? "sheet",
+      modelSubTab: options.modelSubTab ?? "results",
+      dailySubTab: options.dailySubTab ?? "results",
+    }));
+    return true;
+  }
+
+  function selectAnnouncementsTab() {
+    if (openScopedAdminRoute("announcements")) return;
+    setActiveTab("announcements");
+  }
+
+  function selectStudentsTab() {
+    if (openScopedAdminRoute("students")) return;
+    setActiveTab("students");
+  }
+
+  function selectAttendanceTab(nextAttendanceSubTab = "sheet") {
+    if (openScopedAdminRoute("attendance", { attendanceSubTab: nextAttendanceSubTab })) return;
+    setActiveTab("attendance");
+    setAttendanceSubTab(nextAttendanceSubTab);
+  }
+
+  function selectModelTab(nextModelSubTab = "results") {
+    if (openScopedAdminRoute("model", { modelSubTab: nextModelSubTab })) return;
+    setActiveTab("model");
+    setModelSubTab(nextModelSubTab);
+  }
+
+  function selectDailyTab(nextDailySubTab = "results") {
+    if (openScopedAdminRoute("daily", { dailySubTab: nextDailySubTab })) return;
+    setActiveTab("daily");
+    setDailySubTab(nextDailySubTab);
+  }
+
+  function selectDailyRecordTab() {
+    if (openScopedAdminRoute("dailyRecord")) return;
+    setActiveTab("dailyRecord");
+  }
+
+  function selectRankingTab() {
+    if (openScopedAdminRoute("ranking")) return;
+    setActiveTab("ranking");
   }
 
   const displayName = profile?.display_name?.trim() || session?.user?.email || "User";
@@ -12670,7 +12727,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         <div className="admin-nav">
           <button
             className={`admin-nav-item ${activeTab === "announcements" ? "active" : ""}`}
-            onClick={() => handleSidebarMenuClick(() => setActiveTab("announcements"))}
+            onClick={() => handleSidebarMenuClick(selectAnnouncementsTab)}
           >
             <span className="admin-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -12683,7 +12740,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
           <button
             className={`admin-nav-item ${activeTab === "students" ? "active" : ""}`}
-            onClick={() => handleSidebarMenuClick(() => setActiveTab("students"))}
+            onClick={() => handleSidebarMenuClick(selectStudentsTab)}
           >
             <span className="admin-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -12699,10 +12756,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           <div className={`admin-nav-group ${activeTab === "attendance" ? "active" : ""}`}>
             <button
               className={`admin-nav-item admin-group-toggle ${activeTab === "attendance" ? "active" : ""}`}
-              onClick={() => handleSidebarMenuClick(() => {
-                setActiveTab("attendance");
-                setAttendanceSubTab("sheet");
-              })}
+              onClick={() => handleSidebarMenuClick(() => selectAttendanceTab("sheet"))}
             >
               <span className="admin-nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -12717,19 +12771,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
               <div className="admin-subnav">
                 <button
                   className={`admin-subnav-item ${attendanceSubTab === "sheet" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("attendance");
-                    setAttendanceSubTab("sheet");
-                  })}
+                  onClick={() => handleSidebarMenuClick(() => selectAttendanceTab("sheet"))}
                 >
                   Attendance Sheet
                 </button>
                 <button
                   className={`admin-subnav-item ${attendanceSubTab === "absence" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("attendance");
-                    setAttendanceSubTab("absence");
-                  })}
+                  onClick={() => handleSidebarMenuClick(() => selectAttendanceTab("absence"))}
                 >
                   Absence Applications
                 </button>
@@ -12740,10 +12788,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           <div className={`admin-nav-group ${activeTab === "model" ? "active" : ""}`}>
             <button
               className={`admin-nav-item admin-group-toggle ${activeTab === "model" ? "active" : ""}`}
-              onClick={() => handleSidebarMenuClick(() => {
-                setActiveTab("model");
-                setModelSubTab("results");
-              })}
+              onClick={() => handleSidebarMenuClick(() => selectModelTab("results"))}
             >
               <span className="admin-nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -12758,28 +12803,19 @@ function openDailyRecordModal(record = null, recordDate = "") {
               <div className="admin-subnav">
                 <button
                   className={`admin-subnav-item ${modelSubTab === "results" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("model");
-                    setModelSubTab("results");
-                  })}
+                  onClick={() => handleSidebarMenuClick(() => selectModelTab("results"))}
                 >
                   Model Test Results
                 </button>
                 <button
                   className={`admin-subnav-item ${modelSubTab === "conduct" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("model");
-                    setModelSubTab("conduct");
-                  })}
+                  onClick={() => handleSidebarMenuClick(() => selectModelTab("conduct"))}
                 >
                   Create Test Session
                 </button>
                 <button
                   className={`admin-subnav-item ${modelSubTab === "upload" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("model");
-                    setModelSubTab("upload");
-                  })}
+                  onClick={() => handleSidebarMenuClick(() => selectModelTab("upload"))}
                 >
                   Upload Question Set
                 </button>
@@ -12790,10 +12826,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           <div className={`admin-nav-group ${activeTab === "daily" ? "active" : ""}`}>
             <button
               className={`admin-nav-item admin-group-toggle ${activeTab === "daily" ? "active" : ""}`}
-              onClick={() => handleSidebarMenuClick(() => {
-                setActiveTab("daily");
-                setDailySubTab("results");
-              })}
+              onClick={() => handleSidebarMenuClick(() => selectDailyTab("results"))}
             >
               <span className="admin-nav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -12809,28 +12842,19 @@ function openDailyRecordModal(record = null, recordDate = "") {
               <div className="admin-subnav">
                 <button
                   className={`admin-subnav-item ${dailySubTab === "results" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("daily");
-                    setDailySubTab("results");
-                  })}
+                  onClick={() => handleSidebarMenuClick(() => selectDailyTab("results"))}
                 >
                   Daily Test Results
                 </button>
                 <button
                   className={`admin-subnav-item ${dailySubTab === "conduct" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("daily");
-                    setDailySubTab("conduct");
-                  })}
+                  onClick={() => handleSidebarMenuClick(() => selectDailyTab("conduct"))}
                 >
                   Create Test Session
                 </button>
                 <button
                   className={`admin-subnav-item ${dailySubTab === "upload" ? "active" : ""}`}
-                  onClick={() => handleSidebarMenuClick(() => {
-                    setActiveTab("daily");
-                    setDailySubTab("upload");
-                  })}
+                  onClick={() => handleSidebarMenuClick(() => selectDailyTab("upload"))}
                 >
                   Upload Question Set
                 </button>
@@ -12840,7 +12864,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
           <button
             className={`admin-nav-item ${activeTab === "dailyRecord" ? "active" : ""}`}
-            onClick={() => handleSidebarMenuClick(() => setActiveTab("dailyRecord"))}
+            onClick={() => handleSidebarMenuClick(selectDailyRecordTab)}
           >
             <span className="admin-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -12853,7 +12877,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
           <button
             className={`admin-nav-item ${activeTab === "ranking" ? "active" : ""}`}
-            onClick={() => handleSidebarMenuClick(() => setActiveTab("ranking"))}
+            onClick={() => handleSidebarMenuClick(selectRankingTab)}
           >
             <span className="admin-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" className="admin-nav-svg">

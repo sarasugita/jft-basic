@@ -1,14 +1,23 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { syncAdminAuthCookie } from "../lib/authCookies";
+import { buildScopedAdminHref } from "../lib/adminConsoleRoute";
 import { logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import {
   ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
   getLoadedAdminConsoleAnnouncementsStartup,
+  getLoadedAdminConsoleAttendanceStartup,
+  getLoadedAdminConsoleDailyRecordStartup,
+  getLoadedAdminConsoleRankingStartup,
+  getLoadedAdminConsoleStudentsStartup,
   getLoadedAdminConsoleCore,
   loadAdminConsoleAnnouncementsStartup,
+  loadAdminConsoleAttendanceStartup,
+  loadAdminConsoleDailyRecordStartup,
+  loadAdminConsoleRankingStartup,
+  loadAdminConsoleStudentsStartup,
   loadAdminConsoleCore,
   preloadAdminConsoleCore,
 } from "./adminConsoleLoader";
@@ -23,6 +32,34 @@ const DIRECT_STARTUP_WORKSPACE_CONFIG = {
     getLoadedModule: getLoadedAdminConsoleAnnouncementsStartup,
     loadingLabel: "Loading announcements...",
     errorMessage: "Failed to load announcements. Retry or switch tabs and try again.",
+  },
+  attendance: {
+    importTarget: "AdminConsoleAttendanceStartup",
+    loadModule: loadAdminConsoleAttendanceStartup,
+    getLoadedModule: getLoadedAdminConsoleAttendanceStartup,
+    loadingLabel: "Loading attendance...",
+    errorMessage: "Failed to load attendance. Retry or switch tabs and try again.",
+  },
+  ranking: {
+    importTarget: "AdminConsoleRankingStartup",
+    loadModule: loadAdminConsoleRankingStartup,
+    getLoadedModule: getLoadedAdminConsoleRankingStartup,
+    loadingLabel: "Loading ranking...",
+    errorMessage: "Failed to load ranking. Retry or switch tabs and try again.",
+  },
+  students: {
+    importTarget: "AdminConsoleStudentsStartup",
+    loadModule: loadAdminConsoleStudentsStartup,
+    getLoadedModule: getLoadedAdminConsoleStudentsStartup,
+    loadingLabel: "Loading students...",
+    errorMessage: "Failed to load students. Retry or switch tabs and try again.",
+  },
+  dailyRecord: {
+    importTarget: "AdminConsoleDailyRecordStartup",
+    loadModule: loadAdminConsoleDailyRecordStartup,
+    getLoadedModule: getLoadedAdminConsoleDailyRecordStartup,
+    loadingLabel: "Loading schedule & record...",
+    errorMessage: "Failed to load schedule & record. Retry or switch tabs and try again.",
   },
 };
 const ADMIN_SUPABASE_CONFIG_ERROR = !process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -148,6 +185,7 @@ function AdminConsoleStartupFrame({
 }
 
 export default function AdminConsole(props) {
+  const router = useRouter();
   const pathname = usePathname();
   const {
     forcedSchoolScope = null,
@@ -156,13 +194,19 @@ export default function AdminConsole(props) {
     homeLabel = "Admin Home",
     managedSession = undefined,
     managedProfile = undefined,
+    initialAdminTab = "announcements",
+    initialAttendanceSubTab = "sheet",
+    initialModelSubTab = "results",
+    initialDailySubTab = "results",
   } = props;
   const renderTraceLoggedRef = useRef(false);
   const [coreReady, setCoreReady] = useState(false);
   const [coreError, setCoreError] = useState("");
   const [coreRetryNonce, setCoreRetryNonce] = useState(0);
-  const [startupTab, setStartupTab] = useState("announcements");
-  const [legacyCoreRequested, setLegacyCoreRequested] = useState(false);
+  const [startupTab, setStartupTab] = useState(initialAdminTab);
+  const [legacyCoreRequested, setLegacyCoreRequested] = useState(
+    () => !DIRECT_STARTUP_WORKSPACE_CONFIG[initialAdminTab]
+  );
   const [schoolAssignments, setSchoolAssignments] = useState([]);
   const [schoolScopeId, setSchoolScopeId] = useState(null);
 
@@ -357,12 +401,12 @@ export default function AdminConsole(props) {
 
   useEffect(() => {
     if (!isConsoleReadyForCore) {
-      setLegacyCoreRequested(false);
-      setStartupTab("announcements");
+      setLegacyCoreRequested(!DIRECT_STARTUP_WORKSPACE_CONFIG[initialAdminTab]);
+      setStartupTab(initialAdminTab);
       setCoreReady(false);
       setCoreError("");
     }
-  }, [isConsoleReadyForCore]);
+  }, [initialAdminTab, isConsoleReadyForCore]);
 
   useEffect(() => {
     let cancelled = false;
@@ -542,6 +586,30 @@ export default function AdminConsole(props) {
     setLegacyCoreRequested(true);
   }
 
+  const shouldSyncScopedRoute = Boolean(forcedSchoolScope?.id && profile?.role === "super_admin");
+
+  function navigateScopedAdminTab(nextTab, options = {}) {
+    if (!shouldSyncScopedRoute) return false;
+    router.replace(buildScopedAdminHref(forcedSchoolScope.id, {
+      adminTab: nextTab,
+      attendanceSubTab: options.attendanceSubTab ?? "sheet",
+      modelSubTab: options.modelSubTab ?? "results",
+      dailySubTab: options.dailySubTab ?? "results",
+    }));
+    return true;
+  }
+
+  function handleStartupTabSelection(nextTab) {
+    if (navigateScopedAdminTab(nextTab)) {
+      return;
+    }
+    if (DIRECT_STARTUP_WORKSPACE_CONFIG[nextTab]) {
+      setStartupTab(nextTab);
+      return;
+    }
+    openLegacyCore(nextTab);
+  }
+
   async function handleSignOut() {
     if (supabaseConfigError) {
       window.location.assign(homeHref || "/");
@@ -604,14 +672,7 @@ export default function AdminConsole(props) {
         schoolSelector={startupSchoolSelector}
         changeSchoolHref={changeSchoolHref && profile?.role !== "super_admin" ? changeSchoolHref : ""}
         onSignOut={handleSignOut}
-        onSelectTab={(nextTab) => {
-          if (DIRECT_STARTUP_WORKSPACE_CONFIG[nextTab]) {
-            setStartupTab(nextTab);
-            return;
-          }
-          setStartupTab(nextTab);
-          openLegacyCore(nextTab);
-        }}
+        onSelectTab={handleStartupTabSelection}
       >
         <div className="admin-title">{errorMessage ? "Startup Error" : "Opening Admin Console"}</div>
         <div className="admin-help" style={{ marginTop: 10 }}>
@@ -685,13 +746,7 @@ export default function AdminConsole(props) {
         schoolSelector={startupSchoolSelector}
         changeSchoolHref={changeSchoolHref && profile?.role !== "super_admin" ? changeSchoolHref : ""}
         onSignOut={handleSignOut}
-        onSelectTab={(nextTab) => {
-          if (DIRECT_STARTUP_WORKSPACE_CONFIG[nextTab]) {
-            setStartupTab(nextTab);
-            return;
-          }
-          openLegacyCore(nextTab);
-        }}
+        onSelectTab={handleStartupTabSelection}
       >
         {directStartupWorkspace ? (
           <LoadableAdminWorkspace
@@ -704,6 +759,14 @@ export default function AdminConsole(props) {
             }}
             moduleProps={{
               activeSchoolId,
+              initialAttendanceSubTab,
+              onSelectAttendanceSubTab: shouldSyncScopedRoute
+                ? (nextAttendanceSubTab) => {
+                    navigateScopedAdminTab("attendance", {
+                      attendanceSubTab: nextAttendanceSubTab,
+                    });
+                  }
+                : null,
               onOpenFullConsole: () => openLegacyCore(startupTab),
             }}
             loadingLabel={directStartupWorkspace.loadingLabel}
@@ -741,6 +804,9 @@ export default function AdminConsole(props) {
       moduleProps={{
         ...props,
         initialAdminTab: startupTab,
+        initialAttendanceSubTab,
+        initialModelSubTab,
+        initialDailySubTab,
       }}
     />
   );

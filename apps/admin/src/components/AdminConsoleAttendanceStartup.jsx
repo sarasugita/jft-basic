@@ -422,7 +422,12 @@ function isAnalyticsExcludedStudent(student) {
   return Boolean(student?.is_withdrawn || student?.is_test_account);
 }
 
-export default function AdminConsoleAttendanceStartup({ activeSchoolId, onOpenFullConsole = null }) {
+export default function AdminConsoleAttendanceStartup({
+  activeSchoolId,
+  initialAttendanceSubTab = "sheet",
+  onSelectAttendanceSubTab = null,
+  onOpenFullConsole = null,
+}) {
   const renderTraceLoggedRef = useRef(false);
   const supabaseConfigError = getAdminSupabaseConfigError();
   const supabase = useMemo(
@@ -431,7 +436,7 @@ export default function AdminConsoleAttendanceStartup({ activeSchoolId, onOpenFu
   );
   const attendanceImportInputRef = useRef(null);
   const attendanceImportChoiceResolverRef = useRef(null);
-  const [attendanceSubTab, setAttendanceSubTab] = useState("sheet");
+  const [attendanceSubTab, setAttendanceSubTab] = useState(initialAttendanceSubTab);
   const [students, setStudents] = useState([]);
   const [attendanceDays, setAttendanceDays] = useState([]);
   const [attendanceEntries, setAttendanceEntries] = useState({});
@@ -478,6 +483,10 @@ export default function AdminConsoleAttendanceStartup({ activeSchoolId, onOpenFu
     setAttendanceImportStatus(null);
     setApprovedAbsenceByStudent({});
   }, [activeSchoolId]);
+
+  useEffect(() => {
+    setAttendanceSubTab(initialAttendanceSubTab === "absence" ? "absence" : "sheet");
+  }, [initialAttendanceSubTab]);
 
   const sortedStudents = useMemo(
     () => [...students].sort((left, right) => String(left.student_code ?? "").localeCompare(String(right.student_code ?? "")) || String(left.display_name ?? "").localeCompare(String(right.display_name ?? ""))),
@@ -1176,14 +1185,20 @@ export default function AdminConsoleAttendanceStartup({ activeSchoolId, onOpenFu
         <button
           className={`btn ${attendanceSubTab === "sheet" ? "btn-primary" : ""}`}
           type="button"
-          onClick={() => setAttendanceSubTab("sheet")}
+          onClick={() => {
+            setAttendanceSubTab("sheet");
+            onSelectAttendanceSubTab?.("sheet");
+          }}
         >
           Attendance Sheet
         </button>
         <button
           className={`btn ${attendanceSubTab === "absence" ? "btn-primary" : ""}`}
           type="button"
-          onClick={() => setAttendanceSubTab("absence")}
+          onClick={() => {
+            setAttendanceSubTab("absence");
+            onSelectAttendanceSubTab?.("absence");
+          }}
         >
           Absence Applications
         </button>

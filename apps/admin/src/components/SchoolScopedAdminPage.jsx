@@ -10,7 +10,10 @@ import LoadableAdminModule from "./LoadableAdminModule";
 
 const ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS = 15000;
 
-export default function SchoolScopedAdminPage({ schoolId }) {
+export default function SchoolScopedAdminPage({
+  schoolId,
+  initialRouteState = null,
+}) {
   const router = useRouter();
   const { supabase, session, profile, loading: authLoading, startupError: authStartupError } = useSuperAdmin();
   const [school, setSchool] = useState(null);
@@ -352,7 +355,7 @@ export default function SchoolScopedAdminPage({ schoolId }) {
       backLabel="BACK TO SCHOOLS"
     >
       <LoadableAdminModule
-        key={adminConsoleRetryNonce}
+        key={`${adminConsoleRetryNonce}:${initialRouteState?.pathKey ?? "index"}`}
         importTarget="AdminConsole"
         loadModule={loadAdminConsole}
         getLoadedModule={getLoadedAdminConsole}
@@ -379,6 +382,10 @@ export default function SchoolScopedAdminPage({ schoolId }) {
           forcedSchoolOptions: schoolOptions,
           managedSession: session,
           managedProfile: profile,
+          initialAdminTab: initialRouteState?.adminTab ?? "announcements",
+          initialAttendanceSubTab: initialRouteState?.attendanceSubTab ?? "sheet",
+          initialModelSubTab: initialRouteState?.modelSubTab ?? "results",
+          initialDailySubTab: initialRouteState?.dailySubTab ?? "results",
         }}
       />
     </AdminConsoleBoundary>
