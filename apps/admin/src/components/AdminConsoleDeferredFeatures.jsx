@@ -51,6 +51,7 @@ export default function AdminConsoleDeferredFeatures({
   attempts,
   formatDateTime,
   exportSelectedAttemptCsv,
+  deleteTest,
   deleteAttempt,
   formatDateShort,
   previewOpen,
