@@ -1,10 +1,10 @@
 # Admin Console Refactor — Deployment Notes
 
-## Current Status: Phase 2 In Progress — 4 of 6 Workspaces Extracted
+## Current Status: Phase 2 Complete — 4 of 6 Workspaces Fully Extracted
 
 **Goal**: Split AdminConsoleCore (14,439 lines / 325 KB) into per-workspace isolated bundles to fix loading failures on slow/non-US devices.
 
-**Progress**: 4 of 6 workspaces extracted. AdminConsoleCore reduced from 325.1 KB → 287.0 KB (−38.1 KB cumulative). All workspace loading glitches resolved. Attendance workspace state (Part 1) extracted; memos pending Phase 2d-2.
+**Progress**: 4 of 6 workspaces fully extracted (Ranking, Announcements, DailyRecord, Attendance). AdminConsoleCore reduced from 325.1 KB → 287.0 KB (−38.1 KB cumulative). All workspace loading glitches resolved.
 
 ---
 
@@ -119,9 +119,26 @@ AdminConsoleShellLayout
 - Functions (2): exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv (large, complex CSV handling)
 - Shared formatters: formatDateShort, formatWeekday (used by multiple workspaces)
 
-**Chunk Impact**: Attendance workspace 9.1 KB → 20.1 KB. AdminConsoleCore still 287.0 KB (memos, utilities, export/import pending).
+**Chunk Impact**: Attendance workspace 9.1 KB → 20.1 KB.
 
-**Status**: ✓ Deployed (Part 1) | Phase 2d-2 TBD
+**Status**: ✓ Deployed (Part 1)
+
+### Commit 6969d9c: Phase 2d-2 — Attendance Memos & Derived Data
+
+**Extracted to Hook**:
+- Memos (7): attendanceEntriesByDay, attendanceDayColumns, attendanceRangeColumns, activeStudents, attendanceFilteredStudents, attendanceAnalyticsStudents, attendanceDayRates
+
+**Key Changes**:
+- Hook now accepts `isAnalyticsExcludedStudent` as parameter for filtering
+- All attendance memos co-located with state in hook
+- Workspace gets all memos from hook, not context
+- Removed `attendanceDayRates` from context imports in workspace
+
+**Chunk Impact**: Attendance workspace 20.1 KB → 21.5 KB. AdminConsoleCore still 287.0 KB (unused duplicate state + export/import functions).
+
+**Status**: ✓ Deployed (Complete)
+
+**Note**: Old attendance state remains in AdminConsoleCore (unused). Can be removed in cleanup phase. Export/import CSV functions still in core (large, complex dependencies on formatters).
 
 ---
 
@@ -243,13 +260,7 @@ If regressions are found:
 
 ## Notes for Next Phases
 
-### Phase 2d-2 (Attendance Memos & Exports)
-Extract remaining attendance code from AdminConsoleCore:
-- Memos: attendanceDayColumns, attendanceRangeColumns, attendanceFilteredStudents, attendanceDayRates
-- Functions: exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv (large, complex)
-- These depend on shared formatters (formatDateShort, formatWeekday) — refactor dependencies or keep in core
-
-### Phase 2e (Attendance - Part 2) & 2f (Students, Testing)
+### Phase 2e & 2f (Students, Testing)
 After Phase 2d-2, remaining workspaces:
 - Students workspace: 30.8 KB → extract useStudentsWorkspaceState
 - Testing workspace: 67.3 KB → extract useTestingWorkspaceState (largest, complex)
