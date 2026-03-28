@@ -373,6 +373,8 @@ export default function AdminConsole(props) {
     if (!isConsoleReadyForCore) {
       setLegacyCoreRequested(false);
       setStartupTab("announcements");
+      setCoreReady(false);
+      setCoreError("");
     }
   }, [isConsoleReadyForCore]);
 
@@ -382,8 +384,6 @@ export default function AdminConsole(props) {
     let preloadFrameId = null;
 
     if (!isConsoleReadyForCore || !legacyCoreRequested) {
-      setCoreReady(false);
-      setCoreError("");
       return () => {
         cancelled = true;
       };
@@ -451,7 +451,107 @@ export default function AdminConsole(props) {
     session,
   ]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let idleCallbackId = null;
+    let timeoutId = null;
+
+    if (!isConsoleReadyForCore || legacyCoreRequested || coreReady || getLoadedAdminConsoleCore()) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const payload = {
+      pathname,
+      role: profile.role,
+      userId: session.user.id,
+      schoolId: activeSchoolId,
+      activeSchoolId,
+      attempt: coreRetryNonce,
+      managedAuth: isManagedAuth,
+    };
+
+    const startWarmPreload = () => {
+      void preloadAdminConsoleCore(
+        {
+          ...payload,
+          source: "core-shell-idle-preload",
+        },
+        { timeoutMs: ADMIN_CONSOLE_IMPORT_TIMEOUT_MS }
+      )
+        .then(() => {
+          if (cancelled) return;
+          setCoreReady(true);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          logAdminRequestFailure("Admin console shell idle preload failed", error, payload);
+        });
+    };
+
+    if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+      idleCallbackId = window.requestIdleCallback(
+        () => {
+          timeoutId = window.setTimeout(startWarmPreload, 150);
+        },
+        { timeout: 2500 }
+      );
+    } else {
+      timeoutId = window.setTimeout(startWarmPreload, 1200);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleCallbackId != null && typeof window !== "undefined" && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleCallbackId);
+      }
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    activeSchoolId,
+    coreReady,
+    coreRetryNonce,
+    isConsoleReadyForCore,
+    isManagedAuth,
+    legacyCoreRequested,
+    pathname,
+    profile,
+    session,
+  ]);
+
   function openLegacyCore(nextTab = "announcements") {
+    if (isConsoleReadyForCore) {
+      void preloadAdminConsoleCore(
+        {
+          pathname,
+          role: profile.role,
+          userId: session.user.id,
+          schoolId: activeSchoolId,
+          activeSchoolId,
+          attempt: coreRetryNonce,
+          managedAuth: isManagedAuth,
+          source: "core-user-intent-preload",
+        },
+        { timeoutMs: ADMIN_CONSOLE_IMPORT_TIMEOUT_MS }
+      )
+        .then(() => {
+          setCoreReady(true);
+        })
+        .catch((error) => {
+          logAdminRequestFailure("Admin console user intent preload failed", error, {
+            pathname,
+            role: profile.role,
+            userId: session.user.id,
+            schoolId: activeSchoolId,
+            activeSchoolId,
+            attempt: coreRetryNonce,
+            managedAuth: isManagedAuth,
+          });
+        });
+    }
     setStartupTab(nextTab);
     setLegacyCoreRequested(true);
   }
