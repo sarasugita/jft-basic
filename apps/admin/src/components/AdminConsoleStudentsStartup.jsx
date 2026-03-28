@@ -28,6 +28,7 @@ function formatDateShort(value) {
 
 export default function AdminConsoleStudentsStartup({
   activeSchoolId,
+  onOpenFullConsole = null,
 }) {
   const renderTraceLoggedRef = useRef(false);
   const supabaseConfigError = getAdminSupabaseConfigError();
@@ -157,6 +158,15 @@ export default function AdminConsoleStudentsStartup({
           <div className="admin-title">Student List</div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {typeof onOpenFullConsole === "function" ? (
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={onOpenFullConsole}
+            >
+              Open Full Console
+            </button>
+          ) : null}
           <button
             className="btn"
             type="button"
@@ -172,6 +182,12 @@ export default function AdminConsoleStudentsStartup({
           </button>
         </div>
       </div>
+
+      {typeof onOpenFullConsole === "function" ? (
+        <div className="admin-help" style={{ marginTop: 10 }}>
+          Need student details, warnings, exports, or edit actions? Open the full console for the complete student workspace.
+        </div>
+      ) : null}
 
       <div className="attendance-filter-box" style={{ marginTop: 14 }}>
         <div className="admin-form" style={{ marginTop: 0 }}>

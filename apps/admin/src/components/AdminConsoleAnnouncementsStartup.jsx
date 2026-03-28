@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { logAdminEvent } from "../lib/adminDiagnostics";
 import AdminConsoleAnnouncementsWorkspace from "./AdminConsoleAnnouncementsWorkspace";
 import { AdminConsoleWorkspaceProvider } from "./AdminConsoleWorkspaceContext";
 
 const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
+const ADMIN_SUPABASE_CONFIG_ERROR = !process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ? "Admin app is missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY."
+  : "";
 
 function formatDateTime(iso) {
   if (!iso) return "";
@@ -39,11 +41,8 @@ function formatDateTimeInput(iso) {
 
 export default function AdminConsoleAnnouncementsStartup({ activeSchoolId }) {
   const renderTraceLoggedRef = useRef(false);
-  const supabaseConfigError = getAdminSupabaseConfigError();
-  const supabase = useMemo(
-    () => (supabaseConfigError || !activeSchoolId ? null : createAdminSupabaseClient({ schoolScopeId: activeSchoolId })),
-    [activeSchoolId, supabaseConfigError]
-  );
+  const supabaseConfigError = ADMIN_SUPABASE_CONFIG_ERROR;
+  const supabaseRef = useRef(null);
   const [announcements, setAnnouncements] = useState([]);
   const [announcementMsg, setAnnouncementMsg] = useState("");
   const [announcementCreateOpen, setAnnouncementCreateOpen] = useState(false);
@@ -61,11 +60,31 @@ export default function AdminConsoleAnnouncementsStartup({ activeSchoolId }) {
     end_at: "",
   });
 
+  useEffect(() => {
+    supabaseRef.current = null;
+  }, [activeSchoolId]);
+
+  const getSupabaseClient = useCallback(async () => {
+    if (supabaseConfigError) {
+      throw new Error(supabaseConfigError);
+    }
+    if (!activeSchoolId) {
+      throw new Error("Select a school.");
+    }
+    if (supabaseRef.current) {
+      return supabaseRef.current;
+    }
+    const { createAdminSupabaseClient } = await import("../lib/adminSupabase");
+    const client = createAdminSupabaseClient({ schoolScopeId: activeSchoolId });
+    supabaseRef.current = client;
+    return client;
+  }, [activeSchoolId, supabaseConfigError]);
+
   if (!renderTraceLoggedRef.current) {
     renderTraceLoggedRef.current = true;
     logAdminEvent("Admin console announcements startup render start", {
       activeSchoolId,
-      hasSupabaseClient: Boolean(supabase),
+      hasSupabaseClient: !supabaseConfigError && Boolean(activeSchoolId),
     });
   }
 
@@ -75,12 +94,15 @@ export default function AdminConsoleAnnouncementsStartup({ activeSchoolId }) {
       setAnnouncementMsg(supabaseConfigError);
       return;
     }
-    if (!supabase || !activeSchoolId) {
+    setAnnouncementMsg("Loading...");
+    let supabase = null;
+    try {
+      supabase = await getSupabaseClient();
+    } catch (error) {
       setAnnouncements([]);
-      setAnnouncementMsg("Select a school.");
+      setAnnouncementMsg(error instanceof Error ? error.message : "Failed to load school context.");
       return;
     }
-    setAnnouncementMsg("Loading...");
     const { data, error } = await supabase
       .from("announcements")
       .select("id, title, body, publish_at, end_at, created_at")
@@ -97,7 +119,13 @@ export default function AdminConsoleAnnouncementsStartup({ activeSchoolId }) {
   }
 
   async function createAnnouncement() {
-    if (!supabase || !activeSchoolId) return;
+    let supabase = null;
+    try {
+      supabase = await getSupabaseClient();
+    } catch (error) {
+      setAnnouncementMsg(error instanceof Error ? error.message : "Failed to load school context.");
+      return;
+    }
     setAnnouncementMsg("");
     const title = announcementForm.title.trim();
     const body = announcementForm.body.trim();
@@ -128,7 +156,14 @@ export default function AdminConsoleAnnouncementsStartup({ activeSchoolId }) {
   }
 
   async function deleteAnnouncement(id) {
-    if (!supabase || !id) return;
+    if (!id) return;
+    let supabase = null;
+    try {
+      supabase = await getSupabaseClient();
+    } catch (error) {
+      setAnnouncementMsg(error instanceof Error ? error.message : "Failed to load school context.");
+      return;
+    }
     if (!window.confirm("Delete this announcement?")) return;
     const { error } = await supabase.from("announcements").delete().eq("id", id);
     if (error) {
@@ -174,7 +209,14 @@ export default function AdminConsoleAnnouncementsStartup({ activeSchoolId }) {
   }
 
   async function saveAnnouncementEdits() {
-    if (!supabase || !editingAnnouncementId) return;
+    if (!editingAnnouncementId) return;
+    let supabase = null;
+    try {
+      supabase = await getSupabaseClient();
+    } catch (error) {
+      setAnnouncementMsg(error instanceof Error ? error.message : "Failed to load school context.");
+      return;
+    }
     const title = editingAnnouncementForm.title.trim();
     const body = editingAnnouncementForm.body.trim();
     if (!title || !body) {

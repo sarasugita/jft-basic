@@ -422,7 +422,7 @@ function isAnalyticsExcludedStudent(student) {
   return Boolean(student?.is_withdrawn || student?.is_test_account);
 }
 
-export default function AdminConsoleAttendanceStartup({ activeSchoolId }) {
+export default function AdminConsoleAttendanceStartup({ activeSchoolId, onOpenFullConsole = null }) {
   const renderTraceLoggedRef = useRef(false);
   const supabaseConfigError = getAdminSupabaseConfigError();
   const supabase = useMemo(
@@ -1187,7 +1187,18 @@ export default function AdminConsoleAttendanceStartup({ activeSchoolId }) {
         >
           Absence Applications
         </button>
+        {typeof onOpenFullConsole === "function" ? (
+          <button className="btn" type="button" onClick={onOpenFullConsole}>
+            Open Full Console
+          </button>
+        ) : null}
       </div>
+
+      {typeof onOpenFullConsole === "function" ? (
+        <div className="admin-help" style={{ marginBottom: 12 }}>
+          Need the full attendance console with every linked admin workflow? Open the full console from here.
+        </div>
+      ) : null}
 
       <AdminConsoleAttendanceWorkspace />
 

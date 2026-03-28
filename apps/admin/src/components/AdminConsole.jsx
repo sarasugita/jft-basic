@@ -1,23 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
-import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import {
   ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
   getLoadedAdminConsoleAnnouncementsStartup,
-  getLoadedAdminConsoleAttendanceStartup,
-  getLoadedAdminConsoleDailyRecordStartup,
-  getLoadedAdminConsoleRankingStartup,
-  getLoadedAdminConsoleStudentsStartup,
   getLoadedAdminConsoleCore,
   loadAdminConsoleAnnouncementsStartup,
-  loadAdminConsoleAttendanceStartup,
-  loadAdminConsoleDailyRecordStartup,
-  loadAdminConsoleRankingStartup,
-  loadAdminConsoleStudentsStartup,
   loadAdminConsoleCore,
   preloadAdminConsoleCore,
 } from "./adminConsoleLoader";
@@ -33,35 +24,10 @@ const DIRECT_STARTUP_WORKSPACE_CONFIG = {
     loadingLabel: "Loading announcements...",
     errorMessage: "Failed to load announcements. Retry or switch tabs and try again.",
   },
-  attendance: {
-    importTarget: "AdminConsoleAttendanceStartup",
-    loadModule: loadAdminConsoleAttendanceStartup,
-    getLoadedModule: getLoadedAdminConsoleAttendanceStartup,
-    loadingLabel: "Loading attendance...",
-    errorMessage: "Failed to load attendance. Retry or switch tabs and try again.",
-  },
-  ranking: {
-    importTarget: "AdminConsoleRankingStartup",
-    loadModule: loadAdminConsoleRankingStartup,
-    getLoadedModule: getLoadedAdminConsoleRankingStartup,
-    loadingLabel: "Loading ranking...",
-    errorMessage: "Failed to load ranking. Retry or switch tabs and try again.",
-  },
-  students: {
-    importTarget: "AdminConsoleStudentsStartup",
-    loadModule: loadAdminConsoleStudentsStartup,
-    getLoadedModule: getLoadedAdminConsoleStudentsStartup,
-    loadingLabel: "Loading students...",
-    errorMessage: "Failed to load students. Retry or switch tabs and try again.",
-  },
-  dailyRecord: {
-    importTarget: "AdminConsoleDailyRecordStartup",
-    loadModule: loadAdminConsoleDailyRecordStartup,
-    getLoadedModule: getLoadedAdminConsoleDailyRecordStartup,
-    loadingLabel: "Loading schedule & record...",
-    errorMessage: "Failed to load schedule & record. Retry or switch tabs and try again.",
-  },
 };
+const ADMIN_SUPABASE_CONFIG_ERROR = !process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ? "Admin app is missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY."
+  : "";
 
 function getAdminPageTitle(activeTab) {
   if (activeTab === "announcements") return "Announcements";
@@ -203,11 +169,7 @@ export default function AdminConsole(props) {
   const isManagedAuth = managedSession !== undefined || managedProfile !== undefined;
   const session = managedSession ?? null;
   const profile = managedProfile ?? null;
-  const supabaseConfigError = getAdminSupabaseConfigError();
-  const baseSupabase = useMemo(
-    () => (supabaseConfigError ? null : createAdminSupabaseClient()),
-    [supabaseConfigError]
-  );
+  const supabaseConfigError = ADMIN_SUPABASE_CONFIG_ERROR;
   const activeSchoolId = forcedSchoolScope?.id ?? schoolScopeId ?? profile?.school_id ?? null;
   const activeSchoolName = forcedSchoolScope?.name
     ?? schoolAssignments.find((assignment) => assignment.school_id === activeSchoolId)?.school_name
@@ -265,7 +227,7 @@ export default function AdminConsole(props) {
       return;
     }
 
-    if (!baseSupabase || !session?.user?.id) {
+    if (supabaseConfigError || !session?.user?.id) {
       setSchoolAssignments([]);
       setSchoolScopeId(profile.school_id ?? null);
       return;
@@ -283,6 +245,30 @@ export default function AdminConsole(props) {
           ? storedScope
           : profile.school_id ?? assignments[0]?.school_id ?? null;
       };
+
+      let createAdminSupabaseClient = null;
+      try {
+        ({ createAdminSupabaseClient } = await import("../lib/adminSupabase"));
+      } catch (error) {
+        logAdminRequestFailure("Admin console failed to load supabase module", error, {
+          pathname,
+          role: profile.role,
+          userId: session.user.id,
+          schoolId: profile.school_id ?? null,
+          activeSchoolId: profile.school_id ?? null,
+          managedAuth: isManagedAuth,
+        });
+        if (!mounted) return;
+        setSchoolAssignments(
+          profile.school_id
+            ? [{ school_id: profile.school_id, school_name: "Current School", is_primary: true }]
+            : []
+        );
+        setSchoolScopeId(profile.school_id ?? null);
+        return;
+      }
+
+      const baseSupabase = createAdminSupabaseClient();
 
       const { data: rpcSchoolOptionsData, error: rpcSchoolOptionsError } = await baseSupabase.rpc(
         "get_admin_school_options"
@@ -357,7 +343,7 @@ export default function AdminConsole(props) {
     return () => {
       mounted = false;
     };
-  }, [baseSupabase, forcedSchoolScope?.id, profile, session?.user?.id]);
+  }, [forcedSchoolScope?.id, isManagedAuth, pathname, profile, session?.user?.id, supabaseConfigError]);
 
   useEffect(() => {
     if (forcedSchoolScope?.id || profile?.role !== "admin") return;
@@ -557,11 +543,13 @@ export default function AdminConsole(props) {
   }
 
   async function handleSignOut() {
-    if (!baseSupabase) {
+    if (supabaseConfigError) {
       window.location.assign(homeHref || "/");
       return;
     }
     try {
+      const { createAdminSupabaseClient } = await import("../lib/adminSupabase");
+      const baseSupabase = createAdminSupabaseClient();
       await baseSupabase.auth.signOut({ scope: "local" });
     } finally {
       syncAdminAuthCookie(null);
@@ -716,6 +704,7 @@ export default function AdminConsole(props) {
             }}
             moduleProps={{
               activeSchoolId,
+              onOpenFullConsole: () => openLegacyCore(startupTab),
             }}
             loadingLabel={directStartupWorkspace.loadingLabel}
             errorTitle="Workspace Error"

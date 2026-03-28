@@ -3,12 +3,12 @@ import path from "node:path";
 
 const appRoot = path.resolve(process.cwd());
 const manifestPath = path.join(appRoot, ".next", "server", "middleware-react-loadable-manifest.js");
-const MAX_SHELL_TOTAL_BYTES = 560_000;
-const MAX_SHELL_LARGEST_CHUNK_BYTES = 340_000;
-const WARN_SHELL_TOTAL_BYTES = 540_000;
-const WARN_SHELL_LARGEST_CHUNK_BYTES = 320_000;
-const MAX_WRAPPER_BYTES = 220_000;
-const WARN_WRAPPER_BYTES = 180_000;
+const MAX_SHELL_TOTAL_BYTES = 220_000;
+const MAX_SHELL_LARGEST_CHUNK_BYTES = 170_000;
+const WARN_SHELL_TOTAL_BYTES = 180_000;
+const WARN_SHELL_LARGEST_CHUNK_BYTES = 140_000;
+const MAX_WRAPPER_BYTES = 120_000;
+const WARN_WRAPPER_BYTES = 80_000;
 const REQUIRED_WORKSPACE_ENTRIES = [
   "components/adminConsoleLoader.js -> ./AdminConsoleStudentsWorkspace",
   "components/adminConsoleLoader.js -> ./AdminConsoleAttendanceWorkspace",
@@ -18,6 +18,7 @@ const REQUIRED_WORKSPACE_ENTRIES = [
   "components/adminConsoleLoader.js -> ./AdminConsoleTestingWorkspace",
 ];
 const REQUIRED_STARTUP_ENTRY = "components/adminConsoleLoader.js -> ./AdminConsoleAnnouncementsStartup";
+const REQUIRED_WRAPPER_ENTRY = "components/adminConsoleLoader.js -> ./AdminConsole";
 
 function readManifestJson(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -64,10 +65,12 @@ function getChunkSize(filePath) {
 }
 
 const manifest = readManifestJson(manifestPath);
+const wrapperEntry = manifest[REQUIRED_WRAPPER_ENTRY];
+const startupEntry = manifest[REQUIRED_STARTUP_ENTRY];
 const coreEntry = manifest["components/adminConsoleLoader.js -> ./AdminConsoleCore"];
 
-if (!coreEntry?.files?.length) {
-  throw new Error("AdminConsoleCore entry was not found in the loadable manifest.");
+if (!wrapperEntry?.files?.length) {
+  throw new Error(`Admin console wrapper entry is missing from the loadable manifest: ${REQUIRED_WRAPPER_ENTRY}`);
 }
 
 const missingWorkspaceEntries = REQUIRED_WORKSPACE_ENTRIES.filter((entryKey) => !manifest[entryKey]?.files?.length);
@@ -78,11 +81,11 @@ if (missingWorkspaceEntries.length) {
   );
 }
 
-if (!manifest[REQUIRED_STARTUP_ENTRY]?.files?.length) {
+if (!startupEntry?.files?.length) {
   throw new Error(`Admin console startup entry is missing from the loadable manifest: ${REQUIRED_STARTUP_ENTRY}`);
 }
 
-const wrapperArtifactPath = resolveBuildArtifactPath(manifest["components/adminConsoleLoader.js -> ./AdminConsole"].files[0]);
+const wrapperArtifactPath = resolveBuildArtifactPath(wrapperEntry.files[0]);
 const wrapperBytes = getChunkSize(wrapperArtifactPath);
 
 if (wrapperBytes > MAX_WRAPPER_BYTES) {
@@ -94,10 +97,15 @@ if (wrapperBytes > MAX_WRAPPER_BYTES) {
   );
 }
 
-const chunkSizes = coreEntry.files
+const shellRelativeFiles = Array.from(new Set([
+  ...wrapperEntry.files,
+  ...startupEntry.files,
+]));
+
+const chunkSizes = shellRelativeFiles
   .map((relativeFile) => {
-    const chunkPath = tryResolveDirectBuildArtifactPath(relativeFile);
-    if (!chunkPath) return null;
+    const chunkPath = resolveBuildArtifactPath(relativeFile);
+    if (!fs.existsSync(chunkPath)) return null;
     return {
       relativeFile,
       bytes: getChunkSize(chunkPath),
@@ -111,12 +119,11 @@ const details = chunkSizes
   .sort((a, b) => b.bytes - a.bytes)
   .map((chunk) => `${chunk.relativeFile}: ${formatBytes(chunk.bytes)}`)
   .join(", ");
-const hasDirectCoreChunkFiles = chunkSizes.length > 0;
+if (chunkSizes.length === 0) {
+  throw new Error("No startup shell chunks could be resolved for budget enforcement.");
+}
 
-if (
-  hasDirectCoreChunkFiles
-  && (totalBytes > MAX_SHELL_TOTAL_BYTES || largestChunkBytes > MAX_SHELL_LARGEST_CHUNK_BYTES)
-) {
+if (totalBytes > MAX_SHELL_TOTAL_BYTES || largestChunkBytes > MAX_SHELL_LARGEST_CHUNK_BYTES) {
   throw new Error(
     [
       "Admin console shell startup bundle exceeded the allowed size budget.",
@@ -129,32 +136,38 @@ if (
 
 if (
   wrapperBytes > WARN_WRAPPER_BYTES
-  || (
-    hasDirectCoreChunkFiles
-    && (totalBytes > WARN_SHELL_TOTAL_BYTES || largestChunkBytes > WARN_SHELL_LARGEST_CHUNK_BYTES)
-  )
+  || (totalBytes > WARN_SHELL_TOTAL_BYTES || largestChunkBytes > WARN_SHELL_LARGEST_CHUNK_BYTES)
 ) {
   console.warn(
     [
       "Warning: Admin console shell startup bundle is approaching the size budget.",
       `AdminConsole wrapper: ${formatBytes(wrapperBytes)} (warn at ${formatBytes(WARN_WRAPPER_BYTES)})`,
-      hasDirectCoreChunkFiles
-        ? `Largest chunk: ${formatBytes(largestChunkBytes)} (warn at ${formatBytes(WARN_SHELL_LARGEST_CHUNK_BYTES)})`
-        : "Core chunk files unavailable in direct build output; skipped core startup chunk budget.",
-      hasDirectCoreChunkFiles
-        ? `Total shell import: ${formatBytes(totalBytes)} (warn at ${formatBytes(WARN_SHELL_TOTAL_BYTES)})`
-        : "",
-      hasDirectCoreChunkFiles ? `Chunks: ${details}` : "",
+      `Largest chunk: ${formatBytes(largestChunkBytes)} (warn at ${formatBytes(WARN_SHELL_LARGEST_CHUNK_BYTES)})`,
+      `Total shell import: ${formatBytes(totalBytes)} (warn at ${formatBytes(WARN_SHELL_TOTAL_BYTES)})`,
+      `Chunks: ${details}`,
     ].join(" ")
   );
 } else {
+  const coreChunkSizes = (coreEntry?.files ?? [])
+    .map((relativeFile) => {
+      const chunkPath = tryResolveDirectBuildArtifactPath(relativeFile);
+      if (!chunkPath) return null;
+      return {
+        relativeFile,
+        bytes: getChunkSize(chunkPath),
+      };
+    })
+    .filter(Boolean);
+  const coreTotalBytes = coreChunkSizes.reduce((sum, chunk) => sum + chunk.bytes, 0);
+
   console.log(
     [
       "Admin console shell chunk budget check passed.",
       `AdminConsole wrapper: ${formatBytes(wrapperBytes)}`,
-      hasDirectCoreChunkFiles ? `Largest chunk: ${formatBytes(largestChunkBytes)}` : "Core startup chunk budget skipped",
-      hasDirectCoreChunkFiles ? `Total shell import: ${formatBytes(totalBytes)}` : "",
+      `Largest chunk: ${formatBytes(largestChunkBytes)}`,
+      `Total shell import: ${formatBytes(totalBytes)}`,
       `Workspace entries: ${REQUIRED_WORKSPACE_ENTRIES.length}`,
+      coreChunkSizes.length ? `On-demand core import: ${formatBytes(coreTotalBytes)}` : "On-demand core import: skipped",
     ].join(" ")
   );
 }

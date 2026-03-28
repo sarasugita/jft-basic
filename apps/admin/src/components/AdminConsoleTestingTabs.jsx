@@ -6,6 +6,7 @@ export default function AdminConsoleTestingTabs({
   dailySubTab,
   sessionDetail,
   openModelConductModal,
+  openDailyConductModal,
   fetchTestSessions,
   fetchExamLinks,
   modelSessions,
@@ -90,6 +91,7 @@ export default function AdminConsoleTestingTabs({
   setDailyConductMode,
   setDailyRetakeCategory,
   setDailyRetakeSourceId,
+  dailySetDropdownOpen,
   setDailySetDropdownOpen,
   setActiveDailyTimePicker,
   dailyConductMode,
@@ -103,6 +105,7 @@ export default function AdminConsoleTestingTabs({
   updateDailySessionTimePart,
   createDailySession,
   dailyRetakeSourceId,
+  dailySessionsMsg,
   dailySourceCategoryDropdownRef,
   dailyCategories,
   dailySourceCategoryDropdownOpen,
@@ -1255,7 +1258,1047 @@ export default function AdminConsoleTestingTabs({
       {activeTab === "daily" ? (
         <>
           {dailySubTab === "conduct" ? (
-            <div className="admin-help">Loading daily testing workspace…</div>
+            <div style={{ marginBottom: 12 }}>
+              {!(sessionDetail.type === "daily" && sessionDetail.sessionId) ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <div className="admin-title">Daily Test Sessions</div>
+                      <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => openDailyConductModal("normal")}>
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                          <path
+                            d="M10 5v10M5 10h10"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                        Create Test Session
+                      </button>
+                      <button className="btn btn-retake admin-compact-action-btn admin-upload-cta-btn" onClick={() => openDailyConductModal("retake")}>
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                          <path
+                            d="M5.5 6.5h8V4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M13.5 13.5h-8V16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M13.5 4l2.5 2.5-2.5 2.5"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M6.5 16 4 13.5 6.5 11"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        Create Retake Session
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      className="btn admin-icon-action-btn"
+                      aria-label="Refresh sessions"
+                      title="Refresh sessions"
+                      onClick={() => {
+                        fetchTestSessions();
+                        fetchExamLinks();
+                      }}
+                    >
+                      <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path
+                          d="M16 10a6 6 0 1 1-1.76-4.24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="M16 4.5v3.75h-3.75"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {sessionDetail.type === "daily" && sessionDetail.sessionId ? null : (
+                <>
+                  <div className="admin-table-wrap" style={{ marginTop: 10 }}>
+                    <table className="admin-table daily-sessions-table" style={{ minWidth: 860 }}>
+                      <colgroup>
+                        <col />
+                        <col />
+                        <col />
+                        <col className="daily-sessions-col-setid" />
+                        <col className="daily-sessions-col-show-answers" />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>Created</th>
+                          <th>Test Title</th>
+                          <th>Category</th>
+                          <th>SetID</th>
+                          <th><span className="daily-sessions-show-answers-head">Show Answers</span></th>
+                          <th>Start</th>
+                          <th>End</th>
+                          <th>Time (min)</th>
+                          <th>Pass Rate</th>
+                          <th style={{ textAlign: "center" }}>Action</th>
+                          <th style={{ textAlign: "center" }}>Preview</th>
+                          <th style={{ textAlign: "center" }}>Edit</th>
+                          <th style={{ textAlign: "center" }}>Delete</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dailySessions.map((t) => (
+                          <tr key={t.id} onClick={editingSessionId === t.id ? undefined : () => openSessionDetailView(t, "daily")}>
+                            <td>{formatDateTime(t.created_at)}</td>
+                            <td>
+                              {editingSessionId === t.id ? (
+                                <input
+                                  value={editingSessionForm.title}
+                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
+                                />
+                              ) : (
+                                t.title ?? ""
+                              )}
+                            </td>
+                            <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
+                            <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
+                            <td>
+                              {editingSessionId === t.id ? (
+                                <select
+                                  value={editingSessionForm.show_answers ? "yes" : "no"}
+                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
+                                >
+                                  <option value="yes">Yes</option>
+                                  <option value="no">No</option>
+                                </select>
+                              ) : (
+                                t.show_answers ? "Yes" : "No"
+                              )}
+                            </td>
+                            <td>
+                              {editingSessionId === t.id ? (
+                                <input
+                                  type="datetime-local"
+                                  step="300"
+                                  value={editingSessionForm.starts_at}
+                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
+                                />
+                              ) : (
+                                formatDateTime(t.starts_at)
+                              )}
+                            </td>
+                            <td>
+                              {editingSessionId === t.id ? (
+                                <input
+                                  type="datetime-local"
+                                  step="300"
+                                  value={editingSessionForm.ends_at}
+                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
+                                />
+                              ) : (
+                                formatDateTime(t.ends_at)
+                              )}
+                            </td>
+                            <td>
+                              {editingSessionId === t.id ? (
+                                <input
+                                  value={editingSessionForm.time_limit_min}
+                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                                />
+                              ) : (
+                                t.time_limit_min ?? ""
+                              )}
+                            </td>
+                            <td>
+                              {editingSessionId === t.id ? (
+                                <input
+                                  value={editingSessionForm.pass_rate}
+                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                                />
+                              ) : (
+                                `${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`
+                              )}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              {linkBySession[t.id]?.id ? (
+                                <button
+                                  className="btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copyLink(linkBySession[t.id].id);
+                                  }}
+                                >
+                                  Copy URL
+                                </button>
+                              ) : (
+                                ""
+                              )}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              <button
+                                className="btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openSessionPreview(t);
+                                }}
+                              >
+                                Preview
+                              </button>
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              {editingSessionId === t.id ? (
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                  <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); saveSessionEdits(); }}>
+                                    Save
+                                  </button>
+                                  <button className="btn" onClick={(e) => { e.stopPropagation(); cancelEditSession(); }}>
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
+                                  Edit
+                                </button>
+                              )}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="admin-msg">{dailySessionsMsg}</div>
+                  <div className="admin-msg">{linkMsg}</div>
+                  {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+                </>
+              )}
+
+              {dailyConductOpen ? (
+                <div
+                  className="admin-modal-overlay"
+                  onClick={() => {
+                    setDailyConductOpen(false);
+                    setDailyConductMode("normal");
+                    setDailyRetakeCategory("");
+                    setDailyRetakeSourceId("");
+                    setDailySetDropdownOpen(false);
+                    setActiveDailyTimePicker("");
+                  }}
+                >
+                  <div
+                    className="admin-modal daily-session-create-modal"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="admin-modal-header daily-session-create-header">
+                      <div className="admin-title">{dailyConductMode === "retake" ? "Conduct Daily Retake" : "Create Daily Test Session"}</div>
+                      <button
+                        className="admin-modal-close"
+                        onClick={() => {
+                          setDailyConductOpen(false);
+                          setDailyConductMode("normal");
+                          setDailyRetakeCategory("");
+                          setDailyRetakeSourceId("");
+                          setDailySetDropdownOpen(false);
+                          setActiveDailyTimePicker("");
+                        }}
+                        aria-label="Close"
+                      >
+                        &times;
+                      </button>
+                    </div>
+
+                    <div className="daily-session-create-body">
+                      {dailyConductMode === "retake" ? (
+                        <div className="daily-session-create-layout">
+                          <div className="daily-session-create-field">
+                            <label>Session Category</label>
+                            <select
+                              value={dailyRetakeCategory}
+                              onChange={(e) => {
+                                setDailyRetakeCategory(e.target.value);
+                                setDailyRetakeSourceId("");
+                              }}
+                            >
+                              {pastDailySessionCategories.length ? (
+                                pastDailySessionCategories.map((category) => (
+                                  <option key={`daily-retake-category-${category.name}`} value={category.name}>
+                                    {category.name}
+                                  </option>
+                                ))
+                              ) : (
+                                <option value="">No past daily session categories</option>
+                              )}
+                            </select>
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Original Session</label>
+                            <select
+                              value={dailyRetakeSourceId}
+                              onChange={(e) => selectDailyRetakeSource(e.target.value)}
+                            >
+                              {filteredPastDailySessions.length ? (
+                                filteredPastDailySessions.map((session) => (
+                                  <option key={`daily-retake-${session.id}`} value={session.id}>
+                                    {session.title || session.problem_set_id} ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
+                                  </option>
+                                ))
+                              ) : (
+                                <option value="">
+                                  {dailyRetakeCategory ? "No past daily sessions in this category" : "No past daily sessions"}
+                                </option>
+                              )}
+                            </select>
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Release To</label>
+                            <select
+                              value={dailySessionForm.retake_release_scope}
+                              onChange={(e) => setDailySessionForm((s) => ({ ...s, retake_release_scope: e.target.value }))}
+                            >
+                              <option value="all">All students</option>
+                              <option value="failed_only">Only students who failed</option>
+                            </select>
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Test Title</label>
+                            <input
+                              value={dailySessionForm.title}
+                              onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                              placeholder="Daily Test"
+                            />
+                          </div>
+                          <div className="daily-session-create-split-row">
+                            <div className="daily-session-create-field">
+                              <label>Date</label>
+                              <input
+                                type="date"
+                                value={dailySessionForm.session_date}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, session_date: e.target.value }))}
+                              />
+                            </div>
+                            <div className="daily-session-create-field">
+                              <label>Start Time</label>
+                              <div className="daily-session-create-time-picker-wrap" data-daily-time-picker>
+                                {(() => {
+                                  const startTimeParts = getTwelveHourTimeParts(dailySessionForm.start_time);
+                                  const isOpen = activeDailyTimePicker === "start_time";
+                                  return (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="daily-session-create-time-trigger"
+                                        aria-haspopup="dialog"
+                                        aria-expanded={isOpen}
+                                        onClick={() => setActiveDailyTimePicker((current) => (current === "start_time" ? "" : "start_time"))}
+                                      >
+                                        <span>{formatTwelveHourTimeDisplay(dailySessionForm.start_time)}</span>
+                                        <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                      </button>
+                                      {isOpen ? (
+                                        <div className="daily-session-create-time-popover" role="dialog" aria-label="Select daily retake start time">
+                                          <div className="daily-session-create-time-columns">
+                                            <div className="daily-session-create-time-column">
+                                              {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                                <button
+                                                  key={`daily-retake-start-hour-${hourValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${startTimeParts.hour === hourValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("start_time", "hour", hourValue)}
+                                                >
+                                                  {hourValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                            <div className="daily-session-create-time-column">
+                                              {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                                <button
+                                                  key={`daily-retake-start-minute-${minuteValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${startTimeParts.minute === minuteValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("start_time", "minute", minuteValue)}
+                                                >
+                                                  {minuteValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                            <div className="daily-session-create-time-column">
+                                              {MERIDIEM_OPTIONS.map((periodValue) => (
+                                                <button
+                                                  key={`daily-retake-start-period-${periodValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${startTimeParts.period === periodValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("start_time", "period", periodValue)}
+                                                >
+                                                  {periodValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                            <div className="daily-session-create-field">
+                              <label>Close Time</label>
+                              <div className="daily-session-create-time-picker-wrap" data-daily-time-picker>
+                                {(() => {
+                                  const closeTimeParts = getTwelveHourTimeParts(dailySessionForm.close_time);
+                                  const isOpen = activeDailyTimePicker === "close_time";
+                                  return (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="daily-session-create-time-trigger"
+                                        aria-haspopup="dialog"
+                                        aria-expanded={isOpen}
+                                        onClick={() => setActiveDailyTimePicker((current) => (current === "close_time" ? "" : "close_time"))}
+                                      >
+                                        <span>{formatTwelveHourTimeDisplay(dailySessionForm.close_time)}</span>
+                                        <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                      </button>
+                                      {isOpen ? (
+                                        <div className="daily-session-create-time-popover" role="dialog" aria-label="Select daily retake close time">
+                                          <div className="daily-session-create-time-columns">
+                                            <div className="daily-session-create-time-column">
+                                              {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                                <button
+                                                  key={`daily-retake-close-hour-${hourValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${closeTimeParts.hour === hourValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("close_time", "hour", hourValue)}
+                                                >
+                                                  {hourValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                            <div className="daily-session-create-time-column">
+                                              {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                                <button
+                                                  key={`daily-retake-close-minute-${minuteValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${closeTimeParts.minute === minuteValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("close_time", "minute", minuteValue)}
+                                                >
+                                                  {minuteValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                            <div className="daily-session-create-time-column">
+                                              {MERIDIEM_OPTIONS.map((periodValue) => (
+                                                <button
+                                                  key={`daily-retake-close-period-${periodValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${closeTimeParts.period === periodValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("close_time", "period", periodValue)}
+                                                >
+                                                  {periodValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="daily-session-create-two-col">
+                            <div className="daily-session-create-field">
+                              <label>Time Limit (min)</label>
+                              <input
+                                value={dailySessionForm.time_limit_min}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                                placeholder="10"
+                              />
+                            </div>
+                            <div className="daily-session-create-field">
+                              <label>Pass Rate</label>
+                              <input
+                                value={dailySessionForm.pass_rate}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                                placeholder="0.8"
+                              />
+                            </div>
+                          </div>
+                          <div className="daily-session-create-toggle-row">
+                            <span>Show Answers After Attempt</span>
+                            <label className="daily-session-create-switch" aria-label="Show Answers After Attempt">
+                              <input
+                                type="checkbox"
+                                checked={dailySessionForm.show_answers}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.checked }))}
+                              />
+                              <span className="daily-session-create-switch-slider" />
+                            </label>
+                          </div>
+                          <div className="daily-session-create-toggle-row">
+                            <span>Allow Multiple Attempts</span>
+                            <label className="daily-session-create-switch" aria-label="Allow Multiple Attempts">
+                              <input
+                                type="checkbox"
+                                checked={dailySessionForm.allow_multiple_attempts}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.checked }))}
+                              />
+                              <span className="daily-session-create-switch-slider" />
+                            </label>
+                          </div>
+                          <div className="daily-session-create-actions">
+                            <button
+                              className="btn btn-retake"
+                              type="button"
+                              onClick={createDailySession}
+                              disabled={!dailyRetakeSourceId}
+                            >
+                              Create Session
+                            </button>
+                          </div>
+                          {dailySessionsMsg ? <div className="admin-msg">{dailySessionsMsg}</div> : null}
+                        </div>
+                      ) : (
+                        <div className="daily-session-create-layout">
+                          <div className="daily-session-create-choice-row">
+                            <label className="daily-session-create-choice">
+                              <input
+                                type="radio"
+                                name="dailySessionSelectionMode"
+                                checked={dailySessionForm.selection_mode === "single"}
+                                onChange={() => {
+                                  setDailySetDropdownOpen(false);
+                                  setDailySessionForm((s) => ({
+                                    ...s,
+                                    selection_mode: "single",
+                                    problem_set_ids: s.problem_set_id ? [s.problem_set_id] : [],
+                                  }));
+                                }}
+                              />
+                              Single Question Set
+                            </label>
+                            <label className="daily-session-create-choice">
+                              <input
+                                type="radio"
+                                name="dailySessionSelectionMode"
+                                checked={dailySessionForm.selection_mode === "multiple"}
+                                onChange={() => {
+                                  setDailySessionForm((s) => ({
+                                    ...s,
+                                    selection_mode: "multiple",
+                                    problem_set_ids: s.problem_set_id
+                                      ? Array.from(new Set([...(s.problem_set_ids ?? []), s.problem_set_id]))
+                                      : s.problem_set_ids ?? [],
+                                  }));
+                                }}
+                              />
+                              Multiple Question Sets
+                            </label>
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Source Categories</label>
+                            {dailySessionForm.selection_mode === "multiple" ? (
+                              <>
+                                <div className="daily-session-create-multi-select" ref={dailySourceCategoryDropdownRef}>
+                                  <button
+                                    className="daily-session-create-multi-trigger"
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveDailyTimePicker("");
+                                      setDailySetDropdownOpen(false);
+                                      setDailySourceCategoryDropdownOpen((open) => !open);
+                                    }}
+                                    disabled={!dailyCategories.length}
+                                  >
+                                    <span className="daily-session-create-multi-trigger-value">
+                                      {selectedDailySourceCategoryNames.length
+                                        ? (
+                                          <span className="daily-session-create-trigger-chip-list">
+                                            {selectedDailySourceCategoryNames.map((categoryName) => (
+                                              <span key={`selected-source-category-${categoryName}`} className="daily-session-create-selected-chip">
+                                                {categoryName}
+                                              </span>
+                                            ))}
+                                          </span>
+                                        )
+                                        : "Select Source Categories"}
+                                    </span>
+                                    <span className={`daily-session-create-multi-arrow ${dailySourceCategoryDropdownOpen ? "open" : ""}`}>▾</span>
+                                  </button>
+                                  {dailySourceCategoryDropdownOpen ? (
+                                    <div className="daily-session-create-set-list">
+                                      {dailyCategories.length ? (
+                                        dailyCategories.map((category) => {
+                                          const checked = selectedDailySourceCategoryNames.includes(category.name);
+                                          return (
+                                            <label
+                                              key={`daily-source-category-${category.name}`}
+                                              className="daily-session-create-set-option"
+                                            >
+                                              <span className="daily-session-create-set-option-main">
+                                                <input
+                                                  className="daily-session-create-set-option-check"
+                                                  type="checkbox"
+                                                  checked={checked}
+                                                  onChange={() => toggleDailySourceCategorySelection(category.name)}
+                                                />
+                                                <span className="daily-session-create-set-option-id">{category.name}</span>
+                                              </span>
+                                              <span className="daily-session-create-set-meta">{Number(category.tests?.length ?? 0)} Sets</span>
+                                            </label>
+                                          );
+                                        })
+                                      ) : (
+                                        <div className="daily-session-create-help">No categories available.</div>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="daily-session-create-help">
+                                  Checked categories determine which Set IDs are available below.
+                                </div>
+                              </>
+                            ) : (
+                              <select
+                                value={dailyConductCategory}
+                                onChange={(e) => {
+                                  setDailySourceCategoryDropdownOpen(false);
+                                  setDailyConductCategory(e.target.value);
+                                }}
+                              >
+                                {dailyCategories.length ? (
+                                  dailyCategories.map((category) => (
+                                    <option key={`daily-source-single-${category.name}`} value={category.name}>
+                                      {category.name}
+                                    </option>
+                                  ))
+                                ) : (
+                                  <option value="">No categories</option>
+                                )}
+                              </select>
+                            )}
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Set ID</label>
+                            {dailySessionForm.selection_mode === "multiple" ? (
+                              <div className="daily-session-create-multi-select" ref={dailySetDropdownRef}>
+                                <button
+                                  className="daily-session-create-multi-trigger"
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveDailyTimePicker("");
+                                    setDailySetDropdownOpen((open) => !open);
+                                  }}
+                                  disabled={!dailyConductTests.length}
+                                >
+                                  <span className="daily-session-create-multi-trigger-value">
+                                    {selectedDailyProblemSetIds.length
+                                      ? (
+                                        <span className="daily-session-create-trigger-chip-list">
+                                          {selectedDailyProblemSetIds.map((setId) => (
+                                            <span key={`selected-set-inline-${setId}`} className="daily-session-create-selected-chip">
+                                              {setId}
+                                            </span>
+                                          ))}
+                                        </span>
+                                      )
+                                      : "Select Set ID"}
+                                  </span>
+                                  <span className={`daily-session-create-multi-arrow ${dailySetDropdownOpen ? "open" : ""}`}>▾</span>
+                                </button>
+                                {dailySetDropdownOpen ? (
+                                  <div className="daily-session-create-set-list">
+                                    {dailyConductTests.length ? (
+                                      dailyConductTests.map((test) => {
+                                        const checked = selectedDailyProblemSetIds.includes(test.version);
+                                        return (
+                                          <label
+                                            key={`daily-ps-multi-${test.version}`}
+                                            className="daily-session-create-set-option"
+                                          >
+                                            <span className="daily-session-create-set-option-main">
+                                              <input
+                                                className="daily-session-create-set-option-check"
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={() => toggleDailyProblemSetSelection(test.version)}
+                                              />
+                                              <span className="daily-session-create-set-option-id">{test.version}</span>
+                                            </span>
+                                            <span className="daily-session-create-set-meta">{Number(test.question_count ?? 0)}Q</span>
+                                          </label>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="daily-session-create-help">No daily tests in the selected categories.</div>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <select
+                                value={dailySessionForm.problem_set_id}
+                                onChange={(e) =>
+                                  setDailySessionForm((s) => ({
+                                    ...s,
+                                    problem_set_id: e.target.value,
+                                    problem_set_ids: e.target.value ? [e.target.value] : [],
+                                  }))
+                                }
+                              >
+                                {dailyConductTests.length ? (
+                                  dailyConductTests.map((t) => (
+                                    <option key={`daily-ps-${t.version}`} value={t.version}>
+                                      {t.version}
+                                    </option>
+                                  ))
+                                ) : (
+                                  <option value="">No daily tests</option>
+                                )}
+                              </select>
+                            )}
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Session Category</label>
+                            {dailySessionCategories.length ? (
+                              <>
+                                <select
+                                  value={dailySessionCategorySelectValue}
+                                  onChange={(e) => {
+                                    const next = e.target.value;
+                                    if (next === CUSTOM_CATEGORY_OPTION) {
+                                      setDailySessionForm((s) => ({
+                                        ...s,
+                                        session_category: dailySessionCategories.some((category) => category.name === s.session_category)
+                                          ? ""
+                                          : s.session_category,
+                                      }));
+                                      return;
+                                    }
+                                    setDailySessionForm((s) => ({ ...s, session_category: next }));
+                                  }}
+                                >
+                                  {dailySessionCategories.map((category) => (
+                                    <option key={`daily-session-category-${category.name}`} value={category.name}>
+                                      {category.name}
+                                    </option>
+                                  ))}
+                                  <option value={CUSTOM_CATEGORY_OPTION}>Custom...</option>
+                                </select>
+                                {dailySessionCategorySelectValue === CUSTOM_CATEGORY_OPTION ? (
+                                  <input
+                                    value={dailySessionForm.session_category}
+                                    onChange={(e) => setDailySessionForm((s) => ({ ...s, session_category: e.target.value }))}
+                                    placeholder="Mixed Practice"
+                                    style={{ marginTop: 6 }}
+                                  />
+                                ) : null}
+                              </>
+                            ) : (
+                              <input
+                                value={dailySessionForm.session_category}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, session_category: e.target.value }))}
+                                placeholder="Mixed Practice"
+                              />
+                            )}
+                            <div className="daily-session-create-help">
+                              This category will be used for the generated daily test session.
+                            </div>
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Test Title</label>
+                            <input
+                              value={dailySessionForm.title}
+                              onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                              placeholder="Test Title"
+                            />
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Number of Questions</label>
+                            <div className="daily-session-create-choice-row daily-session-create-count-row">
+                              <label className="daily-session-create-choice">
+                                <input
+                                  type="radio"
+                                  name="dailySessionQuestionMode"
+                                  checked={dailySessionForm.question_count_mode === "all"}
+                                  onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "all", question_count: "" }))}
+                                />
+                                <span className="daily-session-create-choice-copy">All Questions</span>
+                              </label>
+                              <div className="daily-session-create-count-option">
+                                <label className="daily-session-create-choice">
+                                  <input
+                                    type="radio"
+                                    name="dailySessionQuestionMode"
+                                    checked={dailySessionForm.question_count_mode === "specify"}
+                                    onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "specify" }))}
+                                  />
+                                  <span className="daily-session-create-choice-copy">Specify</span>
+                                </label>
+                                <input
+                                  className={`daily-session-create-count-input ${dailySessionForm.question_count_mode === "specify" ? "is-active" : ""}`}
+                                  value={dailySessionForm.question_count}
+                                  disabled={dailySessionForm.question_count_mode !== "specify"}
+                                  onChange={(e) => setDailySessionForm((s) => ({ ...s, question_count: e.target.value }))}
+                                  placeholder=""
+                                />
+                              </div>
+                            </div>
+                            <div className="daily-session-create-help">
+                              Available questions: {selectedDailyQuestionCount || 0}
+                            </div>
+                          </div>
+                          <div className="daily-session-create-split-row">
+                            <div className="daily-session-create-field">
+                              <label>Date</label>
+                              <input
+                                type="date"
+                                value={dailySessionForm.session_date}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, session_date: e.target.value }))}
+                              />
+                            </div>
+                            <div className="daily-session-create-field">
+                              <label>Start Time</label>
+                              <div className="daily-session-create-time-picker-wrap" data-daily-time-picker>
+                                {(() => {
+                                  const startTimeParts = getTwelveHourTimeParts(dailySessionForm.start_time);
+                                  const isOpen = activeDailyTimePicker === "start_time";
+                                  return (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="daily-session-create-time-trigger"
+                                        aria-haspopup="dialog"
+                                        aria-expanded={isOpen}
+                                        onClick={() => {
+                                          setDailySetDropdownOpen(false);
+                                          setActiveDailyTimePicker((current) => (current === "start_time" ? "" : "start_time"));
+                                        }}
+                                      >
+                                        <span>{formatTwelveHourTimeDisplay(dailySessionForm.start_time)}</span>
+                                        <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                      </button>
+                                      {isOpen ? (
+                                        <div className="daily-session-create-time-popover" role="dialog" aria-label="Select start time">
+                                          <div className="daily-session-create-time-columns">
+                                            <div className="daily-session-create-time-column">
+                                              {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                                <button
+                                                  key={`daily-start-hour-${hourValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${startTimeParts.hour === hourValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("start_time", "hour", hourValue)}
+                                                >
+                                                  {hourValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                            <div className="daily-session-create-time-column">
+                                              {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                                <button
+                                                  key={`daily-start-minute-${minuteValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${startTimeParts.minute === minuteValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("start_time", "minute", minuteValue)}
+                                                >
+                                                  {minuteValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                            <div className="daily-session-create-time-column">
+                                              {MERIDIEM_OPTIONS.map((periodValue) => (
+                                                <button
+                                                  key={`daily-start-period-${periodValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${startTimeParts.period === periodValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("start_time", "period", periodValue)}
+                                                >
+                                                  {periodValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                            <div className="daily-session-create-field">
+                              <label>Close Time</label>
+                              <div className="daily-session-create-time-picker-wrap" data-daily-time-picker>
+                                {(() => {
+                                  const closeTimeParts = getTwelveHourTimeParts(dailySessionForm.close_time);
+                                  const isOpen = activeDailyTimePicker === "close_time";
+                                  return (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="daily-session-create-time-trigger"
+                                        aria-haspopup="dialog"
+                                        aria-expanded={isOpen}
+                                        onClick={() => {
+                                          setDailySetDropdownOpen(false);
+                                          setActiveDailyTimePicker((current) => (current === "close_time" ? "" : "close_time"));
+                                        }}
+                                      >
+                                        <span>{formatTwelveHourTimeDisplay(dailySessionForm.close_time)}</span>
+                                        <span className={`daily-session-create-multi-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                                      </button>
+                                      {isOpen ? (
+                                        <div className="daily-session-create-time-popover" role="dialog" aria-label="Select close time">
+                                          <div className="daily-session-create-time-columns">
+                                            <div className="daily-session-create-time-column">
+                                              {TWELVE_HOUR_TIME_OPTIONS.map((hourValue) => (
+                                                <button
+                                                  key={`daily-close-hour-${hourValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${closeTimeParts.hour === hourValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("close_time", "hour", hourValue)}
+                                                >
+                                                  {hourValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                            <div className="daily-session-create-time-column">
+                                              {FIVE_MINUTE_MINUTE_OPTIONS.map((minuteValue) => (
+                                                <button
+                                                  key={`daily-close-minute-${minuteValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${closeTimeParts.minute === minuteValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("close_time", "minute", minuteValue)}
+                                                >
+                                                  {minuteValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                            <div className="daily-session-create-time-column">
+                                              {MERIDIEM_OPTIONS.map((periodValue) => (
+                                                <button
+                                                  key={`daily-close-period-${periodValue}`}
+                                                  type="button"
+                                                  className={`daily-session-create-time-option ${closeTimeParts.period === periodValue ? "active" : ""}`}
+                                                  onClick={() => updateDailySessionTimePart("close_time", "period", periodValue)}
+                                                >
+                                                  {periodValue}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="daily-session-create-two-col">
+                            <div className="daily-session-create-field">
+                              <label>Time Limit (min)</label>
+                              <input
+                                value={dailySessionForm.time_limit_min}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                                placeholder=""
+                              />
+                            </div>
+                            <div className="daily-session-create-field">
+                              <label>Pass Rate</label>
+                              <input
+                                value={dailySessionForm.pass_rate}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                                placeholder=""
+                              />
+                            </div>
+                          </div>
+                          <div className="daily-session-create-toggle-row">
+                            <span>Show Answers After Attempt</span>
+                            <label className="daily-session-create-switch" aria-label="Show Answers After Attempt">
+                              <input
+                                type="checkbox"
+                                checked={dailySessionForm.show_answers}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, show_answers: e.target.checked }))}
+                              />
+                              <span className="daily-session-create-switch-slider" />
+                            </label>
+                          </div>
+                          <div className="daily-session-create-toggle-row">
+                            <span>Allow Multiple Attempts</span>
+                            <label className="daily-session-create-switch" aria-label="Allow Multiple Attempts">
+                              <input
+                                type="checkbox"
+                                checked={dailySessionForm.allow_multiple_attempts}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.checked }))}
+                              />
+                              <span className="daily-session-create-switch-slider" />
+                            </label>
+                          </div>
+                          <div className="daily-session-create-actions">
+                            <button
+                              className="btn btn-primary"
+                              type="button"
+                              onClick={createDailySession}
+                            >
+                              Create Session
+                            </button>
+                          </div>
+                          {dailySessionsMsg ? <div className="admin-msg">{dailySessionsMsg}</div> : null}
+                        </div>
+                      )}
+                    </div>
+
+                    {dailyConductMode === "retake" ? (
+                      <div className="admin-help" style={{ marginTop: 6 }}>
+                        Student Base URL: <b>{getStudentBaseUrl() || "Not set"}</b>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
 
           {dailySubTab === "upload" ? (

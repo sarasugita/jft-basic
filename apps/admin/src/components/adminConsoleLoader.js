@@ -6,6 +6,8 @@ export const ADMIN_CONSOLE_IMPORT_TIMEOUT_MS = 15000;
 
 const CHUNK_PATH_FRAGMENT = "/_next/static/chunks/";
 const STARTUP_ERROR_PATTERN = /ChunkLoadError|Failed to fetch dynamically imported module|Loading chunk|Unexpected token|Failed to fetch/i;
+const RETRYABLE_IMPORT_ERROR_PATTERN = /ChunkLoadError|Failed to fetch dynamically imported module|Loading chunk|Importing a module script failed|NetworkError|Failed to fetch/i;
+const MAX_IMPORT_RETRY_ATTEMPTS = 1;
 
 let adminConsolePromise = null;
 let adminConsoleCorePromise = null;
@@ -101,6 +103,7 @@ function buildImportContext(context = {}) {
     schoolId: context.schoolId ?? null,
     activeSchoolId: context.activeSchoolId ?? context.schoolId ?? null,
     attempt: context.attempt ?? 0,
+    importRetryAttempt: context.importRetryAttempt ?? 0,
     managedAuth: context.managedAuth ?? null,
     source: context.source ?? "unknown",
     importTarget: context.importTarget ?? "AdminConsole",
@@ -168,11 +171,18 @@ function shouldLogStartupMessage(message) {
   return STARTUP_ERROR_PATTERN.test(String(message ?? ""));
 }
 
+function shouldRetryImportError(error) {
+  const message = getErrorMessage(error);
+  return RETRYABLE_IMPORT_ERROR_PATTERN.test(String(message ?? ""));
+}
+
 async function loadImport(importTarget, importer, context = {}) {
   const startTimeMs = now();
+  const importRetryAttempt = Number(context.importRetryAttempt ?? 0);
   const payload = buildImportContext({
     ...context,
     importTarget,
+    importRetryAttempt,
   });
 
   logAdminEvent("Admin console import start", payload);
@@ -189,6 +199,22 @@ async function loadImport(importTarget, importer, context = {}) {
   } catch (error) {
     const durationMs = Math.round((now() - startTimeMs) * 10) / 10;
     logChunkTimings(payload, startTimeMs);
+
+    if (shouldRetryImportError(error) && importRetryAttempt < MAX_IMPORT_RETRY_ATTEMPTS) {
+      const nextRetryAttempt = importRetryAttempt + 1;
+      logAdminEvent("Admin console import retry", {
+        ...payload,
+        durationMs,
+        nextRetryAttempt,
+        reason: getErrorMessage(error),
+      });
+      return loadImport(importTarget, importer, {
+        ...context,
+        importRetryAttempt: nextRetryAttempt,
+        source: `${context.source ?? "unknown"}-retry`,
+      });
+    }
+
     logAdminRequestFailure("Admin console import failed", error, {
       ...payload,
       durationMs,

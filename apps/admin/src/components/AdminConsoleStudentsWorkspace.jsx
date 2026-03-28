@@ -13,6 +13,7 @@ export default function AdminConsoleStudentsWorkspace() {
     setSelectedStudentWarning,
     setStudentWarningPreviewStudentId,
     studentDetailOpen,
+    setStudentDetailOpen,
     setInviteOpen,
     openStudentWarningsModal,
     handleLoadStudentMetrics,
@@ -347,6 +348,7 @@ export default function AdminConsoleStudentsWorkspace() {
                   className="admin-icon-btn"
                   onClick={() => {
                     setSelectedStudentId("");
+                    setStudentDetailOpen(false);
                   }}
                   aria-label="Back"
                 >
