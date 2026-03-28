@@ -75,7 +75,7 @@ function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, tes
   });
 }
 
-export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, testMetaByVersion, getScoreRate }) {
+export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, testMetaByVersion, getScoreRate, fetchStudentDetail }) {
   // Student list state
   const [studentMsg, setStudentMsg] = useState("");
   const [studentTempMap, setStudentTempMap] = useState({});
@@ -234,6 +234,23 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, 
     setStudentWarningIssueOpen(true);
   }, [studentListFilters]);
 
+  // Open student detail view
+  const openStudentDetailFn = useCallback(async (studentId) => {
+    if (!studentId) return;
+    setSelectedStudentId(studentId);
+    setSelectedStudentTab("information");
+    setStudentAttendance([]);
+    setStudentAttendanceMsg("");
+    setStudentAttendanceRange({ from: "", to: "" });
+    setStudentDetailOpen(true);
+    if (selectedStudentDetail?.id !== studentId) {
+      setSelectedStudentDetail(null);
+    }
+    if (fetchStudentDetail) {
+      await fetchStudentDetail(studentId);
+    }
+  }, [selectedStudentDetail?.id, fetchStudentDetail]);
+
   // Memos for derived data
   const sortedStudents = useMemo(() => {
     const list = [...(students ?? [])];
@@ -368,6 +385,7 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, 
     // Functions
     fetchStudentListMetrics,
     openStudentWarningsModalFn,
+    openStudentDetailFn,
     // Memos
     sortedStudents,
     studentListRows,

@@ -18,7 +18,6 @@ export default function AdminConsoleStudentsWorkspace() {
     setInviteOpen,
     handleLoadStudentWarnings,
     studentWarningCounts,
-    openStudentDetail,
     handleCsvFile,
     csvMsg,
     selectedStudent,
@@ -34,6 +33,7 @@ export default function AdminConsoleStudentsWorkspace() {
     deleteStudent,
     fetchStudentAttendance,
     fetchStudentAttempts,
+    fetchStudentDetail,
     getPersonalInfoForm,
     hasStudentDetailFields,
     formatDateFull,
@@ -138,6 +138,7 @@ export default function AdminConsoleStudentsWorkspace() {
     studentListRows,
     fetchStudentListMetrics,
     openStudentWarningsModalFn,
+    openStudentDetailFn,
     normalizeStudentNumberInput,
     getStudentDisplayName,
   } = useStudentsWorkspaceState({
@@ -146,6 +147,7 @@ export default function AdminConsoleStudentsWorkspace() {
     students,
     testMetaByVersion,
     getScoreRate,
+    fetchStudentDetail,
   });
 
   // Wrapper for loading metrics (since handleLoadStudentMetrics from context references old fetchStudentListMetrics)
@@ -322,7 +324,7 @@ export default function AdminConsoleStudentsWorkspace() {
                     <tr
                       key={s.id}
                       onClick={() => {
-                        void openStudentDetail(s.id);
+                        void openStudentDetailFn(s.id);
                       }}
                       className={s.is_withdrawn ? "row-withdrawn" : ""}
                     >
