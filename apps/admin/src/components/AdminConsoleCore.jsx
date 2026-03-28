@@ -8,6 +8,7 @@ import { questions, sections } from "../../../../packages/shared/questions.js";
 import { buildScopedAdminHref } from "../lib/adminConsoleRoute";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import AdminConsoleShellFrame from "./AdminConsoleShellFrame";
 import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
 import { AdminConsoleWorkspaceProvider } from "./AdminConsoleWorkspaceContext";
 import {
@@ -11979,7 +11980,28 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }));
   }
 
+  function renderManagedShellLoading(message) {
+    return (
+      <AdminConsoleShellFrame
+        activeTab={activeTab}
+        schoolName={activeSchoolName}
+        displayName={managedProfile?.display_name?.trim() || managedSession?.user?.email || "Loading user..."}
+        changeSchoolHref={changeSchoolHref && managedProfile?.role !== "super_admin" ? changeSchoolHref : ""}
+        onChangeSchool={() => {
+          window.location.assign(changeSchoolHref || homeHref || "/");
+        }}
+      >
+        <div className="admin-help" style={{ marginTop: 16 }}>
+          {message}
+        </div>
+      </AdminConsoleShellFrame>
+    );
+  }
+
   if (!authReady) {
+    if (isManagedAuth) {
+      return renderManagedShellLoading("Loading admin session...");
+    }
     return (
       <div className="admin-login">
         <h2>Loading...</h2>
@@ -12044,6 +12066,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   if (profileLoading) {
+    if (isManagedAuth) {
+      return renderManagedShellLoading("Loading admin profile...");
+    }
     return (
       <div className="admin-login">
         <h2>Loading...</h2>
@@ -12052,6 +12077,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   if (!profile) {
+    if (isManagedAuth && !loginMsg) {
+      return renderManagedShellLoading("Loading admin profile...");
+    }
     return (
       <div className="admin-login">
         <h2>{loginMsg ? "Startup Error" : "Loading..."}</h2>

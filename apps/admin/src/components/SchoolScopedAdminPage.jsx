@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   createAdminTrace,
-  getAdminDiagnosticsReport,
   isAbortLikeError,
   logAdminEvent,
   logAdminRequestFailure,
@@ -14,13 +13,9 @@ import {
   ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
   getLoadedAdminConsole,
   loadAdminConsole,
-  preloadAdminConsole,
-  preloadAdminConsoleCore,
 } from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
 import LoadableAdminModule from "./LoadableAdminModule";
-
-const ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS = 15000;
 
 export default function SchoolScopedAdminPage({
   schoolId,
@@ -32,16 +27,12 @@ export default function SchoolScopedAdminPage({
   const [schoolOptions, setSchoolOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [startupError, setStartupError] = useState("");
-  const [adminConsoleReady, setAdminConsoleReady] = useState(false);
-  const [adminConsoleError, setAdminConsoleError] = useState("");
   const [adminConsoleRetryNonce, setAdminConsoleRetryNonce] = useState(0);
 
   useEffect(() => {
     if (!supabase || !session || !profile) return;
     let mounted = true;
     const loadAbortController = new AbortController();
-    setAdminConsoleReady(false);
-    setAdminConsoleError("");
 
     function redirect(target, reason, extra = {}) {
       logAdminEvent("School scoped page redirect", {
@@ -139,88 +130,7 @@ export default function SchoolScopedAdminPage({
   }, [profile, router, schoolId, session, supabase]);
 
   useEffect(() => {
-    if (!session || !profile || !school) return;
-    let cancelled = false;
-    let timeoutId;
-    let timedOut = false;
-
-    const finishTrace = createAdminTrace("School scoped admin console preload", {
-      schoolId,
-      userId: session.user.id,
-      role: profile.role,
-      attempt: adminConsoleRetryNonce,
-    });
-
-    setAdminConsoleReady(false);
-    setAdminConsoleError("");
-
-    timeoutId = window.setTimeout(() => {
-      timedOut = true;
-      finishTrace("timeout", {
-        timeoutMs: ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS,
-      });
-      if (!cancelled) {
-        setAdminConsoleError("Admin console is taking too long to load. Retry or go back to Schools.");
-      }
-    }, ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS);
-
-    const preloadContext = {
-      pathname: `/super/schools/${schoolId}/admin`,
-      role: profile.role,
-      userId: session.user.id,
-      schoolId,
-      activeSchoolId: schoolId,
-      attempt: adminConsoleRetryNonce,
-      managedAuth: true,
-    };
-
-    void Promise.all([
-      preloadAdminConsole(
-        {
-          ...preloadContext,
-          source: "school-scoped-preload-wrapper",
-        },
-        { timeoutMs: ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS }
-      ),
-      preloadAdminConsoleCore(
-        {
-          ...preloadContext,
-          source: "school-scoped-preload-core",
-        },
-        { timeoutMs: ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS }
-      ),
-    ])
-      .then(() => {
-        window.clearTimeout(timeoutId);
-        if (cancelled) return;
-        if (!timedOut) {
-          finishTrace("success");
-        }
-        setAdminConsoleError("");
-        setAdminConsoleReady(true);
-      })
-      .catch((error) => {
-        window.clearTimeout(timeoutId);
-        if (cancelled) return;
-        finishTrace("failed", {
-          message: error instanceof Error ? error.message : String(error ?? ""),
-        });
-        logAdminRequestFailure("School scoped admin console preload failed", error, {
-          schoolId,
-          userId: session.user.id,
-          role: profile.role,
-        });
-        setAdminConsoleError("Failed to load the admin console. Retry or go back to Schools.");
-      });
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [adminConsoleRetryNonce, profile, school, schoolId, session]);
-
-  useEffect(() => {
-    if (!supabase || !session || !profile || !school || !adminConsoleReady) return;
+    if (!supabase || !session || !profile || !school) return;
     let cancelled = false;
     const schoolOptionsAbortController = new AbortController();
 
@@ -289,7 +199,7 @@ export default function SchoolScopedAdminPage({
       cancelled = true;
       schoolOptionsAbortController.abort();
     };
-  }, [adminConsoleReady, profile, school, schoolId, session, supabase]);
+  }, [profile, school, schoolId, session, supabase]);
 
   useEffect(() => {
     if (!session || !profile || !school) return;
@@ -319,55 +229,6 @@ export default function SchoolScopedAdminPage({
     );
   }
 
-  if (adminConsoleError) {
-    return (
-      <div className="admin-login">
-        <h2>Startup Error</h2>
-        <div className="admin-msg">{adminConsoleError}</div>
-        <button
-          className="admin-password-change-secondary"
-          type="button"
-          onClick={() => {
-            setAdminConsoleError("");
-            setAdminConsoleRetryNonce((value) => value + 1);
-          }}
-        >
-          RETRY
-        </button>
-        <button
-          className="admin-password-change-secondary"
-          type="button"
-          onClick={async () => {
-            const report = getAdminDiagnosticsReport({
-              schoolId,
-              source: "school-scoped-startup-error",
-              adminTab: initialRouteState?.adminTab ?? "announcements",
-              attendanceSubTab: initialRouteState?.attendanceSubTab ?? "sheet",
-              modelSubTab: initialRouteState?.modelSubTab ?? "results",
-              dailySubTab: initialRouteState?.dailySubTab ?? "results",
-            });
-            try {
-              await navigator.clipboard.writeText(report);
-            } catch (error) {
-              logAdminRequestFailure("School scoped diagnostics copy failed", error, {
-                schoolId,
-              });
-            }
-          }}
-        >
-          COPY DIAGNOSTICS
-        </button>
-        <button
-          className="admin-password-change-secondary"
-          type="button"
-          onClick={() => router.replace("/super/schools")}
-        >
-          BACK TO SCHOOLS
-        </button>
-      </div>
-    );
-  }
-
   if (authLoading || loading) {
     return (
       <div className="admin-login">
@@ -381,14 +242,6 @@ export default function SchoolScopedAdminPage({
       <div className="admin-login">
         <h2>Startup Error</h2>
         <div className="admin-msg">Admin session is not ready. Refresh the page.</div>
-      </div>
-    );
-  }
-
-  if (!adminConsoleReady) {
-    return (
-      <div className="admin-login">
-        <h2>Loading...</h2>
       </div>
     );
   }

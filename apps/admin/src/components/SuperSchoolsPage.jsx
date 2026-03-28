@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useSuperAdmin } from "./super/SuperAdminShell";
-import { preloadAdminConsole, preloadAdminConsoleCore } from "./adminConsoleLoader";
+import { preloadAdminConsole } from "./adminConsoleLoader";
 
 function emptyForm() {
   return {
@@ -290,10 +290,6 @@ export default function SuperSchoolsPage() {
       preloadAdminConsole({
         ...preloadContext,
         source: "super-schools-prefetch-wrapper",
-      }),
-      preloadAdminConsoleCore({
-        ...preloadContext,
-        source: "super-schools-prefetch-core",
       }),
     ]).catch(() => {});
   }

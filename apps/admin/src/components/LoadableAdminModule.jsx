@@ -24,6 +24,7 @@ export default function LoadableAdminModule({
   context = {},
   moduleProps = {},
   loadingLabel = "Loading...",
+  loadingFallback = null,
   errorTitle = "Startup Error",
   errorMessage = "Failed to load the admin console. Retry or go back and try again.",
   timeoutMs = ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
@@ -197,6 +198,11 @@ export default function LoadableAdminModule({
   }
 
   if (!LoadedComponent) {
+    if (loadingFallback) {
+      return typeof loadingFallback === "function"
+        ? loadingFallback({ label: loadingLabel })
+        : loadingFallback;
+    }
     return <LoadingFallback label={loadingLabel} />;
   }
 
