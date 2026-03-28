@@ -10,7 +10,6 @@ import {
 } from "../lib/adminDiagnostics";
 import { useSuperAdmin } from "./super/SuperAdminShell";
 import {
-  ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
   getLoadedAdminConsole,
   loadAdminConsole,
 } from "./adminConsoleLoader";
@@ -271,7 +270,7 @@ export default function SchoolScopedAdminPage({
           source: "school-scoped-mount",
         }}
         retryKey={adminConsoleRetryNonce}
-        timeoutMs={ADMIN_CONSOLE_IMPORT_TIMEOUT_MS}
+        timeoutMs={30000}
         errorMessage="Failed to mount the admin console. Retry or go back to Schools."
         backLabel="BACK TO SCHOOLS"
         onBack={() => router.replace("/super/schools")}

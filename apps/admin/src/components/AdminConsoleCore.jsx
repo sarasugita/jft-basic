@@ -36,6 +36,7 @@ const ADMIN_SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const ADMIN_SUPABASE_CONFIG_ERROR = !ADMIN_SUPABASE_URL || !ADMIN_SUPABASE_ANON_KEY
   ? "Admin app is missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY."
   : "";
+
 let adminSupabaseModulePromise = null;
 
 async function loadAdminSupabaseModule() {

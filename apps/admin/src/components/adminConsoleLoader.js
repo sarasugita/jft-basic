@@ -14,20 +14,6 @@ let adminConsoleCorePromise = null;
 let adminConsoleModule = null;
 let adminConsoleCoreModule = null;
 let startupListenersRegistered = false;
-const startupPromises = {
-  announcements: null,
-  students: null,
-  attendance: null,
-  dailyRecord: null,
-  ranking: null,
-};
-const startupModules = {
-  announcements: null,
-  students: null,
-  attendance: null,
-  dailyRecord: null,
-  ranking: null,
-};
 const workspacePromises = {
   students: null,
   attendance: null,
@@ -305,20 +291,6 @@ function loadCachedWorkspaceModule(key, importer) {
   );
 }
 
-function loadCachedStartupModule(key, importer) {
-  return loadCachedModule(
-    () => startupPromises[key],
-    (value) => {
-      startupPromises[key] = value;
-    },
-    () => startupModules[key],
-    (value) => {
-      startupModules[key] = value;
-    },
-    importer
-  );
-}
-
 export function loadAdminConsole(context = {}) {
   return loadImport(
     "AdminConsole",
@@ -374,43 +346,6 @@ function createWorkspaceLoaders(key, importTarget, importer) {
   return { load, preload, getLoaded };
 }
 
-function createStartupLoaders(key, importTarget, importer) {
-  const load = (context = {}) => loadImport(
-    importTarget,
-    () => loadCachedStartupModule(key, importer),
-    context
-  );
-  const preload = (context = {}, options = {}) => preloadImport(importTarget, load, context, options);
-  const getLoaded = () => startupModules[key];
-  return { load, preload, getLoaded };
-}
-
-const announcementsStartup = createStartupLoaders(
-  "announcements",
-  "AdminConsoleAnnouncementsStartup",
-  () => import("./AdminConsoleAnnouncementsStartup")
-);
-const studentsStartup = createStartupLoaders(
-  "students",
-  "AdminConsoleStudentsStartup",
-  () => import("./AdminConsoleStudentsStartup")
-);
-const attendanceStartup = createStartupLoaders(
-  "attendance",
-  "AdminConsoleAttendanceStartup",
-  () => import("./AdminConsoleAttendanceStartup")
-);
-const dailyRecordStartup = createStartupLoaders(
-  "dailyRecord",
-  "AdminConsoleDailyRecordStartup",
-  () => import("./AdminConsoleDailyRecordStartup")
-);
-const rankingStartup = createStartupLoaders(
-  "ranking",
-  "AdminConsoleRankingStartup",
-  () => import("./AdminConsoleRankingStartup")
-);
-
 const studentsWorkspace = createWorkspaceLoaders(
   "students",
   "AdminConsoleStudentsWorkspace",
@@ -449,26 +384,6 @@ export function getLoadedAdminConsole() {
 export function getLoadedAdminConsoleCore() {
   return adminConsoleCoreModule;
 }
-
-export const loadAdminConsoleAnnouncementsStartup = announcementsStartup.load;
-export const preloadAdminConsoleAnnouncementsStartup = announcementsStartup.preload;
-export const getLoadedAdminConsoleAnnouncementsStartup = announcementsStartup.getLoaded;
-
-export const loadAdminConsoleStudentsStartup = studentsStartup.load;
-export const preloadAdminConsoleStudentsStartup = studentsStartup.preload;
-export const getLoadedAdminConsoleStudentsStartup = studentsStartup.getLoaded;
-
-export const loadAdminConsoleAttendanceStartup = attendanceStartup.load;
-export const preloadAdminConsoleAttendanceStartup = attendanceStartup.preload;
-export const getLoadedAdminConsoleAttendanceStartup = attendanceStartup.getLoaded;
-
-export const loadAdminConsoleDailyRecordStartup = dailyRecordStartup.load;
-export const preloadAdminConsoleDailyRecordStartup = dailyRecordStartup.preload;
-export const getLoadedAdminConsoleDailyRecordStartup = dailyRecordStartup.getLoaded;
-
-export const loadAdminConsoleRankingStartup = rankingStartup.load;
-export const preloadAdminConsoleRankingStartup = rankingStartup.preload;
-export const getLoadedAdminConsoleRankingStartup = rankingStartup.getLoaded;
 
 export const loadAdminConsoleStudentsWorkspace = studentsWorkspace.load;
 export const preloadAdminConsoleStudentsWorkspace = studentsWorkspace.preload;
