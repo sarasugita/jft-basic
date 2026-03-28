@@ -142,6 +142,77 @@ AdminConsoleShellLayout
 
 ---
 
+## Phase 2d-2 Troubleshooting Log
+
+During the Phase 2d-2 extraction, several issues were encountered and resolved:
+
+### Issue 1: Missing Formatter Functions in Hook
+**Error**: `ReferenceError: formatDateShort is not defined`
+**Cause**: Memos in the hook referenced shared formatter functions that weren't available in hook scope
+**Solution**: Pass `formatDateShort` and `formatWeekday` as parameters from workspace component
+**Lesson**: Functions that depend on context should be passed as parameters or imported, not used directly in hooks
+
+### Issue 2: Complex Inline Function Definitions
+**Error**: `Cannot access 'j' before initialization`
+**Cause**: Inline function definitions in destructuring assignment caused variable hoisting issues
+**Solution**: Define formatter functions outside the hook call, pass by reference
+**Code Pattern Before** (❌ Bad):
+```javascript
+const { state } = useHook({
+  formatDateShort: (d) => { ... },
+  formatWeekday: (d) => { ... }
+});
+```
+**Code Pattern After** (✅ Good):
+```javascript
+function formatDateShortFn(d) { ... }
+function formatWeekdayFn(d) { ... }
+const { state } = useHook({
+  formatDateShort: formatDateShortFn,
+  formatWeekday: formatWeekdayFn
+});
+```
+
+### Issue 3: Missing buildAttendanceStats Function
+**Error**: `ReferenceError: buildAttendanceStats is not defined`
+**Cause**: Memos called `buildAttendanceStats()` but the function was never defined in the hook
+**Solution**: Added `buildAttendanceStats` function definition to the hook. It depends on helper functions already in scope (`normalizeAttendanceStatusToken`, `isCountedAttendanceStatus`)
+**Lesson**: When exporting a function from a hook's return object, ensure the function is actually defined in the hook
+
+### Issue 4: Circular Reference with attendanceSubTab
+**Error**: `ReferenceError: Cannot access 'attendanceSubTab' before initialization`
+**Cause**: Trying to destructure `attendanceSubTab` from hook while also passing it as a parameter to the hook
+**Solution**: Get `attendanceSubTab` from context only, pass to hook as parameter, don't try to get it back from hook
+**Pattern**:
+```javascript
+// ✅ Correct
+const { attendanceSubTab, ... } = useAdminConsoleWorkspaceContext();
+const { ...stateFromHook } = useAttendanceWorkspaceState({
+  attendanceSubTab,
+  ...
+});
+
+// ❌ Wrong - circular reference
+const { attendanceSubTab, stateFromHook } = useAttendanceWorkspaceState({
+  attendanceSubTab,
+  ...
+});
+```
+**Lesson**: State that comes from context should not be destructured from hooks that receive it as a parameter. UI state (which tab is active) stays in context; data state (attendance records) goes in hook.
+
+### Key Principles for Workspace State Extraction
+
+1. **Value vs Reference**: Primitives and objects from context (activeSchoolId, students, settings) should be passed to hooks as parameters
+2. **State Ownership**: UI state (tabs, modals, filters) can stay in context; data state (records, entries) should move to hooks
+3. **Helper Functions**: Shared formatters, validators, and utilities should be passed as parameters rather than imported in hooks to avoid circular dependencies
+4. **Function Dependencies**: When memos reference functions, ensure those functions are:
+   - Defined in the hook before the memos
+   - Or passed as parameters to the hook
+   - Not referenced before they're available
+5. **Initialization Order**: Keep function definitions separate from destructuring assignments to avoid hoisting issues
+
+---
+
 ### Commit c49fc3e: Phase 2c — DailyRecord Workspace Extraction
 
 **Files Added**:
