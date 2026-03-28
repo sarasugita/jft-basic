@@ -22,7 +22,8 @@
       "Bash(sed -n '1095,1138p' AdminConsoleCore.jsx)",
       "Bash(sed -n '742,831p' AdminConsoleCore.jsx)",
       "Bash(sed -n '929,931p' AdminConsoleCore.jsx)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }

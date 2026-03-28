@@ -5,13 +5,11 @@ import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext"
 import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceState";
 
 export default function AdminConsoleAttendanceWorkspace() {
-  const {
-    activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime,
-    // Derived memos from context (to be extracted in Phase 2d-2)
-    attendanceSubTab, setAttendanceSubTab, attendanceDayColumns, attendanceDayRates, attendanceFilteredStudents, attendanceRangeColumns, attendanceEntriesByDay
-  } = useAdminConsoleWorkspaceContext();
+  const { activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime, isAnalyticsExcludedStudent } = useAdminConsoleWorkspaceContext();
 
   const {
+    attendanceSubTab,
+    setAttendanceSubTab,
     attendanceMsg,
     attendanceDate,
     setAttendanceDate,
@@ -28,7 +26,13 @@ export default function AdminConsoleAttendanceWorkspace() {
     absenceApplicationsMsg,
     buildAttendanceStats,
     getAttendanceStatusClassName,
-  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab });
+    // Memos from hook
+    attendanceDayColumns,
+    attendanceRangeColumns,
+    attendanceEntriesByDay,
+    attendanceFilteredStudents,
+    attendanceDayRates,
+  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent });
 
   useEffect(() => {
     if (!activeSchoolId) return;

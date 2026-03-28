@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
 
 const ATTENDANCE_COUNTED_STATUSES = ["P", "L", "E", "A"];
@@ -179,7 +179,7 @@ function detectAttendanceImportLayout(rows) {
 }
 
 
-export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students = [], attendanceSubTab, setAttendanceSubTab }) {
+export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students = [], attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent = () => false }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
@@ -213,6 +213,61 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
 
   const attendanceImportInputRef = useRef(null);
   const attendanceImportChoiceResolverRef = useRef(null);
+
+  // Memos - derived attendance data
+  const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
+
+  const attendanceDayColumns = useMemo(() => {
+    return attendanceDays.map((d) => ({
+      ...d,
+      label: `${formatDateShort(d.day_date)} (${formatWeekday(d.day_date)})`
+    }));
+  }, [attendanceDays]);
+
+  const attendanceRangeColumns = useMemo(() => {
+    const start = attendanceFilter.startDate;
+    const end = attendanceFilter.endDate;
+    if (!start && !end) return attendanceDayColumns;
+    return attendanceDayColumns.filter((d) => {
+      const day = d.day_date;
+      if (start && day < start) return false;
+      if (end && day > end) return false;
+      return true;
+    });
+  }, [attendanceDayColumns, attendanceFilter.startDate, attendanceFilter.endDate]);
+
+  const activeStudents = useMemo(
+    () => (students ?? []).filter((s) => !s.is_withdrawn),
+    [students]
+  );
+
+  const attendanceFilteredStudents = useMemo(() => {
+    const minRate = attendanceFilter.minRate === "" ? null : Number(attendanceFilter.minRate);
+    const minAbsences = attendanceFilter.minAbsences === "" ? null : Number(attendanceFilter.minAbsences);
+    return activeStudents.filter((s) => {
+      const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
+      const stats = buildAttendanceStats(perDay);
+      const rate = stats.total ? (stats.present / stats.total) * 100 : 0;
+      const absences = stats.unexcused;
+      if (minRate != null && rate >= minRate) return false;
+      if (minAbsences != null && absences < minAbsences) return false;
+      return true;
+    });
+  }, [activeStudents, attendanceFilter, attendanceRangeColumns, attendanceEntriesByDay]);
+
+  const attendanceAnalyticsStudents = useMemo(
+    () => attendanceFilteredStudents.filter((student) => !isAnalyticsExcludedStudent(student)),
+    [attendanceFilteredStudents, isAnalyticsExcludedStudent]
+  );
+
+  const attendanceDayRates = useMemo(() => {
+    const rates = {};
+    attendanceDayColumns.forEach((day) => {
+      const statuses = attendanceAnalyticsStudents.map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "");
+      rates[day.id] = buildAttendanceStats(statuses).rate;
+    });
+    return rates;
+  }, [attendanceAnalyticsStudents, attendanceDayColumns, attendanceEntriesByDay]);
 
   // Async functions
   async function fetchAbsenceApplications() {
@@ -590,5 +645,13 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     isCountedAttendanceStatus,
     getAttendanceStatusClassName,
     detectAttendanceImportLayout,
+    // Memos
+    attendanceEntriesByDay,
+    attendanceDayColumns,
+    attendanceRangeColumns,
+    activeStudents,
+    attendanceFilteredStudents,
+    attendanceAnalyticsStudents,
+    attendanceDayRates,
   };
 }
