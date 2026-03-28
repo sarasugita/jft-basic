@@ -32,7 +32,18 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceEntriesByDay,
     attendanceFilteredStudents,
     attendanceDayRates,
-  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent });
+  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: (d) => {
+    if (!d) return "";
+    const date = new Date(`${d}T00:00:00Z`);
+    if (isNaN(date.getTime())) return "";
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  }, formatWeekday: (d) => {
+    if (!d) return "";
+    const date = new Date(`${d}T00:00:00Z`);
+    if (isNaN(date.getTime())) return "";
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return days[date.getUTCDay()] || "";
+  } });
 
   useEffect(() => {
     if (!activeSchoolId) return;

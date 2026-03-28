@@ -179,7 +179,7 @@ function detectAttendanceImportLayout(rows) {
 }
 
 
-export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students = [], attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent = () => false }) {
+export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students = [], attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent = () => false, formatDateShort = (d) => d, formatWeekday = (d) => "" }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
