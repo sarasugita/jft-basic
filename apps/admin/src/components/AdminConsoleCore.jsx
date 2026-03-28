@@ -11821,10 +11821,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
     isAudioAsset,
   };
   const workspaceContextValue = {
+    supabase,
     activeSchoolId,
     session,
     canUseAdminConsole,
     activeTab,
+    testSessions,
     attendanceSubTab,
     modelSubTab,
     dailySubTab,
