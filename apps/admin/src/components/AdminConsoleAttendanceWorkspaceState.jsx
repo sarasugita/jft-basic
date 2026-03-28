@@ -136,6 +136,19 @@ function getAttendanceStatusClassName(value, prefix = "att") {
 }
 
 
+function buildAttendanceStats(statuses) {
+  const marked = (statuses ?? []).map(normalizeAttendanceStatusToken).filter(isCountedAttendanceStatus);
+  const total = marked.length;
+  const present = marked.filter((status) => status === "P" || status === "L").length;
+  const unexcused = marked.filter((status) => status === "A").length;
+  return {
+    total,
+    present,
+    unexcused,
+    rate: total ? present / total : null,
+  };
+}
+
 function detectAttendanceImportLayout(rows) {
   const headerRow = Array.isArray(rows?.[0]) ? rows[0] : [];
   if (!headerRow.length) return null;
