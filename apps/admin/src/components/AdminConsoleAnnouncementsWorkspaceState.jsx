@@ -41,7 +41,10 @@ export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, sessi
       .eq("school_id", schoolIdSnapshot)
       .order("created_at", { ascending: false })
       .limit(200);
-    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) {
+      setAnnouncementMsg("");
+      return;
+    }
     if (error) {
       console.error("announcements fetch error:", error);
       setAnnouncements([]);

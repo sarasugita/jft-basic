@@ -380,7 +380,10 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         .limit(180);
     }
     const { data, error } = result;
-    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) {
+      setDailyRecordsMsg("");
+      return;
+    }
     if (error) {
       console.error("daily records fetch error:", error);
       setDailyRecords([]);
