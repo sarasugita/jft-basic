@@ -8,8 +8,16 @@ import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/a
 import {
   ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
   getLoadedAdminConsoleAnnouncementsStartup,
+  getLoadedAdminConsoleAttendanceStartup,
+  getLoadedAdminConsoleDailyRecordStartup,
+  getLoadedAdminConsoleRankingStartup,
+  getLoadedAdminConsoleStudentsStartup,
   getLoadedAdminConsoleCore,
   loadAdminConsoleAnnouncementsStartup,
+  loadAdminConsoleAttendanceStartup,
+  loadAdminConsoleDailyRecordStartup,
+  loadAdminConsoleRankingStartup,
+  loadAdminConsoleStudentsStartup,
   loadAdminConsoleCore,
   preloadAdminConsoleCore,
 } from "./adminConsoleLoader";
@@ -17,6 +25,43 @@ import LoadableAdminModule from "./LoadableAdminModule";
 import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
 
 const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
+const DIRECT_STARTUP_WORKSPACE_CONFIG = {
+  announcements: {
+    importTarget: "AdminConsoleAnnouncementsStartup",
+    loadModule: loadAdminConsoleAnnouncementsStartup,
+    getLoadedModule: getLoadedAdminConsoleAnnouncementsStartup,
+    loadingLabel: "Loading announcements...",
+    errorMessage: "Failed to load announcements. Retry or switch tabs and try again.",
+  },
+  attendance: {
+    importTarget: "AdminConsoleAttendanceStartup",
+    loadModule: loadAdminConsoleAttendanceStartup,
+    getLoadedModule: getLoadedAdminConsoleAttendanceStartup,
+    loadingLabel: "Loading attendance...",
+    errorMessage: "Failed to load attendance. Retry or switch tabs and try again.",
+  },
+  ranking: {
+    importTarget: "AdminConsoleRankingStartup",
+    loadModule: loadAdminConsoleRankingStartup,
+    getLoadedModule: getLoadedAdminConsoleRankingStartup,
+    loadingLabel: "Loading ranking...",
+    errorMessage: "Failed to load ranking. Retry or switch tabs and try again.",
+  },
+  students: {
+    importTarget: "AdminConsoleStudentsStartup",
+    loadModule: loadAdminConsoleStudentsStartup,
+    getLoadedModule: getLoadedAdminConsoleStudentsStartup,
+    loadingLabel: "Loading students...",
+    errorMessage: "Failed to load students. Retry or switch tabs and try again.",
+  },
+  dailyRecord: {
+    importTarget: "AdminConsoleDailyRecordStartup",
+    loadModule: loadAdminConsoleDailyRecordStartup,
+    getLoadedModule: getLoadedAdminConsoleDailyRecordStartup,
+    loadingLabel: "Loading schedule & record...",
+    errorMessage: "Failed to load schedule & record. Retry or switch tabs and try again.",
+  },
+};
 
 function getAdminPageTitle(activeTab) {
   if (activeTab === "announcements") return "Announcements";
@@ -186,6 +231,7 @@ export default function AdminConsole(props) {
     attempt: coreRetryNonce,
     managedAuth: isManagedAuth,
   };
+  const directStartupWorkspace = DIRECT_STARTUP_WORKSPACE_CONFIG[startupTab] ?? null;
 
   if (!renderTraceLoggedRef.current) {
     renderTraceLoggedRef.current = true;
@@ -471,8 +517,8 @@ export default function AdminConsole(props) {
         changeSchoolHref={changeSchoolHref && profile?.role !== "super_admin" ? changeSchoolHref : ""}
         onSignOut={handleSignOut}
         onSelectTab={(nextTab) => {
-          if (nextTab === "announcements") {
-            setStartupTab("announcements");
+          if (DIRECT_STARTUP_WORKSPACE_CONFIG[nextTab]) {
+            setStartupTab(nextTab);
             return;
           }
           setStartupTab(nextTab);
@@ -552,28 +598,30 @@ export default function AdminConsole(props) {
         changeSchoolHref={changeSchoolHref && profile?.role !== "super_admin" ? changeSchoolHref : ""}
         onSignOut={handleSignOut}
         onSelectTab={(nextTab) => {
-          if (nextTab === "announcements") {
-            setStartupTab("announcements");
+          if (DIRECT_STARTUP_WORKSPACE_CONFIG[nextTab]) {
+            setStartupTab(nextTab);
             return;
           }
           openLegacyCore(nextTab);
         }}
       >
-        <LoadableAdminWorkspace
-          importTarget="AdminConsoleAnnouncementsStartup"
-          loadModule={loadAdminConsoleAnnouncementsStartup}
-          getLoadedModule={getLoadedAdminConsoleAnnouncementsStartup}
-          context={{
-            ...baseContext,
-            source: "startup-workspace",
-          }}
-          moduleProps={{
-            activeSchoolId,
-          }}
-          loadingLabel="Loading announcements..."
-          errorTitle="Workspace Error"
-          errorMessage="Failed to load announcements. Retry or switch tabs and try again."
-        />
+        {directStartupWorkspace ? (
+          <LoadableAdminWorkspace
+            importTarget={directStartupWorkspace.importTarget}
+            loadModule={directStartupWorkspace.loadModule}
+            getLoadedModule={directStartupWorkspace.getLoadedModule}
+            context={{
+              ...baseContext,
+              source: "startup-workspace",
+            }}
+            moduleProps={{
+              activeSchoolId,
+            }}
+            loadingLabel={directStartupWorkspace.loadingLabel}
+            errorTitle="Workspace Error"
+            errorMessage={directStartupWorkspace.errorMessage}
+          />
+        ) : null}
       </AdminConsoleStartupFrame>
     );
   }

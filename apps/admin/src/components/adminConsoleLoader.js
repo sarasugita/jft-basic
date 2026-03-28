@@ -13,6 +13,14 @@ let adminConsoleModule = null;
 let adminConsoleCoreModule = null;
 let adminConsoleAnnouncementsStartupPromise = null;
 let adminConsoleAnnouncementsStartupModule = null;
+let adminConsoleAttendanceStartupPromise = null;
+let adminConsoleAttendanceStartupModule = null;
+let adminConsoleRankingStartupPromise = null;
+let adminConsoleRankingStartupModule = null;
+let adminConsoleDailyRecordStartupPromise = null;
+let adminConsoleDailyRecordStartupModule = null;
+let adminConsoleStudentsStartupPromise = null;
+let adminConsoleStudentsStartupModule = null;
 let startupListenersRegistered = false;
 const workspacePromises = {
   students: null,
@@ -333,6 +341,94 @@ export function preloadAdminConsoleAnnouncementsStartup(context = {}, options = 
   return preloadImport("AdminConsoleAnnouncementsStartup", loadAdminConsoleAnnouncementsStartup, context, options);
 }
 
+export function loadAdminConsoleAttendanceStartup(context = {}) {
+  return loadImport(
+    "AdminConsoleAttendanceStartup",
+    () => loadCachedModule(
+      () => adminConsoleAttendanceStartupPromise,
+      (value) => {
+        adminConsoleAttendanceStartupPromise = value;
+      },
+      () => adminConsoleAttendanceStartupModule,
+      (value) => {
+        adminConsoleAttendanceStartupModule = value;
+      },
+      () => import("./AdminConsoleAttendanceStartup")
+    ),
+    context
+  );
+}
+
+export function preloadAdminConsoleAttendanceStartup(context = {}, options = {}) {
+  return preloadImport("AdminConsoleAttendanceStartup", loadAdminConsoleAttendanceStartup, context, options);
+}
+
+export function loadAdminConsoleRankingStartup(context = {}) {
+  return loadImport(
+    "AdminConsoleRankingStartup",
+    () => loadCachedModule(
+      () => adminConsoleRankingStartupPromise,
+      (value) => {
+        adminConsoleRankingStartupPromise = value;
+      },
+      () => adminConsoleRankingStartupModule,
+      (value) => {
+        adminConsoleRankingStartupModule = value;
+      },
+      () => import("./AdminConsoleRankingStartup")
+    ),
+    context
+  );
+}
+
+export function preloadAdminConsoleRankingStartup(context = {}, options = {}) {
+  return preloadImport("AdminConsoleRankingStartup", loadAdminConsoleRankingStartup, context, options);
+}
+
+export function loadAdminConsoleDailyRecordStartup(context = {}) {
+  return loadImport(
+    "AdminConsoleDailyRecordStartup",
+    () => loadCachedModule(
+      () => adminConsoleDailyRecordStartupPromise,
+      (value) => {
+        adminConsoleDailyRecordStartupPromise = value;
+      },
+      () => adminConsoleDailyRecordStartupModule,
+      (value) => {
+        adminConsoleDailyRecordStartupModule = value;
+      },
+      () => import("./AdminConsoleDailyRecordStartup")
+    ),
+    context
+  );
+}
+
+export function preloadAdminConsoleDailyRecordStartup(context = {}, options = {}) {
+  return preloadImport("AdminConsoleDailyRecordStartup", loadAdminConsoleDailyRecordStartup, context, options);
+}
+
+export function loadAdminConsoleStudentsStartup(context = {}) {
+  return loadImport(
+    "AdminConsoleStudentsStartup",
+    () => loadCachedModule(
+      () => adminConsoleStudentsStartupPromise,
+      (value) => {
+        adminConsoleStudentsStartupPromise = value;
+      },
+      () => adminConsoleStudentsStartupModule,
+      (value) => {
+        adminConsoleStudentsStartupModule = value;
+      },
+      () => import("./AdminConsoleStudentsStartup")
+    ),
+    context
+  );
+}
+
+export function preloadAdminConsoleStudentsStartup(context = {}, options = {}) {
+  return preloadImport("AdminConsoleStudentsStartup", loadAdminConsoleStudentsStartup, context, options);
+}
+
 function createWorkspaceLoaders(key, importTarget, importer) {
   const load = (context = {}) => loadImport(
     importTarget,
@@ -385,6 +481,22 @@ export function getLoadedAdminConsoleCore() {
 
 export function getLoadedAdminConsoleAnnouncementsStartup() {
   return adminConsoleAnnouncementsStartupModule;
+}
+
+export function getLoadedAdminConsoleAttendanceStartup() {
+  return adminConsoleAttendanceStartupModule;
+}
+
+export function getLoadedAdminConsoleRankingStartup() {
+  return adminConsoleRankingStartupModule;
+}
+
+export function getLoadedAdminConsoleDailyRecordStartup() {
+  return adminConsoleDailyRecordStartupModule;
+}
+
+export function getLoadedAdminConsoleStudentsStartup() {
+  return adminConsoleStudentsStartupModule;
 }
 
 export const loadAdminConsoleStudentsWorkspace = studentsWorkspace.load;
