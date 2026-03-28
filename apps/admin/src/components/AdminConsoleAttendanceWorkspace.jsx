@@ -4,6 +4,21 @@ import { useEffect } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceState";
 
+function formatDateShortFn(d) {
+  if (!d) return "";
+  const date = new Date(`${d}T00:00:00Z`);
+  if (isNaN(date.getTime())) return "";
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function formatWeekdayFn(d) {
+  if (!d) return "";
+  const date = new Date(`${d}T00:00:00Z`);
+  if (isNaN(date.getTime())) return "";
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return days[date.getUTCDay()] || "";
+}
+
 export default function AdminConsoleAttendanceWorkspace() {
   const { activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime, isAnalyticsExcludedStudent } = useAdminConsoleWorkspaceContext();
 
@@ -32,18 +47,7 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceEntriesByDay,
     attendanceFilteredStudents,
     attendanceDayRates,
-  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: (d) => {
-    if (!d) return "";
-    const date = new Date(`${d}T00:00:00Z`);
-    if (isNaN(date.getTime())) return "";
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  }, formatWeekday: (d) => {
-    if (!d) return "";
-    const date = new Date(`${d}T00:00:00Z`);
-    if (isNaN(date.getTime())) return "";
-    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    return days[date.getUTCDay()] || "";
-  } });
+  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: formatDateShortFn, formatWeekday: formatWeekdayFn });
 
   useEffect(() => {
     if (!activeSchoolId) return;
