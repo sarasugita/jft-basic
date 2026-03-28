@@ -1,16 +1,20 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { syncAdminAuthCookie } from "../lib/authCookies";
 import { logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import {
   ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
   getLoadedAdminConsoleCore,
   loadAdminConsoleCore,
   preloadAdminConsoleCore,
 } from "./adminConsoleLoader";
-import AdminConsoleStudentsStartup from "./AdminConsoleStudentsStartup";
+import AdminConsoleDailyRecordStartup from "./AdminConsoleDailyRecordStartup";
 import LoadableAdminModule from "./LoadableAdminModule";
+
+const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
 
 function getAdminPageTitle(activeTab) {
   if (activeTab === "attendance") return "Attendance";
@@ -22,11 +26,27 @@ function getAdminPageTitle(activeTab) {
   return "Student List";
 }
 
+function normalizeSchoolAssignments(rows) {
+  return Array.isArray(rows)
+    ? rows
+        .filter((row) => row?.school_id)
+        .map((row) => ({
+          school_id: row.school_id,
+          school_name: row.school_name ?? row.school_id,
+          school_status: row.school_status ?? null,
+          is_primary: Boolean(row.is_primary),
+        }))
+    : [];
+}
+
 function AdminConsoleStartupFrame({
   schoolName,
   displayName,
-  activeTab = "students",
+  activeTab = "dailyRecord",
   onSelectTab = null,
+  schoolSelector = null,
+  changeSchoolHref = "",
+  onSignOut = null,
   children,
 }) {
   const navItems = [
@@ -66,6 +86,11 @@ function AdminConsoleStartupFrame({
         </div>
         <div className="admin-sidebar-footer">
           <div className="admin-email">{displayName || "Loading user..."}</div>
+          {onSignOut ? (
+            <button className="admin-nav-item logout" type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+          ) : null}
         </div>
       </aside>
 
@@ -74,10 +99,23 @@ function AdminConsoleStartupFrame({
           <div className="admin-page-topbar">
             <div className="admin-page-topbar-title">{getAdminPageTitle(activeTab)}</div>
             <div className="admin-page-topbar-meta">
-              <div className="admin-school-switcher admin-topbar-school-switcher">
-                <label>School</label>
-                <div className="admin-topbar-school-label">{schoolName || "Loading school..."}</div>
-              </div>
+              {schoolSelector || (
+                <div className="admin-school-switcher admin-topbar-school-switcher">
+                  <label>School</label>
+                  <div className="admin-topbar-school-label">{schoolName || "Loading school..."}</div>
+                </div>
+              )}
+              {changeSchoolHref ? (
+                <button
+                  className="btn admin-topbar-link"
+                  type="button"
+                  onClick={() => {
+                    window.location.assign(changeSchoolHref);
+                  }}
+                >
+                  Change school
+                </button>
+              ) : null}
               <div className="admin-page-topbar-console">Admin Console</div>
               <div className="admin-page-topbar-user">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -110,13 +148,24 @@ export default function AdminConsole(props) {
   const [coreReady, setCoreReady] = useState(false);
   const [coreError, setCoreError] = useState("");
   const [coreRetryNonce, setCoreRetryNonce] = useState(0);
-  const [startupTab, setStartupTab] = useState("students");
+  const [startupTab, setStartupTab] = useState("dailyRecord");
   const [legacyCoreRequested, setLegacyCoreRequested] = useState(false);
+  const [schoolAssignments, setSchoolAssignments] = useState([]);
+  const [schoolScopeId, setSchoolScopeId] = useState(null);
 
   const isManagedAuth = managedSession !== undefined || managedProfile !== undefined;
   const session = managedSession ?? null;
   const profile = managedProfile ?? null;
-  const activeSchoolId = forcedSchoolScope?.id ?? profile?.school_id ?? null;
+  const supabaseConfigError = getAdminSupabaseConfigError();
+  const baseSupabase = useMemo(
+    () => (supabaseConfigError ? null : createAdminSupabaseClient()),
+    [supabaseConfigError]
+  );
+  const activeSchoolId = forcedSchoolScope?.id ?? schoolScopeId ?? profile?.school_id ?? null;
+  const activeSchoolName = forcedSchoolScope?.name
+    ?? schoolAssignments.find((assignment) => assignment.school_id === activeSchoolId)?.school_name
+    ?? activeSchoolId
+    ?? "";
   const isConsoleReadyForCore = Boolean(
     session
       && profile
@@ -149,6 +198,135 @@ export default function AdminConsole(props) {
     if (!isConsoleReadyForCore) return;
     logAdminEvent("Admin console managed auth ready", baseContext);
   }, [activeSchoolId, coreRetryNonce, isConsoleReadyForCore, pathname, profile?.role, session?.user?.id]);
+
+  useEffect(() => {
+    if (!profile) {
+      setSchoolAssignments([]);
+      setSchoolScopeId(null);
+      return;
+    }
+
+    if (forcedSchoolScope?.id) {
+      setSchoolScopeId(forcedSchoolScope.id);
+      return;
+    }
+
+    if (profile.role !== "admin") {
+      setSchoolAssignments([]);
+      setSchoolScopeId(profile.school_id ?? null);
+      return;
+    }
+
+    if (!baseSupabase || !session?.user?.id) {
+      setSchoolAssignments([]);
+      setSchoolScopeId(profile.school_id ?? null);
+      return;
+    }
+
+    let mounted = true;
+
+    async function loadSchoolAssignments() {
+      const selectStoredScope = (assignments) => {
+        const storedScope = typeof window !== "undefined"
+          ? window.localStorage.getItem(ADMIN_SCHOOL_SCOPE_STORAGE_KEY)
+          : null;
+        const validStoredScope = assignments.some((assignment) => assignment.school_id === storedScope);
+        return validStoredScope
+          ? storedScope
+          : profile.school_id ?? assignments[0]?.school_id ?? null;
+      };
+
+      const { data: rpcSchoolOptionsData, error: rpcSchoolOptionsError } = await baseSupabase.rpc(
+        "get_admin_school_options"
+      );
+      const rpcAssignments = normalizeSchoolAssignments(rpcSchoolOptionsData);
+      if (!rpcSchoolOptionsError && rpcAssignments.length > 0) {
+        if (!mounted) return;
+        setSchoolAssignments(rpcAssignments);
+        setSchoolScopeId(selectStoredScope(rpcAssignments));
+        return;
+      }
+
+      const { data: schoolOptionsData, error: schoolOptionsError } = await baseSupabase.functions.invoke(
+        "get-admin-school-options",
+        { body: {} }
+      );
+      const functionAssignments = normalizeSchoolAssignments(schoolOptionsData?.schools);
+      if (!schoolOptionsError && functionAssignments.length > 0) {
+        if (!mounted) return;
+        setSchoolAssignments(functionAssignments);
+        setSchoolScopeId(selectStoredScope(functionAssignments));
+        return;
+      }
+
+      const { data: assignments, error: assignmentsError } = await baseSupabase
+        .from("admin_school_assignments")
+        .select("school_id, is_primary")
+        .eq("admin_user_id", session.user.id)
+        .order("is_primary", { ascending: false });
+
+      if (assignmentsError) {
+        if (!mounted) return;
+        setSchoolAssignments(
+          profile.school_id
+            ? [{ school_id: profile.school_id, school_name: "Current School", is_primary: true }]
+            : []
+        );
+        setSchoolScopeId(profile.school_id ?? null);
+        return;
+      }
+
+      const schoolIds = Array.from(
+        new Set([profile.school_id, ...(assignments ?? []).map((row) => row.school_id)].filter(Boolean))
+      );
+
+      const schoolRows = await Promise.all(
+        schoolIds.map(async (id) => {
+          const schoolClient = createAdminSupabaseClient({ schoolScopeId: id });
+          const { data } = await schoolClient
+            .from("schools")
+            .select("id, name, status")
+            .eq("id", id)
+            .maybeSingle();
+          return data ?? null;
+        })
+      );
+
+      if (!mounted) return;
+      const schoolMap = Object.fromEntries(schoolRows.filter(Boolean).map((row) => [row.id, row]));
+      const normalizedAssignments = schoolIds.map((id) => ({
+        school_id: id,
+        school_name: schoolMap[id]?.name ?? id,
+        school_status: schoolMap[id]?.status ?? null,
+        is_primary: id === profile.school_id || (assignments ?? []).some((row) => row.school_id === id && row.is_primary),
+      }));
+      setSchoolAssignments(normalizedAssignments);
+      setSchoolScopeId(selectStoredScope(normalizedAssignments));
+    }
+
+    void loadSchoolAssignments();
+
+    return () => {
+      mounted = false;
+    };
+  }, [baseSupabase, forcedSchoolScope?.id, profile, session?.user?.id]);
+
+  useEffect(() => {
+    if (forcedSchoolScope?.id || profile?.role !== "admin") return;
+    if (typeof window === "undefined") return;
+    if (schoolScopeId) {
+      window.localStorage.setItem(ADMIN_SCHOOL_SCOPE_STORAGE_KEY, schoolScopeId);
+      return;
+    }
+    window.localStorage.removeItem(ADMIN_SCHOOL_SCOPE_STORAGE_KEY);
+  }, [forcedSchoolScope?.id, profile?.role, schoolScopeId]);
+
+  useEffect(() => {
+    if (!isConsoleReadyForCore) {
+      setLegacyCoreRequested(false);
+      setStartupTab("dailyRecord");
+    }
+  }, [isConsoleReadyForCore]);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,10 +403,55 @@ export default function AdminConsole(props) {
     session,
   ]);
 
-  function openLegacyCore(nextTab = "students") {
+  function openLegacyCore(nextTab = "dailyRecord") {
     setStartupTab(nextTab);
     setLegacyCoreRequested(true);
   }
+
+  async function handleSignOut() {
+    if (!baseSupabase) {
+      window.location.assign(homeHref || "/");
+      return;
+    }
+    try {
+      await baseSupabase.auth.signOut({ scope: "local" });
+    } finally {
+      syncAdminAuthCookie(null);
+      window.location.assign(homeHref || "/");
+    }
+  }
+
+  const startupSchoolSelector = forcedSchoolScope?.id && profile?.role === "super_admin"
+    ? (
+      <div className="admin-school-switcher admin-topbar-school-switcher">
+        <label>School</label>
+        <div className="admin-topbar-school-label">{forcedSchoolScope.name || activeSchoolName || "Loading school..."}</div>
+      </div>
+    )
+    : !forcedSchoolScope?.id && profile?.role === "admin"
+      ? (
+        <div className="admin-school-switcher admin-topbar-school-switcher">
+          <label htmlFor="admin-startup-school-switcher">School</label>
+          {schoolAssignments.length > 1 ? (
+            <select
+              id="admin-startup-school-switcher"
+              value={activeSchoolId ?? ""}
+              onChange={(event) => setSchoolScopeId(event.target.value || null)}
+            >
+              {schoolAssignments.map((assignment) => (
+                <option key={assignment.school_id} value={assignment.school_id}>
+                  {assignment.school_name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="admin-topbar-school-label">
+              {schoolAssignments[0]?.school_name ?? activeSchoolName ?? "Loading school..."}
+            </div>
+          )}
+        </div>
+      )
+      : null;
 
   function renderLegacyLoadingFrame({
     message,
@@ -239,9 +462,12 @@ export default function AdminConsole(props) {
   }) {
     return (
       <AdminConsoleStartupFrame
-        schoolName={forcedSchoolScope?.name ?? null}
+        schoolName={activeSchoolName}
         displayName={profile?.display_name?.trim() || session?.user?.email || "User"}
         activeTab={startupTab}
+        schoolSelector={startupSchoolSelector}
+        changeSchoolHref={changeSchoolHref && profile?.role !== "super_admin" ? changeSchoolHref : ""}
+        onSignOut={handleSignOut}
         onSelectTab={(nextTab) => {
           setStartupTab(nextTab);
           openLegacyCore(nextTab);
@@ -313,20 +539,23 @@ export default function AdminConsole(props) {
   if (!legacyCoreRequested) {
     return (
       <AdminConsoleStartupFrame
-        schoolName={forcedSchoolScope?.name ?? null}
+        schoolName={activeSchoolName}
         displayName={profile?.display_name?.trim() || session?.user?.email || "User"}
         activeTab={startupTab}
+        schoolSelector={startupSchoolSelector}
+        changeSchoolHref={changeSchoolHref && profile?.role !== "super_admin" ? changeSchoolHref : ""}
+        onSignOut={handleSignOut}
         onSelectTab={(nextTab) => {
-          if (nextTab === "students") {
-            setStartupTab("students");
+          if (nextTab === "dailyRecord") {
+            setStartupTab("dailyRecord");
             return;
           }
           openLegacyCore(nextTab);
         }}
       >
-        <AdminConsoleStudentsStartup
+        <AdminConsoleDailyRecordStartup
           activeSchoolId={activeSchoolId}
-          onOpenFullConsole={() => openLegacyCore("students")}
+          onOpenFullConsole={() => openLegacyCore("dailyRecord")}
         />
       </AdminConsoleStartupFrame>
     );
