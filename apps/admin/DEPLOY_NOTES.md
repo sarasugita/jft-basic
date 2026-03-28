@@ -4,7 +4,7 @@
 
 **Goal**: Split AdminConsoleCore (14,439 lines / 325 KB) into per-workspace isolated bundles to fix loading failures on slow/non-US devices.
 
-**Progress**: 2 of 6 workspaces extracted. AdminConsoleCore reduced from 325.1 KB → 316.2 KB (−8.9 KB).
+**Progress**: 3 of 6 workspaces extracted. AdminConsoleCore reduced from 325.1 KB → 295.3 KB (−29.8 KB cumulative).
 
 ---
 
@@ -14,21 +14,21 @@
 ```
 AdminConsole (4.3 KB wrapper)
   ↓ imports
-AdminConsoleCore (316.2 KB, shrinking)
+AdminConsoleCore (295.3 KB, shrinking)
   ├─ Auth + supabase client creation
   ├─ School scope management
   ├─ Sidebar + topbar chrome JSX
-  ├─ ALL state for all 6 workspaces (203 useState vars)
-  ├─ ALL data fetching functions
-  ├─ ALL mutation handlers
-  └─ WorkspaceContext provider with ~200 properties
+  ├─ Remaining state for 3 workspaces (shared utilities + Testing data)
+  ├─ Data fetching functions (shared + Testing)
+  ├─ Mutation handlers (shared + Testing)
+  └─ WorkspaceContext provider with ~100 properties
        ↓ consumed by
-  [Workspace components] (thin display layers)
+  [Workspace components with isolated state hooks]
     ├─ AdminConsoleStudentsWorkspace (30.8 KB)
     ├─ AdminConsoleAttendanceWorkspace (9.1 KB)
-    ├─ AdminConsoleDailyRecordWorkspace (7.3 KB)
+    ├─ AdminConsoleDailyRecordWorkspace (27.4 KB) ← REFACTORED
     ├─ AdminConsoleRankingWorkspace (10.8 KB) ← REFACTORED
-    ├─ AdminConsoleAnnouncementsWorkspace (11.0 KB) ← REFACTORED
+    ├─ AdminConsoleAnnouncementsWorkspace (11.1 KB) ← REFACTORED
     └─ AdminConsoleTestingWorkspace (67.3 KB)
 ```
 
@@ -47,15 +47,15 @@ AdminConsoleShellLayout
   /admin/announcements
     AdminConsoleAnnouncementsWorkspace
       └─ useAnnouncementsWorkspaceState hook (self-contained) ← DEPLOYED
+  /admin/dailyRecord
+    AdminConsoleDailyRecordWorkspace
+      └─ useDailyRecordWorkspaceState hook (self-contained) ← DEPLOYED
   /admin/students
     AdminConsoleStudentsWorkspace
       └─ useStudentsWorkspaceState hook (TBD)
   /admin/attendance
     AdminConsoleAttendanceWorkspace
       └─ useAttendanceWorkspaceState hook (TBD)
-  /admin/daily-record
-    AdminConsoleDailyRecordWorkspace
-      └─ useDailyRecordWorkspaceState hook (TBD)
   /admin/model | /admin/daily
     AdminConsoleTestingWorkspace
       └─ useTestingWorkspaceState hook (TBD)
@@ -96,7 +96,25 @@ AdminConsoleShellLayout
   - Functions: fetchAnnouncements, createAnnouncement, deleteAnnouncement, startEditAnnouncement, cancelEditAnnouncement, openCreateAnnouncementModal, closeCreateAnnouncementModal, saveAnnouncementEdits
   - WorkspaceContext entries: 16 announcement-related properties
 
-**Chunk Impact**: Core 319.0 KB → 316.2 KB (−2.8 KB). Announcements workspace 6.7 KB → 11.0 KB (now carries state).
+**Chunk Impact**: Core 319.0 KB → 316.2 KB (−2.8 KB). Announcements workspace 6.7 KB → 11.1 KB (now carries state).
+
+---
+
+### Commit c49fc3e: Phase 2c — DailyRecord Workspace Extraction
+
+**Files Added**:
+- `src/components/AdminConsoleDailyRecordWorkspaceState.jsx` — useDailyRecordWorkspaceState hook with all schedule/record state/effects/handlers
+
+**Files Modified**:
+- `AdminConsoleDailyRecordWorkspace.jsx` — now uses own state hook instead of WorkspaceContext; added local formatDateFull/formatWeekday helpers
+- `AdminConsoleCore.jsx` — removed:
+  - State: dailyRecords, dailyRecordsMsg, dailyRecordDate, dailyRecordDatePickerOpen, dailyRecordCalendarMonth, dailyRecordModalOpen, dailyRecordSaving, dailyRecordForm, dailyRecordAnnouncementTitleDraft, dailyRecordAnnouncementDraft, dailyRecordSyllabusAnnouncements, dailyRecordPlanDrafts, dailyRecordConfirmedDates, dailyRecordPlanSavingDate, dailyRecordHolidaySavingDate, + 2 refs
+  - Functions: fetchDailyRecords, openDailyRecordModal, closeDailyRecordModal, updateDailyRecordPlanDraft, updateDailyRecordComment, updateDailyRecordTextbookEntry, toggleDailyRecordCanDo, addDailyRecordTextbookEntry, removeDailyRecordTextbookEntry, addDailyRecordCommentRow, removeDailyRecordCommentRow, saveDailyRecord, saveDailyRecordPlan, saveDailyRecordHoliday
+  - Memos: scheduleRecordRows, scheduleRecordActualTestsByDate, scheduleRecordDisplayByDate, dailyRecordSelectableDates, dailyRecordSelectableDateSet, dailyRecordCalendarMonths, dailyRecordCalendarMonthKeys, dailyRecordActiveCalendarMonth, dailyRecordTomorrowSessions
+  - Modal JSX: 350-line portal rendering the daily record form
+  - WorkspaceContext entries: 20 DailyRecord-related properties
+
+**Chunk Impact**: Core 316.2 KB → 295.3 KB (−20.9 KB). DailyRecord workspace 7.3 KB → 27.4 KB (now carries state + Irodori constants + modal content logic).
 
 ---
 
@@ -173,16 +191,19 @@ If regressions are found:
 
 ---
 
-## Notes for Next Phase (DailyRecord)
+## Notes for Next Phase (Attendance — Phase 2d)
 
 AdminConsoleCore still contains:
-- 203 useState hooks total (removed 16 so far)
-- Daily record state: dailyRecords, dailyRecordForm, dailyRecordDate, dailyRecordModalOpen, dailyRecordPlanDrafts, dailyRecordConfirmedDates, dailyRecordSyllabusAnnouncements, dailyRecordHolidaySavingDate, dailyRecordPlanSavingDate
-- Daily record functions: fetchDailyRecords, openDailyRecordModal, closeDailyRecordModal, updateDailyRecordPlanDraft, saveDailyRecordPlan, saveDailyRecordHoliday, etc.
-- Will extract in Phase 2c following same pattern as ranking/announcements
+- ~180 useState hooks total (removed 52 across 3 extractions)
+- Attendance state: attendanceDate, attendanceModalDay, attendanceByDay, attendanceEntriesByDay, absenceApplications, etc.
+- Attendance functions: fetchAttendanceDays, openAttendanceDay, fetchAbsenceApplications, decideAbsenceApplication, etc.
+- Will extract in Phase 2d following same pattern as ranking/announcements/dailyRecord
 
-Shared dependency: `getTodayDateInput`, `addDays`, `addMonths` — already extracted to adminFormatters or kept in AdminConsoleCore if used by other workspaces.
+Shared dependencies:
+- formatDateFull, formatWeekday, formatDateShort — used by multiple workspaces, keep in core
+- Attendance-specific helpers: buildAttendanceStats, buildAttendancePieData, buildAttendanceSummary — move with state hook
+- Date utilities: getTodayDateInput, addDays — already in hook or core, refactor if needed
 
 ---
 
-**Last Updated**: 2026-03-28 | **Commits**: f25be63 (ranking), 41a67e3 (announcements)
+**Last Updated**: 2026-03-28 | **Commits**: f25be63 (ranking), 41a67e3 (announcements), c49fc3e (dailyRecord)
