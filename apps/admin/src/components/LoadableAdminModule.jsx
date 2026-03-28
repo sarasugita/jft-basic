@@ -73,7 +73,8 @@ export default function LoadableAdminModule({
   }, [LoadedComponent, stableContext]);
 
   useEffect(() => {
-    setLoadedComponent(resolveModuleExport(getLoadedModule?.()));
+    const initialComponent = resolveModuleExport(getLoadedModule?.());
+    setLoadedComponent(() => initialComponent);
     setModuleError("");
     renderTraceLoggedRef.current = false;
   }, [getLoadedModule, retryKey]);
