@@ -2,13 +2,34 @@
 
 import { useEffect } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
+import { useDailyRecordWorkspaceState } from "./AdminConsoleDailyRecordWorkspaceState";
+
+function formatDateFull(value) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00Z`);
+  if (isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+}
+
+function formatWeekday(value) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00Z`);
+  if (isNaN(date.getTime())) return "";
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return days[date.getUTCDay()] || "";
+}
 
 export default function AdminConsoleDailyRecordWorkspace() {
   const {
     activeSchoolId,
-    fetchDailyRecords,
+    supabase,
+    session,
     students,
     fetchStudents,
+    testSessions,
+  } = useAdminConsoleWorkspaceContext();
+
+  const {
     dailyRecordDatePickerRef,
     dailyRecordDatePickerOpen,
     setDailyRecordDatePickerOpen,
@@ -17,8 +38,6 @@ export default function AdminConsoleDailyRecordWorkspace() {
     dailyRecordActiveCalendarMonth,
     dailyRecordCalendarMonthKeys,
     setDailyRecordCalendarMonth,
-    formatDateFull,
-    formatWeekday,
     openDailyRecordModal,
     dailyRecordTableWrapRef,
     scheduleRecordRows,
@@ -32,7 +51,8 @@ export default function AdminConsoleDailyRecordWorkspace() {
     saveDailyRecordPlan,
     dailyRecordPlanSavingDate,
     dailyRecordsMsg,
-  } = useAdminConsoleWorkspaceContext();
+    fetchDailyRecords,
+  } = useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions });
 
   useEffect(() => {
     if (!activeSchoolId) return;
@@ -40,7 +60,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
     if (!students.length) {
       fetchStudents();
     }
-  }, [activeSchoolId, students.length]);
+  }, [activeSchoolId, students.length, fetchDailyRecords, fetchStudents]);
 
   return (
     <div style={{ marginBottom: 12 }}>
