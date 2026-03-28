@@ -20,11 +20,9 @@ function formatWeekdayFn(d) {
 }
 
 export default function AdminConsoleAttendanceWorkspace() {
-  const { activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime, isAnalyticsExcludedStudent } = useAdminConsoleWorkspaceContext();
+  const { activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime, isAnalyticsExcludedStudent, attendanceSubTab, setAttendanceSubTab } = useAdminConsoleWorkspaceContext();
 
   const {
-    attendanceSubTab,
-    setAttendanceSubTab,
     attendanceMsg,
     attendanceDate,
     setAttendanceDate,
