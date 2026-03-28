@@ -9,25 +9,34 @@ import {
   loadAdminConsoleCore,
   preloadAdminConsoleCore,
 } from "./adminConsoleLoader";
+import AdminConsoleStudentsStartup from "./AdminConsoleStudentsStartup";
 import LoadableAdminModule from "./LoadableAdminModule";
 
-function AdminConsoleStartupShell({
+function getAdminPageTitle(activeTab) {
+  if (activeTab === "attendance") return "Attendance";
+  if (activeTab === "model") return "Model Test";
+  if (activeTab === "daily") return "Daily Test";
+  if (activeTab === "dailyRecord") return "Schedule & Record";
+  if (activeTab === "ranking") return "Ranking";
+  if (activeTab === "announcements") return "Announcements";
+  return "Student List";
+}
+
+function AdminConsoleStartupFrame({
   schoolName,
   displayName,
-  message = "Loading admin workspace...",
-  errorMessage = "",
-  onRetry = null,
-  onBack = null,
-  backLabel = "BACK",
+  activeTab = "students",
+  onSelectTab = null,
+  children,
 }) {
   const navItems = [
-    "Student List",
-    "Attendance",
-    "Model Test",
-    "Daily Test",
-    "Schedule & Record",
-    "Ranking",
-    "Announcements",
+    { key: "students", label: "Student List" },
+    { key: "attendance", label: "Attendance" },
+    { key: "model", label: "Model Test" },
+    { key: "daily", label: "Daily Test" },
+    { key: "dailyRecord", label: "Schedule & Record" },
+    { key: "ranking", label: "Ranking" },
+    { key: "announcements", label: "Announcements" },
   ];
 
   return (
@@ -44,14 +53,14 @@ function AdminConsoleStartupShell({
           </div>
         </div>
         <div className="admin-nav" aria-hidden="true">
-          {navItems.map((label, index) => (
+          {navItems.map((item) => (
             <button
-              key={label}
-              className={`admin-nav-item ${index === 0 ? "active" : ""}`}
+              key={item.key}
+              className={`admin-nav-item ${activeTab === item.key ? "active" : ""}`}
               type="button"
-              disabled
+              onClick={() => onSelectTab?.(item.key)}
             >
-              {label}
+              {item.label}
             </button>
           ))}
         </div>
@@ -63,7 +72,7 @@ function AdminConsoleStartupShell({
       <div className="admin-main">
         <div className="admin-wrap">
           <div className="admin-page-topbar">
-            <div className="admin-page-topbar-title">Student List</div>
+            <div className="admin-page-topbar-title">{getAdminPageTitle(activeTab)}</div>
             <div className="admin-page-topbar-meta">
               <div className="admin-school-switcher admin-topbar-school-switcher">
                 <label>School</label>
@@ -80,33 +89,7 @@ function AdminConsoleStartupShell({
             </div>
           </div>
 
-          <div className="admin-panel admin-console-panel">
-            <div className="admin-title">{errorMessage ? "Startup Error" : "Opening Admin Console"}</div>
-            <div className="admin-help" style={{ marginTop: 10 }}>
-              {errorMessage || message}
-            </div>
-            <div className="admin-help" style={{ marginTop: 6 }}>
-              The shell is ready. The selected workspace is still loading.
-            </div>
-            {errorMessage ? (
-              <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {typeof onRetry === "function" ? (
-                  <button className="btn btn-primary" type="button" onClick={onRetry}>
-                    Retry
-                  </button>
-                ) : null}
-                {typeof onBack === "function" ? (
-                  <button className="btn" type="button" onClick={onBack}>
-                    {backLabel}
-                  </button>
-                ) : null}
-              </div>
-            ) : (
-              <div className="admin-help" style={{ marginTop: 16 }}>
-                Loading students workspace...
-              </div>
-            )}
-          </div>
+          <div className="admin-panel admin-console-panel">{children}</div>
         </div>
       </div>
     </div>
@@ -127,6 +110,8 @@ export default function AdminConsole(props) {
   const [coreReady, setCoreReady] = useState(false);
   const [coreError, setCoreError] = useState("");
   const [coreRetryNonce, setCoreRetryNonce] = useState(0);
+  const [startupTab, setStartupTab] = useState("students");
+  const [legacyCoreRequested, setLegacyCoreRequested] = useState(false);
 
   const isManagedAuth = managedSession !== undefined || managedProfile !== undefined;
   const session = managedSession ?? null;
@@ -170,7 +155,7 @@ export default function AdminConsole(props) {
     let preloadTimeoutId = null;
     let preloadFrameId = null;
 
-    if (!isConsoleReadyForCore) {
+    if (!isConsoleReadyForCore || !legacyCoreRequested) {
       setCoreReady(false);
       setCoreError("");
       return () => {
@@ -234,10 +219,58 @@ export default function AdminConsole(props) {
     coreRetryNonce,
     isConsoleReadyForCore,
     isManagedAuth,
+    legacyCoreRequested,
     pathname,
     profile,
     session,
   ]);
+
+  function openLegacyCore(nextTab = "students") {
+    setStartupTab(nextTab);
+    setLegacyCoreRequested(true);
+  }
+
+  function renderLegacyLoadingFrame({
+    message,
+    errorMessage = "",
+    onRetry = null,
+    onBack = null,
+    backLabel = "BACK",
+  }) {
+    return (
+      <AdminConsoleStartupFrame
+        schoolName={forcedSchoolScope?.name ?? null}
+        displayName={profile?.display_name?.trim() || session?.user?.email || "User"}
+        activeTab={startupTab}
+        onSelectTab={(nextTab) => {
+          setStartupTab(nextTab);
+          openLegacyCore(nextTab);
+        }}
+      >
+        <div className="admin-title">{errorMessage ? "Startup Error" : "Opening Admin Console"}</div>
+        <div className="admin-help" style={{ marginTop: 10 }}>
+          {errorMessage || message}
+        </div>
+        <div className="admin-help" style={{ marginTop: 6 }}>
+          The shell is ready. The selected workspace is still loading.
+        </div>
+        {errorMessage ? (
+          <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {typeof onRetry === "function" ? (
+              <button className="btn btn-primary" type="button" onClick={onRetry}>
+                Retry
+              </button>
+            ) : null}
+            {typeof onBack === "function" ? (
+              <button className="btn" type="button" onClick={onBack}>
+                {backLabel}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </AdminConsoleStartupFrame>
+    );
+  }
 
   if (!isConsoleReadyForCore) {
     return (
@@ -264,31 +297,45 @@ export default function AdminConsole(props) {
     const fallbackHref = changeSchoolHref || homeHref || "/";
     const fallbackLabel = changeSchoolHref ? "BACK TO SCHOOLS" : homeLabel;
 
+    return renderLegacyLoadingFrame({
+      errorMessage: coreError,
+      onRetry: () => {
+        setCoreError("");
+        setCoreRetryNonce((value) => value + 1);
+      },
+      onBack: () => {
+        window.location.assign(fallbackHref);
+      },
+      backLabel: fallbackLabel,
+    });
+  }
+
+  if (!legacyCoreRequested) {
     return (
-      <AdminConsoleStartupShell
+      <AdminConsoleStartupFrame
         schoolName={forcedSchoolScope?.name ?? null}
         displayName={profile?.display_name?.trim() || session?.user?.email || "User"}
-        errorMessage={coreError}
-        onRetry={() => {
-          setCoreError("");
-          setCoreRetryNonce((value) => value + 1);
+        activeTab={startupTab}
+        onSelectTab={(nextTab) => {
+          if (nextTab === "students") {
+            setStartupTab("students");
+            return;
+          }
+          openLegacyCore(nextTab);
         }}
-        onBack={() => {
-          window.location.assign(fallbackHref);
-        }}
-        backLabel={fallbackLabel}
-      />
+      >
+        <AdminConsoleStudentsStartup
+          activeSchoolId={activeSchoolId}
+          onOpenFullConsole={() => openLegacyCore("students")}
+        />
+      </AdminConsoleStartupFrame>
     );
   }
 
   if (!coreReady) {
-    return (
-      <AdminConsoleStartupShell
-        schoolName={forcedSchoolScope?.name ?? null}
-        displayName={profile?.display_name?.trim() || session?.user?.email || "User"}
-        message="Preparing the admin console shell and first workspace."
-      />
-    );
+    return renderLegacyLoadingFrame({
+      message: `Preparing the ${getAdminPageTitle(startupTab)} workspace in the full admin console.`,
+    });
   }
 
   return (
@@ -298,17 +345,20 @@ export default function AdminConsole(props) {
       loadModule={loadAdminConsoleCore}
       getLoadedModule={getLoadedAdminConsoleCore}
       context={{
-        ...baseContext,
-        source: "core-managed-mount",
-      }}
+          ...baseContext,
+          source: "core-managed-mount",
+        }}
       retryKey={coreRetryNonce}
       timeoutMs={ADMIN_CONSOLE_IMPORT_TIMEOUT_MS}
       errorMessage="Failed to mount the admin console core. Retry or go back and try again."
       backLabel={changeSchoolHref ? "BACK TO SCHOOLS" : homeLabel}
       onBack={() => {
         window.location.assign(changeSchoolHref || homeHref || "/");
+        }}
+      moduleProps={{
+        ...props,
+        initialAdminTab: startupTab,
       }}
-      moduleProps={props}
     />
   );
 }

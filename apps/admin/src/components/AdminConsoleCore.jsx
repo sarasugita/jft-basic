@@ -3213,6 +3213,10 @@ export default function AdminConsole({
   forceLoginOnEntry = false,
   managedSession = undefined,
   managedProfile = undefined,
+  initialAdminTab = "students",
+  initialAttendanceSubTab = "sheet",
+  initialModelSubTab = "results",
+  initialDailySubTab = "results",
 }) {
   const router = useRouter();
   const renderTraceLoggedRef = useRef(false);
@@ -3246,10 +3250,10 @@ export default function AdminConsole({
     limit: 200,
     testVersion: ""
   });
-  const [activeTab, setActiveTab] = useState("students");
-  const [modelSubTab, setModelSubTab] = useState("results");
-  const [dailySubTab, setDailySubTab] = useState("results");
-  const [attendanceSubTab, setAttendanceSubTab] = useState("sheet");
+  const [activeTab, setActiveTab] = useState(initialAdminTab);
+  const [modelSubTab, setModelSubTab] = useState(initialModelSubTab);
+  const [dailySubTab, setDailySubTab] = useState(initialDailySubTab);
+  const [attendanceSubTab, setAttendanceSubTab] = useState(initialAttendanceSubTab);
   const [dailyResultsCategory, setDailyResultsCategory] = useState("");
   const [modelResultsCategory, setModelResultsCategory] = useState("");
   const [dailyCategorySelect, setDailyCategorySelect] = useState("__custom__");
