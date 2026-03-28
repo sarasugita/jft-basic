@@ -2,39 +2,29 @@
 
 import { useEffect } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
+import { useStudentsWorkspaceState } from "./AdminConsoleStudentsWorkspaceState";
 
 export default function AdminConsoleStudentsWorkspace() {
+  const contextData = useAdminConsoleWorkspaceContext();
   const {
     activeSchoolId,
     session,
     canUseAdminConsole,
+    supabase,
+    students,
+    testMetaByVersion,
+    getScoreRate,
     fetchStudents,
-    studentListFilters,
-    setSelectedStudentWarning,
-    setStudentWarningPreviewStudentId,
-    studentDetailOpen,
-    setStudentDetailOpen,
     setInviteOpen,
     openStudentWarningsModal,
     handleLoadStudentMetrics,
-    studentListLoading,
-    studentListMetricsLoaded,
     handleLoadStudentWarnings,
-    studentWarningsLoading,
-    studentWarningsLoaded,
-    setStudentListFilters,
-    studentListRows,
     studentWarningCounts,
     openStudentDetail,
-    studentMsg,
     handleCsvFile,
     csvMsg,
-    selectedStudentId,
-    setSelectedStudentId,
     selectedStudent,
     exportStudentReportPdf,
-    studentReportExporting,
-    studentDetailLoading,
     setReissueStudent,
     setReissuePassword,
     setReissueIssuedPassword,
@@ -44,16 +34,9 @@ export default function AdminConsoleStudentsWorkspace() {
     toggleTestAccount,
     toggleWithdrawn,
     deleteStudent,
-    selectedStudentTab,
-    setSelectedStudentTab,
     fetchStudentAttendance,
     fetchStudentAttempts,
-    setStudentInfoForm,
     getPersonalInfoForm,
-    setStudentInfoUploadFiles,
-    setStudentInfoMsg,
-    setStudentInfoOpen,
-    studentDetailMsg,
     hasStudentDetailFields,
     formatDateFull,
     calculateAge,
@@ -65,54 +48,111 @@ export default function AdminConsoleStudentsWorkspace() {
     studentModelAttempts,
     sectionTitles,
     renderTwoLineHeader,
-    getScoreRate,
     getAttemptEffectivePassRate,
-    studentAttemptRanks,
     studentAttemptSummaryById,
     openAttemptDetail,
     getAttemptTitle,
     getAttemptDisplayDateValue,
-    studentAttemptsMsg,
     studentDailyCategorySummaryRows,
     studentDailyAttemptsByCategory,
     studentAttendancePrevMonthKey,
-    setStudentAttendanceMonthKey,
     selectedStudentAttendanceMonth,
     studentAttendanceMonthOptions,
     studentAttendanceNextMonthKey,
     studentAttendancePie,
     attendanceSummary,
-    studentAttendanceRange,
-    setStudentAttendanceRange,
-    filteredStudentAttendance,
     formatDateShort,
     formatWeekday,
-    studentAttendanceMsg,
-    studentWarningIssueOpen,
-    setStudentWarningIssueOpen,
-    studentWarnings,
     formatDateTime,
     summarizeWarningCriteria,
-    studentWarningsMsg,
-    studentWarningForm,
-    setStudentWarningForm,
-    studentWarningIssueMsg,
-    issueStudentWarning,
-    studentWarningIssueSaving,
     getDefaultStudentWarningForm,
-    selectedStudentWarning,
-    students,
-    deleteStudentWarning,
-    studentWarningDeletingId,
-    studentWarningPreviewStudentId,
+    issueStudentWarning: issueStudentWarningCtx,
+    deleteStudentWarning: deleteStudentWarningCtx,
     studentWarningPreviewStudent,
     studentWarningPreviewEntries,
-  } = useAdminConsoleWorkspaceContext();
+  } = contextData;
+
+  // Use the Students workspace state hook
+  const {
+    studentMsg,
+    selectedStudentId,
+    setSelectedStudentId,
+    selectedStudentDetail,
+    setSelectedStudentDetail,
+    selectedStudentTab,
+    setSelectedStudentTab,
+    studentAttempts,
+    setStudentAttempts,
+    studentAttemptsMsg,
+    setStudentAttemptsMsg,
+    studentAttemptRanks,
+    setStudentAttemptRanks,
+    studentAttendance,
+    setStudentAttendance,
+    studentAttendanceMsg,
+    setStudentAttendanceMsg,
+    studentAttendanceRange,
+    setStudentAttendanceRange,
+    studentInfoOpen,
+    setStudentInfoOpen,
+    studentInfoSaving,
+    setStudentInfoSaving,
+    studentInfoMsg,
+    setStudentInfoMsg,
+    studentInfoForm,
+    setStudentInfoForm,
+    studentInfoUploadFiles,
+    setStudentInfoUploadFiles,
+    studentListFilters,
+    setStudentListFilters,
+    studentListLoading,
+    studentListMetricsLoaded,
+    studentDetailOpen,
+    setStudentDetailOpen,
+    studentDetailLoading,
+    setStudentDetailLoading,
+    studentDetailMsg,
+    studentReportExporting,
+    setStudentReportExporting,
+    studentAttendanceMonthKey,
+    setStudentAttendanceMonthKey,
+    studentWarnings,
+    setStudentWarnings,
+    studentWarningsLoading,
+    studentWarningsLoaded,
+    studentWarningsMsg,
+    setStudentWarningsMsg,
+    studentWarningIssueOpen,
+    setStudentWarningIssueOpen,
+    studentWarningIssueSaving,
+    setStudentWarningIssueSaving,
+    studentWarningIssueMsg,
+    setStudentWarningIssueMsg,
+    issueStudentWarning,
+    studentWarningDeletingId,
+    setStudentWarningDeletingId,
+    studentWarningForm,
+    setStudentWarningForm,
+    selectedStudentWarning,
+    setSelectedStudentWarning,
+    studentWarningPreviewStudentId,
+    setStudentWarningPreviewStudentId,
+    studentListRows,
+    fetchStudentListMetrics,
+    normalizeStudentNumberInput,
+    getStudentDisplayName,
+  } = useStudentsWorkspaceState({
+    supabase,
+    activeSchoolId,
+    students,
+    testMetaByVersion,
+    getScoreRate,
+  });
 
   useEffect(() => {
     if (!activeSchoolId || !session || !canUseAdminConsole) return;
     fetchStudents();
-  }, [activeSchoolId, canUseAdminConsole, session]);
+  }, [activeSchoolId, canUseAdminConsole, session, fetchStudents]);
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -905,7 +945,7 @@ export default function AdminConsoleStudentsWorkspace() {
             </div>
             {studentWarningIssueMsg ? <div className="admin-msg">{studentWarningIssueMsg}</div> : null}
             <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={issueStudentWarning} disabled={studentWarningIssueSaving}>
+              <button className="btn btn-primary" onClick={issueStudentWarningCtx} disabled={studentWarningIssueSaving}>
                 {studentWarningIssueSaving ? "Issuing..." : "Issue Warning"}
               </button>
               <button className="btn" onClick={() => setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters))}>
@@ -967,7 +1007,7 @@ export default function AdminConsoleStudentsWorkspace() {
             <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
               <button
                 className="btn btn-danger"
-                onClick={() => deleteStudentWarning(selectedStudentWarning)}
+                onClick={() => deleteStudentWarningCtx(selectedStudentWarning)}
                 disabled={studentWarningDeletingId === selectedStudentWarning.id}
               >
                 {studentWarningDeletingId === selectedStudentWarning.id ? "Deleting..." : "Delete Warning"}

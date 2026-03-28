@@ -1,10 +1,10 @@
 # Admin Console Refactor — Deployment Notes
 
-## Current Status: Phase 2 Complete — 4 of 6 Workspaces Fully Extracted
+## Current Status: Phase 2 In Progress — 5 of 6 Workspaces Extracted
 
 **Goal**: Split AdminConsoleCore (14,439 lines / 325 KB) into per-workspace isolated bundles to fix loading failures on slow/non-US devices.
 
-**Progress**: 4 of 6 workspaces fully extracted (Ranking, Announcements, DailyRecord, Attendance). AdminConsoleCore reduced from 325.1 KB → 287.0 KB (−38.1 KB cumulative). All workspace loading glitches resolved.
+**Progress**: 5 of 6 workspaces extracted (Ranking, Announcements, DailyRecord, Attendance, Students). AdminConsoleCore reduced from 325.1 KB → ~280 KB (−45 KB cumulative). Testing workspace (67.3 KB, most complex) remains for Phase 2f.
 
 ---
 
@@ -231,6 +231,64 @@ const { attendanceSubTab, stateFromHook } = useAttendanceWorkspaceState({
 
 ---
 
+### Commit [TBD]: Phase 2e — Students Workspace State Extraction
+
+**Files Added**:
+- `src/components/AdminConsoleStudentsWorkspaceState.jsx` — useStudentsWorkspaceState hook with all student list management state/functions
+
+**Files Modified**:
+- `AdminConsoleStudentsWorkspace.jsx` — now uses own state hook for student list, detail view, and warning management state; handler functions (fetchStudentAttempts, fetchStudentAttendance, issueStudentWarning) kept in context for now due to complex dependencies
+
+**Extracted to Hook** (26 state variables + 1 async function + 7 helpers):
+- State (26 vars): studentMsg, studentTempMap, selectedStudentId/Detail/Tab, studentAttempts/AttemptsMsg/AttemptRanks, studentAttendance/AttendanceMsg/AttendanceRange, studentInfoOpen/Saving/Msg/Form/UploadFiles, studentListFilters/AttendanceMap/Attempts/Loading/MetricsLoaded, studentDetailOpen/Loading/Msg/ReportExporting/AttendanceMonthKey, studentWarnings/Loading/Loaded/Msg, studentWarningIssueOpen/Saving/Msg, studentWarningDeletingId/Form, selectedStudentWarning/PreviewStudentId
+- Functions (1): fetchStudentListMetrics (queries attendance + attempts for filtering)
+- Memos (2): sortedStudents (sorts by student code, then name), studentListRows (applies attendance/avg/unexcused filters)
+- Helpers (2): normalizeStudentNumberInput, getStudentDisplayName
+- Helper dependencies (5): getRowTimestamp, getAttemptScopeKey, buildLatestAttemptMapByStudentAndScope, buildStudentMetricRows, isMissingTabLeftCountError
+
+**Kept in Context** (complex dependencies):
+- fetchStudents() — used by multiple workspaces
+- fetchStudentAttempts(), fetchStudentAttendance() — complex state hydration (attemptQuestionsByVersion, studentsById maps)
+- issueStudentWarning(), deleteStudentWarning(), fetchStudentWarnings() — warning management with criteria normalization
+- isAnalyticsExcludedStudent() — shared by Attendance, Ranking, Testing workspaces
+
+**Deferred to Future** (if extracted):
+- All student detail view rendering logic (32 fields, 4 tabs: information, attempts, attendance, warnings)
+- Personal info editor modal (profile uploads, date fields)
+- Reissue password flow (stays in context)
+- Invite modal (stays in context)
+
+**Chunk Impact**: Students workspace now 30.8 KB (unchanged, all state moved to hook but component still large due to UI rendering).
+
+**Status**: ✓ Extracted (awaiting deploy test)
+
+**Hook Signature**:
+```javascript
+const {
+  studentMsg, selectedStudentId, setSelectedStudentId,
+  selectedStudentDetail, selectedStudentTab,
+  studentAttempts, studentAttemptsMsg, studentAttemptRanks,
+  studentAttendance, studentAttendanceMsg, studentAttendanceRange,
+  studentListFilters, setStudentListFilters,
+  studentListLoading, studentListMetricsLoaded,
+  studentWarnings, studentWarningsLoading, studentWarningsLoaded,
+  studentWarningIssueOpen, studentWarningForm,
+  studentListRows, fetchStudentListMetrics,
+  normalizeStudentNumberInput, getStudentDisplayName,
+  // ... 20 additional setters
+} = useStudentsWorkspaceState({
+  supabase, activeSchoolId, students, testMetaByVersion, getScoreRate
+});
+```
+
+**Notes**:
+- Hook accepts `getScoreRate` as parameter (from context) to avoid reimplementing it
+- students list passed as parameter since it's managed by fetchStudents in core
+- sortedStudents and studentListRows memos depend on students parameter + testMetaByVersion for score calculation
+- buildStudentMetricRows helper now in hook, uses passed-in getScoreRate for compatibility
+
+---
+
 ## Key Design Patterns
 
 ### Workspace State Hooks (New)
@@ -273,10 +331,10 @@ const { rankingPeriods, fetchRankingPeriods, /* ... */ } = useRankingWorkspaceSt
 - [x] Git history clean with descriptive commits
 
 ### Before Shipping Phase 2 Complete (All 6 Workspaces)
-- [ ] DailyRecord workspace extracted
-- [ ] Attendance workspace extracted
-- [ ] Students workspace extracted
-- [ ] Testing workspace extracted
+- [x] DailyRecord workspace extracted
+- [x] Attendance workspace extracted
+- [x] Students workspace extracted
+- [ ] Testing workspace extracted (Phase 2f — in planning)
 - [ ] Smoke test all workspaces on working device (no UI regression)
 - [ ] Test on slow/non-US device to verify loading improvement
 - [ ] AdminConsole.jsx and AdminConsoleCore.jsx deleted (Phase 3)
@@ -331,10 +389,19 @@ If regressions are found:
 
 ## Notes for Next Phases
 
-### Phase 2e & 2f (Students, Testing)
-After Phase 2d-2, remaining workspaces:
-- Students workspace: 30.8 KB → extract useStudentsWorkspaceState
-- Testing workspace: 67.3 KB → extract useTestingWorkspaceState (largest, complex)
+### Phase 2e (Students) — IN PROGRESS
+- [x] Extract useStudentsWorkspaceState hook with student list/detail/warning state
+- [x] Update AdminConsoleStudentsWorkspace to use hook
+- [ ] Deploy and test on devices
+- [ ] Verify no UI regressions (student list, detail view, warnings modal)
+
+### Phase 2f (Testing)
+After Phase 2e, final workspace:
+- Testing workspace: 67.3 KB → extract useTestingWorkspaceState (largest, most complex)
+  - Encompasses all model test and daily test session management
+  - Heavy analytics calculations (session results matrix, attempt rankings, score distribution)
+  - Question management, preview modal, upload flows
+  - Dependencies: all existing analytics helpers, schema questions
 
 ### Shared State Still in Core
 AdminConsoleCore retains:
