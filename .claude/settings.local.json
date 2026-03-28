@@ -16,7 +16,13 @@
       "Bash(cat:*)",
       "Bash(grep -n useAdminConsoleWorkspaceContext /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsole*Workspace.jsx)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(sed -n '1020,1051p' AdminConsoleCore.jsx)",
+      "Bash(sed -n '1053,1093p' AdminConsoleCore.jsx)",
+      "Bash(sed -n '1095,1138p' AdminConsoleCore.jsx)",
+      "Bash(sed -n '742,831p' AdminConsoleCore.jsx)",
+      "Bash(sed -n '929,931p' AdminConsoleCore.jsx)",
+      "Bash(python3:*)"
     ]
   }
 }

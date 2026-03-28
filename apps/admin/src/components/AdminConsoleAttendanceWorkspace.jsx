@@ -2,39 +2,33 @@
 
 import { useEffect } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
+import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceState";
 
 export default function AdminConsoleAttendanceWorkspace() {
   const {
-    activeSchoolId,
-    attendanceSubTab,
-    students,
-    fetchStudents,
-    fetchAttendanceDays,
-    fetchAbsenceApplications,
+    activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime,
+    // Derived memos from context (to be extracted in Phase 2d-2)
+    attendanceSubTab, setAttendanceSubTab, attendanceDayColumns, attendanceDayRates, attendanceFilteredStudents, attendanceRangeColumns, attendanceEntriesByDay
+  } = useAdminConsoleWorkspaceContext();
+
+  const {
+    attendanceMsg,
     attendanceDate,
     setAttendanceDate,
     openAttendanceDay,
-    exportAttendanceGoogleSheetsCsv,
     clearAllAttendanceValues,
     attendanceClearing,
     attendanceImportInputRef,
-    importAttendanceGoogleSheetsCsv,
     attendanceFilter,
     setAttendanceFilter,
-    attendanceDayColumns,
-    attendanceDayRates,
-    formatRatePercent,
-    attendanceFilteredStudents,
-    attendanceRangeColumns,
-    attendanceEntriesByDay,
-    buildAttendanceStats,
-    getAttendanceStatusClassName,
-    attendanceMsg,
+    fetchAttendanceDays,
+    fetchAbsenceApplications,
     absenceApplications,
-    formatDateTime,
     decideAbsenceApplication,
     absenceApplicationsMsg,
-  } = useAdminConsoleWorkspaceContext();
+    buildAttendanceStats,
+    getAttendanceStatusClassName,
+  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab });
 
   useEffect(() => {
     if (!activeSchoolId) return;
@@ -46,11 +40,7 @@ export default function AdminConsoleAttendanceWorkspace() {
       return;
     }
     fetchAbsenceApplications();
-  }, [
-    activeSchoolId,
-    attendanceSubTab,
-    students.length,
-  ]);
+  }, [activeSchoolId, attendanceSubTab, students.length]);
 
   if (attendanceSubTab === "absence") {
     return (
