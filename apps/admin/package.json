@@ -2,10 +2,11 @@
   "name": "jft-admin",
   "private": true,
   "scripts": {
+    "check:admin-console-chunks": "node ./scripts/check-admin-console-chunks.mjs",
     "clean:cache": "find .next/cache -mindepth 1 -delete 2>/dev/null || true",
     "clean:next": "find .next -mindepth 1 -delete 2>/dev/null || true",
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && npm run check:admin-console-chunks",
     "rebuild": "npm run clean:cache && npm run build",
     "start": "next start"
   },
