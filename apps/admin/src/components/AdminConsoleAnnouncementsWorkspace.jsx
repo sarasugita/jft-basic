@@ -29,7 +29,7 @@ export default function AdminConsoleAnnouncementsWorkspace() {
   useEffect(() => {
     if (!activeSchoolId) return;
     fetchAnnouncements();
-  }, [activeSchoolId, fetchAnnouncements]);
+  }, [activeSchoolId]);
 
   return (
     <div style={{ marginBottom: 12 }}>

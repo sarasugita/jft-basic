@@ -60,7 +60,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
     if (!students.length) {
       fetchStudents();
     }
-  }, [activeSchoolId, students.length, fetchDailyRecords, fetchStudents]);
+  }, [activeSchoolId, students.length]);
 
   return (
     <div style={{ marginBottom: 12 }}>

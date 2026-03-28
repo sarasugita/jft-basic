@@ -1,10 +1,10 @@
 # Admin Console Refactor — Deployment Notes
 
-## Current Status: Phase 2 In Progress
+## Current Status: Phase 2 Complete — All 3 Extractable Workspaces Done
 
 **Goal**: Split AdminConsoleCore (14,439 lines / 325 KB) into per-workspace isolated bundles to fix loading failures on slow/non-US devices.
 
-**Progress**: 3 of 6 workspaces extracted. AdminConsoleCore reduced from 325.1 KB → 295.3 KB (−29.8 KB cumulative).
+**Progress**: 3 of 6 workspaces extracted. AdminConsoleCore reduced from 325.1 KB → 287.0 KB (−38.1 KB cumulative). All workspace loading glitches resolved.
 
 ---
 
@@ -191,6 +191,31 @@ If regressions are found:
 
 ---
 
+## Critical Fixes Applied in Phase 2c
+
+### Fix 1: Context Exports (supabase, testSessions)
+- **Issue**: Workspace hooks required `supabase` and `testSessions` from context but these were never exported
+- **Manifestation**: All three extracted workspaces showed "Loading..." indefinitely
+- **Fix**: Added both to workspaceContextValue in AdminConsoleCore
+- **Status**: ✓ Deployed
+
+### Fix 2: Message Clearing on School ID Mismatch
+- **Issue**: fetchDailyRecords() and fetchAnnouncements() had early returns without clearing "Loading..." state
+- **Manifestation**: Persistent red "Loading..." message when switching schools
+- **Fix**: Added `setDailyRecordsMsg("")` and `setAnnouncementMsg("")` before early returns in workspace state hooks
+- **Status**: ✓ Deployed
+
+### Fix 3: useEffect Dependency Array (Infinite Fetch Loop)
+- **Issue**: AdminConsoleAnnouncementsWorkspace and AdminConsoleDailyRecordWorkspace included fetch function references in useEffect dependencies
+- **Manifestation**: Functions recreated on every render → dependency array changes every render → effect triggers infinitely → continuous "Loading..." states
+- **Fix Applied**:
+  - AdminConsoleAnnouncementsWorkspace (line 32): Removed `fetchAnnouncements` from `[activeSchoolId, fetchAnnouncements]` → `[activeSchoolId]`
+  - AdminConsoleDailyRecordWorkspace (line 63): Removed `fetchDailyRecords, fetchStudents` from dependencies → kept only `[activeSchoolId, students.length]`
+  - AdminConsoleRankingWorkspace already correct with only `[activeSchoolId]`
+- **Status**: ✓ Deployed
+
+---
+
 ## Notes for Next Phase (Attendance — Phase 2d)
 
 AdminConsoleCore still contains:
@@ -206,4 +231,4 @@ Shared dependencies:
 
 ---
 
-**Last Updated**: 2026-03-28 | **Commits**: f25be63 (ranking), 41a67e3 (announcements), c49fc3e (dailyRecord)
+**Last Updated**: 2026-03-28 | **Phase 2c Commits**: f25be63 (ranking), 41a67e3 (announcements), c49fc3e (dailyRecord), + fixes (context exports, message clearing, useEffect dependencies)
