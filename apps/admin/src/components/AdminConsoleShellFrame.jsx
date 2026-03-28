@@ -27,6 +27,7 @@ export default function AdminConsoleShellFrame({
   schoolSelector = null,
   changeSchoolHref = "",
   onChangeSchool = null,
+  onSelectTab = null,
   children = null,
 }) {
   return (
@@ -48,7 +49,8 @@ export default function AdminConsoleShellFrame({
               key={item.key}
               className={`admin-nav-item ${activeTab === item.key ? "active" : ""}`}
               type="button"
-              disabled
+              disabled={typeof onSelectTab !== "function"}
+              onClick={() => onSelectTab?.(item.key)}
             >
               {item.label}
             </button>

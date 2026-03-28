@@ -8,11 +8,11 @@ const WARN_WRAPPER_BYTES = 80_000;
 const MAX_CORE_TOTAL_BYTES = 400_000;
 const WARN_CORE_TOTAL_BYTES = 320_000;
 const WORKSPACE_BUDGETS = {
-  announcements: { max: 80_000, warn: 60_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleAnnouncementsWorkspace" },
-  students: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleStudentsWorkspace" },
-  dailyRecord: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleDailyRecordWorkspace" },
-  ranking: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleRankingWorkspace" },
-  attendance: { max: 180_000, warn: 140_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleAttendanceWorkspace" },
+  announcements: { max: 80_000, warn: 60_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleAnnouncementsStartup" },
+  students: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleStudentsStartup" },
+  dailyRecord: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleDailyRecordStartup" },
+  ranking: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleRankingStartup" },
+  attendance: { max: 180_000, warn: 140_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleAttendanceStartup" },
   testing: { max: 220_000, warn: 180_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleTestingWorkspace" },
 };
 const REQUIRED_WORKSPACE_ENTRIES = [
