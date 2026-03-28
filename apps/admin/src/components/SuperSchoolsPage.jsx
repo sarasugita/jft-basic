@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useSuperAdmin } from "./super/SuperAdminShell";
-import { preloadAdminConsole } from "./adminConsoleLoader";
+import { preloadAdminConsole, preloadAdminConsoleCore } from "./adminConsoleLoader";
 
 function emptyForm() {
   return {
@@ -280,13 +280,22 @@ export default function SuperSchoolsPage() {
   function prefetchSchoolAdmin(schoolId) {
     if (!schoolId) return;
     router.prefetch(`/super/schools/${schoolId}/admin`);
-    void preloadAdminConsole({
+    const preloadContext = {
       pathname: `/super/schools/${schoolId}/admin`,
       role: "super_admin",
       schoolId,
       activeSchoolId: schoolId,
-      source: "super-schools-prefetch",
-    }).catch(() => {});
+    };
+    void Promise.all([
+      preloadAdminConsole({
+        ...preloadContext,
+        source: "super-schools-prefetch-wrapper",
+      }),
+      preloadAdminConsoleCore({
+        ...preloadContext,
+        source: "super-schools-prefetch-core",
+      }),
+    ]).catch(() => {});
   }
 
   async function invokeManageSchools(payload) {

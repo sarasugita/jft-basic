@@ -4,8 +4,20 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
-import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
-import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS, getLoadedAdminConsole, loadAdminConsole, preloadAdminConsole } from "./adminConsoleLoader";
+import {
+  createAdminTrace,
+  getAdminDiagnosticsReport,
+  isAbortLikeError,
+  logAdminEvent,
+  logAdminRequestFailure,
+} from "../lib/adminDiagnostics";
+import {
+  ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
+  getLoadedAdminConsole,
+  loadAdminConsole,
+  preloadAdminConsole,
+  preloadAdminConsoleCore,
+} from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
 import LoadableAdminModule from "./LoadableAdminModule";
 
@@ -358,19 +370,32 @@ export default function AdminEntryPage() {
     setAdminConsoleReady(false);
     setAdminConsoleError("");
 
-    void preloadAdminConsole(
-      {
-        pathname: "/",
-        role: profile.role,
-        userId: session.user.id,
-        schoolId: profile.school_id ?? null,
-        activeSchoolId: profile.school_id ?? null,
-        attempt: adminConsoleRetryNonce,
-        managedAuth: true,
-        source: "admin-entry-preload",
-      },
-      { timeoutMs: ADMIN_CONSOLE_IMPORT_TIMEOUT_MS }
-    )
+    const preloadContext = {
+      pathname: "/",
+      role: profile.role,
+      userId: session.user.id,
+      schoolId: profile.school_id ?? null,
+      activeSchoolId: profile.school_id ?? null,
+      attempt: adminConsoleRetryNonce,
+      managedAuth: true,
+    };
+
+    void Promise.all([
+      preloadAdminConsole(
+        {
+          ...preloadContext,
+          source: "admin-entry-preload-wrapper",
+        },
+        { timeoutMs: ADMIN_CONSOLE_IMPORT_TIMEOUT_MS }
+      ),
+      preloadAdminConsoleCore(
+        {
+          ...preloadContext,
+          source: "admin-entry-preload-core",
+        },
+        { timeoutMs: ADMIN_CONSOLE_IMPORT_TIMEOUT_MS }
+      ),
+    ])
       .then(() => {
         if (cancelled) return;
         setAdminConsoleReady(true);
@@ -782,6 +807,27 @@ export default function AdminEntryPage() {
           <button
             className="admin-password-change-secondary"
             type="button"
+            onClick={async () => {
+              const report = getAdminDiagnosticsReport({
+                source: "admin-entry-startup-error",
+                schoolId: profile?.school_id ?? null,
+                role: profile?.role ?? null,
+              });
+              try {
+                await navigator.clipboard.writeText(report);
+              } catch (error) {
+                logAdminRequestFailure("Admin entry diagnostics copy failed", error, {
+                  role: profile?.role ?? null,
+                  schoolId: profile?.school_id ?? null,
+                });
+              }
+            }}
+          >
+            COPY DIAGNOSTICS
+          </button>
+          <button
+            className="admin-password-change-secondary"
+            type="button"
             onClick={() => {
               void handleStartupRecovery();
             }}
@@ -831,6 +877,11 @@ export default function AdminEntryPage() {
         backLabel="SIGN OUT AND RETRY"
         onBack={() => {
           void handleStartupRecovery();
+        }}
+        diagnosticsExtra={{
+          schoolId: profile?.school_id ?? null,
+          role: profile?.role ?? null,
+          source: "admin-entry-mount",
         }}
         moduleProps={{
           homeHref: "/",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { getAdminDiagnosticsReport, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS } from "./adminConsoleLoader";
 
 function resolveModuleExport(mod) {
@@ -30,6 +30,7 @@ export default function LoadableAdminModule({
   retryKey = 0,
   backLabel = "BACK",
   onBack = null,
+  diagnosticsExtra = {},
 }) {
   const stableContext = useMemo(() => ({
     pathname: context.pathname ?? "",
@@ -162,6 +163,25 @@ export default function LoadableAdminModule({
           }}
         >
           RETRY
+        </button>
+        <button
+          className="admin-password-change-secondary"
+          type="button"
+          onClick={async () => {
+            const report = getAdminDiagnosticsReport({
+              importTarget,
+              source: stableContext.source,
+              ...stableContext,
+              ...diagnosticsExtra,
+            });
+            try {
+              await navigator.clipboard.writeText(report);
+            } catch {
+              // Clipboard may be unavailable on some browsers.
+            }
+          }}
+        >
+          COPY DIAGNOSTICS
         </button>
         {onBack ? (
           <button

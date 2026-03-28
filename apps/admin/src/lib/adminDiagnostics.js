@@ -1,3 +1,6 @@
+const ADMIN_DIAGNOSTICS_STORAGE_KEY = "jft_admin_recent_diagnostics";
+const MAX_STORED_ADMIN_DIAGNOSTICS = 100;
+
 export function isAbortLikeError(error) {
   const name = String(error?.name ?? "").trim();
   const code = String(error?.code ?? "").trim();
@@ -44,8 +47,53 @@ export function getAdminErrorInfo(error, extra = {}) {
   };
 }
 
+function persistAdminDiagnostic(entry) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.sessionStorage.getItem(ADMIN_DIAGNOSTICS_STORAGE_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    const nextList = Array.isArray(list) ? list : [];
+    nextList.push({
+      timestamp: new Date().toISOString(),
+      ...entry,
+    });
+    const trimmed = nextList.slice(-MAX_STORED_ADMIN_DIAGNOSTICS);
+    window.sessionStorage.setItem(ADMIN_DIAGNOSTICS_STORAGE_KEY, JSON.stringify(trimmed));
+  } catch {
+    // Ignore storage failures so diagnostics never break runtime behavior.
+  }
+}
+
+function getStoredAdminDiagnostics() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.sessionStorage.getItem(ADMIN_DIAGNOSTICS_STORAGE_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getAdminDiagnosticsReport(extra = {}) {
+  return JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    currentPath:
+      typeof window !== "undefined"
+        ? window.location?.pathname ?? ""
+        : "",
+    ...extra,
+    events: getStoredAdminDiagnostics(),
+  }, null, 2);
+}
+
 export function logAdminEvent(event, details = {}) {
   console.info(`[AdminAuth] ${event}`, details);
+  persistAdminDiagnostic({
+    level: "info",
+    event,
+    details,
+  });
 }
 
 export function createAdminTrace(step, details = {}) {
@@ -72,5 +120,10 @@ export function logAdminRequestFailure(context, error, extra = {}) {
   const payload = getAdminErrorInfo(error, extra);
   const logger = payload.aborted ? console.warn : console.error;
   logger(`[AdminAuth] ${context}`, payload);
+  persistAdminDiagnostic({
+    level: payload.aborted ? "warn" : "error",
+    event: context,
+    details: payload,
+  });
   return payload;
 }

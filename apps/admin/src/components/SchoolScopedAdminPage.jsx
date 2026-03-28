@@ -2,9 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import {
+  createAdminTrace,
+  getAdminDiagnosticsReport,
+  isAbortLikeError,
+  logAdminEvent,
+  logAdminRequestFailure,
+} from "../lib/adminDiagnostics";
 import { useSuperAdmin } from "./super/SuperAdminShell";
-import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS, getLoadedAdminConsole, loadAdminConsole, preloadAdminConsole } from "./adminConsoleLoader";
+import {
+  ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
+  getLoadedAdminConsole,
+  loadAdminConsole,
+  preloadAdminConsole,
+  preloadAdminConsoleCore,
+} from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
 import LoadableAdminModule from "./LoadableAdminModule";
 
@@ -152,19 +164,32 @@ export default function SchoolScopedAdminPage({
       }
     }, ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS);
 
-    void preloadAdminConsole(
-      {
-        pathname: `/super/schools/${schoolId}/admin`,
-        role: profile.role,
-        userId: session.user.id,
-        schoolId,
-        activeSchoolId: schoolId,
-        attempt: adminConsoleRetryNonce,
-        managedAuth: true,
-        source: "school-scoped-preload",
-      },
-      { timeoutMs: ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS }
-    )
+    const preloadContext = {
+      pathname: `/super/schools/${schoolId}/admin`,
+      role: profile.role,
+      userId: session.user.id,
+      schoolId,
+      activeSchoolId: schoolId,
+      attempt: adminConsoleRetryNonce,
+      managedAuth: true,
+    };
+
+    void Promise.all([
+      preloadAdminConsole(
+        {
+          ...preloadContext,
+          source: "school-scoped-preload-wrapper",
+        },
+        { timeoutMs: ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS }
+      ),
+      preloadAdminConsoleCore(
+        {
+          ...preloadContext,
+          source: "school-scoped-preload-core",
+        },
+        { timeoutMs: ADMIN_CONSOLE_PRELOAD_TIMEOUT_MS }
+      ),
+    ])
       .then(() => {
         window.clearTimeout(timeoutId);
         if (cancelled) return;
@@ -312,6 +337,29 @@ export default function SchoolScopedAdminPage({
         <button
           className="admin-password-change-secondary"
           type="button"
+          onClick={async () => {
+            const report = getAdminDiagnosticsReport({
+              schoolId,
+              source: "school-scoped-startup-error",
+              adminTab: initialRouteState?.adminTab ?? "announcements",
+              attendanceSubTab: initialRouteState?.attendanceSubTab ?? "sheet",
+              modelSubTab: initialRouteState?.modelSubTab ?? "results",
+              dailySubTab: initialRouteState?.dailySubTab ?? "results",
+            });
+            try {
+              await navigator.clipboard.writeText(report);
+            } catch (error) {
+              logAdminRequestFailure("School scoped diagnostics copy failed", error, {
+                schoolId,
+              });
+            }
+          }}
+        >
+          COPY DIAGNOSTICS
+        </button>
+        <button
+          className="admin-password-change-secondary"
+          type="button"
           onClick={() => router.replace("/super/schools")}
         >
           BACK TO SCHOOLS
@@ -386,6 +434,14 @@ export default function SchoolScopedAdminPage({
           initialAttendanceSubTab: initialRouteState?.attendanceSubTab ?? "sheet",
           initialModelSubTab: initialRouteState?.modelSubTab ?? "results",
           initialDailySubTab: initialRouteState?.dailySubTab ?? "results",
+        }}
+        diagnosticsExtra={{
+          adminTab: initialRouteState?.adminTab ?? "announcements",
+          attendanceSubTab: initialRouteState?.attendanceSubTab ?? "sheet",
+          modelSubTab: initialRouteState?.modelSubTab ?? "results",
+          dailySubTab: initialRouteState?.dailySubTab ?? "results",
+          schoolId,
+          source: "school-scoped-mount",
         }}
       />
     </AdminConsoleBoundary>

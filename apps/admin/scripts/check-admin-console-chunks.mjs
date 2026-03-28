@@ -3,22 +3,23 @@ import path from "node:path";
 
 const appRoot = path.resolve(process.cwd());
 const manifestPath = path.join(appRoot, ".next", "server", "middleware-react-loadable-manifest.js");
-const MAX_SHELL_TOTAL_BYTES = 220_000;
-const MAX_SHELL_LARGEST_CHUNK_BYTES = 170_000;
-const WARN_SHELL_TOTAL_BYTES = 180_000;
-const WARN_SHELL_LARGEST_CHUNK_BYTES = 140_000;
 const MAX_WRAPPER_BYTES = 120_000;
 const WARN_WRAPPER_BYTES = 80_000;
+const MAX_CORE_TOTAL_BYTES = 400_000;
+const WARN_CORE_TOTAL_BYTES = 320_000;
+const WORKSPACE_BUDGETS = {
+  announcements: { max: 80_000, warn: 60_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleAnnouncementsWorkspace" },
+  students: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleStudentsWorkspace" },
+  dailyRecord: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleDailyRecordWorkspace" },
+  ranking: { max: 140_000, warn: 100_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleRankingWorkspace" },
+  attendance: { max: 180_000, warn: 140_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleAttendanceWorkspace" },
+  testing: { max: 220_000, warn: 180_000, entry: "components/adminConsoleLoader.js -> ./AdminConsoleTestingWorkspace" },
+};
 const REQUIRED_WORKSPACE_ENTRIES = [
-  "components/adminConsoleLoader.js -> ./AdminConsoleStudentsWorkspace",
-  "components/adminConsoleLoader.js -> ./AdminConsoleAttendanceWorkspace",
-  "components/adminConsoleLoader.js -> ./AdminConsoleDailyRecordWorkspace",
-  "components/adminConsoleLoader.js -> ./AdminConsoleRankingWorkspace",
-  "components/adminConsoleLoader.js -> ./AdminConsoleAnnouncementsWorkspace",
-  "components/adminConsoleLoader.js -> ./AdminConsoleTestingWorkspace",
+  ...Object.values(WORKSPACE_BUDGETS).map((workspace) => workspace.entry),
 ];
-const REQUIRED_STARTUP_ENTRY = "components/adminConsoleLoader.js -> ./AdminConsoleAnnouncementsStartup";
 const REQUIRED_WRAPPER_ENTRY = "components/adminConsoleLoader.js -> ./AdminConsole";
+const REQUIRED_CORE_ENTRY = "components/adminConsoleLoader.js -> ./AdminConsoleCore";
 
 function readManifestJson(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -66,8 +67,7 @@ function getChunkSize(filePath) {
 
 const manifest = readManifestJson(manifestPath);
 const wrapperEntry = manifest[REQUIRED_WRAPPER_ENTRY];
-const startupEntry = manifest[REQUIRED_STARTUP_ENTRY];
-const coreEntry = manifest["components/adminConsoleLoader.js -> ./AdminConsoleCore"];
+const coreEntry = manifest[REQUIRED_CORE_ENTRY];
 
 if (!wrapperEntry?.files?.length) {
   throw new Error(`Admin console wrapper entry is missing from the loadable manifest: ${REQUIRED_WRAPPER_ENTRY}`);
@@ -81,8 +81,8 @@ if (missingWorkspaceEntries.length) {
   );
 }
 
-if (!startupEntry?.files?.length) {
-  throw new Error(`Admin console startup entry is missing from the loadable manifest: ${REQUIRED_STARTUP_ENTRY}`);
+if (!coreEntry?.files?.length) {
+  throw new Error(`Admin console core entry is missing from the loadable manifest: ${REQUIRED_CORE_ENTRY}`);
 }
 
 const wrapperArtifactPath = resolveBuildArtifactPath(wrapperEntry.files[0]);
@@ -97,58 +97,43 @@ if (wrapperBytes > MAX_WRAPPER_BYTES) {
   );
 }
 
-const shellRelativeFiles = Array.from(new Set([
-  ...wrapperEntry.files,
-  ...startupEntry.files,
-]));
-
-const chunkSizes = shellRelativeFiles
+const coreChunkSizes = (coreEntry?.files ?? [])
   .map((relativeFile) => {
-    const chunkPath = resolveBuildArtifactPath(relativeFile);
-    if (!fs.existsSync(chunkPath)) return null;
+    const chunkPath = tryResolveDirectBuildArtifactPath(relativeFile);
+    if (!chunkPath) return null;
     return {
       relativeFile,
       bytes: getChunkSize(chunkPath),
     };
   })
   .filter(Boolean);
-
-const totalBytes = chunkSizes.reduce((sum, chunk) => sum + chunk.bytes, 0);
-const largestChunkBytes = chunkSizes.reduce((max, chunk) => Math.max(max, chunk.bytes), 0);
-const details = chunkSizes
+const coreTotalBytes = coreChunkSizes.reduce((sum, chunk) => sum + chunk.bytes, 0);
+const coreDetails = coreChunkSizes
   .sort((a, b) => b.bytes - a.bytes)
   .map((chunk) => `${chunk.relativeFile}: ${formatBytes(chunk.bytes)}`)
   .join(", ");
-if (chunkSizes.length === 0) {
-  throw new Error("No startup shell chunks could be resolved for budget enforcement.");
-}
 
-if (totalBytes > MAX_SHELL_TOTAL_BYTES || largestChunkBytes > MAX_SHELL_LARGEST_CHUNK_BYTES) {
+if (coreTotalBytes > MAX_CORE_TOTAL_BYTES) {
   throw new Error(
     [
-      "Admin console shell startup bundle exceeded the allowed size budget.",
-      `Largest chunk: ${formatBytes(largestChunkBytes)} (limit ${formatBytes(MAX_SHELL_LARGEST_CHUNK_BYTES)})`,
-      `Total shell import: ${formatBytes(totalBytes)} (limit ${formatBytes(MAX_SHELL_TOTAL_BYTES)})`,
-      `Chunks: ${details}`,
+      "Admin console core import exceeded the allowed size budget.",
+      `AdminConsole core: ${formatBytes(coreTotalBytes)} (limit ${formatBytes(MAX_CORE_TOTAL_BYTES)})`,
+      `Chunks: ${coreDetails}`,
     ].join(" ")
   );
 }
 
-if (
-  wrapperBytes > WARN_WRAPPER_BYTES
-  || (totalBytes > WARN_SHELL_TOTAL_BYTES || largestChunkBytes > WARN_SHELL_LARGEST_CHUNK_BYTES)
-) {
-  console.warn(
-    [
-      "Warning: Admin console shell startup bundle is approaching the size budget.",
-      `AdminConsole wrapper: ${formatBytes(wrapperBytes)} (warn at ${formatBytes(WARN_WRAPPER_BYTES)})`,
-      `Largest chunk: ${formatBytes(largestChunkBytes)} (warn at ${formatBytes(WARN_SHELL_LARGEST_CHUNK_BYTES)})`,
-      `Total shell import: ${formatBytes(totalBytes)} (warn at ${formatBytes(WARN_SHELL_TOTAL_BYTES)})`,
-      `Chunks: ${details}`,
-    ].join(" ")
-  );
-} else {
-  const coreChunkSizes = (coreEntry?.files ?? [])
+const warnings = [];
+if (wrapperBytes > WARN_WRAPPER_BYTES) {
+  warnings.push(`AdminConsole wrapper: ${formatBytes(wrapperBytes)} (warn at ${formatBytes(WARN_WRAPPER_BYTES)})`);
+}
+if (coreTotalBytes > WARN_CORE_TOTAL_BYTES) {
+  warnings.push(`AdminConsole core: ${formatBytes(coreTotalBytes)} (warn at ${formatBytes(WARN_CORE_TOTAL_BYTES)})`);
+}
+
+const workspaceSummaries = Object.entries(WORKSPACE_BUDGETS).map(([workspaceKey, config]) => {
+  const entry = manifest[config.entry];
+  const chunks = (entry?.files ?? [])
     .map((relativeFile) => {
       const chunkPath = tryResolveDirectBuildArtifactPath(relativeFile);
       if (!chunkPath) return null;
@@ -158,16 +143,36 @@ if (
       };
     })
     .filter(Boolean);
-  const coreTotalBytes = coreChunkSizes.reduce((sum, chunk) => sum + chunk.bytes, 0);
+  const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.bytes, 0);
+  if (totalBytes > config.max) {
+    throw new Error(
+      [
+        `Admin console ${workspaceKey} workspace exceeded the allowed size budget.`,
+        `${workspaceKey}: ${formatBytes(totalBytes)} (limit ${formatBytes(config.max)})`,
+        `Chunks: ${chunks.map((chunk) => `${chunk.relativeFile}: ${formatBytes(chunk.bytes)}`).join(", ")}`,
+      ].join(" ")
+    );
+  }
+  if (totalBytes > config.warn) {
+    warnings.push(`${workspaceKey}: ${formatBytes(totalBytes)} (warn at ${formatBytes(config.warn)})`);
+  }
+  return `${workspaceKey} ${formatBytes(totalBytes)}`;
+});
 
-  console.log(
+if (warnings.length) {
+  console.warn(
     [
-      "Admin console shell chunk budget check passed.",
-      `AdminConsole wrapper: ${formatBytes(wrapperBytes)}`,
-      `Largest chunk: ${formatBytes(largestChunkBytes)}`,
-      `Total shell import: ${formatBytes(totalBytes)}`,
-      `Workspace entries: ${REQUIRED_WORKSPACE_ENTRIES.length}`,
-      coreChunkSizes.length ? `On-demand core import: ${formatBytes(coreTotalBytes)}` : "On-demand core import: skipped",
+      "Warning: Admin console chunk budgets are approaching limits.",
+      ...warnings,
     ].join(" ")
   );
 }
+
+console.log(
+  [
+    "Admin console chunk budget check passed.",
+    `AdminConsole wrapper: ${formatBytes(wrapperBytes)}`,
+    `AdminConsole core: ${formatBytes(coreTotalBytes)}`,
+    `Workspace entries: ${workspaceSummaries.join(", ")}`,
+  ].join(" ")
+);

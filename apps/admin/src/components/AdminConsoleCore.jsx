@@ -6,7 +6,6 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { createPortal } from "react-dom";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { buildScopedAdminHref } from "../lib/adminConsoleRoute";
-import { createAdminSupabaseClient, getAdminSupabaseConfig, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
@@ -31,6 +30,23 @@ import {
   preloadAdminConsoleStudentsWorkspace,
   preloadAdminConsoleTestingWorkspace,
 } from "./adminConsoleLoader";
+
+const ADMIN_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const ADMIN_SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const ADMIN_SUPABASE_CONFIG_ERROR = !ADMIN_SUPABASE_URL || !ADMIN_SUPABASE_ANON_KEY
+  ? "Admin app is missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY."
+  : "";
+let adminSupabaseModulePromise = null;
+
+async function loadAdminSupabaseModule() {
+  if (adminSupabaseModulePromise) return adminSupabaseModulePromise;
+  adminSupabaseModulePromise = import("../lib/adminSupabase")
+    .catch((error) => {
+      adminSupabaseModulePromise = null;
+      throw error;
+    });
+  return adminSupabaseModulePromise;
+}
 
 const DEFAULT_MODEL_CATEGORY = "Book Review";
 const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
@@ -204,7 +220,7 @@ function resolveAdminAssetUrl(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
   if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
-  const { supabaseUrl: baseUrl } = getAdminSupabaseConfig();
+  const baseUrl = ADMIN_SUPABASE_URL;
   if (!baseUrl) return raw;
   const encodedPath = raw
     .split("/")
@@ -3550,11 +3566,8 @@ export default function AdminConsole({
     || activeSchoolId
     || "";
   const activeSchoolIdRef = useRef(activeSchoolId);
-  const supabaseConfigError = getAdminSupabaseConfigError();
-  const supabase = useMemo(
-    () => (supabaseConfigError ? null : createAdminSupabaseClient({ schoolScopeId: activeSchoolId })),
-    [activeSchoolId, supabaseConfigError]
-  );
+  const supabaseConfigError = ADMIN_SUPABASE_CONFIG_ERROR;
+  const [supabase, setSupabase] = useState(null);
   const activeWorkspaceKey = resolveAdminWorkspaceKey(activeTab);
   const activeWorkspaceConfig = ADMIN_WORKSPACE_CONFIG[activeWorkspaceKey];
 
@@ -3578,6 +3591,36 @@ export default function AdminConsole({
       workspaceKey: resolveAdminWorkspaceKey(activeTab),
     });
   }, [activeSchoolId, activeTab, forcedSchoolId, isManagedAuth, managedProfile?.role]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (supabaseConfigError) {
+      setSupabase(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void loadAdminSupabaseModule()
+      .then(({ createAdminSupabaseClient }) => {
+        if (cancelled) return;
+        setSupabase(createAdminSupabaseClient({ schoolScopeId: activeSchoolId }));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        logAdminRequestFailure("Admin console failed to load supabase client", error, {
+          activeSchoolId,
+          forcedSchoolId,
+          role: profile?.role ?? null,
+        });
+        setSupabase(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSchoolId, forcedSchoolId, profile?.role, supabaseConfigError]);
 
   useEffect(() => {
     if (!canUseAdminConsole || !activeWorkspaceConfig?.preloadModule) return;
@@ -5899,6 +5942,8 @@ export default function AdminConsole({
       const schoolIds = Array.from(
         new Set([profile.school_id, ...(assignments ?? []).map((row) => row.school_id)].filter(Boolean))
       );
+      if (!mounted) return;
+      const { createAdminSupabaseClient } = await loadAdminSupabaseModule();
       if (!mounted) return;
       const schoolRows = await Promise.all(
         schoolIds.map(async (id) => {
@@ -12146,55 +12191,57 @@ function openDailyRecordModal(record = null, recordDate = "") {
     action();
   }
 
-  function openScopedAdminRoute(nextAdminTab, options = {}) {
+  function syncScopedAdminRoute(nextAdminTab, options = {}) {
     if (!(forcedSchoolId && profile?.role === "super_admin")) {
-      return false;
+      return;
     }
-    router.push(buildScopedAdminHref(forcedSchoolId, {
+    const href = buildScopedAdminHref(forcedSchoolId, {
       adminTab: nextAdminTab,
       attendanceSubTab: options.attendanceSubTab ?? "sheet",
       modelSubTab: options.modelSubTab ?? "results",
       dailySubTab: options.dailySubTab ?? "results",
-    }));
-    return true;
+    });
+    if (typeof window === "undefined") return;
+    if (window.location?.pathname === href) return;
+    window.history.replaceState(window.history.state, "", href);
   }
 
   function selectAnnouncementsTab() {
-    if (openScopedAdminRoute("announcements")) return;
     setActiveTab("announcements");
+    syncScopedAdminRoute("announcements");
   }
 
   function selectStudentsTab() {
-    if (openScopedAdminRoute("students")) return;
     setActiveTab("students");
+    syncScopedAdminRoute("students");
   }
 
   function selectAttendanceTab(nextAttendanceSubTab = "sheet") {
-    if (openScopedAdminRoute("attendance", { attendanceSubTab: nextAttendanceSubTab })) return;
     setActiveTab("attendance");
     setAttendanceSubTab(nextAttendanceSubTab);
+    syncScopedAdminRoute("attendance", { attendanceSubTab: nextAttendanceSubTab });
   }
 
   function selectModelTab(nextModelSubTab = "results") {
-    if (openScopedAdminRoute("model", { modelSubTab: nextModelSubTab })) return;
     setActiveTab("model");
     setModelSubTab(nextModelSubTab);
+    syncScopedAdminRoute("model", { modelSubTab: nextModelSubTab });
   }
 
   function selectDailyTab(nextDailySubTab = "results") {
-    if (openScopedAdminRoute("daily", { dailySubTab: nextDailySubTab })) return;
     setActiveTab("daily");
     setDailySubTab(nextDailySubTab);
+    syncScopedAdminRoute("daily", { dailySubTab: nextDailySubTab });
   }
 
   function selectDailyRecordTab() {
-    if (openScopedAdminRoute("dailyRecord")) return;
     setActiveTab("dailyRecord");
+    syncScopedAdminRoute("dailyRecord");
   }
 
   function selectRankingTab() {
-    if (openScopedAdminRoute("ranking")) return;
     setActiveTab("ranking");
+    syncScopedAdminRoute("ranking");
   }
 
   const displayName = profile?.display_name?.trim() || session?.user?.email || "User";
@@ -12975,10 +13022,26 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     activeSchoolId,
                     managedAuth: isManagedAuth,
                     source: "shell-workspace",
+                    adminTab: activeTab,
+                    attendanceSubTab,
+                    modelSubTab,
+                    dailySubTab,
                   }}
                   loadingLabel={activeWorkspaceConfig.loadingLabel}
                   errorTitle="Workspace Error"
                   errorMessage="Failed to load this admin workspace. Retry or switch tabs and try again."
+                  onBack={changeSchoolHref
+                    ? () => {
+                        window.location.assign(changeSchoolHref);
+                      }
+                    : null}
+                  backLabel={changeSchoolHref ? "Back to Schools" : "Back"}
+                  diagnosticsExtra={{
+                    adminTab: activeTab,
+                    attendanceSubTab,
+                    modelSubTab,
+                    dailySubTab,
+                  }}
                 />
               ) : null}
             </AdminConsoleWorkspaceProvider>

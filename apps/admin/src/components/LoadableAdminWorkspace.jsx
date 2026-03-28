@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { getAdminDiagnosticsReport, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS } from "./adminConsoleLoader";
 
 function resolveModuleExport(mod) {
@@ -28,6 +28,9 @@ export default function LoadableAdminWorkspace({
   errorMessage = "Failed to load this workspace. Retry or switch tabs and try again.",
   timeoutMs = ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
   retryKey = 0,
+  onBack = null,
+  backLabel = "Back",
+  diagnosticsExtra = {},
 }) {
   const stableContext = useMemo(() => ({
     pathname: context.pathname ?? "",
@@ -150,17 +153,43 @@ export default function LoadableAdminWorkspace({
       <div className="admin-panel" style={{ marginTop: 16 }}>
         <div className="admin-title">{errorTitle}</div>
         <div className="admin-msg">{workspaceError}</div>
-        <button
-          className="btn"
-          type="button"
-          onClick={() => {
-            setWorkspaceError("");
-            setLoadedComponent(null);
-            renderTraceLoggedRef.current = false;
-          }}
-        >
-          Retry
-        </button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              setWorkspaceError("");
+              setLoadedComponent(null);
+              renderTraceLoggedRef.current = false;
+            }}
+          >
+            Retry
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={async () => {
+              const report = getAdminDiagnosticsReport({
+                importTarget,
+                source: stableContext.source,
+                ...stableContext,
+                ...diagnosticsExtra,
+              });
+              try {
+                await navigator.clipboard.writeText(report);
+              } catch {
+                // Clipboard may be unavailable on some browsers.
+              }
+            }}
+          >
+            Copy Diagnostics
+          </button>
+          {typeof onBack === "function" ? (
+            <button className="btn" type="button" onClick={onBack}>
+              {backLabel}
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }
