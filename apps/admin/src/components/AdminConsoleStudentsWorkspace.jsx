@@ -10,12 +10,6 @@ export default function AdminConsoleStudentsWorkspace() {
     canUseAdminConsole,
     fetchStudents,
     studentListFilters,
-    setStudentListMetricsLoaded,
-    setStudentListAttendanceMap,
-    setStudentListAttempts,
-    setStudentWarningsLoaded,
-    setStudentWarnings,
-    setStudentWarningsMsg,
     setSelectedStudentWarning,
     setStudentWarningPreviewStudentId,
     studentDetailOpen,
@@ -118,26 +112,6 @@ export default function AdminConsoleStudentsWorkspace() {
     if (!activeSchoolId || !session || !canUseAdminConsole) return;
     fetchStudents();
   }, [activeSchoolId, canUseAdminConsole, session]);
-
-  useEffect(() => {
-    setStudentListMetricsLoaded(false);
-    setStudentListAttendanceMap({});
-    setStudentListAttempts([]);
-  }, [
-    activeSchoolId,
-    studentListFilters.from,
-    studentListFilters.to,
-  ]);
-
-  useEffect(() => {
-    setStudentWarningsLoaded(false);
-    setStudentWarnings([]);
-    setStudentWarningsMsg("");
-    setSelectedStudentWarning(null);
-    setStudentWarningPreviewStudentId("");
-  }, [
-    activeSchoolId,
-  ]);
 
   return (
     <div style={{ marginBottom: 12 }}>
