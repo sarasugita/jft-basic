@@ -249,10 +249,27 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     });
   }, [attendanceDayColumns, attendanceFilter.startDate, attendanceFilter.endDate]);
 
-  const activeStudents = useMemo(
-    () => (students ?? []).filter((s) => !s.is_withdrawn),
-    [students]
-  );
+  const activeStudents = useMemo(() => {
+    const filtered = (students ?? []).filter((s) => !s.is_withdrawn);
+    const sorted = [...filtered];
+    const codeNum = (code) => {
+      const m = String(code ?? "").match(/(\d+)/);
+      return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+    };
+    sorted.sort((a, b) => {
+      const aNum = codeNum(a.student_code);
+      const bNum = codeNum(b.student_code);
+      if (aNum !== bNum) return aNum - bNum;
+      const aCode = String(a.student_code ?? "");
+      const bCode = String(b.student_code ?? "");
+      if (aCode !== bCode) return aCode.localeCompare(bCode);
+      const aName = String(a.display_name ?? "");
+      const bName = String(b.display_name ?? "");
+      if (aName !== bName) return aName.localeCompare(bName);
+      return String(a.email ?? "").localeCompare(String(b.email ?? ""));
+    });
+    return sorted;
+  }, [students]);
 
   const attendanceFilteredStudents = useMemo(() => {
     const minRate = attendanceFilter.minRate === "" ? null : Number(attendanceFilter.minRate);

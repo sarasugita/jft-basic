@@ -161,7 +161,18 @@ export default function AdminConsoleDailyRecordWorkspace() {
               </div>
               <div className="field small">
                 <label>&nbsp;</label>
-                <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => openDailyRecordModal(null, dailyRecordDate)}>
+                <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => {
+                  if (!dailyRecordDate) {
+                    alert("Please select a date first");
+                    return;
+                  }
+                  try {
+                    openDailyRecordModal(null, dailyRecordDate);
+                  } catch (err) {
+                    console.error("Open record error:", err);
+                    alert(`Failed to open record: ${err?.message || "Unknown error"}`);
+                  }
+                }}>
                   Open Record
                 </button>
               </div>

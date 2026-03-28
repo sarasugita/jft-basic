@@ -173,7 +173,16 @@ export default function AdminConsoleAttendanceWorkspace() {
               }}
             />
           </div>
-          <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => openAttendanceDay(attendanceDate, { confirmExisting: true })}>
+          <button className="btn btn-primary attendance-open-day-btn" type="button" onClick={() => {
+            if (!attendanceDate) {
+              alert("Please select a date first");
+              return;
+            }
+            openAttendanceDay(attendanceDate, { confirmExisting: true }).catch((err) => {
+              console.error("Open day error:", err);
+              alert(`Failed to open day: ${err?.message || "Unknown error"}`);
+            });
+          }}>
             Open Day
           </button>
         </div>
