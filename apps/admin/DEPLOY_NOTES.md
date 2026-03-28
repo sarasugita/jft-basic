@@ -1,10 +1,10 @@
 # Admin Console Refactor — Deployment Notes
 
-## Current Status: Phase 2 Complete — All 3 Extractable Workspaces Done
+## Current Status: Phase 2 In Progress — 4 of 6 Workspaces Extracted
 
 **Goal**: Split AdminConsoleCore (14,439 lines / 325 KB) into per-workspace isolated bundles to fix loading failures on slow/non-US devices.
 
-**Progress**: 3 of 6 workspaces extracted. AdminConsoleCore reduced from 325.1 KB → 287.0 KB (−38.1 KB cumulative). All workspace loading glitches resolved.
+**Progress**: 4 of 6 workspaces extracted. AdminConsoleCore reduced from 325.1 KB → 287.0 KB (−38.1 KB cumulative). All workspace loading glitches resolved. Attendance workspace state (Part 1) extracted; memos pending Phase 2d-2.
 
 ---
 
@@ -97,6 +97,31 @@ AdminConsoleShellLayout
   - WorkspaceContext entries: 16 announcement-related properties
 
 **Chunk Impact**: Core 319.0 KB → 316.2 KB (−2.8 KB). Announcements workspace 6.7 KB → 11.1 KB (now carries state).
+
+---
+
+### Commit 2bb852f: Phase 2d (Part 1) — Attendance Workspace State Extraction
+
+**Files Added**:
+- `src/components/AdminConsoleAttendanceWorkspaceState.jsx` — useAttendanceWorkspaceState hook with attendance state/functions
+
+**Files Modified**:
+- `AdminConsoleAttendanceWorkspace.jsx` — now uses own state hook for core state and functions; memos still from context (Phase 2d-2)
+
+**Extracted to Hook**:
+- State (16 vars): attendanceDays, attendanceEntries, attendanceMsg, attendanceDate, attendanceModalOpen/Day/Draft, attendanceSaving/Clearing, attendanceImportConflict/Status, attendanceFilter, absenceApplications/Msg, approvedAbsenceByStudent
+- Functions (8): fetchAttendanceDays, fetchAttendanceEntries, openAttendanceDay, saveAttendanceDay, deleteAttendanceDay, clearAllAttendanceValues, fetchAbsenceApplications, decideAbsenceApplication
+- Helper functions: buildAttendancePieData, buildAttendanceSummary, normalizeAttendanceStatusToken, normalizeAttendanceImportStatus, isCountedAttendanceStatus, getAttendanceStatusClassName, detectAttendanceImportLayout
+- Constants: ATTENDANCE_COUNTED_STATUSES, ATTENDANCE_SUPPORTED_STATUSES
+
+**Deferred to Phase 2d-2**:
+- Memos (7): attendanceEntriesByDay, attendanceDayColumns, attendanceRangeColumns, activeStudents (shared), attendanceFilteredStudents, attendanceAnalyticsStudents, attendanceDayRates
+- Functions (2): exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv (large, complex CSV handling)
+- Shared formatters: formatDateShort, formatWeekday (used by multiple workspaces)
+
+**Chunk Impact**: Attendance workspace 9.1 KB → 20.1 KB. AdminConsoleCore still 287.0 KB (memos, utilities, export/import pending).
+
+**Status**: ✓ Deployed (Part 1) | Phase 2d-2 TBD
 
 ---
 
@@ -216,18 +241,36 @@ If regressions are found:
 
 ---
 
-## Notes for Next Phase (Attendance — Phase 2d)
+## Notes for Next Phases
 
-AdminConsoleCore still contains:
-- ~180 useState hooks total (removed 52 across 3 extractions)
-- Attendance state: attendanceDate, attendanceModalDay, attendanceByDay, attendanceEntriesByDay, absenceApplications, etc.
-- Attendance functions: fetchAttendanceDays, openAttendanceDay, fetchAbsenceApplications, decideAbsenceApplication, etc.
-- Will extract in Phase 2d following same pattern as ranking/announcements/dailyRecord
+### Phase 2d-2 (Attendance Memos & Exports)
+Extract remaining attendance code from AdminConsoleCore:
+- Memos: attendanceDayColumns, attendanceRangeColumns, attendanceFilteredStudents, attendanceDayRates
+- Functions: exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv (large, complex)
+- These depend on shared formatters (formatDateShort, formatWeekday) — refactor dependencies or keep in core
 
-Shared dependencies:
-- formatDateFull, formatWeekday, formatDateShort — used by multiple workspaces, keep in core
-- Attendance-specific helpers: buildAttendanceStats, buildAttendancePieData, buildAttendanceSummary — move with state hook
-- Date utilities: getTodayDateInput, addDays — already in hook or core, refactor if needed
+### Phase 2e (Attendance - Part 2) & 2f (Students, Testing)
+After Phase 2d-2, remaining workspaces:
+- Students workspace: 30.8 KB → extract useStudentsWorkspaceState
+- Testing workspace: 67.3 KB → extract useTestingWorkspaceState (largest, complex)
+
+### Shared State Still in Core
+AdminConsoleCore retains:
+- ~160+ useState hooks (after 80 extracted across 4 phases)
+- Shared helpers: formatDateFull, formatWeekday, formatDateShort, buildStudentMetricRows, etc.
+- Cross-workspace utilities: isAnalyticsExcludedStudent, buildLatestAttemptMapByStudent, etc.
+- School/student management, session context
+- Sidebar/topbar JSX
+
+### Estimated Final Core Size
+- AdminConsoleCore: 100–150 KB (shell + shared utilities)
+- Ranking: 10–15 KB
+- Announcements: 10–15 KB
+- DailyRecord: 15–25 KB
+- Attendance: 20–30 KB (with exports)
+- Students: 30–50 KB
+- Testing: 80–120 KB
+- Total workspace bundle on-demand load: ~200–300 KB (first page: shell ~60 KB + requested tab)
 
 ---
 
