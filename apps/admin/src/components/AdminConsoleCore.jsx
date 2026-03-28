@@ -11877,6 +11877,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setSelectedStudentTab,
     fetchStudentAttendance,
     fetchStudentAttempts,
+    fetchStudentDetail,
     setStudentInfoForm,
     getPersonalInfoForm,
     setStudentInfoUploadFiles,
