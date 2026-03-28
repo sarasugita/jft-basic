@@ -11,6 +11,8 @@ let adminConsolePromise = null;
 let adminConsoleCorePromise = null;
 let adminConsoleModule = null;
 let adminConsoleCoreModule = null;
+let adminConsoleAnnouncementsStartupPromise = null;
+let adminConsoleAnnouncementsStartupModule = null;
 let startupListenersRegistered = false;
 const workspacePromises = {
   students: null,
@@ -309,6 +311,28 @@ export function preloadAdminConsoleCore(context = {}, options = {}) {
   return preloadImport("AdminConsoleCore", loadAdminConsoleCore, context, options);
 }
 
+export function loadAdminConsoleAnnouncementsStartup(context = {}) {
+  return loadImport(
+    "AdminConsoleAnnouncementsStartup",
+    () => loadCachedModule(
+      () => adminConsoleAnnouncementsStartupPromise,
+      (value) => {
+        adminConsoleAnnouncementsStartupPromise = value;
+      },
+      () => adminConsoleAnnouncementsStartupModule,
+      (value) => {
+        adminConsoleAnnouncementsStartupModule = value;
+      },
+      () => import("./AdminConsoleAnnouncementsStartup")
+    ),
+    context
+  );
+}
+
+export function preloadAdminConsoleAnnouncementsStartup(context = {}, options = {}) {
+  return preloadImport("AdminConsoleAnnouncementsStartup", loadAdminConsoleAnnouncementsStartup, context, options);
+}
+
 function createWorkspaceLoaders(key, importTarget, importer) {
   const load = (context = {}) => loadImport(
     importTarget,
@@ -357,6 +381,10 @@ export function getLoadedAdminConsole() {
 
 export function getLoadedAdminConsoleCore() {
   return adminConsoleCoreModule;
+}
+
+export function getLoadedAdminConsoleAnnouncementsStartup() {
+  return adminConsoleAnnouncementsStartupModule;
 }
 
 export const loadAdminConsoleStudentsWorkspace = studentsWorkspace.load;

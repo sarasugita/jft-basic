@@ -12665,6 +12665,19 @@ function openDailyRecordModal(record = null, recordDate = "") {
         </div>
         <div className="admin-nav">
           <button
+            className={`admin-nav-item ${activeTab === "announcements" ? "active" : ""}`}
+            onClick={() => handleSidebarMenuClick(() => setActiveTab("announcements"))}
+          >
+            <span className="admin-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" className="admin-nav-svg">
+                <path d="M4 4h16v12H7l-3 3z" />
+                <path d="M7 8h10M7 12h6" />
+              </svg>
+            </span>
+            Announcements
+          </button>
+
+          <button
             className={`admin-nav-item ${activeTab === "students" ? "active" : ""}`}
             onClick={() => handleSidebarMenuClick(() => setActiveTab("students"))}
           >
@@ -12849,18 +12862,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
             Ranking
           </button>
 
-          <button
-            className={`admin-nav-item ${activeTab === "announcements" ? "active" : ""}`}
-            onClick={() => handleSidebarMenuClick(() => setActiveTab("announcements"))}
-          >
-            <span className="admin-nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" className="admin-nav-svg">
-                <path d="M4 4h16v12H7l-3 3z" />
-                <path d="M7 8h10M7 12h6" />
-              </svg>
-            </span>
-            Announcements
-          </button>
         </div>
         <div className="admin-sidebar-footer">
           <div className="admin-email">{session.user.email}</div>

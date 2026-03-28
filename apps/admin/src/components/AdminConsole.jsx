@@ -7,22 +7,24 @@ import { logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import { createAdminSupabaseClient, getAdminSupabaseConfigError } from "../lib/adminSupabase";
 import {
   ADMIN_CONSOLE_IMPORT_TIMEOUT_MS,
+  getLoadedAdminConsoleAnnouncementsStartup,
   getLoadedAdminConsoleCore,
+  loadAdminConsoleAnnouncementsStartup,
   loadAdminConsoleCore,
   preloadAdminConsoleCore,
 } from "./adminConsoleLoader";
-import AdminConsoleDailyRecordStartup from "./AdminConsoleDailyRecordStartup";
 import LoadableAdminModule from "./LoadableAdminModule";
+import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
 
 const ADMIN_SCHOOL_SCOPE_STORAGE_KEY = "jft_admin_school_scope";
 
 function getAdminPageTitle(activeTab) {
+  if (activeTab === "announcements") return "Announcements";
   if (activeTab === "attendance") return "Attendance";
   if (activeTab === "model") return "Model Test";
   if (activeTab === "daily") return "Daily Test";
   if (activeTab === "dailyRecord") return "Schedule & Record";
   if (activeTab === "ranking") return "Ranking";
-  if (activeTab === "announcements") return "Announcements";
   return "Student List";
 }
 
@@ -50,13 +52,13 @@ function AdminConsoleStartupFrame({
   children,
 }) {
   const navItems = [
+    { key: "announcements", label: "Announcements" },
     { key: "students", label: "Student List" },
     { key: "attendance", label: "Attendance" },
     { key: "model", label: "Model Test" },
     { key: "daily", label: "Daily Test" },
     { key: "dailyRecord", label: "Schedule & Record" },
     { key: "ranking", label: "Ranking" },
-    { key: "announcements", label: "Announcements" },
   ];
 
   return (
@@ -148,7 +150,7 @@ export default function AdminConsole(props) {
   const [coreReady, setCoreReady] = useState(false);
   const [coreError, setCoreError] = useState("");
   const [coreRetryNonce, setCoreRetryNonce] = useState(0);
-  const [startupTab, setStartupTab] = useState("dailyRecord");
+  const [startupTab, setStartupTab] = useState("announcements");
   const [legacyCoreRequested, setLegacyCoreRequested] = useState(false);
   const [schoolAssignments, setSchoolAssignments] = useState([]);
   const [schoolScopeId, setSchoolScopeId] = useState(null);
@@ -324,7 +326,7 @@ export default function AdminConsole(props) {
   useEffect(() => {
     if (!isConsoleReadyForCore) {
       setLegacyCoreRequested(false);
-      setStartupTab("dailyRecord");
+      setStartupTab("announcements");
     }
   }, [isConsoleReadyForCore]);
 
@@ -403,7 +405,7 @@ export default function AdminConsole(props) {
     session,
   ]);
 
-  function openLegacyCore(nextTab = "dailyRecord") {
+  function openLegacyCore(nextTab = "announcements") {
     setStartupTab(nextTab);
     setLegacyCoreRequested(true);
   }
@@ -469,6 +471,10 @@ export default function AdminConsole(props) {
         changeSchoolHref={changeSchoolHref && profile?.role !== "super_admin" ? changeSchoolHref : ""}
         onSignOut={handleSignOut}
         onSelectTab={(nextTab) => {
+          if (nextTab === "announcements") {
+            setStartupTab("announcements");
+            return;
+          }
           setStartupTab(nextTab);
           openLegacyCore(nextTab);
         }}
@@ -546,16 +552,27 @@ export default function AdminConsole(props) {
         changeSchoolHref={changeSchoolHref && profile?.role !== "super_admin" ? changeSchoolHref : ""}
         onSignOut={handleSignOut}
         onSelectTab={(nextTab) => {
-          if (nextTab === "dailyRecord") {
-            setStartupTab("dailyRecord");
+          if (nextTab === "announcements") {
+            setStartupTab("announcements");
             return;
           }
           openLegacyCore(nextTab);
         }}
       >
-        <AdminConsoleDailyRecordStartup
-          activeSchoolId={activeSchoolId}
-          onOpenFullConsole={() => openLegacyCore("dailyRecord")}
+        <LoadableAdminWorkspace
+          importTarget="AdminConsoleAnnouncementsStartup"
+          loadModule={loadAdminConsoleAnnouncementsStartup}
+          getLoadedModule={getLoadedAdminConsoleAnnouncementsStartup}
+          context={{
+            ...baseContext,
+            source: "startup-workspace",
+          }}
+          moduleProps={{
+            activeSchoolId,
+          }}
+          loadingLabel="Loading announcements..."
+          errorTitle="Workspace Error"
+          errorMessage="Failed to load announcements. Retry or switch tabs and try again."
         />
       </AdminConsoleStartupFrame>
     );

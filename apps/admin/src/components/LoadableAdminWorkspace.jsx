@@ -22,6 +22,7 @@ export default function LoadableAdminWorkspace({
   loadModule,
   getLoadedModule,
   context = {},
+  moduleProps = {},
   loadingLabel = "Loading workspace...",
   errorTitle = "Workspace Error",
   errorMessage = "Failed to load this workspace. Retry or switch tabs and try again.",
@@ -168,5 +169,5 @@ export default function LoadableAdminWorkspace({
     return <WorkspaceLoadingFallback label={loadingLabel} />;
   }
 
-  return <LoadedComponent />;
+  return <LoadedComponent {...moduleProps} />;
 }
