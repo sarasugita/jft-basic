@@ -227,6 +227,13 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, 
     setStudentListLoading(false);
   }, [activeSchoolId, supabase, studentListFilters]);
 
+  // Open warnings modal
+  const openStudentWarningsModalFn = useCallback((getDefaultStudentWarningForm) => {
+    setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters));
+    setStudentWarningIssueMsg("");
+    setStudentWarningIssueOpen(true);
+  }, [studentListFilters]);
+
   // Memos for derived data
   const sortedStudents = useMemo(() => {
     const list = [...(students ?? [])];
@@ -360,6 +367,7 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, 
     setStudentWarningPreviewStudentId,
     // Functions
     fetchStudentListMetrics,
+    openStudentWarningsModalFn,
     // Memos
     sortedStudents,
     studentListRows,

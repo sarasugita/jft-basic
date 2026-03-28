@@ -16,8 +16,6 @@ export default function AdminConsoleStudentsWorkspace() {
     getScoreRate,
     fetchStudents,
     setInviteOpen,
-    openStudentWarningsModal,
-    handleLoadStudentMetrics,
     handleLoadStudentWarnings,
     studentWarningCounts,
     openStudentDetail,
@@ -139,6 +137,7 @@ export default function AdminConsoleStudentsWorkspace() {
     setStudentWarningPreviewStudentId,
     studentListRows,
     fetchStudentListMetrics,
+    openStudentWarningsModalFn,
     normalizeStudentNumberInput,
     getStudentDisplayName,
   } = useStudentsWorkspaceState({
@@ -149,10 +148,16 @@ export default function AdminConsoleStudentsWorkspace() {
     getScoreRate,
   });
 
+  // Wrapper for loading metrics (since handleLoadStudentMetrics from context references old fetchStudentListMetrics)
+  const loadMetrics = useCallback(() => {
+    if (studentListLoading) return;
+    fetchStudentListMetrics();
+  }, [studentListLoading, fetchStudentListMetrics]);
+
   useEffect(() => {
     if (!activeSchoolId || !session || !canUseAdminConsole) return;
     fetchStudents();
-  }, [activeSchoolId, canUseAdminConsole, session, fetchStudents]);
+  }, [activeSchoolId, canUseAdminConsole, session]);
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -168,7 +173,7 @@ export default function AdminConsoleStudentsWorkspace() {
             </button>
             <button
               className="btn student-list-primary-btn student-warning-launch-btn"
-              onClick={openStudentWarningsModal}
+              onClick={() => openStudentWarningsModalFn(getDefaultStudentWarningForm)}
             >
               <svg viewBox="0 0 20 20" aria-hidden="true">
                 <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -178,7 +183,7 @@ export default function AdminConsoleStudentsWorkspace() {
             <button
               className="btn student-list-primary-btn"
               type="button"
-              onClick={() => void handleLoadStudentMetrics()}
+              onClick={() => void loadMetrics()}
               disabled={studentListLoading}
               aria-label={studentListLoading ? "Loading metrics" : studentListMetricsLoaded ? "Refresh metrics" : "Load metrics"}
               title={studentListLoading ? "Loading metrics..." : studentListMetricsLoaded ? "Refresh metrics" : "Load metrics"}
