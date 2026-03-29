@@ -304,7 +304,7 @@ function getWeekdayNumber(dateString) {
 }
 
 // Main hook
-export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], openDailyRecordModalCtx, closeDailyRecordModalCtx }) {
+export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [] }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
@@ -421,20 +421,10 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   }
 
   function openDailyRecordModal(record = null, recordDate = "") {
-    // Delegate to context function which has proper scope for modal rendering
-    if (openDailyRecordModalCtx) {
-      return openDailyRecordModalCtx(record, recordDate);
-    }
-    // Fallback implementation if context function not provided
-    setDailyRecordsMsg("Context not available for opening record.");
+    setDailyRecordModalOpen(true);
   }
 
   function closeDailyRecordModal() {
-    // Delegate to context function which has proper scope for modal rendering
-    if (closeDailyRecordModalCtx) {
-      return closeDailyRecordModalCtx();
-    }
-    // Fallback implementation if context function not provided
     setDailyRecordModalOpen(false);
   }
 
