@@ -27,7 +27,6 @@ export default function AdminConsoleDailyRecordWorkspace() {
     students,
     fetchStudents,
     testSessions,
-    openDailyRecordModal: openDailyRecordModalCtx,
   } = useAdminConsoleWorkspaceContext();
 
   const {
@@ -53,7 +52,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
     dailyRecordPlanSavingDate,
     dailyRecordsMsg,
     fetchDailyRecords,
-  } = useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions, openDailyRecordModalCtx });
+  } = useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions });
 
   useEffect(() => {
     if (!activeSchoolId) return;

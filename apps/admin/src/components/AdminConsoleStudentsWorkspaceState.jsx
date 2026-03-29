@@ -75,7 +75,7 @@ function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, tes
   });
 }
 
-export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, students, testMetaByVersion, getScoreRate, fetchStudentDetail, issueStudentWarningCtx, deleteStudentWarningCtx, fetchStudentWarnings }) {
+export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, students, testMetaByVersion, getScoreRate, fetchStudentDetail, setStudentWarningForm, setStudentWarningIssueMsg, setStudentWarningIssueOpen }) {
   // Student list state
   const [studentMsg, setStudentMsg] = useState("");
   const [studentTempMap, setStudentTempMap] = useState({});

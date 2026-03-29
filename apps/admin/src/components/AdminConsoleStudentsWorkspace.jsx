@@ -148,6 +148,9 @@ export default function AdminConsoleStudentsWorkspace() {
     testMetaByVersion,
     getScoreRate,
     fetchStudentDetail,
+    setStudentWarningForm,
+    setStudentWarningIssueMsg,
+    setStudentWarningIssueOpen,
   });
 
   // Wrapper for loading metrics (since handleLoadStudentMetrics from context references old fetchStudentListMetrics)

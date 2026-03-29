@@ -304,7 +304,7 @@ function getWeekdayNumber(dateString) {
 }
 
 // Main hook
-export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], openDailyRecordModalCtx }) {
+export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [] }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
@@ -421,11 +421,29 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   }
 
   function openDailyRecordModal(record = null, recordDate = "") {
-    if (openDailyRecordModalCtx) {
-      return openDailyRecordModalCtx(record, recordDate);
+    const existingRecord =
+      record
+      ?? dailyRecords.find((item) => item.record_date === recordDate)
+      ?? null;
+    let nextForm = existingRecord
+      ? getDailyRecordForm(existingRecord)
+      : getEmptyDailyRecordForm(recordDate || getTodayDateInput());
+    if (!existingRecord) {
+      const previousRecordDate = addDays(nextForm.record_date || recordDate || getTodayDateInput(), -1);
+      const previousRecord = dailyRecords.find((item) => item.record_date === previousRecordDate) ?? null;
+      const previousLargestEntry = getLargestDailyRecordTextbookEntry(previousRecord?.todays_content);
+      if (previousLargestEntry) {
+        nextForm = {
+          ...nextForm,
+          textbook_entries: [createDailyRecordTextbookRow(previousLargestEntry.book, String(previousLargestEntry.lesson))],
+        };
+      }
     }
-    // Fallback - shouldn't happen if context function is provided
-    setDailyRecordsMsg("Context not available for opening record.");
+    setDailyRecordForm(nextForm);
+    setDailyRecordDate(nextForm.record_date || recordDate || getTodayDateInput());
+    setDailyRecordsMsg("");
+    setDailyRecordSaving(false);
+    setDailyRecordModalOpen(true);
   }
 
   function closeDailyRecordModal() {
