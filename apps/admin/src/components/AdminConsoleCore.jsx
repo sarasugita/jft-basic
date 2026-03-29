@@ -6986,11 +6986,25 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   async function openAttendanceDay(dayDate, options = {}) {
     if (!dayDate) return;
-    if (!activeSchoolId) {
+    if (!activeSchoolId || !supabase) {
       setAttendanceMsg("School context is missing for this admin.");
       return;
     }
-    const existingDay = (attendanceDays ?? []).find((day) => day.day_date === dayDate) ?? null;
+    let existingDay = (attendanceDays ?? []).find((day) => day.day_date === dayDate) ?? null;
+
+    // If not found locally, try to fetch from database
+    if (!existingDay) {
+      const { data, error } = await supabase
+        .from("attendance_days")
+        .select("id, day_date, created_at")
+        .eq("school_id", activeSchoolId)
+        .eq("day_date", dayDate)
+        .single();
+      if (!error && data) {
+        existingDay = data;
+      }
+    }
+
     if (existingDay && options.confirmExisting) {
       const shouldEditExisting = window.confirm(
         `Attendance for ${dayDate} already exists. Edit it?`
