@@ -36,6 +36,9 @@ function isGeneratedDailySessionVersion(version) {
   return String(version ?? "").startsWith("daily_session_");
 }
 
+// Alias for readability in daily tests filtering
+const isDaily = isGeneratedDailySessionVersion;
+
 function normalizeLookupValue(value) {
   return String(value ?? "")
     .trim()
