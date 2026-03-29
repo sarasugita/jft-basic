@@ -192,7 +192,7 @@ function detectAttendanceImportLayout(rows) {
 }
 
 
-export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students = [], attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent = () => false, formatDateShort = (d) => d, formatWeekday = (d) => "" }) {
+export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students = [], attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent = () => false, formatDateShort = (d) => d, formatWeekday = (d) => "", openAttendanceDayCtx }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
@@ -415,62 +415,14 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceEntries(map);
   }
 
+  // Delegate to context's openAttendanceDay which manages the core modal state
   async function openAttendanceDay(dayDate, options = {}) {
+    if (openAttendanceDayCtx) {
+      return await openAttendanceDayCtx(dayDate, options);
+    }
+    // Fallback if context function not provided
     if (!dayDate) return;
-    if (!activeSchoolId) {
-      setAttendanceMsg("School context is missing for this admin.");
-      return;
-    }
-    const existingDay = (attendanceDays ?? []).find((day) => day.day_date === dayDate) ?? null;
-    if (existingDay && options.confirmExisting) {
-      const shouldEditExisting = window.confirm(
-        `Attendance for ${dayDate} already exists. Edit it?`
-      );
-      if (!shouldEditExisting) {
-        return;
-      }
-    }
-    setAttendanceMsg("");
-    setAttendanceModalOpen(true);
-    setAttendanceSaving(false);
-    setApprovedAbsenceByStudent({});
-    let day = existingDay;
-    if (!day) {
-      day = {
-        id: null,
-        school_id: activeSchoolId,
-        day_date: dayDate,
-        created_at: null,
-        isDraft: true,
-      };
-    }
-    const { data: approvedApps, error: appsError } = await supabase
-      .from("absence_applications")
-      .select("id, student_id, type, late_type, time_value, reason, catch_up")
-      .eq("school_id", activeSchoolId)
-      .eq("day_date", day.day_date)
-      .eq("status", "approved");
-    if (appsError) {
-      console.error("approved applications fetch error:", appsError);
-      setApprovedAbsenceByStudent({});
-    } else {
-      const map = {};
-      (approvedApps ?? []).forEach((a) => {
-        map[a.student_id] = a;
-      });
-      setApprovedAbsenceByStudent(map);
-    }
-    setAttendanceModalDay(day);
-    const existing = day.id ? (attendanceEntries[day.id] ?? {}) : {};
-    const draft = {};
-    (students ?? []).forEach((s) => {
-      const entry = existing[s.id] || {};
-      draft[s.id] = {
-        status: entry.status || "P",
-        comment: entry.comment || ""
-      };
-    });
-    setAttendanceDraft(draft);
+    setAttendanceMsg("School context is missing.");
   }
 
   async function saveAttendanceDay() {

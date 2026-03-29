@@ -20,7 +20,7 @@ function formatWeekdayFn(d) {
 }
 
 export default function AdminConsoleAttendanceWorkspace() {
-  const { activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime, isAnalyticsExcludedStudent, attendanceSubTab, setAttendanceSubTab } = useAdminConsoleWorkspaceContext();
+  const { activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime, isAnalyticsExcludedStudent, attendanceSubTab, setAttendanceSubTab, openAttendanceDay: openAttendanceDayCtx } = useAdminConsoleWorkspaceContext();
 
   const {
     attendanceMsg,
@@ -45,7 +45,7 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceEntriesByDay,
     attendanceFilteredStudents,
     attendanceDayRates,
-  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: formatDateShortFn, formatWeekday: formatWeekdayFn });
+  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: formatDateShortFn, formatWeekday: formatWeekdayFn, openAttendanceDayCtx: openAttendanceDay });
 
   useEffect(() => {
     if (!activeSchoolId) return;

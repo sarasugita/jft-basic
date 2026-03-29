@@ -75,7 +75,7 @@ function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, tes
   });
 }
 
-export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, testMetaByVersion, getScoreRate, fetchStudentDetail }) {
+export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, students, testMetaByVersion, getScoreRate, fetchStudentDetail, issueStudentWarningCtx, deleteStudentWarningCtx, fetchStudentWarnings, normalizeStudentWarningCriteria, loadStudentWarningMetrics, isAnalyticsExcludedStudent, getStudentWarningIssues, summarizeWarningCriteria, getDefaultStudentWarningForm, isMissingStudentWarningsTableError }) {
   // Student list state
   const [studentMsg, setStudentMsg] = useState("");
   const [studentTempMap, setStudentTempMap] = useState({});
@@ -251,6 +251,113 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, 
     }
   }, [selectedStudentDetail?.id, fetchStudentDetail]);
 
+  // Issue student warning wrapper
+  const issueStudentWarning = useCallback(async () => {
+    if (!activeSchoolId) {
+      setStudentWarningIssueMsg("Select a school.");
+      return;
+    }
+    setStudentWarningIssueSaving(true);
+    setStudentWarningIssueMsg("");
+    try {
+      const criteria = normalizeStudentWarningCriteria?.(studentWarningForm) || {};
+      const rows = await loadStudentWarningMetrics?.(criteria) || [];
+      const matched = rows
+        .filter((row) => !isAnalyticsExcludedStudent?.(row.student))
+        .map((row) => ({ row, issues: getStudentWarningIssues?.(row, criteria) || [] }))
+        .filter((item) => item.issues.length > 0);
+      if (!matched.length) {
+        setStudentWarningIssueMsg("No students matched the selected warning criteria.");
+        setStudentWarningIssueSaving(false);
+        return;
+      }
+      const criteriaSummary = summarizeWarningCriteria?.(criteria) || [];
+      const title =
+        criteria.title ||
+        (criteriaSummary.length
+          ? `Warning: ${criteriaSummary[0]}`
+          : `Warning issued on ${new Date().toLocaleDateString()}`);
+      const { data: warningRow, error: warningError } = await supabase
+        .from("student_warnings")
+        .insert({
+          school_id: activeSchoolId,
+          title,
+          criteria: {
+            ...criteria,
+            title: undefined,
+            summary: criteriaSummary,
+          },
+          student_count: matched.length,
+          created_by: session?.user?.id ?? null,
+        })
+        .select("id")
+        .single();
+      if (warningError) throw warningError;
+
+      const recipientsPayload = matched.map(({ row, issues }) => ({
+        warning_id: warningRow.id,
+        school_id: activeSchoolId,
+        student_id: row.student.id,
+        issues,
+      }));
+      const { error: recipientsError } = await supabase
+        .from("student_warning_recipients")
+        .insert(recipientsPayload);
+      if (recipientsError) throw recipientsError;
+
+      setStudentWarningIssueOpen(false);
+      setStudentWarningForm(getDefaultStudentWarningForm?.(studentListFilters) || {});
+      setStudentWarningIssueMsg("");
+      setStudentMsg(`Issued warning to ${matched.length} student${matched.length > 1 ? "s" : ""}.`);
+      if (fetchStudentWarnings) {
+        await fetchStudentWarnings();
+      }
+    } catch (error) {
+      if (!isMissingStudentWarningsTableError?.(error)) {
+        console.error("issue student warning error:", error);
+      }
+      setStudentWarningIssueMsg(
+        isMissingStudentWarningsTableError?.(error)
+          ? "Warning tables are not available yet. Apply the latest Supabase migration first."
+          : `Issue warning failed: ${error?.message || error}`
+      );
+    } finally {
+      setStudentWarningIssueSaving(false);
+    }
+  }, [activeSchoolId, supabase, session, studentWarningForm, studentListFilters, normalizeStudentWarningCriteria, loadStudentWarningMetrics, isAnalyticsExcludedStudent, getStudentWarningIssues, summarizeWarningCriteria, getDefaultStudentWarningForm, isMissingStudentWarningsTableError, fetchStudentWarnings]);
+
+  // Delete student warning wrapper
+  const deleteStudentWarning = useCallback(async (warning) => {
+    if (!warning?.id) return;
+    const ok = window.confirm(`Delete warning "${warning.title || "Warning"}"?`);
+    if (!ok) return;
+    setStudentWarningDeletingId(warning.id);
+    setStudentWarningsMsg("");
+    try {
+      const { error: recipientError } = await supabase
+        .from("student_warning_recipients")
+        .delete()
+        .eq("warning_id", warning.id);
+      if (recipientError) throw recipientError;
+
+      const { error: warningError } = await supabase
+        .from("student_warnings")
+        .delete()
+        .eq("id", warning.id);
+      if (warningError) throw warningError;
+
+      setStudentWarningDeletingId("");
+      setStudentWarningsMsg("Warning deleted.");
+      if (fetchStudentWarnings) {
+        await fetchStudentWarnings();
+      }
+    } catch (error) {
+      console.error("delete student warning error:", error);
+      setStudentWarningsMsg(`Delete failed: ${error?.message || error}`);
+      setStudentWarningDeletingId("");
+    }
+  }, [supabase, fetchStudentWarnings]);
+
   // Memos for derived data
   const sortedStudents = useMemo(() => {
     const list = [...(students ?? [])];
@@ -386,6 +493,8 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, students, 
     fetchStudentListMetrics,
     openStudentWarningsModalFn,
     openStudentDetailFn,
+    issueStudentWarning,
+    deleteStudentWarning,
     // Memos
     sortedStudents,
     studentListRows,
