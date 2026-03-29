@@ -16,6 +16,7 @@ import { recordAdminAuditEvent } from "../lib/adminAudit";
 // ============================================================================
 
 const DEFAULT_MODEL_CATEGORY = "Book Review";
+const CUSTOM_CATEGORY_OPTION = "__custom__";
 const ADMIN_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
 // ============================================================================
