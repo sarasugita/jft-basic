@@ -11961,6 +11961,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
     absenceApplications,
     decideAbsenceApplication,
     absenceApplicationsMsg,
+    openDailyRecordModal,
+    closeDailyRecordModal,
     tests,
     fetchTests,
     fetchTestSessions,
