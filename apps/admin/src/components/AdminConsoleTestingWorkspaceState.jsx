@@ -2765,6 +2765,17 @@ export function useTestingWorkspaceState({
     buildTwentyFourHourTime,
     formatTwelveHourTimeDisplay,
 
+    // Helper functions
+    formatDateTime,
+    formatDateShort,
+    getStudentBaseUrl,
+    copyLink,
+    formatRatePercent,
+    runSearch,
+    exportDailyGoogleSheetsCsv,
+    exportModelGoogleSheetsCsv,
+    getSectionTitle,
+
     // Refs
     dailySourceCategoryDropdownRef,
     dailySetDropdownRef,
