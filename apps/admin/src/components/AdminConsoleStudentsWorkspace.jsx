@@ -68,6 +68,10 @@ export default function AdminConsoleStudentsWorkspace() {
     deleteStudentWarning: deleteStudentWarningCtx,
     studentWarningPreviewStudent,
     studentWarningPreviewEntries,
+    normalizeStudentWarningCriteria,
+    loadStudentWarningMetrics,
+    getStudentWarningIssues,
+    isMissingStudentWarningsTableError,
   } = contextData;
 
   // Use the Students workspace state hook
