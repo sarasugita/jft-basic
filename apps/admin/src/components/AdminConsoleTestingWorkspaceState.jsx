@@ -72,6 +72,16 @@ function mapQuestion(row) {
   };
 }
 
+function isMissingTabLeftCountError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /tab_left_count/i.test(text) && /does not exist/i.test(text);
+}
+
+function isMissingSessionAttemptOverrideTableError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /test_session_attempt_overrides/i.test(text) && /does not exist/i.test(text);
+}
+
 function normalizeLookupValue(value) {
   return String(value ?? "")
     .trim()
