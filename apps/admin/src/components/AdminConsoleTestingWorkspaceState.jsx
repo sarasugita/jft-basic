@@ -298,6 +298,14 @@ function getProblemSetTitle(problemSetId, testsList) {
   return item?.title || problemSetId || "";
 }
 
+function getProblemSetDisplayId(problemSetId, testsList) {
+  const item = (testsList ?? []).find((t) => t.version === problemSetId);
+  if (Array.isArray(item?.source_set_ids) && item.source_set_ids.length) {
+    return item.source_set_ids.join(", ");
+  }
+  return problemSetId || "";
+}
+
 function isRetakeSessionTitle(title) {
   return String(title ?? "").trim().startsWith("[Retake]");
 }
@@ -2960,6 +2968,7 @@ export function useTestingWorkspaceState({
     exportDailyGoogleSheetsCsv,
     exportModelGoogleSheetsCsv,
     getSectionTitle,
+    getProblemSetDisplayId,
 
     // Refs
     dailySourceCategoryDropdownRef,
