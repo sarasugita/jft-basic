@@ -310,20 +310,9 @@ export default function AdminConsoleAttendanceWorkspace() {
               <th className="att-col-absent att-sticky-4">Unexcused<br />Absence</th>
               {attendanceDayColumns.map((d) => (
                 <th key={d.id}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <button className="link-btn" type="button" onClick={() => openAttendanceDay(d.day_date)}>
-                      {d.label}
-                    </button>
-                    <button
-                      className="btn admin-icon-btn"
-                      type="button"
-                      title="Delete this day"
-                      onClick={() => deleteAttendanceDay(d)}
-                      style={{ padding: "2px 6px", fontSize: "12px" }}
-                    >
-                      ✕
-                    </button>
-                  </div>
+                  <button className="link-btn" type="button" onClick={() => openAttendanceDay(d.day_date)}>
+                    {d.label}
+                  </button>
                   <div className="att-day-total">
                     {attendanceDayRates[d.id] == null ? "-" : formatRatePercent(attendanceDayRates[d.id])}
                   </div>
