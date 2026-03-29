@@ -556,6 +556,7 @@ export function useTestingWorkspaceState({
   const [dailyCsvFile, setDailyCsvFile] = useState(null);
   const [dailyUploadMsg, setDailyUploadMsg] = useState("");
   const [dailyImportMsg, setDailyImportMsg] = useState("");
+  const [dailyCategorySelect, setDailyCategorySelect] = useState(CUSTOM_CATEGORY_OPTION);
 
   // Preview
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -2561,6 +2562,93 @@ export function useTestingWorkspaceState({
     }));
   }, [testMetaByVersion, tests]);
 
+  const selectModelRetakeSource = useCallback((sessionId) => {
+    setModelRetakeSourceId(sessionId);
+    const source = pastModelSessions.find((session) => session.id === sessionId);
+    if (source) applySourceSessionToForm(source, setTestSessionForm);
+  }, [pastModelSessions, applySourceSessionToForm]);
+
+  const selectDailyRetakeSource = useCallback((sessionId) => {
+    setDailySourceCategoryDropdownOpen(false);
+    setDailySetDropdownOpen(false);
+    setActiveDailyTimePicker("");
+    setDailyRetakeSourceId(sessionId);
+    const source = dailyRetakeSessions.find((session) => session.id === sessionId);
+    if (source) applyDailyRetakeSourceSession(source);
+  }, [dailyRetakeSessions, applyDailyRetakeSourceSession]);
+
+  const updateModelSessionTimePart = useCallback((field, part, value) => {
+    setTestSessionForm((current) => {
+      const nextParts = {
+        ...getTwelveHourTimeParts(current[field]),
+        [part]: value,
+      };
+      return {
+        ...current,
+        [field]: buildTwentyFourHourTime(nextParts),
+      };
+    });
+  }, []);
+
+  const updateDailySessionTimePart = useCallback((field, part, value) => {
+    setDailySessionForm((current) => {
+      const nextParts = {
+        ...getTwelveHourTimeParts(current[field]),
+        [part]: value,
+      };
+      return {
+        ...current,
+        [field]: buildTwentyFourHourTime(nextParts),
+      };
+    });
+  }, []);
+
+  const toggleDailySourceCategorySelection = useCallback((categoryName) => {
+    const normalizedName = String(categoryName ?? "").trim();
+    if (!normalizedName) return;
+    const currentlySelected = selectedDailySourceCategoryNames;
+    const isSelected = currentlySelected.includes(normalizedName);
+
+    if (isSelected) {
+      if (currentlySelected.length <= 1) return;
+      const remainingNames = currentlySelected.filter((name) => name !== normalizedName);
+      const nextPrimary = dailyConductCategory === normalizedName
+        ? remainingNames[0] ?? ""
+        : dailyConductCategory;
+      setDailyConductCategory(nextPrimary);
+      setDailySessionForm((current) => ({
+        ...current,
+        source_categories: remainingNames.filter((name) => name !== nextPrimary),
+      }));
+      return;
+    }
+
+    if (!dailyConductCategory) {
+      setDailyConductCategory(normalizedName);
+      return;
+    }
+
+    setDailySessionForm((current) => ({
+      ...current,
+      source_categories: Array.from(new Set([...(current.source_categories ?? []), normalizedName])),
+    }));
+  }, [selectedDailySourceCategoryNames, dailyConductCategory]);
+
+  const toggleDailyProblemSetSelection = useCallback((problemSetId) => {
+    setDailySessionForm((current) => {
+      const nextIds = new Set(current.problem_set_ids ?? []);
+      if (nextIds.has(problemSetId)) {
+        nextIds.delete(problemSetId);
+      } else {
+        nextIds.add(problemSetId);
+      }
+      return {
+        ...current,
+        problem_set_ids: Array.from(nextIds),
+      };
+    });
+  }, []);
+
   const openModelConductModal = useCallback((mode = "normal") => {
     setModelConductMode(mode);
     setModelConductOpen(true);
@@ -2854,6 +2942,8 @@ export function useTestingWorkspaceState({
     setDailyUploadMsg,
     dailyImportMsg,
     setDailyImportMsg,
+    dailyCategorySelect,
+    setDailyCategorySelect,
 
     // Preview
     previewOpen,
@@ -3004,6 +3094,12 @@ export function useTestingWorkspaceState({
     getTwelveHourTimeParts,
     buildTwentyFourHourTime,
     formatTwelveHourTimeDisplay,
+    selectModelRetakeSource,
+    selectDailyRetakeSource,
+    updateModelSessionTimePart,
+    updateDailySessionTimePart,
+    toggleDailySourceCategorySelection,
+    toggleDailyProblemSetSelection,
 
     // Helper functions
     formatDateTime,
