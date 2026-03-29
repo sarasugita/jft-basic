@@ -577,6 +577,21 @@ export function useTestingWorkspaceState({
   // useMemo declarations (25+ memos)
   // ========================================================================
 
+  const buildCategories = (list, fallbackLabel = "Uncategorized") => {
+    const map = new Map();
+    (list ?? []).forEach((t) => {
+      const name = String(t.title ?? "").trim() || fallbackLabel;
+      if (!map.has(name)) map.set(name, []);
+      map.get(name).push(t);
+    });
+    const categories = Array.from(map.entries()).map(([name, items]) => {
+      const ordered = [...items].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
+      return { name, tests: ordered };
+    });
+    categories.sort((a, b) => a.name.localeCompare(b.name));
+    return categories;
+  };
+
   const modelTests = useMemo(() => tests.filter((t) => t.type === "mock"), [tests]);
   const dailyTests = useMemo(() => tests.filter((t) => t.type === "daily"), [tests]);
   const dailyQuestionSets = useMemo(
@@ -755,6 +770,26 @@ export function useTestingWorkspaceState({
       .map((name) => ({ name }))
       .sort((left, right) => left.name.localeCompare(right.name));
   }, [modelTests]);
+
+  const filteredModelUploadTests = useMemo(() => {
+    if (!modelUploadCategory) return modelTests;
+    return modelTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
+  }, [modelTests, modelUploadCategory]);
+
+  const groupedModelUploadTests = useMemo(
+    () => buildCategories(filteredModelUploadTests, DEFAULT_MODEL_CATEGORY),
+    [filteredModelUploadTests],
+  );
+
+  const filteredDailyUploadTests = useMemo(() => {
+    if (!dailyUploadCategory) return dailyQuestionSets;
+    return dailyQuestionSets.filter((t) => String(t.title ?? "").trim() === dailyUploadCategory);
+  }, [dailyQuestionSets, dailyUploadCategory]);
+
+  const groupedDailyUploadTests = useMemo(
+    () => buildCategories(filteredDailyUploadTests),
+    [filteredDailyUploadTests],
+  );
 
   // ========================================================================
   // useCallback functions (39+ callbacks)
@@ -2484,6 +2519,10 @@ export function useTestingWorkspaceState({
     selectedDailyQuestionCount,
     dailyCategories,
     modelCategories,
+    filteredModelUploadTests,
+    groupedModelUploadTests,
+    filteredDailyUploadTests,
+    groupedDailyUploadTests,
 
     // Callback functions
     fetchTests,
