@@ -608,8 +608,9 @@ export default function AdminConsoleDeferredFeatures({
           <div className="admin-modal admin-modal-wide" onClick={(e) => e.stopPropagation()}>
             <div className="admin-modal-header">
               <div>
-                <div className="admin-title">Preview: {previewTest}</div>
-                <div className="admin-help">正解の選択肢を色で表示します。</div>
+                <div className="admin-title">
+                  Preview: {previewSession ? previewSession.title || previewSession.problem_set_id : previewTest}
+                </div>
               </div>
               <button className="admin-modal-close" onClick={closePreview} aria-label="Close">
                 ×
