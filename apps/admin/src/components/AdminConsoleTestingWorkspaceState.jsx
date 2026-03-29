@@ -16,6 +16,7 @@ import { recordAdminAuditEvent } from "../lib/adminAudit";
 // ============================================================================
 
 const DEFAULT_MODEL_CATEGORY = "Book Review";
+const ADMIN_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -112,6 +113,108 @@ function buildStorageObjectPath(testType, testVersion, assetType, relativePath) 
     .map((segment) => sanitizeStoragePathSegment(segment))
     .filter(Boolean);
   return [...baseSegments, ...(relativeSegments.length ? relativeSegments : ["file"])].join("/");
+}
+
+function splitAssetValues(value) {
+  return String(value ?? "")
+    .split(/\r?\n|\|/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function resolveAssetValue(value, assetMap) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.includes("/")) return raw;
+  return assetMap[raw] ?? raw;
+}
+
+function groupParsedCsvByVersion(questions, choices) {
+  const groups = new Map();
+  for (const question of questions) {
+    const version = String(question?.test_version ?? "").trim();
+    if (!version) continue;
+    if (!groups.has(version)) groups.set(version, { questions: [], choices: [] });
+    groups.get(version).questions.push(question);
+  }
+  for (const choice of choices) {
+    const version = String(choice?.test_version ?? "").trim();
+    if (!version) continue;
+    if (!groups.has(version)) groups.set(version, { questions: [], choices: [] });
+    groups.get(version).choices.push(choice);
+  }
+  return groups;
+}
+
+function applyAssetMap(questions, choices, assetMap) {
+  for (const q of questions) {
+    const data = q.data ?? {};
+    if (data.stemAsset) {
+      data.stemAsset = splitAssetValues(data.stemAsset)
+        .map((value) => resolveAssetValue(value, assetMap))
+        .join("|");
+    }
+    if (Array.isArray(data.choices)) {
+      data.choices = data.choices.map((v) => {
+        const raw = String(v ?? "").trim();
+        if (!raw) return v;
+        if (!/\.(png|jpe?g|webp|mp3|wav|m4a|ogg)$/i.test(raw)) return v;
+        return resolveAssetValue(raw, assetMap);
+      });
+    }
+    q.data = data;
+  }
+  for (const c of choices) {
+    c.choice_image = resolveAssetValue(c.choice_image, assetMap);
+  }
+}
+
+function validateAssetRefs(questions, choices, assetMap) {
+  const missing = new Set();
+  const invalid = new Set();
+  const checkValue = (value) => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return;
+    if (!/\.(png|jpe?g|webp|mp3|wav|m4a|ogg)$/i.test(raw)) return;
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return;
+    if (raw.startsWith("/")) {
+      invalid.add(raw);
+      return;
+    }
+    if (raw.includes("/")) return;
+    if (!assetMap[raw]) missing.add(raw);
+  };
+  for (const q of questions) {
+    const data = q.data ?? {};
+    splitAssetValues(data.stemAsset).forEach(checkValue);
+    if (Array.isArray(data.choices)) data.choices.forEach(checkValue);
+  }
+  for (const c of choices) checkValue(c.choice_image);
+  return { missing: Array.from(missing), invalid: Array.from(invalid) };
+}
+
+function buildLocalAssetNameMap(files, isCsvLike) {
+  const assetMap = {};
+  for (const file of Array.isArray(files) ? files : []) {
+    const name = String(file?.name ?? "").trim();
+    if (!name) continue;
+    if (typeof isCsvLike === "function" && isCsvLike(name)) continue;
+    assetMap[name] = name;
+  }
+  return assetMap;
+}
+
+function resolveAdminAssetUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  const baseUrl = ADMIN_SUPABASE_URL;
+  if (!baseUrl) return raw;
+  const encodedPath = raw
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${baseUrl}/storage/v1/object/public/test-assets/${encodedPath}`;
 }
 
 function normalizeLookupValue(value) {
