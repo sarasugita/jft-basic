@@ -5846,7 +5846,7 @@ export default function AdminConsole({
         criteria.title ||
         (criteriaSummary.length
           ? `Warning: ${criteriaSummary[0]}`
-          : `Warning issued on ${new Date().toLocaleDateString()}`);
+          : `Warning issued on ${new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka" })}`);
       const { data: warningRow, error: warningError } = await supabase
         .from("student_warnings")
         .insert({
@@ -8754,7 +8754,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <div class="report-title">${escapeHtml(reportTitle)}</div>
                 <div class="report-meta">Student No.: ${escapeHtml(selectedStudent.student_code || "-")}</div>
                 <div class="report-meta">Email: ${escapeHtml(selectedStudent.email || "-")}</div>
-                <div class="report-meta">Generated: ${escapeHtml(new Date().toLocaleString())}</div>
+                <div class="report-meta">Generated: ${escapeHtml(new Date().toLocaleString("en-GB", { timeZone: "Asia/Dhaka" }))}</div>
               </div>
 
               <section class="report-section">

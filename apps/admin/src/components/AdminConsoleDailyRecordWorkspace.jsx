@@ -71,17 +71,16 @@ const IRODORI_CANDO_BY_BOOK = {
 
 function formatDateFull(value) {
   if (!value) return "";
-  const date = new Date(`${value}T00:00:00Z`);
+  const date = new Date(`${value}T00:00:00`);
   if (isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", year: "numeric", month: "long", day: "numeric" });
 }
 
 function formatWeekday(value) {
   if (!value) return "";
-  const date = new Date(`${value}T00:00:00Z`);
+  const date = new Date(`${value}T00:00:00`);
   if (isNaN(date.getTime())) return "";
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return days[date.getUTCDay()] || "";
+  return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
 }
 
 function getIrodoriCanDoOptions(book, lesson) {

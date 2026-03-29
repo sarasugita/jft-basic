@@ -27,9 +27,9 @@ export default function AdminConsoleAnnouncementsWorkspace() {
   } = useAnnouncementsWorkspaceState({ supabase, activeSchoolId, session });
 
   useEffect(() => {
-    if (!activeSchoolId) return;
+    if (!supabase || !activeSchoolId) return;
     fetchAnnouncements();
-  }, [activeSchoolId]);
+  }, [supabase, activeSchoolId]);
 
   return (
     <div style={{ marginBottom: 12 }}>

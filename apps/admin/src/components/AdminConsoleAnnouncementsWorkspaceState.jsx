@@ -34,6 +34,11 @@ export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, sessi
       setAnnouncementMsg("");
       return;
     }
+    if (!supabase) {
+      setAnnouncements([]);
+      setAnnouncementMsg("Supabase not initialized.");
+      return;
+    }
     setAnnouncementMsg("Loading...");
     const { data, error } = await supabase
       .from("announcements")
@@ -57,6 +62,10 @@ export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, sessi
 
   async function createAnnouncement() {
     setAnnouncementMsg("");
+    if (!supabase) {
+      setAnnouncementMsg("Supabase not initialized.");
+      return;
+    }
     const title = announcementForm.title.trim();
     const body = announcementForm.body.trim();
     if (!title || !body) {
@@ -95,7 +104,7 @@ export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, sessi
   }
 
   async function deleteAnnouncement(id) {
-    if (!id) return;
+    if (!id || !supabase) return;
     const ok = window.confirm("Delete this announcement?");
     if (!ok) return;
     const { error } = await supabase.from("announcements").delete().eq("id", id);
@@ -138,7 +147,7 @@ export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, sessi
   }
 
   async function saveAnnouncementEdits() {
-    if (!editingAnnouncementId) return;
+    if (!editingAnnouncementId || !supabase) return;
     const title = editingAnnouncementForm.title.trim();
     const body = editingAnnouncementForm.body.trim();
     if (!title || !body) {

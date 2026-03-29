@@ -882,7 +882,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       if (!monthMap.has(monthKey)) {
         const [year, month] = monthKey.split("-");
         const date = new Date(Number(year), Number(month) - 1, 1);
-        const label = date.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+        const label = date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", year: "numeric", month: "long" });
         monthMap.set(monthKey, {
           monthKey,
           label,

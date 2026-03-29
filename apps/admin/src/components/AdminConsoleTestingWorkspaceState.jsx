@@ -561,8 +561,9 @@ export function useTestingWorkspaceState({
   externalFormatRatePercent = (rate) => `${(rate * 100).toFixed(1)}%`,
 } = {}) {
   // Derived functions with fallbacks
-  const getAuditEvent = externalRecordAuditEvent || recordAdminAuditEvent;
-  const recordAuditEvent = getAuditEvent; // Alias for consistency
+  const recordAuditEvent = externalRecordAuditEvent
+    ? externalRecordAuditEvent
+    : (eventObj) => recordAdminAuditEvent(supabase, eventObj);
   const getAccessToken = externalGetAccessToken;
   const parseQuestionCsv = externalParseQuestionCsv || ((text, version) => ({ questions: [], choices: [], errors: ["parseQuestionCsv not provided"] }));
   const parseDailyCsv = externalParseDailyCsv || ((text, version) => ({ questions: [], choices: [], errors: ["parseDailyCsv not provided"] }));
@@ -1538,7 +1539,8 @@ export function useTestingWorkspaceState({
 
     const { data: sourceQuestions, error: sourceQuestionsError } = await fetchQuestionsForVersionsWithFallback(
       supabase,
-      normalizedSetIds
+      normalizedSetIds,
+      activeSchoolId
     );
     if (sourceQuestionsError) {
       throw new Error(`Question lookup failed: ${sourceQuestionsError.message}`);
@@ -2269,7 +2271,7 @@ export function useTestingWorkspaceState({
     setSessionDetailAnalysisPopup({ open: false, title: "", questions: [] });
 
     const [{ data: questionsData, error: questionsError }, attemptsResult, allowancesResult] = await Promise.all([
-      fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id),
+      fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id, activeSchoolId),
       (async () => {
         const buildAttemptsQuery = (fields) =>
           supabase
@@ -2548,6 +2550,7 @@ export function useTestingWorkspaceState({
   }, [supabase, validateAssetRefs, buildLocalAssetNameMap, tests]);
 
   const uploadAssets = useCallback(async () => {
+    console.log("uploadAssets called");
     setAssetUploadMsg("");
     setAssetImportMsg("");
     if (!activeSchoolId) {
@@ -2628,7 +2631,9 @@ export function useTestingWorkspaceState({
     }
 
     setAssetUploadMsg(`Uploaded files: ${ok} ok / ${ng} failed. Importing questions...`);
+    console.log("Starting import with csvFile:", csvFile?.name, "category:", category);
     const importResult = await importModelQuestionsFromCsvFile(csvFile, category);
+    console.log("Import result:", importResult);
     if (!importResult.ok) {
       setAssetUploadMsg(`Uploaded files: ${ok} ok / ${ng} failed. Question import failed.`);
       return;
@@ -2648,6 +2653,7 @@ export function useTestingWorkspaceState({
   }, [activeSchoolId, assetFile, assetFiles, assetForm, assetCsvFile, validateCsvAssetsBeforeUpload, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets, mergeRegisteredTestsIntoState, DEFAULT_MODEL_CATEGORY, importModelQuestionsFromCsvFile]);
 
   async function importModelQuestionsFromCsvFile(file, category) {
+    console.log("importModelQuestionsFromCsvFile called with file:", file?.name, "category:", category);
     setAssetImportMsg("");
     if (!activeSchoolId) {
       setAssetImportMsg("School scope is required.");
@@ -2673,6 +2679,7 @@ export function useTestingWorkspaceState({
     setAssetImportMsg("Parsing...");
     const text = await csvFile.text();
     const { questions, choices, errors } = parseQuestionCsv(text, "");
+    console.log("CSV parsed. Questions:", questions.length, "Choices:", choices.length, "Errors:", errors);
     if (errors.length) {
       setAssetImportMsg(`CSV errors:\n${errors.slice(0, 5).join("\n")}`);
       return { ok: false };
@@ -2681,6 +2688,7 @@ export function useTestingWorkspaceState({
       setAssetImportMsg("No questions found.");
       return { ok: false };
     }
+    console.log("Grouped by version:", questions.map(q => ({ test_version: q.test_version, question_id: q.question_id })).slice(0, 3));
     const groupedByVersion = groupParsedCsvByVersion(questions, choices);
     const versions = Array.from(groupedByVersion.keys());
     if (!versions.length) {
@@ -2775,6 +2783,17 @@ export function useTestingWorkspaceState({
         return { ok: false };
       }
 
+      console.log(`Fetched ${(qRows ?? []).length} questions for version ${version}, expected ${questionIds.length}`);
+      if ((qRows ?? []).length === 0 && questionIds.length > 0) {
+        console.warn(`No questions found after upsert for version ${version}. Checking database directly...`);
+        const { data: allQuestions, error: checkErr } = await supabase
+          .from("questions")
+          .select("test_version, question_id, school_id")
+          .eq("test_version", version)
+          .limit(5);
+        console.log("All questions with this version:", allQuestions, checkErr);
+      }
+
       const idMap = {};
       for (const row of qRows ?? []) {
         idMap[row.question_id] = row.id;
@@ -2819,6 +2838,190 @@ export function useTestingWorkspaceState({
       entityType: "question_import",
       entityId: versions[0] || `mock-import-${Date.now()}`,
       summary: `Imported ${versions.length} model set${versions.length === 1 ? "" : "s"} in ${normalizedCategory}.`,
+      metadata: {
+        category: normalizedCategory,
+        set_ids: versions,
+        question_count: totalQuestions,
+        choice_count: totalChoiceRows,
+      },
+    });
+
+    return { ok: true, versions, totalQuestions, totalChoiceRows, questionCountsByVersion };
+  }
+
+  async function importDailyQuestionsFromCsvFile(file, category) {
+    console.log("importDailyQuestionsFromCsvFile called with file:", file?.name, "category:", category);
+    setDailyImportMsg("");
+    if (!activeSchoolId) {
+      setDailyImportMsg("School scope is required.");
+      return { ok: false };
+    }
+    const normalizedCategory = String(category ?? "").trim() || "Daily Test";
+    const csvFile = file ?? null;
+    const type = "daily";
+
+    if (!csvFile) {
+      setDailyImportMsg("CSV file is required.");
+      return { ok: false };
+    }
+    const isCsvLike = (name) => {
+      const lower = String(name ?? "").toLowerCase();
+      return lower.endsWith(".csv") || lower.endsWith(".tsv");
+    };
+    if (!isCsvLike(csvFile.name)) {
+      setDailyImportMsg("CSV file is required.");
+      return { ok: false };
+    }
+    setDailyImportMsg("Parsing...");
+    const text = await csvFile.text();
+    const { questions, choices, errors } = parseDailyCsv(text, "");
+    console.log("Daily CSV parsed. Questions:", questions.length, "Choices:", choices.length, "Errors:", errors);
+    if (errors.length) {
+      setDailyImportMsg(`CSV errors:\n${errors.slice(0, 5).join("\n")}`);
+      return { ok: false };
+    }
+    if (questions.length === 0) {
+      setDailyImportMsg("No questions found.");
+      return { ok: false };
+    }
+    const groupedByVersion = groupParsedCsvByVersion(questions, choices);
+    const versions = Array.from(groupedByVersion.keys());
+    if (!versions.length) {
+      setDailyImportMsg("set_id is required in the CSV.");
+      return { ok: false };
+    }
+
+    setDailyImportMsg("Resolving assets...");
+    let totalQuestions = 0;
+    let totalChoiceRows = 0;
+    const questionCountsByVersion = {};
+
+    if (!supabase) {
+      setDailyImportMsg("Supabase not initialized.");
+      return { ok: false };
+    }
+
+    for (const version of versions) {
+      const group = groupedByVersion.get(version);
+      if (!group) continue;
+      const groupQuestions = group.questions.map((question) => ({ ...question }));
+      const groupChoices = group.choices.map((choice) => ({ ...choice }));
+      questionCountsByVersion[version] = groupQuestions.length;
+
+      const { data: assetRows, error: assetErr } = await supabase
+        .from("test_assets")
+        .select("path, original_name")
+        .eq("test_version", version);
+      if (assetErr) {
+        console.error("daily assets fetch error:", assetErr);
+        setDailyImportMsg(`Asset lookup failed: ${assetErr.message}`);
+        return { ok: false };
+      }
+      const assetMap = {};
+      for (const row of assetRows ?? []) {
+        const name = row.original_name || row.path?.split("/").pop();
+        if (name) assetMap[name] = resolveAdminAssetUrl(row.path);
+      }
+      const { missing, invalid } = validateAssetRefs(groupQuestions, groupChoices, assetMap);
+      if (invalid.length) {
+        setDailyImportMsg(`Invalid asset paths for ${version} (use filename only):\n${invalid.slice(0, 5).join("\n")}`);
+        return { ok: false };
+      }
+      if (missing.length) {
+        setDailyImportMsg(`Missing assets for ${version} (upload first):\n${missing.slice(0, 5).join("\n")}`);
+        return { ok: false };
+      }
+      applyAssetMap(groupQuestions, groupChoices, assetMap);
+
+      const ensure = await ensureTestRecord(version, normalizedCategory, type, null, activeSchoolId);
+      if (!ensure.ok) {
+        setDailyImportMsg(ensure.message);
+        return { ok: false };
+      }
+
+      const questionIds = groupQuestions.map((q) => q.question_id);
+      if (questionIds.length) {
+        const notIn = `(${questionIds.map((id) => `"${id}"`).join(",")})`;
+        const { error: cleanupErr } = await supabase
+          .from("questions")
+          .delete()
+          .eq("test_version", version)
+          .not("question_id", "in", notIn);
+        if (cleanupErr) {
+          console.error("daily questions cleanup error:", cleanupErr);
+          setDailyImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
+          return { ok: false };
+        }
+      }
+
+      const scopedQuestions = groupQuestions.map((question) => ({
+        ...question,
+        school_id: activeSchoolId,
+      }));
+
+      const { error: qError } = await supabase.from("questions").upsert(scopedQuestions, {
+        onConflict: "test_version,question_id"
+      });
+      if (qError) {
+        console.error("daily questions upsert error:", qError);
+        setDailyImportMsg(`Question upsert failed: ${qError.message}`);
+        return { ok: false };
+      }
+      const { data: qRows, error: qFetchErr } = await supabase
+        .from("questions")
+        .select("id, question_id")
+        .eq("test_version", version)
+        .in("question_id", questionIds);
+      if (qFetchErr) {
+        console.error("daily questions fetch error:", qFetchErr);
+        setDailyImportMsg(`Question fetch failed: ${qFetchErr.message}`);
+        return { ok: false };
+      }
+
+      const idMap = {};
+      for (const row of qRows ?? []) {
+        idMap[row.question_id] = row.id;
+      }
+
+      const choiceRows = groupChoices
+        .map((c) => ({
+          question_id: idMap[c.question_key],
+          part_index: c.part_index,
+          choice_index: c.choice_index,
+          label: c.label,
+          choice_image: c.choice_image
+        }))
+        .filter((c) => c.question_id);
+
+      const qUuidList = Object.values(idMap);
+      if (qUuidList.length) {
+        const { error: delErr } = await supabase.from("choices").delete().in("question_id", qUuidList);
+        if (delErr) {
+          console.error("daily choices delete error:", delErr);
+          setDailyImportMsg(`Choice cleanup failed: ${delErr.message}`);
+          return { ok: false };
+        }
+      }
+
+      if (choiceRows.length) {
+        const { error: cErr } = await supabase.from("choices").insert(choiceRows);
+        if (cErr) {
+          console.error("daily choices insert error:", cErr);
+          setDailyImportMsg(`Choice insert failed: ${cErr.message}`);
+          return { ok: false };
+        }
+      }
+
+      totalQuestions += groupQuestions.length;
+      totalChoiceRows += choiceRows.length;
+    }
+
+    setDailyImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versions.length} set${versions.length === 1 ? "" : "s"}.`);
+    await recordAuditEvent({
+      actionType: "import",
+      entityType: "question_import",
+      entityId: versions[0] || `daily-import-${Date.now()}`,
+      summary: `Imported ${versions.length} daily set${versions.length === 1 ? "" : "s"} in ${normalizedCategory}.`,
       metadata: {
         category: normalizedCategory,
         set_ids: versions,
@@ -2921,16 +3124,23 @@ export function useTestingWorkspaceState({
       }
     }
 
-    mergeRegisteredTestsIntoState(versions, {
+    setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed. Importing questions...`);
+    const importResult = await importDailyQuestionsFromCsvFile(csvFile, category);
+    if (!importResult.ok) {
+      setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed. Question import failed.`);
+      return;
+    }
+
+    mergeRegisteredTestsIntoState(importResult.versions, {
       title: category || versions[0] || "",
       type,
-      questionCountsByVersion,
+      questionCountsByVersion: importResult.questionCountsByVersion,
     });
     setDailyUploadCategory(category || "");
     setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed. Refreshing list...`);
     await fetchTests();
     await fetchAssets();
-    setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
+    setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed. Imported ${importResult.totalQuestions} questions.`);
   }, [activeSchoolId, dailyFile, dailyFiles, dailyForm, dailyCsvFile, validateCsvAssetsBeforeUpload, parseDailyCsv, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets, mergeRegisteredTestsIntoState]);
 
   const applySourceSessionToForm = useCallback((session, setForm) => {

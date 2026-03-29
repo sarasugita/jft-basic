@@ -55,7 +55,8 @@
       "Bash(grep:*)",
       "Bash(curl -s http://localhost:3000/super/schools/test/admin/model/results)",
       "Bash(curl -s http://localhost:3000/super/schools/test/admin)",
-      "Bash(pkill -f \"next dev\")"
+      "Bash(pkill -f \"next dev\")",
+      "Bash(find /Users/1231s/Projects/jft-navi/apps/student/src/components -type f -name \"*.jsx\" -exec wc -l {} +)"
     ]
   }
 }
