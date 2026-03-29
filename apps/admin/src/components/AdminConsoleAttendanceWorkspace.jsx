@@ -6,6 +6,10 @@ import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceSt
 
 function formatDateShortFn(d) {
   if (!d) return "";
+  const parts = d.split("-");
+  if (parts.length === 3) {
+    return `${parseInt(parts[1])}/${parseInt(parts[2])}`;
+  }
   const date = new Date(`${d}T00:00:00`);
   if (isNaN(date.getTime())) return "";
   return `${date.getMonth() + 1}/${date.getDate()}`;
@@ -15,8 +19,7 @@ function formatWeekdayFn(d) {
   if (!d) return "";
   const date = new Date(`${d}T00:00:00`);
   if (isNaN(date.getTime())) return "";
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return days[date.getDay()] || "";
+  return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
 }
 
 export default function AdminConsoleAttendanceWorkspace() {
