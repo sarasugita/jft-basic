@@ -808,6 +808,15 @@ export function useTestingWorkspaceState({
     return buildCategories((modelTests ?? []).filter((test) => sessionVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
   }, [modelTests, testSessions]);
 
+  const dailySessionCategories = useMemo(() => buildCategories(dailyTests), [dailyTests]);
+
+  const dailySessionCategorySelectValue = useMemo(() => {
+    if (!dailySessionCategories.length) return CUSTOM_CATEGORY_OPTION;
+    return dailySessionCategories.some((category) => category.name === dailySessionForm.session_category)
+      ? dailySessionForm.session_category
+      : CUSTOM_CATEGORY_OPTION;
+  }, [dailySessionCategories, dailySessionForm.session_category]);
+
   // ========================================================================
   // useCallback functions (39+ callbacks)
   // ========================================================================
@@ -2654,6 +2663,8 @@ export function useTestingWorkspaceState({
     selectedDailyQuestionCount,
     dailyCategories,
     modelCategories,
+    dailySessionCategories,
+    dailySessionCategorySelectValue,
     dailyResultCategories,
     modelResultCategories,
     dailyResultsCategory,
