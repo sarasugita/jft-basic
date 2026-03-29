@@ -2226,6 +2226,124 @@ export function useTestingWorkspaceState({
     fetchAssets();
   }, [activeSchoolId, dailyFile, dailyFiles, dailyForm, dailyCsvFile, validateCsvAssetsBeforeUpload, parseDailyCsv, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets]);
 
+  const applySourceSessionToForm = useCallback((session, setForm) => {
+    if (!session) return;
+    setForm((current) => ({
+      ...current,
+      problem_set_id: session.problem_set_id ?? current.problem_set_id,
+      title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
+      session_date: session.ends_at
+        ? getBangladeshDateInput(session.ends_at)
+        : session.starts_at
+          ? getBangladeshDateInput(session.starts_at)
+          : current.session_date,
+      start_time: "",
+      close_time: "",
+      starts_at: "",
+      ends_at: "",
+      time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
+      show_answers: false,
+      allow_multiple_attempts: false,
+      retake_release_scope: current.retake_release_scope || "all",
+      pass_rate: "0.8",
+    }));
+  }, [tests]);
+
+  const applyDailyRetakeSourceSession = useCallback((session) => {
+    if (!session) return;
+    const sourceCategory = testMetaByVersion[session.problem_set_id]?.category || "";
+    if (sourceCategory) {
+      setDailyRetakeCategory(sourceCategory);
+      setDailyConductCategory(sourceCategory);
+    }
+    setDailySessionForm((current) => ({
+      ...current,
+      selection_mode: "single",
+      problem_set_id: session.problem_set_id ?? current.problem_set_id,
+      problem_set_ids: session.problem_set_id ? [session.problem_set_id] : [],
+      source_categories: [],
+      session_category: sourceCategory || current.session_category || "",
+      title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
+      session_date: session.ends_at
+        ? getBangladeshDateInput(session.ends_at)
+        : session.starts_at
+          ? getBangladeshDateInput(session.starts_at)
+          : current.session_date,
+      start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
+      close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
+      starts_at: "",
+      ends_at: "",
+      question_count_mode: "all",
+      question_count: "",
+      time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
+      show_answers: false,
+      allow_multiple_attempts: false,
+      retake_release_scope: current.retake_release_scope || "all",
+      pass_rate: "0.8",
+    }));
+  }, [testMetaByVersion, tests]);
+
+  const openModelConductModal = useCallback((mode = "normal") => {
+    setModelConductMode(mode);
+    setModelConductOpen(true);
+    setTestSessionsMsg("");
+    setActiveModelTimePicker("");
+    if (mode !== "retake") {
+      setModelRetakeSourceId("");
+      setTestSessionForm((current) => ({
+        ...current,
+        title: "",
+        session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
+        start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
+        close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
+        show_answers: false,
+        allow_multiple_attempts: false,
+        pass_rate: "0.8",
+        retake_release_scope: "all",
+      }));
+      return;
+    }
+    const source = pastModelSessions[0] ?? null;
+    setModelRetakeSourceId(source?.id ?? "");
+    if (source) applySourceSessionToForm(source, setTestSessionForm);
+  }, [pastModelSessions, applySourceSessionToForm]);
+
+  const openDailyConductModal = useCallback((mode = "normal") => {
+    setDailyConductMode(mode);
+    setDailyConductOpen(true);
+    setDailySessionsMsg("");
+    setDailySourceCategoryDropdownOpen(false);
+    setDailySetDropdownOpen(false);
+    setActiveDailyTimePicker("");
+    if (mode !== "retake") {
+      setDailyRetakeCategory("");
+      setDailyRetakeSourceId("");
+      setDailySessionForm((current) => ({
+        ...current,
+        selection_mode: "single",
+        problem_set_ids: current.problem_set_id ? [current.problem_set_id] : [],
+        source_categories: [],
+        session_category: dailyConductCategory || current.session_category || "",
+        title: "",
+        session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
+        start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
+        close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
+        question_count_mode: "all",
+        question_count: "",
+        show_answers: false,
+        allow_multiple_attempts: false,
+        pass_rate: "0.8",
+        retake_release_scope: "all",
+      }));
+      return;
+    }
+    const firstCategory = pastDailySessionCategories[0]?.name ?? "";
+    if (firstCategory) setDailyRetakeCategory(firstCategory);
+    const source = pastDailySessionCategories[0]?.sessions?.[0] ?? null;
+    setDailyRetakeSourceId(source?.id ?? "");
+    if (source) applyDailyRetakeSourceSession(source);
+  }, [pastDailySessionCategories, dailyConductCategory, applyDailyRetakeSourceSession]);
+
   const openModelUploadModal = useCallback(() => {
     const normalizedCategory = String(assetForm.category ?? "").trim();
     const availableCategories = modelCategories.length
@@ -2558,6 +2676,8 @@ export function useTestingWorkspaceState({
     importQuestionsFromCsv,
     uploadDailyAssets,
     hasDuplicateSessionTitle,
+    openModelConductModal,
+    openDailyConductModal,
     openModelUploadModal,
     getSessionEffectivePassRate,
 
