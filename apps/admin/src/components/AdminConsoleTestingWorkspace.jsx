@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect } from "react";
 import AdminConsoleTestingTabs from "./AdminConsoleTestingTabs";
+import { useTestingWorkspaceState } from "./AdminConsoleTestingWorkspaceState";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 
 const LazyAdminConsoleResultsWorkspace = dynamic(() => import("./AdminConsoleResultsWorkspace"));
@@ -17,65 +18,67 @@ export default function AdminConsoleTestingWorkspace() {
     dailySubTab,
     modelSubTab,
     students,
-    tests,
     fetchStudents,
-    fetchTests,
-    fetchTestSessions,
-    fetchExamLinks,
-    fetchAssets,
     runSearch,
-    resultContext,
-    previewOpen,
-    attemptDetailOpen,
-    sessionDetail,
-    testingTabProps,
-    resultsWorkspaceProps,
+    supabase,
+    isAnalyticsExcludedStudent,
+    getScoreRate,
+    getTabLeftCount,
+    formatDateTime,
+    formatDateShort,
+    getStudentBaseUrl,
+    copyLink,
+    formatRatePercent,
+    exportDailyGoogleSheetsCsv,
+    exportModelGoogleSheetsCsv,
+    recordAdminAuditEvent,
   } = context;
 
-  useEffect(() => {
-    if (!activeSchoolId) return;
-    if (activeTab !== "model" && activeTab !== "daily") return;
-    fetchTests();
-    fetchTestSessions();
-    fetchExamLinks();
-    const isUploadTab =
-      (activeTab === "model" && modelSubTab === "upload")
-      || (activeTab === "daily" && dailySubTab === "upload");
-    if (isUploadTab) {
-      fetchAssets();
-    }
-  }, [
+  // Initialize testing workspace state hook
+  const hookState = useTestingWorkspaceState({
+    supabase,
     activeSchoolId,
-    activeTab,
-    dailySubTab,
-    modelSubTab,
-  ]);
-
-  useEffect(() => {
-    if (!activeSchoolId || !session || !canUseAdminConsole) return;
-    if (activeTab === "daily" && dailySubTab === "results") {
-      if (!students.length) fetchStudents();
-      runSearch("daily");
-    }
-    if (activeTab === "model" && modelSubTab === "results") {
-      if (!students.length) fetchStudents();
-      runSearch("mock");
-    }
-  }, [
-    activeSchoolId,
-    activeTab,
-    canUseAdminConsole,
-    dailySubTab,
-    modelSubTab,
     session,
-    students.length,
-  ]);
+    students,
+    activeTab,
+    modelSubTab,
+    dailySubTab,
+    recordAuditEvent: recordAdminAuditEvent,
+    isAnalyticsExcludedStudent,
+    getScoreRate,
+    getTabLeftCount,
+    formatDateTime,
+    formatDateShort,
+    getStudentBaseUrl,
+    copyLink,
+    formatRatePercent,
+    runSearch,
+    exportDailyGoogleSheetsCsv,
+    exportModelGoogleSheetsCsv,
+    fetchStudents,
+  });
+
+  // Extract testing tab and results workspace props from hook state
+  const testingTabProps = {
+    activeTab,
+    modelSubTab,
+    dailySubTab,
+    // Include all hook state properties needed by AdminConsoleTestingTabs
+    ...hookState,
+  };
+
+  const resultsWorkspaceProps = {
+    activeTab,
+    modelSubTab,
+    dailySubTab,
+    canUseAdminConsole,
+    // Include all hook state properties needed by AdminConsoleResultsWorkspace
+    ...hookState,
+  };
 
   const resultsWorkspaceActive = Boolean(
-    resultContext
-    || previewOpen
-    || attemptDetailOpen
-    || sessionDetail.sessionId
+    hookState.previewOpen
+    || hookState.sessionDetail?.sessionId
   );
 
   return (

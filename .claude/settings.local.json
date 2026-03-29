@@ -27,7 +27,24 @@
       "Bash(grep -r isAnalyticsExcludedStudent /Users/1231s/Projects/jft-navi/apps/admin/src/components/ --include=*.jsx)",
       "Bash(grep -r \"normalizeStudentNumberInput\\\\|getStudentDisplayName\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/ --include=*.jsx)",
       "Bash(ls:*)",
-      "Bash(/tmp/analysis.txt:*)"
+      "Bash(/tmp/analysis.txt:*)",
+      "Bash(grep -E \"^export function|^}$\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleTestingWorkspaceState.jsx)",
+      "Bash(cd:*)",
+      "Bash(sort -t: -k1 -rn)",
+      "Bash(sed -i '3537,3567d' AdminConsoleCore.jsx)",
+      "Bash(sed -n '3535,3545p' AdminConsoleCore.jsx)",
+      "Bash(awk 'NR >= 8270 && NR <= 8600' apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(awk 'NR >= 6627 && NR <= 6800' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(awk 'NR >= 6757 && NR <= 7000' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(awk 'NR >= 6920 && NR <= 6980' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(awk 'NR >= 6964 && NR <= 7100' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(awk 'NR >= 8713 && NR <= 8900' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(/tmp/remove_testing_funcs.sh:*)",
+      "Bash(chmod +x /tmp/remove_testing_funcs.sh)",
+      "Bash(/tmp/remove_testing_funcs.sh)",
+      "Bash(/tmp/remove_upload_funcs.sh:*)",
+      "Bash(chmod +x /tmp/remove_upload_funcs.sh)",
+      "Bash(/tmp/remove_upload_funcs.sh)"
     ]
   }
 }
