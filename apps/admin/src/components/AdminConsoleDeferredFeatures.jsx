@@ -609,7 +609,7 @@ export default function AdminConsoleDeferredFeatures({
             <div className="admin-modal-header">
               <div>
                 <div className="admin-title">
-                  Preview: {previewSession ? previewSession.title || previewSession.problem_set_id : previewTest}
+                  {previewSession ? previewSession.title || previewSession.problem_set_id : previewTest}
                 </div>
               </div>
               <button className="admin-modal-close" onClick={closePreview} aria-label="Close">
@@ -618,20 +618,9 @@ export default function AdminConsoleDeferredFeatures({
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                <button className="btn" onClick={closePreview}>Exit Preview</button>
-                {!previewSession ? (
-                  <button className="btn" onClick={() => deleteTest(previewTest)}>Delete Test</button>
-                ) : null}
-              </div>
               <div className="admin-help">
-                Total: <b>{previewQuestions.length}</b>
+                Total: <b>{previewQuestions.length}</b> questions
               </div>
-              {previewSession ? (
-                <div className="admin-help">
-                  Session preview for: <b>{previewSession.title || previewSession.problem_set_id}</b>
-                </div>
-              ) : null}
               {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
               {previewReplacementMsg ? <div className="admin-msg">{previewReplacementMsg}</div> : null}
               {!previewMsg && previewQuestions.length === 0 ? (
