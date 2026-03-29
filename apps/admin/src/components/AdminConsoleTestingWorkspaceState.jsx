@@ -844,6 +844,27 @@ export function useTestingWorkspaceState({
     });
   }, [previewQuestions, previewReplacementOrderMap, previewSession, isDaily]);
 
+  const previewSectionBreaks = useMemo(() => {
+    if (!isModelPreview) return [];
+    let previousSectionTitle = "";
+    return previewDisplayQuestions.map((question, index) => {
+      const sectionTitle = getSectionTitle(question.sectionKey) || "Unknown";
+      const showHeader = index === 0 || sectionTitle !== previousSectionTitle;
+      previousSectionTitle = sectionTitle;
+      return {
+        question,
+        index,
+        sectionTitle,
+        showHeader,
+      };
+    });
+  }, [isModelPreview, previewDisplayQuestions]);
+
+  const previewSectionTitles = useMemo(
+    () => previewSectionBreaks.filter((item) => item.showHeader).map((item) => item.sectionTitle),
+    [previewSectionBreaks]
+  );
+
   const testMetaByVersion = useMemo(() => {
     const map = {};
     tests.forEach((test) => {
@@ -3025,6 +3046,8 @@ export function useTestingWorkspaceState({
     isModelPreview,
     previewDisplayQuestions,
     previewReplacementOrderMap,
+    previewSectionBreaks,
+    previewSectionTitles,
     testPassRateByVersion: testMetaByVersion,
     testMetaByVersion,
     testSessionsById,
