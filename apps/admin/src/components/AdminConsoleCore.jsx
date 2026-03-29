@@ -11940,6 +11940,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     loadStudentWarningMetrics,
     getStudentWarningIssues,
     isMissingStudentWarningsTableError,
+    isAnalyticsExcludedStudent,
     fetchAttendanceDays,
     fetchAbsenceApplications,
     attendanceDate,

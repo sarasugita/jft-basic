@@ -72,6 +72,7 @@ export default function AdminConsoleStudentsWorkspace() {
     loadStudentWarningMetrics,
     getStudentWarningIssues,
     isMissingStudentWarningsTableError,
+    isAnalyticsExcludedStudent,
   } = contextData;
 
   // Use the Students workspace state hook
