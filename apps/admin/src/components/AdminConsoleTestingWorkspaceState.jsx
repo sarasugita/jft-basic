@@ -136,6 +136,31 @@ function getAssetTypeByExt(filename) {
   return "file";
 }
 
+function getAssetProbeTarget(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return `${url.pathname}${url.search}`.toLowerCase();
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
+function isImageAsset(value) {
+  const probe = getAssetProbeTarget(value);
+  return /\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(probe)
+    || probe.includes("/images/")
+    || probe.includes("/image/");
+}
+
+function isAudioAsset(value) {
+  const probe = getAssetProbeTarget(value);
+  return /\.(mp3|wav|m4a|ogg)(\?.*)?$/i.test(probe)
+    || probe.includes("/audio/")
+    || probe.includes("/audios/");
+}
+
 function sanitizeStoragePathSegment(value, fallback = "file") {
   const normalized = String(value ?? "")
     .trim()
@@ -3175,6 +3200,9 @@ export function useTestingWorkspaceState({
     getSectionTitle,
     getProblemSetDisplayId,
     normalizeModelCsvKind,
+    splitAssetValues,
+    isImageAsset,
+    isAudioAsset,
 
     // Constants
     DEFAULT_MODEL_CATEGORY,
