@@ -421,11 +421,37 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   }
 
   function openDailyRecordModal(record = null, recordDate = "") {
+    const existingRecord =
+      record
+      ?? dailyRecords.find((item) => item.record_date === recordDate)
+      ?? null;
+    let nextForm = existingRecord
+      ? getDailyRecordForm(existingRecord)
+      : getEmptyDailyRecordForm(recordDate || getTodayDateInput());
+    if (!existingRecord) {
+      const previousRecordDate = addDays(nextForm.record_date || recordDate || getTodayDateInput(), -1);
+      const previousRecord = dailyRecords.find((item) => item.record_date === previousRecordDate) ?? null;
+      const previousLargestEntry = getLargestDailyRecordTextbookEntry(previousRecord?.todays_content);
+      if (previousLargestEntry) {
+        nextForm = {
+          ...nextForm,
+          textbook_entries: [createDailyRecordTextbookRow(previousLargestEntry.book, String(previousLargestEntry.lesson))],
+        };
+      }
+    }
+    setDailyRecordForm(nextForm);
+    setDailyRecordDate(nextForm.record_date || recordDate || getTodayDateInput());
+    setDailyRecordsMsg("");
+    setDailyRecordSaving(false);
     setDailyRecordModalOpen(true);
   }
 
   function closeDailyRecordModal() {
     setDailyRecordModalOpen(false);
+    setDailyRecordSaving(false);
+    setDailyRecordForm(getEmptyDailyRecordForm(dailyRecordDate || getTodayDateInput()));
+    setDailyRecordAnnouncementTitleDraft("");
+    setDailyRecordAnnouncementDraft("");
   }
 
   function updateDailyRecordPlanDraft(recordDate, field, value) {

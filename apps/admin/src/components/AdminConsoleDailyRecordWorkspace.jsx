@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useDailyRecordWorkspaceState } from "./AdminConsoleDailyRecordWorkspaceState";
 
@@ -331,6 +332,54 @@ export default function AdminConsoleDailyRecordWorkspace() {
         </table>
       </div>
       <div className="admin-msg">{dailyRecordsMsg}</div>
+
+      {dailyRecordModalOpen && typeof document !== "undefined" ? createPortal((
+        <div
+          className="admin-modal-overlay"
+          onClick={() => closeDailyRecordModal()}
+        >
+          <div className="admin-modal daily-record-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal-header">
+              <div className="admin-title">
+                Daily Record - {dailyRecordForm?.record_date ? formatDateFull(dailyRecordForm.record_date) : "New Record"}
+              </div>
+              <button
+                className="admin-modal-close"
+                aria-label="Close"
+                onClick={() => closeDailyRecordModal()}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: "16px", maxHeight: "70vh", overflowY: "auto" }}>
+              <div style={{ marginBottom: "16px" }}>
+                <label>Date</label>
+                <div>{dailyRecordForm?.record_date ? formatDateFull(dailyRecordForm.record_date) : "-"}</div>
+              </div>
+
+              <div style={{ marginBottom: "16px" }}>
+                <label>Today's Content</label>
+                <textarea
+                  value={dailyRecordForm?.free_writing || ""}
+                  onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, free_writing: e.target.value }))}
+                  placeholder="Today's teaching content, lesson summary, etc."
+                  style={{ width: "100%", minHeight: "100px" }}
+                />
+              </div>
+
+              <div style={{ marginTop: "12px", display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="btn btn-primary" onClick={() => saveDailyRecord()} disabled={dailyRecordSaving}>
+                  {dailyRecordSaving ? "Saving..." : "Save Record"}
+                </button>
+                <button className="btn" onClick={() => closeDailyRecordModal()} disabled={dailyRecordSaving}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ), document.body) : null}
     </div>
   );
 }
