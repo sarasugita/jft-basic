@@ -812,6 +812,24 @@ export function useTestingWorkspaceState({
     return { ok: true, existing: false };
   }, [supabase, activeSchoolId]);
 
+  const hasDuplicateSessionTitle = useCallback(async (title, excludeId = "") => {
+    if (!supabase) return false;
+    const normalizedTitle = String(title ?? "").trim();
+    if (!normalizedTitle) return false;
+    let query = supabase
+      .from("test_sessions")
+      .select("id")
+      .eq("title", normalizedTitle)
+      .limit(1);
+    if (excludeId) query = query.neq("id", excludeId);
+    const { data, error } = await query;
+    if (error) {
+      console.error("test_sessions duplicate title check error:", error);
+      throw new Error(error.message);
+    }
+    return Boolean((data ?? []).length);
+  }, [supabase]);
+
   const createTestSession = useCallback(async () => {
     setTestSessionsMsg("");
     if (!activeSchoolId) {
@@ -1974,24 +1992,6 @@ export function useTestingWorkspaceState({
     fetchTests();
     fetchAssets();
   }, [activeSchoolId, dailyFile, dailyFiles, dailyForm, dailyCsvFile, validateCsvAssetsBeforeUpload, parseDailyCsv, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets]);
-
-  const hasDuplicateSessionTitle = useCallback(async (title, excludeId = "") => {
-    if (!supabase) return false;
-    const normalizedTitle = String(title ?? "").trim();
-    if (!normalizedTitle) return false;
-    let query = supabase
-      .from("test_sessions")
-      .select("id")
-      .eq("title", normalizedTitle)
-      .limit(1);
-    if (excludeId) query = query.neq("id", excludeId);
-    const { data, error } = await query;
-    if (error) {
-      console.error("test_sessions duplicate title check error:", error);
-      throw new Error(error.message);
-    }
-    return Boolean((data ?? []).length);
-  }, [supabase]);
 
   const openModelUploadModal = useCallback(() => {
     const normalizedCategory = String(assetForm.category ?? "").trim();
