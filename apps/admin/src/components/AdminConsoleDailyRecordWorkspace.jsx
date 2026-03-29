@@ -430,92 +430,96 @@ export default function AdminConsoleDailyRecordWorkspace() {
             <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
               <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0" }}>
                 <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontWeight: "bold", marginBottom: "6px" }}>Today's Content</label>
-                  <textarea
-                    value={dailyRecordForm?.free_writing || ""}
-                    onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, free_writing: e.target.value }))}
-                    placeholder="Today's teaching content, lesson summary, objectives, etc."
-                    style={{ width: "100%", minHeight: "80px", padding: "8px", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit" }}
-                  />
-                </div>
-              </div>
+                  <label style={{ display: "block", fontWeight: "bold", marginBottom: "8px" }}>Today's Content</label>
 
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0" }}>
-                <div style={{ marginBottom: "8px" }}>
-                  <label style={{ fontWeight: "bold" }}>Textbook Entries</label>
-                </div>
-                {(dailyRecordForm?.textbook_entries ?? []).map((entry) => {
-                  const candoOptions = getIrodoriCanDoOptions(entry.book || "starter", entry.lesson || "1");
-                  return (
-                    <div key={entry.tempId} style={{ marginBottom: "12px", padding: "12px", border: "1px solid #e0e0e0", borderRadius: "4px", backgroundColor: "#f9f9f9" }}>
-                      <div style={{ display: "flex", gap: "12px", marginBottom: "8px", alignItems: "flex-end" }}>
-                        <div>
-                          <label style={{ fontSize: "12px", color: "#666" }}>Book</label>
-                          <select
-                            value={entry.book || "starter"}
-                            onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { book: e.target.value })}
-                            style={{ padding: "6px", border: "1px solid #ccc", borderRadius: "4px", minWidth: "140px" }}
-                          >
-                            <option value="starter">Starter</option>
-                            <option value="beginner_1">Beginner 1</option>
-                            <option value="beginner_2">Beginner 2</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label style={{ fontSize: "12px", color: "#666" }}>Lesson</label>
-                          <select
-                            value={entry.lesson || "1"}
-                            onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { lesson: e.target.value })}
-                            style={{ padding: "6px", border: "1px solid #ccc", borderRadius: "4px", minWidth: "120px" }}
-                          >
-                            {Array.from({ length: 18 }, (_, i) => String(i + 1)).map((lessonNum) => (
-                              <option key={lessonNum} value={lessonNum}>Lesson {lessonNum}</option>
-                            ))}
-                          </select>
-                        </div>
-                        {dailyRecordForm.textbook_entries.length > 1 && (
-                          <button
-                            className="btn btn-danger"
-                            onClick={() => removeDailyRecordTextbookEntry(entry.tempId)}
-                            type="button"
-                            style={{ padding: "6px 12px" }}
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-
-                      {candoOptions.length > 0 && (
-                        <div>
-                          <label style={{ fontSize: "12px", color: "#666", marginBottom: "6px", display: "block" }}>Can-do Goals</label>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                            {candoOptions.map((candoId) => {
-                              const isSelected = (entry.cando_ids || []).includes(candoId);
-                              return (
-                                <label key={candoId} style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => toggleDailyRecordCanDo(entry.tempId, candoId)}
-                                  />
-                                  <span style={{ fontSize: "13px" }}>{candoId}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
+                  <div style={{ marginBottom: "12px" }}>
+                    <div style={{ marginBottom: "8px" }}>
+                      <label style={{ fontSize: "13px", color: "#333" }}>Textbook Entries</label>
                     </div>
-                  );
-                })}
-                <button
-                  className="btn"
-                  onClick={() => addDailyRecordTextbookEntry()}
-                  type="button"
-                  style={{ marginTop: "8px" }}
-                >
-                  + Add Textbook Entry
-                </button>
+                    {(dailyRecordForm?.textbook_entries ?? []).map((entry) => {
+                      const candoOptions = getIrodoriCanDoOptions(entry.book || "starter", entry.lesson || "1");
+                      return (
+                        <div key={entry.tempId} style={{ marginBottom: "12px", padding: "12px", border: "1px solid #e0e0e0", borderRadius: "4px", backgroundColor: "#f9f9f9" }}>
+                          <div style={{ display: "flex", gap: "12px", marginBottom: "8px", alignItems: "flex-end" }}>
+                            <div>
+                              <label style={{ fontSize: "12px", color: "#666" }}>Book</label>
+                              <select
+                                value={entry.book || "starter"}
+                                onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { book: e.target.value })}
+                                style={{ padding: "6px", border: "1px solid #ccc", borderRadius: "4px", minWidth: "140px" }}
+                              >
+                                <option value="starter">Starter</option>
+                                <option value="beginner_1">Beginner 1</option>
+                                <option value="beginner_2">Beginner 2</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label style={{ fontSize: "12px", color: "#666" }}>Lesson</label>
+                              <select
+                                value={entry.lesson || "1"}
+                                onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { lesson: e.target.value })}
+                                style={{ padding: "6px", border: "1px solid #ccc", borderRadius: "4px", minWidth: "120px" }}
+                              >
+                                {Array.from({ length: 18 }, (_, i) => String(i + 1)).map((lessonNum) => (
+                                  <option key={lessonNum} value={lessonNum}>Lesson {lessonNum}</option>
+                                ))}
+                              </select>
+                            </div>
+                            {dailyRecordForm.textbook_entries.length > 1 && (
+                              <button
+                                className="btn btn-danger"
+                                onClick={() => removeDailyRecordTextbookEntry(entry.tempId)}
+                                type="button"
+                                style={{ padding: "6px 12px" }}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+
+                          {candoOptions.length > 0 && (
+                            <div>
+                              <label style={{ fontSize: "12px", color: "#666", marginBottom: "6px", display: "block" }}>Can-do Goals</label>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                {candoOptions.map((candoId) => {
+                                  const isSelected = (entry.cando_ids || []).includes(candoId);
+                                  return (
+                                    <label key={candoId} style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleDailyRecordCanDo(entry.tempId, candoId)}
+                                      />
+                                      <span style={{ fontSize: "13px" }}>{candoId}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <button
+                      className="btn"
+                      onClick={() => addDailyRecordTextbookEntry()}
+                      type="button"
+                      style={{ marginTop: "8px" }}
+                    >
+                      + Add Textbook Entry
+                    </button>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: "13px", color: "#333", marginBottom: "6px", display: "block" }}>Other Content Covered</label>
+                    <textarea
+                      value={dailyRecordForm?.free_writing || ""}
+                      onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, free_writing: e.target.value }))}
+                      placeholder="Additional content, activities, notes, etc."
+                      style={{ width: "100%", minHeight: "80px", padding: "8px", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit" }}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0" }}>
