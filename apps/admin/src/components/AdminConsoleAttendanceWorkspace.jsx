@@ -45,7 +45,7 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceEntriesByDay,
     attendanceFilteredStudents,
     attendanceDayRates,
-  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: formatDateShortFn, formatWeekday: formatWeekdayFn, openAttendanceDayCtx: openAttendanceDay });
+  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: formatDateShortFn, formatWeekday: formatWeekdayFn, openAttendanceDayCtx });
 
   useEffect(() => {
     if (!activeSchoolId) return;
