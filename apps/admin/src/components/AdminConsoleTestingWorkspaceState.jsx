@@ -559,6 +559,7 @@ export function useTestingWorkspaceState({
 
   // Upload categories
   const [dailyConductCategory, setDailyConductCategory] = useState("");
+  const [modelConductCategory, setModelConductCategory] = useState("");
   const [modelUploadCategory, setModelUploadCategory] = useState("");
   const [dailyUploadCategory, setDailyUploadCategory] = useState("");
   const [dailyResultsCategory, setDailyResultsCategory] = useState("");
@@ -2651,6 +2652,8 @@ export function useTestingWorkspaceState({
     // Upload categories
     dailyConductCategory,
     setDailyConductCategory,
+    modelConductCategory,
+    setModelConductCategory,
     modelUploadCategory,
     setModelUploadCategory,
     dailyUploadCategory,
