@@ -828,6 +828,13 @@ export function useTestingWorkspaceState({
     return modelResultCategories.find((c) => c.name === modelResultsCategory) ?? null;
   }, [modelResultCategories, modelResultsCategory]);
 
+  const selectedModelConductCategory = useMemo(() => {
+    if (!modelCategories.length || !modelConductCategory) return null;
+    return modelCategories.find((c) => c.name === modelConductCategory) ?? null;
+  }, [modelCategories, modelConductCategory]);
+
+  const modelConductTests = selectedModelConductCategory?.tests ?? [];
+
   // ========================================================================
   // useCallback functions (39+ callbacks)
   // ========================================================================
@@ -2680,6 +2687,8 @@ export function useTestingWorkspaceState({
     modelResultCategories,
     selectedDailyCategory,
     selectedModelCategory,
+    selectedModelConductCategory,
+    modelConductTests,
     dailyResultsCategory,
     setDailyResultsCategory,
     modelResultsCategory,
