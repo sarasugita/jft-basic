@@ -122,6 +122,14 @@ function splitAssetValues(value) {
     .filter(Boolean);
 }
 
+function joinAssetValues(...values) {
+  const unique = [];
+  for (const value of values.flatMap((item) => splitAssetValues(item))) {
+    if (!unique.includes(value)) unique.push(value);
+  }
+  return unique.join("|");
+}
+
 function resolveAssetValue(value, assetMap) {
   const raw = String(value ?? "").trim();
   if (!raw) return raw;
@@ -215,6 +223,13 @@ function resolveAdminAssetUrl(value) {
     .map((part) => encodeURIComponent(part))
     .join("/");
   return `${baseUrl}/storage/v1/object/public/test-assets/${encodedPath}`;
+}
+
+function normalizeModelCsvKind(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s/+]+/g, "_");
 }
 
 function normalizeLookupValue(value) {
