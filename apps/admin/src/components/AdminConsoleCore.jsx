@@ -11927,6 +11927,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     studentWarningForm,
     setStudentWarningForm,
     studentWarningIssueMsg,
+    setStudentWarningIssueMsg,
     issueStudentWarning,
     studentWarningIssueSaving,
     getDefaultStudentWarningForm,
