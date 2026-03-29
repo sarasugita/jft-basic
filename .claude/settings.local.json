@@ -25,7 +25,9 @@
       "Bash(python3:*)",
       "Bash(git checkout:*)",
       "Bash(grep -r isAnalyticsExcludedStudent /Users/1231s/Projects/jft-navi/apps/admin/src/components/ --include=*.jsx)",
-      "Bash(grep -r \"normalizeStudentNumberInput\\\\|getStudentDisplayName\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/ --include=*.jsx)"
+      "Bash(grep -r \"normalizeStudentNumberInput\\\\|getStudentDisplayName\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/ --include=*.jsx)",
+      "Bash(ls:*)",
+      "Bash(/tmp/analysis.txt:*)"
     ]
   }
 }

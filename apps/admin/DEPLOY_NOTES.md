@@ -395,13 +395,43 @@ If regressions are found:
 - [ ] Deploy and test on devices
 - [ ] Verify no UI regressions (student list, detail view, warnings modal)
 
-### Phase 2f (Testing)
+### Phase 2f (Testing) — IN PROGRESS
 After Phase 2e, final workspace:
 - Testing workspace: 67.3 KB → extract useTestingWorkspaceState (largest, most complex)
   - Encompasses all model test and daily test session management
   - Heavy analytics calculations (session results matrix, attempt rankings, score distribution)
   - Question management, preview modal, upload flows
   - Dependencies: all existing analytics helpers, schema questions
+
+**Phase 2f Scope Analysis:**
+- Extraction size: ~2,500-2,800 lines (~19-21% of AdminConsoleCore)
+- State variables: 55+ across 8 categories (~150 lines)
+  - Tests & Sessions (5 vars)
+  - Model Conduct & Session Creation (11 vars)
+  - Daily Conduct & Session Creation (17 vars)
+  - Assets & File Uploads (15 vars)
+  - Questions & Preview (13 vars)
+  - Session Detail & Results (11 vars)
+  - Daily Manual Entry (2 vars)
+  - Results Categories & Import Conflicts (9 vars)
+- Functions: 30+ functions (~2,000 lines)
+  - Fetch: fetchTests, fetchTestSessions, fetchSessionDetail, fetchAssets (6 functions, ~250 lines)
+  - Create/Edit Sessions: createTestSession, createDailySession, startEditSession, saveSessionEdits, deleteTestSession (6 functions, ~270 lines)
+  - Upload/Assets: uploadAssets, uploadDailyAssets, uploadSingleAsset, validateCsvAssetsBeforeUpload, importQuestionsFromCsv (4 functions, ~400 lines)
+  - Preview: openPreview, openSessionPreview, closePreview, setPreviewAnswer (5 functions, ~80 lines)
+  - Conduct Modals: openModelConductModal, openDailyConductModal, selectModelRetakeSource, selectDailyRetakeSource (4 functions, ~115 lines)
+  - Helpers: seedModelCategory, attachGeneratedDailySourceSetIds, getSessionEffectivePassRate, buildCategories, applyDailyRetakeSourceSession, updateDailySessionTimePart, updateModelSessionTimePart, buildGeneratedDailySessionTitle, ensureTestRecord, allowSessionAnotherAttempt, mapDbQuestion, parseQuestionCsv (12+ functions, ~400 lines)
+- useEffect hooks: ~15 testing-specific (~500 lines)
+- useMemo hooks: ~25 testing-specific (~300 lines)
+- Constants & Helpers: ~100 lines
+
+**Implementation Plan:**
+1. Create useTestingWorkspaceState hook with all state/functions/effects organized by category
+2. Move AdminConsoleTestingTabs prop list into hook return
+3. Update AdminConsoleTestingWorkspace to destructure from hook instead of context
+4. Update AdminConsoleTestingTabs to receive hook return as props (maintain same shape)
+5. Remove testing state/functions from AdminConsoleCore.jsx
+6. Handle dependencies: adminTestingActions.js, questions.js imports
 
 ### Shared State Still in Core
 AdminConsoleCore retains:
