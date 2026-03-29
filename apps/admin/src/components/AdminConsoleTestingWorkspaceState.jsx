@@ -204,6 +204,7 @@ export function useTestingWorkspaceState({
 } = {}) {
   // Derived functions with fallbacks
   const getAuditEvent = externalRecordAuditEvent || recordAdminAuditEvent;
+  const recordAuditEvent = getAuditEvent; // Alias for consistency
   const getAccessToken = externalGetAccessToken;
   const runSearch = externalRunSearch;
   const exportDailyGoogleSheetsCsv = externalExportDailyGoogleSheetsCsv;
