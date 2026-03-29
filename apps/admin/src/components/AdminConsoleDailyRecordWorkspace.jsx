@@ -145,6 +145,17 @@ export default function AdminConsoleDailyRecordWorkspace() {
     }
   }, [activeSchoolId, students.length]);
 
+  useEffect(() => {
+    // Scroll to today's date in the table
+    if (!dailyRecordTableWrapRef.current) return;
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const todayRow = dailyRecordTableWrapRef.current.querySelector(`[data-daily-record-date="${todayStr}"]`);
+    if (todayRow) {
+      todayRow.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [scheduleRecordRows]);
+
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
