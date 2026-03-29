@@ -819,7 +819,7 @@ function buildAttendanceSummary(list) {
     const stats = calc(monthRows);
     const parts = key.split("-");
     const labelMonth = parts.length === 2
-      ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined, { month: "short" })
+      ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "short" })
       : key;
     return {
       key,
@@ -2466,6 +2466,7 @@ function formatMonthYear(value) {
   const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Dhaka",
     year: "numeric",
     month: "long",
   });
@@ -2528,12 +2529,12 @@ function formatWeekday(value) {
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) {
       const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-      return d.toLocaleDateString(undefined, { weekday: "short" });
+      return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
     }
   }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { weekday: "short" });
+  return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
 }
 
 function getScoreRate(attempt) {
@@ -4179,7 +4180,8 @@ export default function AdminConsole({
     const months = attendanceSummary.months.map((month) => {
       const parts = month.key.split("-");
       const label = parts.length === 2
-        ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined, {
+        ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString("en-GB", {
+            timeZone: "Asia/Dhaka",
             year: "numeric",
             month: "long",
           })
