@@ -870,16 +870,23 @@ export function useTestingWorkspaceState({
     }
     const { data, error } = await supabase
       .from("tests")
-      .select("id, version, title, type, is_public, pass_rate, school_id, created_at, question_count, updated_at, data")
-      .order("created_at", { ascending: false });
+      .select("id, version, title, type, is_public, pass_rate, created_at, questions(count)")
+      .eq("is_public", true)
+      .order("created_at", { ascending: false })
+      .limit(200);
     if (error) {
       console.error("tests fetch error:", error);
       setTests([]);
       setTestsMsg(`Load failed: ${error.message}`);
       return;
     }
-    setTests(data ?? []);
-    setTestsMsg("");
+    const list = data ?? [];
+    const withCounts = list.map((t) => ({
+      ...t,
+      question_count: t.questions?.[0]?.count ?? 0
+    }));
+    setTests(withCounts);
+    setTestsMsg(list.length ? "" : "No tests.");
   }, [supabase]);
 
   const fetchTestSessions = useCallback(async () => {
@@ -2445,18 +2452,22 @@ export function useTestingWorkspaceState({
   // Initialize data on mount
   useEffect(() => {
     if (!supabase || !activeSchoolId) return;
-    void fetchTests();
-  }, [supabase, activeSchoolId]);
+    const initializeData = async () => {
+      await fetchTests();
+      // fetchTestSessions and fetchAssets will run after fetchTests completes
+    };
+    void initializeData();
+  }, [supabase, activeSchoolId, fetchTests]);
 
   useEffect(() => {
-    if (!tests.length) return;
+    if (!supabase || !activeSchoolId || !tests.length) return;
     void fetchTestSessions();
-  }, [tests.length]);
+  }, [supabase, activeSchoolId, tests.length, fetchTestSessions]);
 
   useEffect(() => {
     if (!supabase || !activeSchoolId) return;
     void fetchAssets();
-  }, [supabase, activeSchoolId]);
+  }, [supabase, activeSchoolId, fetchAssets]);
 
   useEffect(() => {
     if (modelCategorySeededRef.current) return;
