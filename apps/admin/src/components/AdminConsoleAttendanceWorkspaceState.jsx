@@ -89,7 +89,7 @@ function buildAttendanceSummary(list) {
     const stats = calc(monthRows);
     const parts = key.split("-");
     const labelMonth = parts.length === 2
-      ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined, { month: "short" })
+      ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "short" })
       : key;
     return {
       key,
