@@ -1720,7 +1720,7 @@ export function useTestingWorkspaceState({
     }
 
     return { ok: true, resolvedVersion, versions: versionSet };
-  }, [supabase, parseCsv, validateAssetRefs, buildLocalAssetNameMap]);
+  }, [supabase, validateAssetRefs, buildLocalAssetNameMap]);
 
   const uploadAssets = useCallback(async () => {
     setAssetUploadMsg("");
