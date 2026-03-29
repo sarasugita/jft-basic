@@ -817,6 +817,16 @@ export function useTestingWorkspaceState({
       : CUSTOM_CATEGORY_OPTION;
   }, [dailySessionCategories, dailySessionForm.session_category]);
 
+  const selectedDailyCategory = useMemo(() => {
+    if (!dailyResultCategories.length) return null;
+    return dailyResultCategories.find((c) => c.name === dailyResultsCategory) ?? dailyResultCategories[0];
+  }, [dailyResultCategories, dailyResultsCategory]);
+
+  const selectedModelCategory = useMemo(() => {
+    if (!modelResultCategories.length || !modelResultsCategory) return null;
+    return modelResultCategories.find((c) => c.name === modelResultsCategory) ?? null;
+  }, [modelResultCategories, modelResultsCategory]);
+
   // ========================================================================
   // useCallback functions (39+ callbacks)
   // ========================================================================
@@ -2667,6 +2677,8 @@ export function useTestingWorkspaceState({
     dailySessionCategorySelectValue,
     dailyResultCategories,
     modelResultCategories,
+    selectedDailyCategory,
+    selectedModelCategory,
     dailyResultsCategory,
     setDailyResultsCategory,
     modelResultsCategory,
