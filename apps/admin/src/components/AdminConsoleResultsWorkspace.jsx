@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { sections } from "../../../../packages/shared/questions.js";
 import AdminConsoleDeferredFeatures from "./AdminConsoleDeferredFeatures";
 
 function escapeHtml(str) {
@@ -140,6 +141,499 @@ function isGeneratedDailySessionVersion(version) {
   return String(version ?? "").startsWith("daily_session_");
 }
 
+function formatCompactDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function renderTwoLineHeaderFallback(title) {
+  const text = String(title ?? "");
+  const idx = text.lastIndexOf(" ");
+  if (idx <= 0) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <br />
+      {text.slice(idx + 1)}
+    </>
+  );
+}
+
+function isImportedSummaryAttempt(attempt) {
+  return Boolean(attempt?.answers_json?.__meta?.imported_summary);
+}
+
+function isImportedResultsSummaryAttempt(attempt) {
+  const source = String(attempt?.answers_json?.__meta?.imported_source ?? "");
+  return isImportedSummaryAttempt(attempt)
+    && (source === "daily_results_csv" || source === "model_results_csv");
+}
+
+function isImportedModelResultsSummaryAttempt(attempt) {
+  return isImportedSummaryAttempt(attempt)
+    && String(attempt?.answers_json?.__meta?.imported_source ?? "") === "model_results_csv";
+}
+
+function getAttemptTimestamp(attempt) {
+  const value = attempt?.ended_at || attempt?.created_at || attempt?.started_at || null;
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function formatOrdinalFallback(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value ?? "");
+  const mod10 = num % 10;
+  const mod100 = num % 100;
+  let suffix = "th";
+  if (mod10 === 1 && mod100 !== 11) suffix = "st";
+  else if (mod10 === 2 && mod100 !== 12) suffix = "nd";
+  else if (mod10 === 3 && mod100 !== 13) suffix = "rd";
+  return `${num}${suffix}`;
+}
+
+function normalizePassRate(value, fallback = 0.8) {
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate : fallback;
+}
+
+function normalizeImportedModelSectionTitle(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const matchedSection = sections.find((section) => {
+    const sectionTitle = String(section?.title ?? "").trim().toLowerCase();
+    const sectionKey = String(section?.key ?? "").trim().toLowerCase();
+    const normalizedRaw = raw.toLowerCase();
+    return section.key !== "DAILY" && (sectionTitle === normalizedRaw || sectionKey === normalizedRaw);
+  });
+  return matchedSection?.title || raw;
+}
+
+function getImportedModelSectionSummaries(attempt) {
+  const rows = Array.isArray(attempt?.answers_json?.__meta?.main_section_summary)
+    ? attempt.answers_json.__meta.main_section_summary
+    : [];
+  const orderMap = new Map(
+    sections
+      .filter((section) => section.key !== "DAILY")
+      .map((section, index) => [section.title, index])
+  );
+  return rows
+    .map((row) => {
+      const section = normalizeImportedModelSectionTitle(row?.section);
+      const correct = Number(row?.correct ?? 0);
+      const total = Number(row?.total ?? 0);
+      const rawRate = Number(row?.rate);
+      const rate = Number.isFinite(rawRate) ? rawRate : (total > 0 ? correct / total : 0);
+      return {
+        section,
+        correct: Number.isFinite(correct) ? correct : 0,
+        total: Number.isFinite(total) ? total : 0,
+        rate: Number.isFinite(rate) ? rate : 0,
+      };
+    })
+    .filter((row) => row.section)
+    .sort((left, right) => {
+      const leftOrder = orderMap.has(left.section) ? orderMap.get(left.section) : 999;
+      const rightOrder = orderMap.has(right.section) ? orderMap.get(right.section) : 999;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return left.section.localeCompare(right.section);
+    });
+}
+
+function buildLatestAttemptMapByStudent(attemptsList) {
+  const map = new Map();
+  for (const attempt of attemptsList ?? []) {
+    if (!attempt?.student_id) continue;
+    const existing = map.get(attempt.student_id);
+    if (!existing || getAttemptTimestamp(attempt) >= getAttemptTimestamp(existing)) {
+      map.set(attempt.student_id, attempt);
+    }
+  }
+  return map;
+}
+
+function mapDbQuestion(row) {
+  const data = row?.data ?? {};
+  const stemAsset = [
+    row?.media_file,
+    data.stemAsset,
+    data.stem_asset,
+    data.stemAudio,
+    data.stem_audio,
+    data.stemImage,
+    data.stem_image,
+  ].filter(Boolean).join("|") || null;
+  return {
+    dbId: row?.id ?? null,
+    id: row?.question_id ?? row?.id ?? "",
+    questionId: row?.question_id ?? row?.id ?? "",
+    testVersion: row?.test_version ?? "",
+    sectionKey: row?.section_key ?? "",
+    sectionLabel: data.sectionLabel ?? data.section_label ?? null,
+    type: row?.type ?? "",
+    promptEn: row?.prompt_en ?? "",
+    promptBn: row?.prompt_bn ?? "",
+    answerIndex: row?.answer_index,
+    orderIndex: row?.order_index ?? 0,
+    rawData: data,
+    data,
+    sourceVersion: data.sourceVersion ?? null,
+    sourceQuestionId: data.sourceQuestionId ?? null,
+    stemAsset,
+    choices: data.choices ?? data.choicesJa ?? data.choicesEn ?? [],
+    choicesJa: data.choicesJa ?? data.choices ?? [],
+    choicesEn: data.choicesEn ?? data.choices ?? [],
+    choiceImages: data.choiceImages ?? [],
+    parts: Array.isArray(data.parts) ? data.parts : [],
+  };
+}
+
+function mergeQuestionData(question) {
+  return {
+    ...(question?.data ?? {}),
+    ...question,
+    id: question?.questionId ?? question?.id,
+    questionId: question?.questionId ?? question?.id,
+  };
+}
+
+function getQuestionPrompt(question) {
+  const q = mergeQuestionData(question);
+  if (q.boxText) return q.boxText;
+  if (q.stemText) return q.stemText;
+  if (q.stemExtra) return q.stemExtra;
+  if (q.promptEn) return q.promptEn;
+  if (q.promptBn) return q.promptBn;
+  return q.questionId || q.id || "";
+}
+
+function buildAttemptDetailRowsFromList(answersJson, questionsList, getQuestionSectionLabel) {
+  const answers = answersJson ?? {};
+  const rows = [];
+  for (const rawQuestion of questionsList ?? []) {
+    const question = mergeQuestionData(rawQuestion);
+    const answerKey = question.questionId ?? question.id;
+    const section = getQuestionSectionLabel(question);
+    if (Array.isArray(question.parts) && question.parts.length) {
+      const answer = answers[answerKey];
+      question.parts.forEach((part, index) => {
+        const chosenIdx = answer?.partAnswers?.[index];
+        const correctIdx = part?.answerIndex;
+        rows.push({
+          qid: `${answerKey}-${index + 1}`,
+          sectionKey: question.sectionKey || "",
+          section,
+          prompt: `${question.promptEn ?? question.promptBn ?? ""} ${part?.partLabel ?? ""} ${part?.questionJa ?? part?.promptEn ?? ""}`.trim(),
+          isCorrect: chosenIdx === correctIdx,
+        });
+      });
+      continue;
+    }
+    const chosenIdx = answers[answerKey];
+    rows.push({
+      qid: String(answerKey),
+      sectionKey: question.sectionKey || "",
+      section,
+      prompt: getQuestionPrompt(question),
+      isCorrect: chosenIdx === question.answerIndex,
+    });
+  }
+  return rows;
+}
+
+function buildSectionSummary(rows) {
+  const summaryMap = new Map();
+  for (const row of rows ?? []) {
+    const key = row.section || "Unknown";
+    const current = summaryMap.get(key) || { section: key, total: 0, correct: 0 };
+    current.total += 1;
+    if (row.isCorrect) current.correct += 1;
+    summaryMap.set(key, current);
+  }
+  return Array.from(summaryMap.values()).map((row) => ({
+    ...row,
+    rate: row.total ? row.correct / row.total : 0,
+  }));
+}
+
+function buildMainSectionSummary(rows, getSectionTitle) {
+  const summaryMap = new Map();
+  for (const row of rows ?? []) {
+    const key = getSectionTitle(row.sectionKey) || row.sectionKey || row.section || "Unknown";
+    const current = summaryMap.get(key) || { section: key, total: 0, correct: 0 };
+    current.total += 1;
+    if (row.isCorrect) current.correct += 1;
+    summaryMap.set(key, current);
+  }
+  return sections
+    .map((section) => getSectionTitle(section.key))
+    .filter(Boolean)
+    .map((label) => summaryMap.get(label))
+    .filter(Boolean)
+    .map((row) => ({
+      ...row,
+      rate: row.total ? row.correct / row.total : 0,
+    }));
+}
+
+function buildNestedSectionSummary(rows, getSectionTitle) {
+  const mainSectionMap = new Map();
+  for (const row of rows ?? []) {
+    const mainSection = getSectionTitle(row.sectionKey) || row.sectionKey || row.section || "Unknown";
+    const current = mainSectionMap.get(mainSection) || {
+      mainSection,
+      total: 0,
+      correct: 0,
+      subSections: new Map(),
+    };
+    current.total += 1;
+    if (row.isCorrect) current.correct += 1;
+    const subKey = row.section || "Unknown";
+    const currentSub = current.subSections.get(subKey) || { section: subKey, total: 0, correct: 0 };
+    currentSub.total += 1;
+    if (row.isCorrect) currentSub.correct += 1;
+    current.subSections.set(subKey, currentSub);
+    mainSectionMap.set(mainSection, current);
+  }
+  const ordered = sections
+    .map((section) => getSectionTitle(section.key))
+    .filter((title) => mainSectionMap.has(title))
+    .map((title) => mainSectionMap.get(title));
+  for (const [title, group] of mainSectionMap.entries()) {
+    if (!ordered.some((item) => item.mainSection === title)) ordered.push(group);
+  }
+  return ordered.map((group) => ({
+    mainSection: group.mainSection,
+    total: group.total,
+    correct: group.correct,
+    rate: group.total ? group.correct / group.total : 0,
+    subSections: Array.from(group.subSections.values()).map((subSection) => ({
+      ...subSection,
+      rate: subSection.total ? subSection.correct / subSection.total : 0,
+    })),
+  }));
+}
+
+function buildQuestionAnalysisRows(attemptsList, questionsList, getQuestionSectionLabel) {
+  const stats = new Map();
+  for (const attempt of attemptsList ?? []) {
+    const rows = buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel);
+    for (const row of rows) {
+      const current = stats.get(row.qid) || {
+        qid: row.qid,
+        section: row.section,
+        prompt: row.prompt,
+        correct: 0,
+        total: 0,
+        byStudent: {},
+      };
+      current.total += 1;
+      if (row.isCorrect) current.correct += 1;
+      if (attempt?.student_id) current.byStudent[attempt.student_id] = row.isCorrect;
+      stats.set(row.qid, current);
+    }
+  }
+  return Array.from(stats.values()).map((row) => ({
+    ...row,
+    rate: row.total ? row.correct / row.total : 0,
+  }));
+}
+
+function buildSectionAverageRows(attemptsList, questionsList, getQuestionSectionLabel) {
+  if (!questionsList?.length || !attemptsList?.length) return [];
+  const baseRows = buildAttemptDetailRowsFromList({}, questionsList, getQuestionSectionLabel);
+  const baseSummary = buildSectionSummary(baseRows);
+  return baseSummary
+    .map((baseRow) => {
+      const stats = attemptsList.reduce(
+        (acc, attempt) => {
+          const summary = buildSectionSummary(buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel));
+          const row = summary.find((item) => item.section === baseRow.section);
+          acc.rateSum += Number(row?.rate ?? 0);
+          acc.correctSum += Number(row?.correct ?? 0);
+          return acc;
+        },
+        { rateSum: 0, correctSum: 0 }
+      );
+      return {
+        section: baseRow.section,
+        averageRate: stats.rateSum / attemptsList.length,
+        averageCorrect: stats.correctSum / attemptsList.length,
+        totalQuestions: Number(baseRow.total ?? 0),
+      };
+    })
+    .filter((row) => row.totalQuestions > 0);
+}
+
+function buildMainSectionAverageRows(attemptsList, questionsList, getQuestionSectionLabel, getSectionTitle) {
+  if (!questionsList?.length || !attemptsList?.length) return [];
+  const baseRows = buildAttemptDetailRowsFromList({}, questionsList, getQuestionSectionLabel);
+  const baseSummary = buildMainSectionSummary(baseRows, getSectionTitle);
+  return baseSummary
+    .map((baseRow) => {
+      const stats = attemptsList.reduce(
+        (acc, attempt) => {
+          const summary = buildMainSectionSummary(
+            buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel),
+            getSectionTitle
+          );
+          const row = summary.find((item) => item.section === baseRow.section);
+          acc.rateSum += Number(row?.rate ?? 0);
+          acc.correctSum += Number(row?.correct ?? 0);
+          return acc;
+        },
+        { rateSum: 0, correctSum: 0 }
+      );
+      return {
+        section: baseRow.section,
+        total: Number(baseRow.total ?? 0),
+        averageCorrect: stats.correctSum / attemptsList.length,
+        averageRate: stats.rateSum / attemptsList.length,
+      };
+    })
+    .filter((row) => row.total > 0);
+}
+
+function buildNestedSectionAverageRows(attemptsList, questionsList, getQuestionSectionLabel, getSectionTitle) {
+  if (!questionsList?.length || !attemptsList?.length) return [];
+  const baseRows = buildAttemptDetailRowsFromList({}, questionsList, getQuestionSectionLabel);
+  const baseSummary = buildNestedSectionSummary(baseRows, getSectionTitle);
+  return baseSummary.map((baseGroup) => {
+    const groupStats = attemptsList.reduce(
+      (acc, attempt) => {
+        const summary = buildNestedSectionSummary(
+          buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel),
+          getSectionTitle
+        );
+        const group = summary.find((item) => item.mainSection === baseGroup.mainSection);
+        acc.rateSum += Number(group?.rate ?? 0);
+        acc.correctSum += Number(group?.correct ?? 0);
+        return acc;
+      },
+      { rateSum: 0, correctSum: 0 }
+    );
+    return {
+      mainSection: baseGroup.mainSection,
+      total: Number(baseGroup.total ?? 0),
+      averageCorrect: groupStats.correctSum / attemptsList.length,
+      averageRate: groupStats.rateSum / attemptsList.length,
+      subSections: baseGroup.subSections.map((baseSubSection) => {
+        const subStats = attemptsList.reduce(
+          (acc, attempt) => {
+            const summary = buildNestedSectionSummary(
+              buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel),
+              getSectionTitle
+            );
+            const group = summary.find((item) => item.mainSection === baseGroup.mainSection);
+            const subSection = group?.subSections?.find((item) => item.section === baseSubSection.section);
+            acc.rateSum += Number(subSection?.rate ?? 0);
+            acc.correctSum += Number(subSection?.correct ?? 0);
+            return acc;
+          },
+          { rateSum: 0, correctSum: 0 }
+        );
+        return {
+          section: baseSubSection.section,
+          total: Number(baseSubSection.total ?? 0),
+          averageCorrect: subStats.correctSum / attemptsList.length,
+          averageRate: subStats.rateSum / attemptsList.length,
+        };
+      }),
+    };
+  });
+}
+
+function buildImportedMainSectionAverageRows(attemptsList) {
+  if (!attemptsList?.length) return [];
+  return sections
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => section.title)
+    .map((sectionTitle) => {
+      const matchingRows = attemptsList
+        .map((attempt) => getImportedModelSectionSummaries(attempt).find((row) => row.section === sectionTitle))
+        .filter(Boolean);
+      if (!matchingRows.length) return null;
+      return {
+        section: sectionTitle,
+        total: Math.max(...matchingRows.map((row) => Number(row.total ?? 0)), 0),
+        averageCorrect: matchingRows.reduce((sum, row) => sum + Number(row.correct ?? 0), 0) / matchingRows.length,
+        averageRate: matchingRows.reduce((sum, row) => sum + Number(row.rate ?? 0), 0) / matchingRows.length,
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildSessionStudentRankingRows(attemptsList, questionsList, studentsList, getQuestionSectionLabel) {
+  if (!attemptsList?.length) return [];
+  const sectionAverageRows = buildSectionAverageRows(attemptsList, questionsList, getQuestionSectionLabel);
+  const sectionTitles = sectionAverageRows.map((row) => row.section);
+  const rows = attemptsList.map((attempt) => {
+    const student = (studentsList ?? []).find((item) => item.id === attempt.student_id) ?? null;
+    const detailRows = buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel);
+    const sectionSummary = buildSectionSummary(detailRows);
+    const sectionRates = Object.fromEntries(
+      sectionTitles.map((title) => [title, Number(sectionSummary.find((row) => row.section === title)?.rate ?? 0)])
+    );
+    return {
+      attempt,
+      student_id: attempt.student_id,
+      display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+      student_code: attempt.student_code || student?.student_code || "",
+      totalCorrect: Number(attempt?.correct ?? 0),
+      totalQuestions: Number(attempt?.total ?? 0),
+      totalRate: Number(attempt?.score_rate ?? 0),
+      sectionRates,
+    };
+  });
+  rows.sort((a, b) => {
+    if (b.totalRate !== a.totalRate) return b.totalRate - a.totalRate;
+    if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
+    const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+    if (nameCompare !== 0) return nameCompare;
+    return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+  });
+  return rows.map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
+function buildImportedSessionStudentRankingRows(attemptsList, studentsList) {
+  if (!attemptsList?.length) return [];
+  const sectionTitles = sections.filter((section) => section.key !== "DAILY").map((section) => section.title);
+  const rows = attemptsList.map((attempt) => {
+    const student = (studentsList ?? []).find((item) => item.id === attempt.student_id) ?? null;
+    const sectionSummary = getImportedModelSectionSummaries(attempt);
+    const sectionRates = Object.fromEntries(
+      sectionTitles.map((title) => [title, Number(sectionSummary.find((row) => row.section === title)?.rate ?? 0)])
+    );
+    return {
+      attempt,
+      student_id: attempt.student_id,
+      display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+      student_code: attempt.student_code || student?.student_code || "",
+      totalCorrect: Number(attempt?.correct ?? 0),
+      totalQuestions: Number(attempt?.total ?? 0),
+      totalRate: Number(attempt?.score_rate ?? 0),
+      sectionRates,
+    };
+  });
+  rows.sort((a, b) => {
+    if (b.totalRate !== a.totalRate) return b.totalRate - a.totalRate;
+    if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
+    const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+    if (nameCompare !== 0) return nameCompare;
+    return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+  });
+  return rows.map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
 export default function AdminConsoleResultsWorkspace(props) {
   const {
     supabase,
@@ -150,40 +644,70 @@ export default function AdminConsoleResultsWorkspace(props) {
     allowSessionAnotherAttempt,
     resultContext,
     sessionDetail,
-    sessionDetailTab,
-    setSessionDetailTab,
-    sessionDetailQuestions,
-    sessionDetailLoading,
-    sessionDetailMsg,
-    sessionDetailAllowStudentId,
-    setSessionDetailAllowStudentId,
-    sessionDetailAllowMsg,
-    sessionDetailAllowances,
-    sessionDetailDisplayAttempts,
-    sessionDetailStudentOptions,
-    sessionDetailPassRate,
-    sessionDetailUsesImportedResultsSummary,
-    sessionDetailUsesImportedModelSummary,
-    sessionDetailAnalysisSummary,
-    sessionDetailOverview,
-    sessionDetailQuestionAnalysis,
-    sessionDetailQuestionStudents,
-    sessionDetailMainSectionAverages,
-    sessionDetailNestedSectionAverages,
-    sessionDetailStudentRankingRows,
-    sessionDetailRankingSections,
-    sessionDetailShowAllAnalysis,
-    setSessionDetailShowAllAnalysis,
-    sessionDetailAnalysisPopup,
-    setSessionDetailAnalysisPopup,
+    sessionDetailTab = "analysis",
+    setSessionDetailTab = () => {},
+    sessionDetailQuestions = [],
+    sessionDetailAttempts = [],
+    sessionDetailLoading = false,
+    sessionDetailMsg = "",
+    sessionDetailAllowStudentId = "",
+    setSessionDetailAllowStudentId = () => {},
+    sessionDetailAllowMsg = "",
+    sessionDetailAllowances = {},
+    sessionDetailDisplayAttempts: sessionDetailDisplayAttemptsProp,
+    sessionDetailStudentOptions: sessionDetailStudentOptionsProp,
+    sessionDetailPassRate: sessionDetailPassRateProp,
+    sessionDetailUsesImportedResultsSummary: sessionDetailUsesImportedResultsSummaryProp,
+    sessionDetailUsesImportedModelSummary: sessionDetailUsesImportedModelSummaryProp,
+    sessionDetailAnalysisSummary: sessionDetailAnalysisSummaryProp,
+    sessionDetailOverview: sessionDetailOverviewProp,
+    sessionDetailQuestionAnalysis: sessionDetailQuestionAnalysisProp,
+    sessionDetailQuestionStudents: sessionDetailQuestionStudentsProp,
+    sessionDetailMainSectionAverages: sessionDetailMainSectionAveragesProp,
+    sessionDetailNestedSectionAverages: sessionDetailNestedSectionAveragesProp,
+    sessionDetailStudentRankingRows: sessionDetailStudentRankingRowsProp,
+    sessionDetailRankingSections: sessionDetailRankingSectionsProp,
+    sessionDetailShowAllAnalysis = false,
+    setSessionDetailShowAllAnalysis = () => {},
+    sessionDetailAnalysisPopup = { open: false, title: "", questions: [] },
+    setSessionDetailAnalysisPopup = () => {},
     selectedSessionDetail,
-    openAttemptDetail,
+    attempts = [],
+    testMetaByVersion = {},
+    attemptCanOpenDetail: attemptCanOpenDetailProp,
+    openAttemptDetail: openAttemptDetailProp,
     formatDateTime,
-    formatOrdinal,
+    formatOrdinal: formatOrdinalProp,
     getScoreRate,
-    renderTwoLineHeader,
+    renderTwoLineHeader: renderTwoLineHeaderProp,
     getSectionTitle,
     getQuestionSectionLabel,
+    students = [],
+    attemptDetailOpen: attemptDetailOpenProp,
+    selectedAttempt: selectedAttemptProp,
+    selectedAttemptRows: selectedAttemptRowsProp,
+    selectedAttemptScoreRate: selectedAttemptScoreRateProp,
+    studentAttemptRanks: studentAttemptRanksProp,
+    attemptDetailSource: attemptDetailSourceProp,
+    selectedAttemptUsesImportedSummary: selectedAttemptUsesImportedSummaryProp,
+    selectedAttemptUsesImportedModelSummary: selectedAttemptUsesImportedModelSummaryProp,
+    selectedAttemptMainSectionSummary: selectedAttemptMainSectionSummaryProp,
+    setAttemptDetailOpen: setAttemptDetailOpenProp,
+    setSelectedAttemptObj: setSelectedAttemptObjProp,
+    setAttemptDetailSource: setAttemptDetailSourceProp,
+    attemptQuestionsLoading: attemptQuestionsLoadingProp,
+    attemptQuestionsError: attemptQuestionsErrorProp,
+    attemptDetailTab: attemptDetailTabProp,
+    setAttemptDetailTab: setAttemptDetailTabProp,
+    selectedAttemptIsPass: selectedAttemptIsPassProp,
+    selectedAttemptIsModel: selectedAttemptIsModelProp,
+    selectedAttemptNestedSectionSummary: selectedAttemptNestedSectionSummaryProp,
+    selectedAttemptPassRate: selectedAttemptPassRateProp,
+    selectedAttemptSectionSummary: selectedAttemptSectionSummaryProp,
+    selectedAttemptQuestionSectionsFiltered: selectedAttemptQuestionSectionsFilteredProp,
+    attemptDetailSectionRefs: attemptDetailSectionRefsProp,
+    attemptDetailWrongOnly: attemptDetailWrongOnlyProp,
+    setAttemptDetailWrongOnly: setAttemptDetailWrongOnlyProp,
     previewOpen,
     previewTest,
     previewSession,
@@ -201,6 +725,444 @@ export default function AdminConsoleResultsWorkspace(props) {
     isImageAsset,
     isAudioAsset,
   } = props;
+
+  const sessionStudents = Array.isArray(students) ? students : [];
+  const studentsById = new Map(sessionStudents.map((student) => [student.id, student]));
+  const sessionDetailDisplayAttempts = Array.isArray(sessionDetailDisplayAttemptsProp)
+    ? sessionDetailDisplayAttemptsProp
+    : (() => {
+      const actualAttempts = sessionDetailAttempts.filter((attempt) => !isImportedResultsSummaryAttempt(attempt));
+      return actualAttempts.length ? actualAttempts : sessionDetailAttempts;
+    })();
+  const sessionDetailStudentOptions = Array.isArray(sessionDetailStudentOptionsProp)
+    ? sessionDetailStudentOptionsProp
+    : (() => {
+      const unique = new Map();
+      sessionDetailDisplayAttempts.forEach((attempt) => {
+        if (!attempt?.student_id || unique.has(attempt.student_id)) return;
+        const student = studentsById.get(attempt.student_id) ?? null;
+        unique.set(attempt.student_id, {
+          id: attempt.student_id,
+          display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+          student_code: attempt.student_code || student?.student_code || "",
+        });
+      });
+      return Array.from(unique.values()).sort((a, b) => {
+        const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+        if (nameCompare !== 0) return nameCompare;
+        return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+      });
+    })();
+  const sessionDetailLatestAttempts = Array.from(buildLatestAttemptMapByStudent(sessionDetailDisplayAttempts).values())
+    .filter((attempt) => {
+      const student = studentsById.get(attempt.student_id);
+      return !(student?.is_withdrawn || student?.is_test_account);
+    })
+    .sort((a, b) => getAttemptTimestamp(a) - getAttemptTimestamp(b));
+  const sessionDetailPassRate = Number.isFinite(sessionDetailPassRateProp)
+    ? sessionDetailPassRateProp
+    : (() => {
+      if (
+        sessionDetailDisplayAttempts.length
+        && sessionDetailDisplayAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt))
+      ) {
+        return 0.8;
+      }
+      const selectedSessionPassRate = Number(selectedSessionDetail?.pass_rate);
+      if (Number.isFinite(selectedSessionPassRate) && selectedSessionPassRate > 0 && selectedSessionPassRate <= 1) {
+        return selectedSessionPassRate;
+      }
+      return normalizePassRate(testMetaByVersion[selectedSessionDetail?.problem_set_id]?.pass_rate);
+    })();
+  const sessionDetailUsesImportedResultsSummary = typeof sessionDetailUsesImportedResultsSummaryProp === "boolean"
+    ? sessionDetailUsesImportedResultsSummaryProp
+    : (
+      sessionDetailDisplayAttempts.length > 0
+      && sessionDetailDisplayAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt))
+    );
+  const sessionDetailUsesImportedModelSummary = typeof sessionDetailUsesImportedModelSummaryProp === "boolean"
+    ? sessionDetailUsesImportedModelSummaryProp
+    : (
+      sessionDetail.type === "mock"
+      && sessionDetailUsesImportedResultsSummary
+      && sessionDetailLatestAttempts.every((attempt) => isImportedModelResultsSummaryAttempt(attempt))
+    );
+  const sessionDetailOverview = sessionDetailOverviewProp ?? (() => {
+    const count = sessionDetailLatestAttempts.length;
+    const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
+    const averageScore = count
+      ? sessionDetailLatestAttempts.reduce((total, attempt) => total + getScoreRate(attempt), 0) / count
+      : 0;
+    return {
+      count,
+      averageScore,
+      passCount,
+      passRate: count ? passCount / count : 0,
+    };
+  })();
+  const sessionDetailAnalysisSummary = sessionDetailAnalysisSummaryProp ?? (() => {
+    const attendedCount = sessionDetailLatestAttempts.length;
+    const activeStudentCount = sessionStudents.filter((student) => !(student?.is_withdrawn || student?.is_test_account)).length;
+    const absentCount = Math.max(0, activeStudentCount - attendedCount);
+    const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
+    const failCount = Math.max(0, attendedCount - passCount);
+    const totalQuestions = sessionDetailUsesImportedResultsSummary
+      ? Math.max(0, ...sessionDetailLatestAttempts.map((attempt) => Number(attempt.total ?? 0)))
+      : sessionDetailQuestions.length;
+    const averageCorrect = attendedCount
+      ? sessionDetailLatestAttempts.reduce((total, attempt) => {
+        return total + Number(attempt.correct ?? (attempt.total ? getScoreRate(attempt) * attempt.total : 0));
+      }, 0) / attendedCount
+      : 0;
+    const bucketLabels = Array.from({ length: 10 }, (_, index) => {
+      const start = index * 10;
+      const end = index === 9 ? 100 : start + 9;
+      return `${start}-${end}%`;
+    });
+    const bucketCounts = Array.from({ length: 10 }, () => 0);
+    sessionDetailLatestAttempts.forEach((attempt) => {
+      const ratePercent = Math.max(0, Math.min(100, getScoreRate(attempt) * 100));
+      const bucketIndex = ratePercent >= 100 ? 9 : Math.floor(ratePercent / 10);
+      bucketCounts[bucketIndex] += 1;
+    });
+    return {
+      attendedCount,
+      absentCount,
+      passCount,
+      failCount,
+      totalQuestions,
+      averageCorrect,
+      averageRate: sessionDetailOverview.averageScore,
+      bucketLabels,
+      bucketCounts,
+      maxBucketCount: Math.max(0, ...bucketCounts),
+    };
+  })();
+  const sessionDetailQuestionAnalysis = Array.isArray(sessionDetailQuestionAnalysisProp)
+    ? sessionDetailQuestionAnalysisProp
+    : (
+      sessionDetailUsesImportedResultsSummary
+        ? []
+        : buildQuestionAnalysisRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel)
+          .sort((a, b) => {
+            if (b.rate !== a.rate) return b.rate - a.rate;
+            return String(a.qid).localeCompare(String(b.qid));
+          })
+    );
+  const sessionDetailQuestionStudents = Array.isArray(sessionDetailQuestionStudentsProp)
+    ? sessionDetailQuestionStudentsProp
+    : sessionDetailLatestAttempts
+      .map((attempt) => {
+        const student = studentsById.get(attempt.student_id) ?? null;
+        return {
+          id: attempt.student_id,
+          display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+          student_code: attempt.student_code || student?.student_code || "",
+        };
+      })
+      .sort((a, b) => {
+        const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+        if (nameCompare !== 0) return nameCompare;
+        return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+      });
+  const sessionDetailMainSectionAverages = Array.isArray(sessionDetailMainSectionAveragesProp)
+    ? sessionDetailMainSectionAveragesProp
+    : (
+      sessionDetailUsesImportedModelSummary
+        ? buildImportedMainSectionAverageRows(sessionDetailLatestAttempts)
+        : buildMainSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel, getSectionTitle)
+    );
+  const sessionDetailNestedSectionAverages = Array.isArray(sessionDetailNestedSectionAveragesProp)
+    ? sessionDetailNestedSectionAveragesProp
+    : (
+      sessionDetailUsesImportedResultsSummary
+        ? []
+        : buildNestedSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel, getSectionTitle)
+    );
+  const sessionDetailStudentRankingRows = Array.isArray(sessionDetailStudentRankingRowsProp)
+    ? sessionDetailStudentRankingRowsProp
+    : (
+      sessionDetailUsesImportedResultsSummary
+        ? buildImportedSessionStudentRankingRows(sessionDetailLatestAttempts, sessionStudents)
+        : buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, sessionStudents, getQuestionSectionLabel)
+    );
+  const sessionDetailRankingSections = Array.isArray(sessionDetailRankingSectionsProp)
+    ? sessionDetailRankingSectionsProp
+    : (
+      sessionDetailUsesImportedResultsSummary
+        ? sessionDetailMainSectionAverages.map((row) => ({ section: row.section }))
+        : buildSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel)
+            .map((row) => ({ section: row.section }))
+    );
+  const formatOrdinal = typeof formatOrdinalProp === "function" ? formatOrdinalProp : formatOrdinalFallback;
+  const renderTwoLineHeader = typeof renderTwoLineHeaderProp === "function"
+    ? renderTwoLineHeaderProp
+    : renderTwoLineHeaderFallback;
+  const canUseExternalAttemptDetail = typeof openAttemptDetailProp === "function"
+    && typeof attemptCanOpenDetailProp === "function"
+    && typeof setAttemptDetailOpenProp === "function"
+    && typeof setSelectedAttemptObjProp === "function"
+    && typeof setAttemptDetailSourceProp === "function";
+  const attemptCanOpenDetail = typeof attemptCanOpenDetailProp === "function"
+    ? attemptCanOpenDetailProp
+    : (attempt) => {
+      if (!attempt?.id) return false;
+      if (isImportedSummaryAttempt(attempt)) return true;
+      if (!attempt?.answers_json || typeof attempt.answers_json !== "object") return false;
+      return Object.keys(attempt.answers_json).some((key) => key !== "__meta");
+    };
+  const [attemptDetailOpenState, setAttemptDetailOpenState] = useState(false);
+  const [selectedAttemptObjState, setSelectedAttemptObjState] = useState(null);
+  const [attemptDetailSourceState, setAttemptDetailSourceState] = useState("default");
+  const [attemptDetailTabState, setAttemptDetailTabState] = useState("overview");
+  const [attemptDetailWrongOnlyState, setAttemptDetailWrongOnlyState] = useState(false);
+  const attemptDetailSectionRefsState = useRef({});
+  const [localAttemptQuestionsByVersion, setLocalAttemptQuestionsByVersion] = useState({});
+  const [localAttemptQuestionsLoading, setLocalAttemptQuestionsLoading] = useState(false);
+  const [localAttemptQuestionsError, setLocalAttemptQuestionsError] = useState("");
+  const attemptDetailOpen = canUseExternalAttemptDetail ? Boolean(attemptDetailOpenProp) : attemptDetailOpenState;
+  const selectedAttempt = canUseExternalAttemptDetail ? (selectedAttemptProp ?? null) : selectedAttemptObjState;
+  const attemptDetailSource = canUseExternalAttemptDetail ? (attemptDetailSourceProp ?? "default") : attemptDetailSourceState;
+  const setAttemptDetailOpen = canUseExternalAttemptDetail ? setAttemptDetailOpenProp : setAttemptDetailOpenState;
+  const setSelectedAttemptObj = canUseExternalAttemptDetail ? setSelectedAttemptObjProp : setSelectedAttemptObjState;
+  const setAttemptDetailSource = canUseExternalAttemptDetail ? setAttemptDetailSourceProp : setAttemptDetailSourceState;
+  const attemptDetailTab = typeof setAttemptDetailTabProp === "function" ? (attemptDetailTabProp ?? "overview") : attemptDetailTabState;
+  const setAttemptDetailTab = typeof setAttemptDetailTabProp === "function" ? setAttemptDetailTabProp : setAttemptDetailTabState;
+  const attemptDetailWrongOnly = typeof setAttemptDetailWrongOnlyProp === "function"
+    ? Boolean(attemptDetailWrongOnlyProp)
+    : attemptDetailWrongOnlyState;
+  const setAttemptDetailWrongOnly = typeof setAttemptDetailWrongOnlyProp === "function"
+    ? setAttemptDetailWrongOnlyProp
+    : setAttemptDetailWrongOnlyState;
+  const attemptDetailSectionRefs = attemptDetailSectionRefsProp ?? attemptDetailSectionRefsState;
+  const localOpenAttemptDetail = (attempt, source = "default") => {
+    if (!attempt?.id) return;
+    if (!attemptCanOpenDetail(attempt)) return;
+    setSelectedAttemptObj(attempt);
+    setAttemptDetailSource(source);
+    setAttemptDetailOpen(true);
+  };
+  const openAttemptDetail = canUseExternalAttemptDetail ? openAttemptDetailProp : localOpenAttemptDetail;
+
+  const buildDetailedAttemptRows = (answersJson, questionsList) => {
+    const answers = answersJson ?? {};
+    const getChoiceText = (question, choiceIndex) => {
+      if (choiceIndex == null) return "";
+      const choices = question?.choices ?? question?.choicesJa ?? question?.choicesEn ?? [];
+      return choices[choiceIndex] ?? `#${Number(choiceIndex) + 1}`;
+    };
+    const getChoiceImage = (question, choiceIndex) => {
+      if (choiceIndex == null) return "";
+      const direct = question?.choiceImages?.[choiceIndex];
+      if (direct) return direct;
+      const value = getChoiceText(question, choiceIndex);
+      return isImageAsset(value) ? value : "";
+    };
+    const getPartChoiceText = (part, choiceIndex) => {
+      if (choiceIndex == null) return "";
+      const choices = part?.choices ?? part?.choicesJa ?? [];
+      return choices[choiceIndex] ?? `#${Number(choiceIndex) + 1}`;
+    };
+    const getPartChoiceImage = (part, choiceIndex) => {
+      if (choiceIndex == null) return "";
+      const direct = part?.choiceImages?.[choiceIndex];
+      if (direct) return direct;
+      const value = getPartChoiceText(part, choiceIndex);
+      return isImageAsset(value) ? value : "";
+    };
+
+    return (questionsList ?? []).flatMap((rawQuestion) => {
+      const question = mergeQuestionData(rawQuestion);
+      const answerKey = question.questionId ?? question.id;
+      const section = getQuestionSectionLabel(question);
+      const stemAsset = [
+        question.stemAsset,
+        question.mediaFile,
+        question.media_file,
+        question.stemImage,
+        question.stemAudio,
+        question.image,
+        question.data?.stemAsset,
+        question.data?.stem_asset,
+        question.data?.stemImage,
+        question.data?.stem_image,
+        question.data?.stemAudio,
+        question.data?.stem_audio,
+      ].find(Boolean);
+      const stemAssets = splitAssetValues(stemAsset);
+      const stemImages = stemAssets.filter((value) => isImageAsset(value));
+      const stemAudios = stemAssets.filter((value) => isAudioAsset(value));
+      if (Array.isArray(question.parts) && question.parts.length) {
+        const answer = answers[answerKey];
+        return question.parts.map((part, index) => {
+          const chosenIdx = answer?.partAnswers?.[index];
+          const correctIdx = part?.answerIndex;
+          return {
+            qid: `${answerKey}-${index + 1}`,
+            sectionKey: question.sectionKey || "",
+            section,
+            prompt: `${question.promptEn ?? question.promptBn ?? ""} ${part?.partLabel ?? ""} ${part?.questionJa ?? part?.promptEn ?? ""}`.trim(),
+            chosen: getPartChoiceText(part, chosenIdx),
+            chosenImage: getPartChoiceImage(part, chosenIdx),
+            correct: getPartChoiceText(part, correctIdx),
+            correctImage: getPartChoiceImage(part, correctIdx),
+            isCorrect: chosenIdx === correctIdx,
+            stemImages,
+            stemAudios,
+          };
+        });
+      }
+      const chosenIdx = answers[answerKey];
+      return [{
+        qid: String(answerKey),
+        sectionKey: question.sectionKey || "",
+        section,
+        prompt: getQuestionPrompt(question),
+        chosen: getChoiceText(question, chosenIdx),
+        chosenImage: getChoiceImage(question, chosenIdx),
+        correct: getChoiceText(question, question.answerIndex),
+        correctImage: getChoiceImage(question, question.answerIndex),
+        isCorrect: chosenIdx === question.answerIndex,
+        stemImages,
+        stemAudios,
+      }];
+    });
+  };
+
+  const selectedAttemptQuestions = useMemo(() => {
+    const version = selectedAttempt?.test_version;
+    if (!version) return null;
+    if (localAttemptQuestionsByVersion[version]) return localAttemptQuestionsByVersion[version];
+    if (selectedAttempt?.test_session_id && selectedAttempt.test_session_id === selectedSessionDetail?.id && sessionDetailQuestions.length) {
+      return sessionDetailQuestions;
+    }
+    return null;
+  }, [localAttemptQuestionsByVersion, selectedAttempt, selectedSessionDetail?.id, sessionDetailQuestions]);
+
+  useEffect(() => {
+    if (canUseExternalAttemptDetail) return;
+    const version = selectedAttempt?.test_version;
+    if (!attemptDetailOpen || !version || !supabase) return;
+    if (selectedAttemptQuestions?.length) return;
+    let cancelled = false;
+    const loadQuestions = async () => {
+      setLocalAttemptQuestionsLoading(true);
+      setLocalAttemptQuestionsError("");
+      const fieldsWithMedia = "id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data, media_file, media_type";
+      const baseFields = "id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
+      let result = await supabase
+        .from("questions")
+        .select(fieldsWithMedia)
+        .eq("test_version", version)
+        .order("order_index", { ascending: true });
+      if (result.error && /media_(file|type)/i.test(String(result.error?.message ?? ""))) {
+        result = await supabase
+          .from("questions")
+          .select(baseFields)
+          .eq("test_version", version)
+          .order("order_index", { ascending: true });
+      }
+      if (cancelled) return;
+      if (result.error) {
+        setLocalAttemptQuestionsError(result.error.message);
+        setLocalAttemptQuestionsLoading(false);
+        return;
+      }
+      setLocalAttemptQuestionsByVersion((current) => ({
+        ...current,
+        [version]: (result.data ?? []).map(mapDbQuestion),
+      }));
+      setLocalAttemptQuestionsLoading(false);
+    };
+    void loadQuestions();
+    return () => {
+      cancelled = true;
+    };
+  }, [attemptDetailOpen, canUseExternalAttemptDetail, selectedAttempt, selectedAttemptQuestions, supabase]);
+
+  useEffect(() => {
+    if (!attemptDetailOpen) return;
+    setAttemptDetailTab("overview");
+    setAttemptDetailWrongOnly(false);
+    if (attemptDetailSectionRefs?.current) attemptDetailSectionRefs.current = {};
+  }, [attemptDetailOpen, selectedAttempt?.id]);
+
+  const selectedAttemptUsesImportedSummary = typeof selectedAttemptUsesImportedSummaryProp === "boolean"
+    ? selectedAttemptUsesImportedSummaryProp
+    : isImportedSummaryAttempt(selectedAttempt);
+  const selectedAttemptUsesImportedModelSummary = typeof selectedAttemptUsesImportedModelSummaryProp === "boolean"
+    ? selectedAttemptUsesImportedModelSummaryProp
+    : isImportedModelResultsSummaryAttempt(selectedAttempt);
+  const selectedAttemptRows = Array.isArray(selectedAttemptRowsProp)
+    ? selectedAttemptRowsProp
+    : (
+      !selectedAttempt || selectedAttemptUsesImportedSummary || !selectedAttemptQuestions?.length
+        ? []
+        : buildDetailedAttemptRows(selectedAttempt.answers_json, selectedAttemptQuestions)
+    );
+  const selectedAttemptSectionSummary = Array.isArray(selectedAttemptSectionSummaryProp)
+    ? selectedAttemptSectionSummaryProp
+    : (
+      selectedAttemptUsesImportedModelSummary
+        ? getImportedModelSectionSummaries(selectedAttempt)
+        : buildSectionSummary(selectedAttemptRows)
+    );
+  const selectedAttemptIsModel = typeof selectedAttemptIsModelProp === "boolean"
+    ? selectedAttemptIsModelProp
+    : testMetaByVersion[selectedAttempt?.test_version]?.type === "mock";
+  const selectedAttemptMainSectionSummary = Array.isArray(selectedAttemptMainSectionSummaryProp)
+    ? selectedAttemptMainSectionSummaryProp
+    : (
+      selectedAttemptUsesImportedModelSummary
+        ? getImportedModelSectionSummaries(selectedAttempt)
+        : buildMainSectionSummary(selectedAttemptRows, getSectionTitle)
+    );
+  const selectedAttemptNestedSectionSummary = Array.isArray(selectedAttemptNestedSectionSummaryProp)
+    ? selectedAttemptNestedSectionSummaryProp
+    : (
+      selectedAttemptUsesImportedModelSummary
+        ? []
+        : buildNestedSectionSummary(selectedAttemptRows, getSectionTitle)
+    );
+  const selectedAttemptPassRate = Number.isFinite(selectedAttemptPassRateProp)
+    ? selectedAttemptPassRateProp
+    : normalizePassRate(testMetaByVersion[selectedAttempt?.test_version]?.pass_rate);
+  const selectedAttemptQuestionSectionsFiltered = Array.isArray(selectedAttemptQuestionSectionsFilteredProp)
+    ? selectedAttemptQuestionSectionsFilteredProp
+    : (() => {
+      const groups = new Map();
+      selectedAttemptRows.forEach((row) => {
+        const key = getSectionTitle(row.sectionKey) || row.sectionKey || row.section || "Unknown";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(row);
+      });
+      return Array.from(groups.entries())
+        .map(([title, rows]) => ({
+          title,
+          rows: attemptDetailWrongOnly ? rows.filter((row) => !row.isCorrect) : rows,
+        }))
+        .filter((section) => section.rows.length > 0);
+    })();
+  const selectedAttemptScoreRate = Number.isFinite(selectedAttemptScoreRateProp)
+    ? selectedAttemptScoreRateProp
+    : (selectedAttempt ? getScoreRate(selectedAttempt) : 0);
+  const selectedAttemptIsPass = typeof selectedAttemptIsPassProp === "boolean"
+    ? selectedAttemptIsPassProp
+    : selectedAttemptScoreRate >= selectedAttemptPassRate;
+  const selectedAttemptDisplayName = selectedAttempt
+    ? (
+      selectedAttempt.display_name
+      || studentsById.get(selectedAttempt.student_id)?.display_name
+      || studentsById.get(selectedAttempt.student_id)?.email
+      || selectedAttempt.student_id
+      || ""
+    )
+    : "";
+  const studentAttemptRanks = studentAttemptRanksProp ?? {};
+  const attemptQuestionsLoading = canUseExternalAttemptDetail && typeof attemptQuestionsLoadingProp === "boolean"
+    ? attemptQuestionsLoadingProp
+    : localAttemptQuestionsLoading;
+  const attemptQuestionsError = canUseExternalAttemptDetail ? (attemptQuestionsErrorProp ?? "") : localAttemptQuestionsError;
 
   function closeSessionDetailAnalysisPopup() {
     setSessionDetailAnalysisPopup({ open: false, title: "", questions: [] });
@@ -600,9 +1562,9 @@ export default function AdminConsoleResultsWorkspace(props) {
                   {" · "}
                 </>
               ) : null}
-              Start: <b>{formatDateTime(selectedSessionDetail.starts_at) || "—"}</b>
+              Start: <b>{formatCompactDateTime(selectedSessionDetail.starts_at) || "—"}</b>
               {" · "}
-              End: <b>{formatDateTime(selectedSessionDetail.ends_at) || "—"}</b>
+              End: <b>{formatCompactDateTime(selectedSessionDetail.ends_at) || "—"}</b>
             </div>
             <div className="admin-top-tabs session-detail-tabs">
               {sessionDetailTabs.map(([key, label]) => (
@@ -1136,10 +2098,39 @@ export default function AdminConsoleResultsWorkspace(props) {
     <AdminConsoleDeferredFeatures
       {...props}
       deleteTest={deleteTest}
+      attemptCanOpenDetail={attemptCanOpenDetail}
+      openAttemptDetail={openAttemptDetail}
       renderSessionDetailView={renderSessionDetailView}
       renderPreviewQuestionCard={renderPreviewQuestionCard}
       buildSectionRadarSvg={buildSectionRadarSvg}
       renderUnderlinesHtml={renderUnderlinesHtml}
+      attemptDetailOpen={attemptDetailOpen}
+      selectedAttempt={selectedAttempt}
+      selectedAttemptDisplayName={selectedAttemptDisplayName}
+      selectedAttemptRows={selectedAttemptRows}
+      selectedAttemptScoreRate={selectedAttemptScoreRate}
+      studentAttemptRanks={studentAttemptRanks}
+      attemptDetailSource={attemptDetailSource}
+      selectedAttemptUsesImportedSummary={selectedAttemptUsesImportedSummary}
+      selectedAttemptUsesImportedModelSummary={selectedAttemptUsesImportedModelSummary}
+      selectedAttemptMainSectionSummary={selectedAttemptMainSectionSummary}
+      setAttemptDetailOpen={setAttemptDetailOpen}
+      setSelectedAttemptObj={setSelectedAttemptObj}
+      setAttemptDetailSource={setAttemptDetailSource}
+      attemptQuestionsLoading={attemptQuestionsLoading}
+      attemptQuestionsError={attemptQuestionsError}
+      attemptDetailTab={attemptDetailTab}
+      setAttemptDetailTab={setAttemptDetailTab}
+      selectedAttemptIsPass={selectedAttemptIsPass}
+      selectedAttemptIsModel={selectedAttemptIsModel}
+      selectedAttemptNestedSectionSummary={selectedAttemptNestedSectionSummary}
+      selectedAttemptPassRate={selectedAttemptPassRate}
+      renderTwoLineHeader={renderTwoLineHeader}
+      selectedAttemptSectionSummary={selectedAttemptSectionSummary}
+      selectedAttemptQuestionSectionsFiltered={selectedAttemptQuestionSectionsFiltered}
+      attemptDetailSectionRefs={attemptDetailSectionRefs}
+      attemptDetailWrongOnly={attemptDetailWrongOnly}
+      setAttemptDetailWrongOnly={setAttemptDetailWrongOnly}
     />
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { createPortal } from "react-dom";
+
 export default function AdminConsoleTestingTabs({
   activeTab,
   modelSubTab,
@@ -142,6 +144,22 @@ export default function AdminConsoleTestingTabs({
   setDailyFiles,
   uploadDailyAssets,
 }) {
+  function getSessionRowProps(sessionItem, sessionType) {
+    const isEditing = editingSessionId === sessionItem?.id;
+    if (isEditing) return {};
+    return {
+      onClick: () => openSessionDetailView(sessionItem, sessionType),
+      onKeyDown: (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openSessionDetailView(sessionItem, sessionType);
+      },
+      tabIndex: 0,
+      role: "button",
+      "aria-label": `Open ${sessionItem?.title || sessionItem?.problem_set_id || "session"} details`,
+    };
+  }
+
   return (
     <>
       {activeTab === "model" ? (
@@ -259,7 +277,7 @@ export default function AdminConsoleTestingTabs({
                       </thead>
                       <tbody>
                         {modelSessions.map((t) => (
-                          <tr key={t.id} onClick={editingSessionId === t.id ? undefined : () => openSessionDetailView(t, "mock")}>
+                          <tr key={t.id} {...getSessionRowProps(t, "mock")}>
                             <td>{formatDateTime(t.created_at)}</td>
                             <td>
                               {editingSessionId === t.id ? (
@@ -1115,7 +1133,7 @@ export default function AdminConsoleTestingTabs({
                 {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
                 {groupedModelUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
-                {modelUploadOpen ? (
+                {modelUploadOpen && typeof document !== "undefined" ? createPortal((
                   <div className="admin-modal-overlay" onClick={() => setModelUploadOpen(false)}>
                     <div className="admin-modal upload-question-modal" onClick={(e) => e.stopPropagation()}>
                       <div className="admin-modal-header">
@@ -1248,7 +1266,7 @@ export default function AdminConsoleTestingTabs({
                       </div>
                     </div>
                   </div>
-                ) : null}
+                ), document.body) : null}
               </div>
             </>
           ) : null}
@@ -1385,7 +1403,7 @@ export default function AdminConsoleTestingTabs({
                       </thead>
                       <tbody>
                         {dailySessions.map((t) => (
-                          <tr key={t.id} onClick={editingSessionId === t.id ? undefined : () => openSessionDetailView(t, "daily")}>
+                          <tr key={t.id} {...getSessionRowProps(t, "daily")}>
                             <td>{formatDateTime(t.created_at)}</td>
                             <td>
                               {editingSessionId === t.id ? (
@@ -2497,7 +2515,7 @@ export default function AdminConsoleTestingTabs({
                 {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
                 {groupedDailyUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
-                {dailyUploadOpen ? (
+                {dailyUploadOpen && typeof document !== "undefined" ? createPortal((
                   <div className="admin-modal-overlay" onClick={() => setDailyUploadOpen(false)}>
                     <div className="admin-modal upload-question-modal" onClick={(e) => e.stopPropagation()}>
                       <div className="admin-modal-header">
@@ -2638,7 +2656,7 @@ export default function AdminConsoleTestingTabs({
                       </div>
                     </div>
                   </div>
-                ) : null}
+                ), document.body) : null}
               </div>
             </>
           ) : null}

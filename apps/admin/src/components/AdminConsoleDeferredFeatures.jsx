@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
+import { createPortal } from "react-dom";
 
 export default function AdminConsoleDeferredFeatures({
   resultContext,
@@ -69,6 +70,7 @@ export default function AdminConsoleDeferredFeatures({
   previewDisplayQuestions,
   attemptDetailOpen,
   selectedAttempt,
+  selectedAttemptDisplayName,
   selectedAttemptRows,
   selectedAttemptScoreRate,
   getAttemptTitle,
@@ -97,6 +99,12 @@ export default function AdminConsoleDeferredFeatures({
   setAttemptDetailWrongOnly,
   renderUnderlinesHtml,
 }) {
+  const canAttemptOpenDetail = (attempt) => (
+    typeof attemptCanOpenDetail === "function"
+      && typeof openAttemptDetail === "function"
+      && attemptCanOpenDetail(attempt)
+  );
+
   return (
     <>
       {resultContext ? (
@@ -251,10 +259,20 @@ export default function AdminConsoleDeferredFeatures({
                         <tr>
                           <th className="daily-sticky-1 daily-col-no">Student<br />No.</th>
                           <th className="daily-sticky-2 daily-col-name">Student Name</th>
-                          {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem) => {
-                            const sessionAverage = (resultContext.type === "daily"
+                          {(resultContext.type === "daily" ? dailyResultsMatrix.sessions : modelResultsMatrix.sessions).map((sessionItem, sessionIndex) => {
+                            const activeMatrix = resultContext.type === "daily" ? dailyResultsMatrix : modelResultsMatrix;
+                            const precomputedSessionAverage = (resultContext.type === "daily"
                               ? dailyResultsSessionHeaderAverages
                               : modelResultsSessionHeaderAverages)[sessionItem.id] ?? null;
+                            const visibleAttempts = (activeMatrix.rows ?? [])
+                              .filter((row) => !row?.student?.is_withdrawn && !row?.student?.is_test_account)
+                              .map((row) => row?.cells?.[sessionIndex]?.[0] ?? null)
+                              .filter(Boolean);
+                            const sessionAverage = visibleAttempts.length
+                              ? {
+                                  averageRate: visibleAttempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / visibleAttempts.length,
+                                }
+                              : precomputedSessionAverage;
                             return (
                               <th key={`daily-col-${sessionItem.id}`}>
                                 {((resultContext.type === "daily"
@@ -346,7 +364,7 @@ export default function AdminConsoleDeferredFeatures({
                                             ) : null}
                                           </>
                                         );
-                                        if (!attemptCanOpenDetail(attempt)) {
+                                        if (!canAttemptOpenDetail(attempt)) {
                                           return (
                                             <div
                                               key={`daily-cell-${row.student.id}-${idx}-${attempt.id || attemptIdx}`}
@@ -600,24 +618,26 @@ export default function AdminConsoleDeferredFeatures({
         </>
       ) : null}
 
-      {previewOpen ? (
-        <div
-          className="admin-modal-overlay"
-          onClick={closePreview}
-        >
-          <div className="admin-modal admin-modal-wide" onClick={(e) => e.stopPropagation()}>
-            <div className="admin-modal-header">
-              <div>
-                <div className="admin-title">
-                  {previewSession ? previewSession.title || previewSession.problem_set_id : previewTest}
-                </div>
+      {previewOpen && typeof document !== "undefined" ? createPortal((
+        <div className="admin-modal-overlay" onClick={closePreview}>
+          <div
+            className="admin-modal admin-modal-wide daily-session-create-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="admin-modal-header daily-session-create-header">
+              <div className="admin-title">
+                {previewSession ? previewSession.title || previewSession.problem_set_id : previewTest || "Preview"}
               </div>
-              <button className="admin-modal-close" onClick={closePreview} aria-label="Close">
+              <button
+                className="admin-modal-close"
+                onClick={closePreview}
+                aria-label="Close"
+              >
                 ×
               </button>
             </div>
 
-            <div style={{ marginTop: 10 }}>
+            <div className="daily-session-create-body">
               <div className="admin-help">
                 Total: <b>{previewQuestions.length}</b> questions
               </div>
@@ -628,96 +648,95 @@ export default function AdminConsoleDeferredFeatures({
                   No questions. Upload & Register SetでCSVを取り込むか、CSVの`test_version`がこのセットと一致しているか確認してください。
                 </div>
               ) : null}
-            </div>
 
-            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
-              {isModelPreview && previewSectionTitles.length ? (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {previewSectionTitles.map((sectionTitle) => (
-                    <button
-                      key={`preview-jump-${sectionTitle}`}
-                      className="btn"
-                      type="button"
-                      onClick={() => previewSectionRefs.current[sectionTitle]?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                    >
-                      {sectionTitle}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {isModelPreview ? (
-                previewSectionBreaks.map(({ question, index, sectionTitle, showHeader }) => (
-                  <Fragment key={`preview-section-row-${question.id}-${index}`}>
-                    {showHeader ? (
-                      <div
-                        ref={(node) => {
-                          if (node) previewSectionRefs.current[sectionTitle] = node;
-                        }}
-                        className="admin-title"
-                        style={{ fontSize: 22, marginTop: index === 0 ? 0 : 6 }}
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 14 }}>
+                {isModelPreview && previewSectionTitles.length ? (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {previewSectionTitles.map((sectionTitle) => (
+                      <button
+                        key={`preview-jump-${sectionTitle}`}
+                        className="btn"
+                        type="button"
+                        onClick={() => previewSectionRefs.current[sectionTitle]?.scrollIntoView({ behavior: "smooth", block: "start" })}
                       >
                         {sectionTitle}
-                      </div>
-                    ) : null}
-                    {renderPreviewQuestionCard(question, index)}
-                  </Fragment>
-                ))
-              ) : (
-                previewDisplayQuestions.map((question, index) => renderPreviewQuestionCard(question, index))
-              )}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {isModelPreview ? (
+                  previewSectionBreaks.map(({ question, index, sectionTitle, showHeader }) => (
+                    <Fragment key={`preview-section-row-${question.id}-${index}`}>
+                      {showHeader ? (
+                        <div
+                          ref={(node) => {
+                            if (node) previewSectionRefs.current[sectionTitle] = node;
+                          }}
+                          className="admin-title"
+                          style={{ fontSize: 22, marginTop: index === 0 ? 0 : 6 }}
+                        >
+                          {sectionTitle}
+                        </div>
+                      ) : null}
+                      {renderPreviewQuestionCard(question, index)}
+                    </Fragment>
+                  ))
+                ) : (
+                  previewDisplayQuestions.map((question, index) => renderPreviewQuestionCard(question, index))
+                )}
+              </div>
             </div>
           </div>
         </div>
-      ) : null}
+      ), document.body) : null}
 
-      {attemptDetailOpen && selectedAttempt ? (() => {
+      {attemptDetailOpen && selectedAttempt && typeof document !== "undefined" ? (() => {
         const totalCorrect = Number(selectedAttempt.correct ?? selectedAttemptRows.filter((row) => row.isCorrect).length);
         const totalQuestions = Number(selectedAttempt.total ?? selectedAttemptRows.length);
         const scorePercent = (selectedAttemptScoreRate * 100).toFixed(1);
         const attemptTitle = getAttemptTitle(selectedAttempt) || selectedAttempt.test_version || "";
         const tabLeftCount = getTabLeftCount(selectedAttempt);
         const selectedAttemptRankInfo = studentAttemptRanks[selectedAttempt.id] ?? null;
+        const attemptStudentName = selectedAttemptDisplayName || selectedAttempt.display_name || "";
         const showSummaryOnly = selectedAttemptUsesImportedSummary;
         const showRankingMainSectionsOnly = attemptDetailSource === "sessionRanking" || selectedAttemptUsesImportedModelSummary;
         const radarData = selectedAttemptMainSectionSummary.map((row) => ({
           label: row.section,
           value: row.total ? row.correct / row.total : 0,
         }));
+        const closeAttemptDetail = () => {
+          setAttemptDetailOpen(false);
+          setSelectedAttemptObj(null);
+          setAttemptDetailSource("default");
+        };
 
-        return (
+        return createPortal((
           <div
             className="admin-modal-overlay"
-            onClick={() => {
-              setAttemptDetailOpen(false);
-              setSelectedAttemptObj(null);
-              setAttemptDetailSource("default");
-            }}
+            onClick={closeAttemptDetail}
           >
             <div
-              className="admin-modal admin-modal-wide"
+              className="admin-modal admin-modal-wide daily-session-create-modal"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="admin-modal-header">
+              <div className="admin-modal-header daily-session-create-header">
                 <div className="admin-title">Attempt Detail</div>
                 <button
                   className="admin-modal-close"
-                  onClick={() => {
-                    setAttemptDetailOpen(false);
-                    setSelectedAttemptObj(null);
-                    setAttemptDetailSource("default");
-                  }}
+                  onClick={closeAttemptDetail}
                   aria-label="Close"
                 >
                   ×
                 </button>
               </div>
+              <div className="daily-session-create-body">
               <div className="attempt-detail-top">
                 <div className="attempt-detail-summary-card">
                   <table className="attempt-detail-summary-table">
                     <tbody>
                       <tr>
                         <th>Student Name</th>
-                        <td>{selectedAttempt.display_name ?? ""}</td>
+                        <td>{attemptStudentName}</td>
                       </tr>
                       <tr>
                         <th>Test</th>
@@ -1062,9 +1081,10 @@ export default function AdminConsoleDeferredFeatures({
                   )}
                 </div>
               ) : null}
+              </div>
             </div>
           </div>
-        );
+        ), document.body);
       })() : null}
     </>
   );

@@ -75,17 +75,42 @@ export default function AdminConsoleTestingWorkspace() {
     ...hookState,
   };
 
+  // Create resultContext for the results workspace
+  const resultContext = (() => {
+    if (activeTab === "model" && modelSubTab === "results") {
+      return { type: "mock", title: "Model Test Results", tests: hookState.modelTests };
+    }
+    if (activeTab === "daily" && dailySubTab === "results") {
+      return { type: "daily", title: "Daily Test Results", tests: hookState.dailyTests };
+    }
+    return null;
+  })();
+
   const resultsWorkspaceProps = {
     activeTab,
     modelSubTab,
     dailySubTab,
     canUseAdminConsole,
+    resultContext,
+    students,
+    // Add context utilities
+    supabase,
+    formatDateTime,
+    formatDateShort,
+    formatRatePercent,
+    getScoreRate,
+    getTabLeftCount,
+    runSearch,
+    exportDailyGoogleSheetsCsv,
+    exportModelGoogleSheetsCsv,
     // Include all hook state properties needed by AdminConsoleResultsWorkspace
     ...hookState,
   };
 
   const resultsWorkspaceActive = Boolean(
-    hookState.previewOpen
+    (modelSubTab === "results" && activeTab === "model")
+    || (dailySubTab === "results" && activeTab === "daily")
+    || hookState.previewOpen
     || hookState.sessionDetail?.sessionId
   );
 

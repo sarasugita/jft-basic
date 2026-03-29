@@ -22,7 +22,7 @@ const TWELVE_HOUR_TIME_OPTIONS = Array.from({ length: 12 }, (_, index) => String
 const FIVE_MINUTE_MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"));
 const MERIDIEM_OPTIONS = ["AM", "PM"];
 const QUESTION_SELECT_BASE = "id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
-const QUESTION_SELECT_WITH_MEDIA = `${QUESTION_SELECT_BASE}, media_file, media_type`;
+const QUESTION_SELECT_WITH_MEDIA = QUESTION_SELECT_BASE;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -89,7 +89,7 @@ function mapQuestion(row) {
   // Transform database question row to UI format
   const data = row.data ?? {};
   const stemAsset = joinAssetValues(
-    row.media_file,
+    null,
     data.stemAsset,
     data.stem_asset,
     data.stemAudio,
@@ -412,6 +412,38 @@ function isRetakeSessionTitle(title) {
   return String(title ?? "").trim().startsWith("[Retake]");
 }
 
+function getRetakeBaseTitle(title) {
+  return String(title ?? "").trim().replace(/^\[Retake\]\s*/i, "").trim();
+}
+
+function isImportedSummaryAttempt(attempt) {
+  return Boolean(attempt?.answers_json?.__meta?.imported_summary);
+}
+
+function attemptHasDetailData(attempt) {
+  if (!attempt || isImportedSummaryAttempt(attempt)) return false;
+  if (!attempt.answers_json || typeof attempt.answers_json !== "object") return false;
+  return Object.keys(attempt.answers_json).some((key) => key !== "__meta");
+}
+
+function attemptCanOpenDetail(attempt) {
+  return attemptHasDetailData(attempt) || isImportedSummaryAttempt(attempt);
+}
+
+function buildSessionDetailAvailability(matrix) {
+  const availability = {};
+  const sessions = matrix?.sessions ?? [];
+  const rows = matrix?.rows ?? [];
+  sessions.forEach((session, sessionIndex) => {
+    availability[session.id] = rows.some((row) =>
+      (row?.cells?.[sessionIndex] ?? []).some((attempt) =>
+        attemptHasDetailData(attempt) || isImportedResultsSummaryAttempt(attempt)
+      )
+    );
+  });
+  return availability;
+}
+
 function isPastSession(session) {
   if (!session) return false;
   const now = Date.now();
@@ -487,8 +519,8 @@ function mapDbQuestion(row) {
     answerIndex: row.answer_index,
     orderIndex: row.order_index,
     data: row.data ?? {},
-    mediaFile: row.media_file,
-    mediaType: row.media_type,
+    mediaFile: null,
+    mediaType: null,
     sourceVersion: row.data?.sourceVersion || null,
     sourceQuestionId: row.data?.sourceQuestionId || null,
   };
@@ -563,6 +595,8 @@ export function useTestingWorkspaceState({
   const [testsMsg, setTestsMsg] = useState("");
   const [testSessions, setTestSessions] = useState(externalTestSessions ?? []);
   const [testSessionsMsg, setTestSessionsMsg] = useState("");
+  const [attempts, setAttempts] = useState([]);
+  const [attemptsMsg, setAttemptsMsg] = useState("");
   const [examLinks, setExamLinks] = useState([]);
   const [linkMsg, setLinkMsg] = useState("");
 
@@ -700,6 +734,9 @@ export function useTestingWorkspaceState({
   const [dailyUploadCategory, setDailyUploadCategory] = useState("");
   const [dailyResultsCategory, setDailyResultsCategory] = useState("");
   const [modelResultsCategory, setModelResultsCategory] = useState("");
+
+  // Results display state
+  const [expandedResultCells, setExpandedResultCells] = useState({});
 
   // ========================================================================
   // useRef declarations (9 refs)
@@ -973,6 +1010,7 @@ export function useTestingWorkspaceState({
         title: test.title || test.version,
         category: String(test.title ?? "").trim() || DEFAULT_MODEL_CATEGORY,
         type: test.type,
+        pass_rate: normalizePassRate(test.pass_rate),
       };
     });
     return map;
@@ -1099,6 +1137,164 @@ export function useTestingWorkspaceState({
   }, [modelCategories, modelConductCategory]);
 
   const modelConductTests = selectedModelConductCategory?.tests ?? [];
+
+  const buildSessionResultsMatrix = useCallback((selectedCategory) => {
+    const testsForCategory = selectedCategory?.tests ?? [];
+    if (!testsForCategory.length) return { sessions: [], rows: [] };
+
+    const testByVersion = new Map(testsForCategory.map((test) => [test.version, test]));
+    const categorySessions = (testSessions ?? [])
+      .filter((session) => testByVersion.has(session.problem_set_id))
+      .map((session) => ({
+        ...session,
+        linkedTest: testByVersion.get(session.problem_set_id) ?? null,
+      }));
+
+    if (!categorySessions.length) return { sessions: [], rows: [] };
+
+    const sessionById = new Map(categorySessions.map((session) => [session.id, session]));
+    const originalSessionById = new Map(
+      categorySessions
+        .filter((session) => !isRetakeSessionTitle(session.title))
+        .map((session) => [session.id, session])
+    );
+    const originalSessionByKey = new Map(
+      categorySessions
+        .filter((session) => !isRetakeSessionTitle(session.title))
+        .map((session) => [`${session.problem_set_id}::${String(session.title ?? "").trim()}`, session])
+    );
+
+    const getCanonicalSession = (session) => {
+      if (!session || !isRetakeSessionTitle(session.title)) return session;
+      if (session.retake_source_session_id && originalSessionById.has(session.retake_source_session_id)) {
+        return originalSessionById.get(session.retake_source_session_id);
+      }
+      return originalSessionByKey.get(`${session.problem_set_id}::${getRetakeBaseTitle(session.title)}`) ?? session;
+    };
+
+    const byStudent = new Map();
+    const canonicalSessionIdsWithAttempts = new Set();
+    (attempts ?? []).forEach((attempt) => {
+      if (!attempt?.student_id || !attempt?.test_session_id) return;
+      const sourceSession = sessionById.get(attempt.test_session_id);
+      if (!sourceSession) return;
+      const canonicalSession = getCanonicalSession(sourceSession);
+      if (!canonicalSession?.id) return;
+      canonicalSessionIdsWithAttempts.add(canonicalSession.id);
+      const perStudent = byStudent.get(attempt.student_id) ?? new Map();
+      const perSession = perStudent.get(canonicalSession.id) ?? [];
+      perSession.push({
+        ...attempt,
+        __isRetake: isRetakeSessionTitle(sourceSession.title),
+        __sourceSessionId: sourceSession.id,
+      });
+      perStudent.set(canonicalSession.id, perSession);
+      byStudent.set(attempt.student_id, perStudent);
+    });
+
+    const sessionList = categorySessions
+      .map((session) => getCanonicalSession(session))
+      .filter((session, idx, list) => session?.id && list.findIndex((item) => item?.id === session.id) === idx)
+      .filter((session) => canonicalSessionIdsWithAttempts.has(session.id))
+      .sort((left, right) => {
+        const leftTime = new Date(left.starts_at || left.created_at || 0).getTime();
+        const rightTime = new Date(right.starts_at || right.created_at || 0).getTime();
+        if (leftTime !== rightTime) return rightTime - leftTime;
+        return String(left.title ?? left.problem_set_id ?? "").localeCompare(
+          String(right.title ?? right.problem_set_id ?? "")
+        );
+      });
+
+    if (!sessionList.length) return { sessions: [], rows: [] };
+
+    byStudent.forEach((perStudent) => {
+      perStudent.forEach((perSession, sessionId) => {
+        perStudent.set(
+          sessionId,
+          perSession.slice().sort((a, b) => {
+            if (Boolean(a.__isRetake) !== Boolean(b.__isRetake)) return a.__isRetake ? -1 : 1;
+            const aTime = new Date(a.ended_at || a.created_at || 0).getTime();
+            const bTime = new Date(b.ended_at || b.created_at || 0).getTime();
+            return bTime - aTime;
+          })
+        );
+      });
+    });
+
+    const studentList = (Array.isArray(students) ? [...students] : []).sort((a, b) => {
+      const getStudentCodeNumber = (student) => {
+        const match = String(student?.student_code ?? "").match(/(\d+)/);
+        return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+      };
+      const leftNumber = getStudentCodeNumber(a);
+      const rightNumber = getStudentCodeNumber(b);
+      if (leftNumber !== rightNumber) return leftNumber - rightNumber;
+
+      const leftCode = String(a?.student_code ?? "");
+      const rightCode = String(b?.student_code ?? "");
+      if (leftCode !== rightCode) return leftCode.localeCompare(rightCode);
+
+      const leftName = String(a?.display_name ?? "");
+      const rightName = String(b?.display_name ?? "");
+      if (leftName !== rightName) return leftName.localeCompare(rightName);
+
+      return String(a?.email ?? "").localeCompare(String(b?.email ?? ""));
+    });
+    const rows = studentList.map((student, idx) => {
+      const perStudent = byStudent.get(student.id) ?? new Map();
+      const cells = sessionList.map((session) => perStudent.get(session.id) ?? []);
+      return { index: idx + 1, student, cells };
+    });
+
+    return { sessions: sessionList, rows };
+  }, [attempts, students, testSessions]);
+
+  const dailyResultsMatrix = useMemo(
+    () => buildSessionResultsMatrix(selectedDailyCategory),
+    [buildSessionResultsMatrix, selectedDailyCategory]
+  );
+
+  const modelResultsMatrix = useMemo(
+    () => buildSessionResultsMatrix(selectedModelCategory ?? { tests: modelTests }),
+    [buildSessionResultsMatrix, selectedModelCategory, modelTests]
+  );
+
+  const buildSessionHeaderAverageMap = useCallback((matrix) => {
+    const sessions = Array.isArray(matrix?.sessions) ? matrix.sessions : [];
+    const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
+    return Object.fromEntries(
+      sessions.map((session, index) => {
+        const visibleAttempts = rows
+          .filter((row) => !isAnalyticsExcludedStudent(row?.student))
+          .map((row) => row?.cells?.[index]?.[0] ?? null)
+          .filter(Boolean);
+        const averageRate = visibleAttempts.length
+          ? visibleAttempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / visibleAttempts.length
+          : 0;
+        return [session.id, { averageRate }];
+      })
+    );
+  }, [isAnalyticsExcludedStudent, getScoreRate]);
+
+  const dailyResultsSessionHeaderAverages = useMemo(
+    () => buildSessionHeaderAverageMap(dailyResultsMatrix),
+    [buildSessionHeaderAverageMap, dailyResultsMatrix]
+  );
+
+  const modelResultsSessionHeaderAverages = useMemo(
+    () => buildSessionHeaderAverageMap(modelResultsMatrix),
+    [buildSessionHeaderAverageMap, modelResultsMatrix]
+  );
+
+  const dailyResultsSessionDetailAvailability = useMemo(
+    () => buildSessionDetailAvailability(dailyResultsMatrix),
+    [dailyResultsMatrix]
+  );
+
+  const modelResultsSessionDetailAvailability = useMemo(
+    () => buildSessionDetailAvailability(modelResultsMatrix),
+    [modelResultsMatrix]
+  );
 
   // ========================================================================
   // useCallback functions (39+ callbacks)
@@ -1248,6 +1444,25 @@ export function useTestingWorkspaceState({
     setExamLinks(data ?? []);
     setLinkMsg(data?.length ? "" : "No links.");
   }, [supabase]);
+
+  const fetchAttempts = useCallback(async () => {
+    if (!supabase || !activeSchoolId) return;
+    setAttemptsMsg("Loading results...");
+    const { data, error } = await supabase
+      .from("attempts")
+      .select("id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json")
+      .eq("school_id", activeSchoolId)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    if (error) {
+      console.error("attempts fetch error:", error);
+      setAttempts([]);
+      setAttemptsMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    setAttempts(data ?? []);
+    setAttemptsMsg("");
+  }, [supabase, activeSchoolId]);
 
   const buildGeneratedDailySessionTitle = useCallback(({ category, setIds, sessionDate, startTime }) => {
     const normalizedCategory = String(category ?? "").trim() || "Daily Test";
@@ -2958,6 +3173,13 @@ export function useTestingWorkspaceState({
     };
   }, []);
 
+  // Load attempts when the results tab is active
+  useEffect(() => {
+    if (activeTab !== "model" && activeTab !== "daily") return;
+    if (!supabase || !activeSchoolId) return;
+    void fetchAttempts();
+  }, [activeTab, supabase, activeSchoolId, fetchAttempts]);
+
   // ========================================================================
   // Return statement
   // ========================================================================
@@ -2972,6 +3194,10 @@ export function useTestingWorkspaceState({
     setTestSessions,
     testSessionsMsg,
     setTestSessionsMsg,
+    attempts,
+    setAttempts,
+    attemptsMsg,
+    setAttemptsMsg,
     examLinks,
     setExamLinks,
     linkMsg,
@@ -3171,16 +3397,26 @@ export function useTestingWorkspaceState({
     setDailyResultsCategory,
     modelResultsCategory,
     setModelResultsCategory,
+    expandedResultCells,
+    setExpandedResultCells,
     filteredModelUploadTests,
     groupedModelUploadTests,
     filteredDailyUploadTests,
     groupedDailyUploadTests,
+    dailyResultsMatrix,
+    modelResultsMatrix,
+    dailyResultsSessionHeaderAverages,
+    modelResultsSessionHeaderAverages,
+    dailyResultsSessionDetailAvailability,
+    modelResultsSessionDetailAvailability,
+    isImportedSummaryAttempt,
 
     // Callback functions
     fetchTests,
     fetchTestSessions,
     fetchAssets,
     fetchExamLinks,
+    fetchAttempts,
     buildGeneratedDailySessionTitle,
     materializeDailyProblemSet,
     ensureTestRecord,
@@ -3231,6 +3467,8 @@ export function useTestingWorkspaceState({
     getStudentBaseUrl,
     copyLink,
     formatRatePercent,
+    getTabLeftCount,
+    attemptCanOpenDetail,
     runSearch,
     exportDailyGoogleSheetsCsv,
     exportModelGoogleSheetsCsv,
