@@ -2442,6 +2442,22 @@ export function useTestingWorkspaceState({
   // useEffect hooks (15+ effects)
   // ========================================================================
 
+  // Initialize data on mount
+  useEffect(() => {
+    if (!supabase || !activeSchoolId) return;
+    void fetchTests();
+  }, [supabase, activeSchoolId]);
+
+  useEffect(() => {
+    if (!tests.length) return;
+    void fetchTestSessions();
+  }, [tests.length]);
+
+  useEffect(() => {
+    if (!supabase || !activeSchoolId) return;
+    void fetchAssets();
+  }, [supabase, activeSchoolId]);
+
   useEffect(() => {
     if (modelCategorySeededRef.current) return;
     modelCategorySeededRef.current = true;
