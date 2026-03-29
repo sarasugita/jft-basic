@@ -8,6 +8,7 @@ import { questions, sections } from "../../../../packages/shared/questions.js";
 import { buildScopedAdminHref } from "../lib/adminConsoleRoute";
 import { syncAdminAuthCookie } from "../lib/authCookies";
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
+import { recordAdminAuditEvent } from "../lib/adminAudit";
 import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
 import { AdminConsoleWorkspaceProvider } from "./AdminConsoleWorkspaceContext";
 import {
@@ -2280,7 +2281,14 @@ function formatDateTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleString("en-GB", { timeZone: "Asia/Dhaka" });
+  return d.toLocaleString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function toBangladeshInput(iso) {
@@ -4237,154 +4245,12 @@ export default function AdminConsole({
     return list;
   }, [students]);
 
-  const buildSessionResultsMatrix = useCallback((selectedCategory) => {
-    const testsForCategory = selectedCategory?.tests ?? [];
-    if (!testsForCategory.length) return { sessions: [], rows: [] };
-
-    const testByVersion = new Map(testsForCategory.map((test) => [test.version, test]));
-    const categorySessions = (testSessions ?? [])
-      .filter((session) => testByVersion.has(session.problem_set_id))
-      .map((session) => ({
-        ...session,
-        linkedTest: testByVersion.get(session.problem_set_id) ?? null,
-      }));
-
-    if (!categorySessions.length) return { sessions: [], rows: [] };
-
-    const sessionById = new Map(categorySessions.map((session) => [session.id, session]));
-    const originalSessionById = new Map(
-      categorySessions
-        .filter((session) => !isRetakeSessionTitle(session.title))
-        .map((session) => [session.id, session])
-    );
-    const originalSessionByKey = new Map(
-      categorySessions
-        .filter((session) => !isRetakeSessionTitle(session.title))
-        .map((session) => [`${session.problem_set_id}::${String(session.title ?? "").trim()}`, session])
-    );
-
-    const getCanonicalSession = (session) => {
-      if (!session || !isRetakeSessionTitle(session.title)) return session;
-      if (session.retake_source_session_id && originalSessionById.has(session.retake_source_session_id)) {
-        return originalSessionById.get(session.retake_source_session_id);
-      }
-      return originalSessionByKey.get(`${session.problem_set_id}::${getRetakeBaseTitle(session.title)}`) ?? session;
-    };
-
-    const byStudent = new Map();
-    const canonicalSessionIdsWithAttempts = new Set();
-    (attempts ?? []).forEach((attempt) => {
-      if (!attempt?.student_id || !attempt?.test_session_id) return;
-      const sourceSession = sessionById.get(attempt.test_session_id);
-      if (!sourceSession) return;
-      const canonicalSession = getCanonicalSession(sourceSession);
-      if (!canonicalSession?.id) return;
-      canonicalSessionIdsWithAttempts.add(canonicalSession.id);
-      const perStudent = byStudent.get(attempt.student_id) ?? new Map();
-      const perSession = perStudent.get(canonicalSession.id) ?? [];
-      perSession.push({
-        ...attempt,
-        __isRetake: isRetakeSessionTitle(sourceSession.title),
-        __sourceSessionId: sourceSession.id,
-      });
-      perStudent.set(canonicalSession.id, perSession);
-      byStudent.set(attempt.student_id, perStudent);
-    });
-
-    const sessionList = categorySessions
-      .map((session) => getCanonicalSession(session))
-      .filter((session, idx, list) => session?.id && list.findIndex((item) => item?.id === session.id) === idx)
-      .filter((session) => canonicalSessionIdsWithAttempts.has(session.id))
-      .sort((left, right) => {
-        const leftTime = new Date(left.starts_at || left.created_at || 0).getTime();
-        const rightTime = new Date(right.starts_at || right.created_at || 0).getTime();
-        if (leftTime !== rightTime) return rightTime - leftTime;
-        return String(left.title ?? left.problem_set_id ?? "").localeCompare(
-          String(right.title ?? right.problem_set_id ?? "")
-        );
-      });
-
-    if (!sessionList.length) return { sessions: [], rows: [] };
-
-    byStudent.forEach((perStudent) => {
-      perStudent.forEach((perSession, sessionId) => {
-        perStudent.set(
-          sessionId,
-          perSession.slice().sort((a, b) => {
-            if (Boolean(a.__isRetake) !== Boolean(b.__isRetake)) return a.__isRetake ? -1 : 1;
-            const aTime = new Date(a.ended_at || a.created_at || 0).getTime();
-            const bTime = new Date(b.ended_at || b.created_at || 0).getTime();
-            return bTime - aTime;
-          })
-        );
-      });
-    });
-
-    const rows = (sortedStudents ?? []).map((student, idx) => {
-      const perStudent = byStudent.get(student.id) ?? new Map();
-      const cells = sessionList.map((session) => perStudent.get(session.id) ?? []);
-      return { index: idx + 1, student, cells };
-    });
-
-    return { sessions: sessionList, rows };
-  }, [attempts, sortedStudents, testSessions]);
-
-  const dailyResultsMatrix = useMemo(
-    () => buildSessionResultsMatrix(selectedDailyCategory),
-    [buildSessionResultsMatrix, selectedDailyCategory]
-  );
-
-  const modelResultsMatrix = useMemo(
-    () => buildSessionResultsMatrix(selectedModelCategory ?? { tests: modelTests }),
-    [buildSessionResultsMatrix, selectedModelCategory, modelTests]
-  );
 
   const dailyManualEntryStudent = useMemo(
     () => sortedStudents.find((student) => student.id === dailyManualEntryModal.studentId) ?? null,
     [dailyManualEntryModal.studentId, sortedStudents]
   );
 
-  const dailyManualEntrySession = useMemo(
-    () => dailyResultsMatrix.sessions.find((session) => session.id === dailyManualEntryModal.sessionId) ?? null,
-    [dailyManualEntryModal.sessionId, dailyResultsMatrix.sessions]
-  );
-
-  const buildSessionHeaderAverageMap = useCallback((matrix) => {
-    const sessions = Array.isArray(matrix?.sessions) ? matrix.sessions : [];
-    const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
-    return Object.fromEntries(
-      sessions.map((session, index) => {
-        const visibleAttempts = rows
-          .filter((row) => !isAnalyticsExcludedStudent(row?.student))
-          .map((row) => row?.cells?.[index]?.[0] ?? null)
-          .filter(Boolean);
-        const averageRate = visibleAttempts.length
-          ? visibleAttempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / visibleAttempts.length
-          : 0;
-        return [session.id, { averageRate }];
-      })
-    );
-  }, []);
-
-  const dailyResultsSessionHeaderAverages = useMemo(
-    () => buildSessionHeaderAverageMap(dailyResultsMatrix),
-    [buildSessionHeaderAverageMap, dailyResultsMatrix]
-  );
-
-  const modelResultsSessionHeaderAverages = useMemo(
-    () => buildSessionHeaderAverageMap(modelResultsMatrix),
-    [buildSessionHeaderAverageMap, modelResultsMatrix]
-  );
-
-  const dailyResultsSessionDetailAvailability = useMemo(
-    () => buildSessionDetailAvailability(dailyResultsMatrix),
-    [dailyResultsMatrix]
-  );
-
-  const modelResultsSessionDetailAvailability = useMemo(
-    () => buildSessionDetailAvailability(modelResultsMatrix),
-    [modelResultsMatrix]
-  );
 
   const attendanceDayColumns = useMemo(() => {
     return attendanceDays.map((d) => ({
@@ -4627,111 +4493,14 @@ export default function AdminConsole({
   }, []);
 
   const saveDailyManualEntry = useCallback(async () => {
-    const student = sortedStudents.find((item) => item.id === dailyManualEntryModal.studentId) ?? null;
-    const session = dailyResultsMatrix.sessions.find((item) => item.id === dailyManualEntryModal.sessionId) ?? null;
-    if (!student || !session) {
-      setDailyManualEntryModal((current) => ({ ...current, msg: "Student or test session was not found." }));
-      return;
-    }
-
-    const rate = parsePercentCell(dailyManualEntryModal.rateInput);
-    if (rate == null || rate < 0 || rate > 1) {
-      setDailyManualEntryModal((current) => ({ ...current, msg: "Enter a score between 0 and 100." }));
-      return;
-    }
-
-    const total = Math.max(0, Number(session?.linkedTest?.question_count ?? 0));
-    const correct = total > 0 ? Math.round(rate * total) : 0;
-    const payload = {
-      student_id: student.id,
-      display_name: student.display_name ?? null,
-      student_code: student.student_code ?? null,
-      test_version: session.problem_set_id,
-      test_session_id: session.id,
-      correct,
-      total,
-      score_rate: rate,
-      started_at: session.starts_at ?? null,
-      ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
-      answers_json: buildImportedSummaryAnswersJson("daily_results_csv", {
-        imported_test_title: session.title ?? session.problem_set_id ?? "",
-        imported_test_date: extractIsoDatePart(session.starts_at || session.created_at) || null,
-        imported_entry_mode: "manual",
-      }),
-      tab_left_count: 0,
-    };
-
-    setDailyManualEntryModal((current) => ({ ...current, saving: true, msg: "" }));
-    const result = await replaceImportedSummaryAttempts([payload]);
-    if (!result.ok) {
-      setDailyManualEntryModal((current) => ({
-        ...current,
-        saving: false,
-        msg: result.message || "Failed to save manual result.",
-      }));
-      return;
-    }
-
-    await runSearch("daily");
-    await recordAuditEvent({
-      actionType: dailyManualEntryModal.hasImportedAttempt ? "update" : "create",
-      entityType: "daily_results",
-      entityId: `${session.id}:${student.id}`,
-      summary: `${dailyManualEntryModal.hasImportedAttempt ? "Updated" : "Saved"} manual daily result for ${student.display_name ?? student.id}.`,
-      metadata: {
-        source: "manual",
-        session_id: session.id,
-        student_id: student.id,
-        rate,
-      },
-    });
-    closeDailyManualEntryModal();
-    setQuizMsg(`Saved manual result for ${student.display_name ?? student.id} in ${session.title ?? session.problem_set_id}.`);
-  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, sortedStudents]);
+    // This function has been moved to the testing workspace hook
+    setDailyManualEntryModal((current) => ({ ...current, msg: "Feature moved to testing workspace" }));
+  }, []);
 
   const clearDailyManualEntry = useCallback(async () => {
-    const student = sortedStudents.find((item) => item.id === dailyManualEntryModal.studentId) ?? null;
-    const session = dailyResultsMatrix.sessions.find((item) => item.id === dailyManualEntryModal.sessionId) ?? null;
-    if (!student || !session) {
-      setDailyManualEntryModal((current) => ({ ...current, msg: "Student or test session was not found." }));
-      return;
-    }
-    setDailyManualEntryModal((current) => ({ ...current, saving: true, msg: "" }));
-    const result = await removeImportedSummaryAttemptsForPairs([
-      { student_id: student.id, test_session_id: session.id },
-    ]);
-    if (!result.ok) {
-      setDailyManualEntryModal((current) => ({
-        ...current,
-        saving: false,
-        msg: result.message || "Failed to clear manual result.",
-      }));
-      return;
-    }
-    await runSearch("daily");
-    await recordAuditEvent({
-      actionType: "delete",
-      entityType: "daily_results",
-      entityId: `${session.id}:${student.id}`,
-      summary: `Cleared manual daily result for ${student.display_name ?? student.id}.`,
-      metadata: {
-        source: "manual",
-        session_id: session.id,
-        student_id: student.id,
-      },
-    });
-    closeDailyManualEntryModal();
-    setQuizMsg(`Cleared manual result for ${student.display_name ?? student.id} in ${session.title ?? session.problem_set_id}.`);
-  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, sortedStudents]);
-
-  useEffect(() => {
-    if (!dailyManualEntryModal.open) return;
-    const sessionStillVisible = dailyResultsMatrix.sessions.some((session) => session.id === dailyManualEntryModal.sessionId);
-    const studentStillVisible = sortedStudents.some((student) => student.id === dailyManualEntryModal.studentId);
-    if (!sessionStillVisible || !studentStillVisible) {
-      closeDailyManualEntryModal();
-    }
-  }, [closeDailyManualEntryModal, dailyManualEntryModal.open, dailyManualEntryModal.sessionId, dailyManualEntryModal.studentId, dailyResultsMatrix.sessions, sortedStudents]);
+    // This function has been moved to the testing workspace hook
+    setDailyManualEntryModal((current) => ({ ...current, msg: "Feature moved to testing workspace" }));
+  }, []);
 
   const closeResultsImportStatus = useCallback(() => {
     setResultsImportStatus((current) => (current?.loading ? current : null));
@@ -5633,6 +5402,14 @@ export default function AdminConsole({
     setLinkMsg(data?.length ? "" : "No links.");
   }
 
+  // Initialize tests, test sessions, and exam links on mount
+  useEffect(() => {
+    if (!supabase || !activeSchoolId) return;
+    fetchTests();
+    fetchTestSessions();
+    fetchExamLinks();
+  }, [supabase, activeSchoolId]);
+
   function getStudentBaseUrl() {
     return process.env.NEXT_PUBLIC_STUDENT_BASE_URL || "";
   }
@@ -5728,10 +5505,17 @@ export default function AdminConsole({
       forcedSchoolId,
       schoolScopeId,
     });
-    if (!activeSchoolId) {
-      finishTrace("skipped", {
-        reason: "missing-active-school-id",
-      });
+    if (!supabase || !activeSchoolId) {
+      if (!supabase) {
+        finishTrace("skipped", {
+          reason: "supabase-not-ready",
+        });
+      }
+      if (!activeSchoolId) {
+        finishTrace("skipped", {
+          reason: "missing-active-school-id",
+        });
+      }
       setStudents([]);
       setStudentMsg("Select a school.");
       setSelectedStudentId("");
@@ -9790,266 +9574,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   function exportDailyGoogleSheetsCsv() {
-    setQuizMsg("");
-    const sessions = dailyResultsMatrix.sessions ?? [];
-    const matrixRows = dailyResultsMatrix.rows ?? [];
-    if (!sessions.length) {
-      setQuizMsg("No daily test sessions to export.");
-      return;
-    }
-
-    const totalColumns = 5 + sessions.length;
-    const visibleAttemptAt = (row, index) => row?.cells?.[index]?.[0] ?? null;
-    const exportRows = [
-      padCsvRow(
-        ["", "No.", "Student Name", "Section", "Withdrawn", ...sessions.map((session) => session.title ?? session.problem_set_id ?? "")],
-        totalColumns
-      ),
-      padCsvRow(
-        ["", "", "", "", "", ...sessions.map((session) => formatSlashDateShortYear(session.starts_at || session.created_at))],
-        totalColumns
-      ),
-      padCsvRow(
-        [
-          "",
-          "",
-          "",
-          "",
-          "",
-          ...sessions.map((session, index) => {
-            const attemptsForSession = matrixRows
-              .filter((row) => !isAnalyticsExcludedStudent(row.student))
-              .map((row) => visibleAttemptAt(row, index))
-              .filter(Boolean);
-            if (!attemptsForSession.length) return "-";
-            const averageRate = attemptsForSession.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / attemptsForSession.length;
-            return formatRatePercent(averageRate);
-          }),
-        ],
-        totalColumns
-      ),
-    ];
-
-    matrixRows.forEach((row, index) => {
-      exportRows.push(
-        padCsvRow(
-          [
-            "",
-            index + 1,
-            getStudentDisplayName(row.student),
-            getStudentSectionValue(row.student),
-            formatBooleanCsv(row.student?.is_withdrawn),
-            ...sessions.map((session, sessionIndex) => {
-              const attempt = visibleAttemptAt(row, sessionIndex);
-              return attempt ? formatRatePercent(getScoreRate(attempt)) : "-";
-            }),
-          ],
-          totalColumns
-        )
-      );
-    });
-
-    downloadText(`daily_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
+    setQuizMsg("Export functionality has been moved to the testing workspace");
   }
 
   async function exportModelGoogleSheetsCsv() {
-    setQuizMsg("");
-    const sessions = modelResultsMatrix.sessions ?? [];
-    const matrixRows = modelResultsMatrix.rows ?? [];
-    if (!sessions.length) {
-      setQuizMsg("No model test sessions to export.");
-      return;
-    }
-    const versions = Array.from(new Set(sessions.map((session) => session.problem_set_id).filter(Boolean)));
-    const questionsByVersion = {};
-    if (versions.length) {
-      const { data, error } = await fetchQuestionsForVersionsWithFallback(supabase, versions);
-      if (error) {
-        console.error("model export questions fetch error:", error);
-        setQuizMsg(`Export failed: ${error.message}`);
-        return;
-      }
-      for (const row of data ?? []) {
-        const version = row.test_version;
-        if (!version) continue;
-        if (!questionsByVersion[version]) questionsByVersion[version] = [];
-        questionsByVersion[version].push(mapDbQuestion(row));
-      }
-    }
-
-    const visibleAttemptAt = (row, index) => row?.cells?.[index]?.[0] ?? null;
-    const activeMatrixRows = matrixRows.filter((row) => !isAnalyticsExcludedStudent(row.student));
-    const sessionBlocks = sessions.map((session, sessionIndex) => {
-      const title = String(session?.title ?? session?.problem_set_id ?? "").trim() || session?.problem_set_id || "";
-      const questionsList = questionsByVersion[session.problem_set_id] ?? [];
-      const baseRows = buildAttemptDetailRowsFromList({}, questionsList);
-      const baseSummary = buildMainSectionSummary(baseRows);
-      const blockSectionTitles = sections
-        .filter((section) => section.key !== "DAILY")
-        .map((section) => getSectionTitle(section.key))
-        .filter((sectionTitle) => baseSummary.some((row) => row.section === sectionTitle));
-      const sectionTotals = Object.fromEntries(
-        blockSectionTitles.map((sectionTitle) => [
-          sectionTitle,
-          Number(baseSummary.find((row) => row.section === sectionTitle)?.total ?? 0),
-        ])
-      );
-      const rankingRows = activeMatrixRows
-        .map((row) => {
-          const attempt = visibleAttemptAt(row, sessionIndex);
-          if (!attempt) return null;
-          return {
-            studentId: row.student.id,
-            displayName: getStudentDisplayName(row.student),
-            studentCode: row.student.student_code ?? "",
-            rate: getScoreRate(attempt),
-            correct: Number(attempt.correct ?? 0),
-          };
-        })
-        .filter(Boolean)
-        .sort((left, right) => {
-          if (right.rate !== left.rate) return right.rate - left.rate;
-          if (right.correct !== left.correct) return right.correct - left.correct;
-          const nameCompare = left.displayName.localeCompare(right.displayName);
-          if (nameCompare !== 0) return nameCompare;
-          return String(left.studentCode).localeCompare(String(right.studentCode));
-        });
-      const rankingByStudentId = Object.fromEntries(
-        rankingRows.map((row, index) => [row.studentId, { rank: index + 1, total: rankingRows.length }])
-      );
-      return {
-        title,
-        session,
-        sessionIndex,
-        questionsList,
-        sectionTitles: blockSectionTitles,
-        sectionTotals,
-        rankingByStudentId,
-      };
-    });
-
-    const totalColumns = 5 + sessionBlocks.reduce(
-      (sum, block) => sum + (block.sectionTitles.length * 2) + 3,
-      0
-    );
-    const row1 = ["", "No.", "Student Name", "Section", "Withdrawn"];
-    const row2 = ["", "", "", "", ""];
-    const row3 = ["", "", "", "", ""];
-    const row4 = ["", "", "", "", ""];
-
-    sessionBlocks.forEach((block) => {
-      const attemptsForBlock = activeMatrixRows
-        .map((row) => visibleAttemptAt(row, block.sessionIndex))
-        .filter(Boolean);
-      const span = (block.sectionTitles.length * 2) + 3;
-      row1.push(block.title, ...Array.from({ length: span - 1 }, () => ""));
-      block.sectionTitles.forEach((sectionTitle) => {
-        const sectionSummaries = attemptsForBlock
-          .map((attempt) => {
-            const summary = buildMainSectionSummary(buildAttemptDetailRowsFromList(attempt.answers_json, block.questionsList));
-            return summary.find((item) => item.section === sectionTitle) ?? null;
-          })
-          .filter(Boolean);
-        const averageRate = sectionSummaries.length
-          ? sectionSummaries.reduce((sum, item) => sum + Number(item.rate ?? 0), 0) / sectionSummaries.length
-          : null;
-        const averageCorrect = sectionSummaries.length
-          ? sectionSummaries.reduce((sum, item) => sum + Number(item.correct ?? 0), 0) / sectionSummaries.length
-          : null;
-        const sectionTotal = Number(block.sectionTotals[sectionTitle] ?? 0);
-        row2.push(sectionTitle, "");
-        row3.push(formatSlashDateShortYear(block.session.starts_at || block.session.created_at), "");
-        row4.push(
-          averageRate == null ? "-" : formatRatePercent(averageRate),
-          averageCorrect == null || sectionTotal <= 0 ? "-" : formatScoreFraction(averageCorrect, sectionTotal, 2)
-        );
-      });
-      const averageTotalRate = attemptsForBlock.length
-        ? attemptsForBlock.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / attemptsForBlock.length
-        : null;
-      const averageTotalCorrect = attemptsForBlock.length
-        ? attemptsForBlock.reduce((sum, attempt) => sum + Number(attempt.correct ?? 0), 0) / attemptsForBlock.length
-        : null;
-      const totalQuestionCount = Number(block.questionsList?.length ?? 0);
-      row2.push("Total", "", "Ranking");
-      row3.push(formatSlashDateShortYear(block.session.starts_at || block.session.created_at), "", "");
-      row4.push(
-        averageTotalRate == null ? "-" : formatRatePercent(averageTotalRate),
-        averageTotalCorrect == null || totalQuestionCount <= 0 ? "-" : formatScoreFraction(averageTotalCorrect, totalQuestionCount, 2),
-        ""
-      );
-    });
-
-    const exportRows = [
-      padCsvRow(row1, totalColumns),
-      padCsvRow(row2, totalColumns),
-      padCsvRow(row3, totalColumns),
-      padCsvRow(row4, totalColumns),
-    ];
-
-    matrixRows.forEach((row, index) => {
-      const dataRow = [
-        "",
-        index + 1,
-        getStudentDisplayName(row.student),
-        getStudentSectionValue(row.student),
-        formatBooleanCsv(row.student?.is_withdrawn),
-      ];
-
-      sessionBlocks.forEach((block) => {
-        const attempt = visibleAttemptAt(row, block.sessionIndex);
-        const sectionSummary = attempt
-          ? buildMainSectionSummary(buildAttemptDetailRowsFromList(attempt.answers_json, block.questionsList))
-          : [];
-        block.sectionTitles.forEach((sectionTitle) => {
-          const summaryRow = sectionSummary.find((item) => item.section === sectionTitle);
-          const sectionTotal = Number(block.sectionTotals[sectionTitle] ?? 0);
-          dataRow.push(
-            summaryRow ? formatRatePercent(summaryRow.rate) : "-",
-            summaryRow && sectionTotal > 0 ? formatScoreFraction(summaryRow.correct, sectionTotal, 0) : "-"
-          );
-        });
-        const ranking = block.rankingByStudentId[row.student.id] ?? null;
-        dataRow.push(
-          attempt ? formatRatePercent(getScoreRate(attempt)) : "-",
-          attempt ? formatScoreFraction(Number(attempt.correct ?? 0), Number(attempt.total ?? 0), 0) : "-",
-          attempt && ranking ? `${formatOrdinalRank(ranking.rank)} / ${ranking.total}` : "-"
-        );
-      });
-
-      exportRows.push(padCsvRow(dataRow, totalColumns));
-    });
-
-    const buildModelFooterRows = (title, collectNames) => {
-      const headerRow = ["", "", "", title, ""];
-      const columns = [];
-      sessionBlocks.forEach((block) => {
-        block.sectionTitles.forEach((sectionTitle) => {
-          headerRow.push(sectionTitle, "");
-          columns.push(collectNames({ kind: "section", block, sectionTitle }));
-        });
-        headerRow.push("Total", "", "");
-        columns.push(collectNames({ kind: "total", block, sectionTitle: "" }));
-      });
-      const rows = [padCsvRow(headerRow, totalColumns)];
-      const maxRows = Math.max(0, ...columns.map((items) => items.length));
-      for (let rowIndex = 0; rowIndex < maxRows; rowIndex += 1) {
-        const nextRow = ["", "", "", "", ""];
-        let columnIndex = 0;
-        sessionBlocks.forEach((block) => {
-          block.sectionTitles.forEach(() => {
-            nextRow.push(columns[columnIndex]?.[rowIndex] ?? "", "");
-            columnIndex += 1;
-          });
-          nextRow.push(columns[columnIndex]?.[rowIndex] ?? "", "", "");
-          columnIndex += 1;
-        });
-        rows.push(padCsvRow(nextRow, totalColumns));
-      }
-      return rows;
-    };
-
-    downloadText(`model_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
+    setQuizMsg("Export functionality has been moved to the testing workspace");
   }
 
   async function fetchExistingImportedAttemptIdsForPairs(pairs) {
@@ -11021,283 +10550,6 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     return "Admin Console";
   })();
-  const testingTabProps = {
-    activeTab,
-    modelSubTab,
-    dailySubTab,
-    sessionDetail,
-    openModelConductModal,
-    openDailyConductModal,
-    fetchTestSessions,
-    fetchExamLinks,
-    modelSessions,
-    editingSessionId,
-    openSessionDetailView,
-    formatDateTime,
-    editingSessionForm,
-    setEditingSessionForm,
-    getProblemSetDisplayId,
-    tests,
-    getSessionEffectivePassRate,
-    linkBySession,
-    copyLink,
-    openSessionPreview,
-    saveSessionEdits,
-    cancelEditSession,
-    startEditSession,
-    deleteTestSession,
-    testSessionsMsg,
-    linkMsg,
-    editingSessionMsg,
-    modelConductOpen,
-    setModelConductOpen,
-    setModelConductMode,
-    setModelRetakeSourceId,
-    setActiveModelTimePicker,
-    modelConductMode,
-    pastModelSessions,
-    selectModelRetakeSource,
-    testSessionForm,
-    setTestSessionForm,
-    TWELVE_HOUR_TIME_OPTIONS,
-    FIVE_MINUTE_MINUTE_OPTIONS,
-    MERIDIEM_OPTIONS,
-    getTwelveHourTimeParts,
-    formatTwelveHourTimeDisplay,
-    activeModelTimePicker,
-    updateModelSessionTimePart,
-    createTestSession,
-    modelRetakeSourceId,
-    modelConductCategory,
-    setModelConductCategory,
-    modelCategories,
-    modelConductTests,
-    getStudentBaseUrl,
-    openModelUploadModal,
-    modelUploadOpen,
-    setModelUploadOpen,
-    modelUploadCategory,
-    setModelUploadCategory,
-    groupedModelUploadTests,
-    editingTestId,
-    openPreview,
-    editingCategorySelect,
-    setEditingCategorySelect,
-    editingTestForm,
-    setEditingTestForm,
-    saveTestEdits,
-    cancelEditTest,
-    startEditTest,
-    deleteTest,
-    testsMsg,
-    assetUploadMsg,
-    assetImportMsg,
-    assetsMsg,
-    assetCategorySelect,
-    setAssetCategorySelect,
-    assetForm,
-    setAssetForm,
-    DEFAULT_MODEL_CATEGORY,
-    setAssetFile,
-    assetCsvFile,
-    setAssetCsvFile,
-    assetFolderInputRef,
-    assetFiles,
-    setAssetFiles,
-    dailySessions,
-    testMetaByVersion,
-    dailyConductOpen,
-    setDailyConductOpen,
-    setDailyConductMode,
-    setDailyRetakeCategory,
-    setDailyRetakeSourceId,
-    dailySetDropdownOpen,
-    setDailySetDropdownOpen,
-    setActiveDailyTimePicker,
-    dailyConductMode,
-    pastDailySessionCategories,
-    dailyRetakeCategory,
-    filteredPastDailySessions,
-    selectDailyRetakeSource,
-    dailySessionForm,
-    setDailySessionForm,
-    activeDailyTimePicker,
-    updateDailySessionTimePart,
-    createDailySession,
-    dailyRetakeSourceId,
-    dailySessionsMsg,
-    dailySourceCategoryDropdownRef,
-    dailyCategories,
-    dailySourceCategoryDropdownOpen,
-    setDailySourceCategoryDropdownOpen,
-    selectedDailySourceCategoryNames,
-    toggleDailySourceCategorySelection,
-    dailyConductCategory,
-    setDailyConductCategory,
-    dailySetDropdownRef,
-    dailyConductTests,
-    selectedDailyProblemSetIds,
-    toggleDailyProblemSetSelection,
-    dailySessionCategories,
-    dailySessionCategorySelectValue,
-    CUSTOM_CATEGORY_OPTION,
-    selectedDailyQuestionCount,
-    dailyUploadOpen,
-    setDailyUploadOpen,
-    dailyUploadCategory,
-    setDailyUploadCategory,
-    groupedDailyUploadTests,
-    dailyUploadMsg,
-    dailyImportMsg,
-    editingTestMsg,
-    dailyCategorySelect,
-    setDailyCategorySelect,
-    dailyForm,
-    setDailyForm,
-    setDailyFile,
-    dailyCsvFile,
-    setDailyCsvFile,
-    dailyFolderInputRef,
-    dailyFiles,
-    setDailyFiles,
-  };
-  const resultsWorkspaceProps = {
-    resultContext,
-    sessionDetail,
-    dailyResultCategories,
-    modelResultCategories,
-    modelResultsCategory,
-    selectedDailyCategory,
-    selectedModelCategory,
-    setDailyResultsCategory,
-    setModelResultsCategory,
-    runSearch,
-    exportDailyGoogleSheetsCsv,
-    exportModelGoogleSheetsCsv,
-    openResultsImportStatus,
-    dailyManualEntryMode,
-    setDailyManualEntryMode,
-    clearDailyResultsForCategory,
-    resultsImportInputRef,
-    resultsImportStatus,
-    getResultsImportTargetCategoryName,
-    importDailyResultsGoogleSheetsCsv,
-    importModelResultsGoogleSheetsCsv,
-    quizMsg,
-    dailyResultsMatrix,
-    modelResultsMatrix,
-    dailyResultsSessionHeaderAverages,
-    modelResultsSessionHeaderAverages,
-    dailyResultsSessionDetailAvailability,
-    modelResultsSessionDetailAvailability,
-    openSessionDetailView,
-    isImportedSummaryAttempt,
-    openDailyManualEntryModal,
-    getSessionEffectivePassRate,
-    expandedResultCells,
-    setExpandedResultCells,
-    getScoreRate,
-    getTabLeftCount,
-    attemptCanOpenDetail,
-    openAttemptDetail,
-    loading,
-    msg,
-    applyTestFilter,
-    filters,
-    setFilters,
-    kpi,
-    attempts,
-    formatDateTime,
-    exportSelectedAttemptCsv,
-    deleteTest,
-    deleteAttempt,
-    formatDateShort,
-    previewOpen,
-    closePreview,
-    previewTest,
-    previewSession,
-    previewQuestions,
-    previewMsg,
-    previewReplacementMsg,
-    isModelPreview,
-    previewSectionTitles,
-    previewSectionRefs,
-    previewSectionBreaks,
-    previewDisplayQuestions,
-    previewReplacementPool,
-    previewReplacementDrafts,
-    setPreviewReplacementDrafts,
-    previewReplacementSavingId,
-    setPreviewReplacementSavingId,
-    setPreviewReplacementMsg,
-    setPreviewQuestions,
-    attemptDetailOpen,
-    selectedAttempt,
-    selectedAttemptRows,
-    selectedAttemptScoreRate,
-    getAttemptTitle,
-    studentAttemptRanks,
-    attemptDetailSource,
-    selectedAttemptUsesImportedSummary,
-    selectedAttemptUsesImportedModelSummary,
-    selectedAttemptMainSectionSummary,
-    setAttemptDetailOpen,
-    setSelectedAttemptObj,
-    setAttemptDetailSource,
-    attemptQuestionsLoading,
-    attemptQuestionsError,
-    attemptDetailTab,
-    setAttemptDetailTab,
-    selectedAttemptIsPass,
-    selectedAttemptIsModel,
-    selectedAttemptNestedSectionSummary,
-    selectedAttemptPassRate,
-    renderTwoLineHeader,
-    selectedAttemptSectionSummary,
-    selectedAttemptQuestionSectionsFiltered,
-    attemptDetailSectionRefs,
-    attemptDetailWrongOnly,
-    setAttemptDetailWrongOnly,
-    supabase,
-    fetchTests,
-    deleteTestSession,
-    closeSessionDetail,
-    allowSessionAnotherAttempt,
-    sessionDetailTab,
-    setSessionDetailTab,
-    sessionDetailQuestions,
-    sessionDetailLoading,
-    sessionDetailMsg,
-    sessionDetailAllowStudentId,
-    setSessionDetailAllowStudentId,
-    sessionDetailAllowMsg,
-    sessionDetailAllowances,
-    sessionDetailDisplayAttempts,
-    sessionDetailStudentOptions,
-    sessionDetailPassRate,
-    sessionDetailUsesImportedResultsSummary,
-    sessionDetailUsesImportedModelSummary,
-    sessionDetailAnalysisSummary,
-    sessionDetailOverview,
-    sessionDetailQuestionAnalysis,
-    sessionDetailQuestionStudents,
-    sessionDetailMainSectionAverages,
-    sessionDetailNestedSectionAverages,
-    sessionDetailStudentRankingRows,
-    sessionDetailRankingSections,
-    sessionDetailShowAllAnalysis,
-    setSessionDetailShowAllAnalysis,
-    sessionDetailAnalysisPopup,
-    setSessionDetailAnalysisPopup,
-    selectedSessionDetail,
-    formatOrdinal,
-    getSectionTitle,
-    getQuestionSectionLabel,
-    normalizeModelCsvKind,
-    splitAssetValues,
-    isImageAsset,
-    isAudioAsset,
-  };
   const workspaceContextValue = {
     supabase,
     activeSchoolId,
@@ -11439,20 +10691,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
     absenceApplications,
     decideAbsenceApplication,
     absenceApplicationsMsg,
-    tests,
-    fetchTests,
-    fetchTestSessions,
-    fetchExamLinks,
-    fetchAssets,
-    runSearch,
-    resultContext,
-    previewOpen,
-    attemptDetailOpen,
-    sessionDetail,
-    testingTabProps,
-    resultsWorkspaceProps,
     parseQuestionCsv,
     parseDailyCsv,
+    recordAdminAuditEvent,
   };
 
   return (

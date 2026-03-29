@@ -52,7 +52,10 @@
       "Bash(done)",
       "Bash(grep -n \"^  };\\\\s*$\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
       "Bash(awk 'NR>=11301 && NR<=11650' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(curl -s http://localhost:3000/super/schools/test/admin/model/results)",
+      "Bash(curl -s http://localhost:3000/super/schools/test/admin)",
+      "Bash(pkill -f \"next dev\")"
     ]
   }
 }
