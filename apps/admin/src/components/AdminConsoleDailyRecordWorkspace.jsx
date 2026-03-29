@@ -60,6 +60,13 @@ export default function AdminConsoleDailyRecordWorkspace() {
     dailyRecordsMsg,
     fetchDailyRecords,
     saveDailyRecord,
+    updateDailyRecordComment,
+    updateDailyRecordTextbookEntry,
+    toggleDailyRecordCanDo,
+    addDailyRecordTextbookEntry,
+    removeDailyRecordTextbookEntry,
+    addDailyRecordCommentRow,
+    removeDailyRecordCommentRow,
   } = useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions });
 
   useEffect(() => {
@@ -338,7 +345,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
           className="admin-modal-overlay"
           onClick={() => closeDailyRecordModal()}
         >
-          <div className="admin-modal daily-record-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="admin-modal daily-record-modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: "800px" }}>
             <div className="admin-modal-header">
               <div className="admin-title">
                 Daily Record - {dailyRecordForm?.record_date ? formatDateFull(dailyRecordForm.record_date) : "New Record"}
@@ -353,22 +360,104 @@ export default function AdminConsoleDailyRecordWorkspace() {
             </div>
 
             <div style={{ padding: "16px", maxHeight: "70vh", overflowY: "auto" }}>
-              <div style={{ marginBottom: "16px" }}>
-                <label>Date</label>
-                <div>{dailyRecordForm?.record_date ? formatDateFull(dailyRecordForm.record_date) : "-"}</div>
-              </div>
-
-              <div style={{ marginBottom: "16px" }}>
-                <label>Today's Content</label>
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontWeight: "bold", marginBottom: "8px" }}>Today's Content</label>
                 <textarea
                   value={dailyRecordForm?.free_writing || ""}
                   onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, free_writing: e.target.value }))}
-                  placeholder="Today's teaching content, lesson summary, etc."
-                  style={{ width: "100%", minHeight: "100px" }}
+                  placeholder="Today's teaching content, lesson summary, objectives covered, etc."
+                  style={{ width: "100%", minHeight: "120px", padding: "8px", border: "1px solid #ccc" }}
                 />
               </div>
 
-              <div style={{ marginTop: "12px", display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontWeight: "bold", marginBottom: "8px" }}>Textbook Entries</label>
+                {(dailyRecordForm?.textbook_entries ?? []).map((entry, index) => (
+                  <div key={entry.tempId} style={{ marginBottom: "12px", padding: "12px", border: "1px solid #e0e0e0", borderRadius: "4px" }}>
+                    <div style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "center" }}>
+                      <select
+                        value={entry.book || "starter"}
+                        onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { book: e.target.value })}
+                        style={{ padding: "4px", border: "1px solid #ccc" }}
+                      >
+                        <option value="starter">Starter</option>
+                        <option value="beginner_1">Beginner 1</option>
+                        <option value="beginner_2">Beginner 2</option>
+                      </select>
+                      <select
+                        value={entry.lesson || "1"}
+                        onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { lesson: e.target.value })}
+                        style={{ padding: "4px", border: "1px solid #ccc" }}
+                      >
+                        {Array.from({ length: 18 }, (_, i) => String(i + 1)).map((lessonNum) => (
+                          <option key={lessonNum} value={lessonNum}>Lesson {lessonNum}</option>
+                        ))}
+                      </select>
+                      {dailyRecordForm.textbook_entries.length > 1 && (
+                        <button
+                          className="btn btn-danger"
+                          onClick={() => removeDailyRecordTextbookEntry(entry.tempId)}
+                          style={{ padding: "4px 8px", fontSize: "12px" }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                <button
+                  className="btn"
+                  onClick={() => addDailyRecordTextbookEntry()}
+                  style={{ marginTop: "8px" }}
+                >
+                  + Add Textbook Entry
+                </button>
+              </div>
+
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontWeight: "bold", marginBottom: "8px" }}>Student Comments</label>
+                {(dailyRecordForm?.comments ?? []).map((comment) => (
+                  <div key={comment.tempId} style={{ marginBottom: "8px", display: "flex", gap: "8px" }}>
+                    <select
+                      value={comment.student_id || ""}
+                      onChange={(e) => updateDailyRecordComment(comment.tempId, { student_id: e.target.value })}
+                      style={{ padding: "4px", border: "1px solid #ccc", minWidth: "200px" }}
+                    >
+                      <option value="">Select student...</option>
+                      {(students ?? []).map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.display_name || s.email || s.id}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={comment.comment || ""}
+                      onChange={(e) => updateDailyRecordComment(comment.tempId, { comment: e.target.value })}
+                      placeholder="Comment"
+                      style={{ flex: 1, padding: "4px", border: "1px solid #ccc" }}
+                    />
+                    {dailyRecordForm.comments.length > 1 && (
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => removeDailyRecordCommentRow(comment.tempId)}
+                        style={{ padding: "4px 8px", fontSize: "12px" }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  className="btn"
+                  onClick={() => addDailyRecordCommentRow()}
+                  style={{ marginTop: "8px" }}
+                >
+                  + Add Comment
+                </button>
+              </div>
+
+              <div style={{ marginTop: "20px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <button className="btn btn-primary" onClick={() => saveDailyRecord()} disabled={dailyRecordSaving}>
                   {dailyRecordSaving ? "Saving..." : "Save Record"}
                 </button>
