@@ -168,77 +168,81 @@ export default function AdminConsoleStudentsWorkspace() {
     <div style={{ marginBottom: 12 }}>
       {!studentDetailOpen ? (
         <>
-          <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 8, flexWrap: "wrap" }}>
-            <div className="admin-title">Student List</div>
-            <button className="btn btn-primary student-list-primary-btn" onClick={() => setInviteOpen(true)}>
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <span>Add New Student</span>
-            </button>
-            <button
-              className="btn student-list-primary-btn student-warning-launch-btn"
-              onClick={() => openStudentWarningsModalFn(getDefaultStudentWarningForm)}
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <span>Warnings</span>
-            </button>
-            <button
-              className="btn student-list-primary-btn"
-              type="button"
-              onClick={() => void loadMetrics()}
-              disabled={studentListLoading}
-              aria-label={studentListLoading ? "Loading metrics" : studentListMetricsLoaded ? "Refresh metrics" : "Load metrics"}
-              title={studentListLoading ? "Loading metrics..." : studentListMetricsLoaded ? "Refresh metrics" : "Load metrics"}
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path
-                  d="M16 10a6 6 0 1 1-1.76-4.24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M16 4.5v3.75h-3.75"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>{studentListLoading ? "Loading Metrics..." : studentListMetricsLoaded ? "Refresh Metrics" : "Load Metrics"}</span>
-            </button>
-            <button
-              className="btn student-list-primary-btn"
-              type="button"
-              onClick={() => void handleLoadStudentWarnings()}
-              disabled={studentWarningsLoading}
-              aria-label={studentWarningsLoading ? "Loading warnings" : studentWarningsLoaded ? "Refresh warnings" : "Load warnings"}
-              title={studentWarningsLoading ? "Loading warnings..." : studentWarningsLoaded ? "Refresh warnings" : "Load warnings"}
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path
-                  d="M16 10a6 6 0 1 1-1.76-4.24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M16 4.5v3.75h-3.75"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>{studentWarningsLoading ? "Loading Warnings..." : studentWarningsLoaded ? "Refresh Warnings" : "Load Warnings"}</span>
-            </button>
+          <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div className="admin-title">Student List</div>
+              <button className="btn btn-primary student-list-primary-btn" onClick={() => setInviteOpen(true)}>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span>Add New Student</span>
+              </button>
+              <button
+                className="btn student-list-primary-btn student-warning-launch-btn"
+                onClick={() => openStudentWarningsModalFn(getDefaultStudentWarningForm)}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span>Warnings</span>
+              </button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", marginLeft: "auto" }}>
+              <button
+                className="btn student-list-primary-btn"
+                type="button"
+                onClick={() => void loadMetrics()}
+                disabled={studentListLoading}
+                aria-label={studentListLoading ? "Loading metrics" : studentListMetricsLoaded ? "Refresh metrics" : "Load metrics"}
+                title={studentListLoading ? "Loading metrics..." : studentListMetricsLoaded ? "Refresh metrics" : "Load metrics"}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M16 10a6 6 0 1 1-1.76-4.24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M16 4.5v3.75h-3.75"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span>{studentListLoading ? "Loading Metrics..." : studentListMetricsLoaded ? "Refresh Metrics" : "Load Metrics"}</span>
+              </button>
+              <button
+                className="btn student-list-primary-btn"
+                type="button"
+                onClick={() => void handleLoadStudentWarnings()}
+                disabled={studentWarningsLoading}
+                aria-label={studentWarningsLoading ? "Loading warnings" : studentWarningsLoaded ? "Refresh warnings" : "Load warnings"}
+                title={studentWarningsLoading ? "Loading warnings..." : studentWarningsLoaded ? "Refresh warnings" : "Load warnings"}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M16 10a6 6 0 1 1-1.76-4.24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M16 4.5v3.75h-3.75"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span>{studentWarningsLoading ? "Loading Warnings..." : studentWarningsLoaded ? "Refresh Warnings" : "Load Warnings"}</span>
+              </button>
+            </div>
           </div>
 
           <div className="attendance-filter-box" style={{ marginTop: 14 }}>

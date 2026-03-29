@@ -160,6 +160,20 @@ export default function AdminConsoleTestingTabs({
     };
   }
 
+  function formatCompactDateTime(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
+  }
+
+  const compactDateColumnStyle = { minWidth: 150, whiteSpace: "nowrap" };
+
   return (
     <>
       {activeTab === "model" ? (
@@ -260,13 +274,13 @@ export default function AdminConsoleTestingTabs({
                     <table className="admin-table" style={{ minWidth: 860 }}>
                       <thead>
                         <tr>
-                          <th>Created</th>
+                          <th style={compactDateColumnStyle}>Created</th>
                           <th>Test Title</th>
                           <th>SetID</th>
                           <th>Show Answers</th>
                           <th>Attempts</th>
-                          <th>Start</th>
-                          <th>End</th>
+                          <th style={compactDateColumnStyle}>Start</th>
+                          <th style={compactDateColumnStyle}>End</th>
                           <th>Time (min)</th>
                           <th>Pass Rate</th>
                           <th style={{ textAlign: "center" }}>Action</th>
@@ -278,8 +292,8 @@ export default function AdminConsoleTestingTabs({
                       <tbody>
                         {modelSessions.map((t) => (
                           <tr key={t.id} {...getSessionRowProps(t, "mock")}>
-                            <td>{formatDateTime(t.created_at)}</td>
-                            <td>
+                            <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
+                            <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
                               {editingSessionId === t.id ? (
                                 <input
                                   value={editingSessionForm.title}
@@ -290,7 +304,7 @@ export default function AdminConsoleTestingTabs({
                               )}
                             </td>
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
-                            <td>
+                            <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
                               {editingSessionId === t.id ? (
                                 <select
                                   value={editingSessionForm.show_answers ? "yes" : "no"}
@@ -327,7 +341,7 @@ export default function AdminConsoleTestingTabs({
                                   onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
                                 />
                               ) : (
-                                formatDateTime(t.starts_at)
+                                formatCompactDateTime(t.starts_at)
                               )}
                             </td>
                             <td>
@@ -339,7 +353,7 @@ export default function AdminConsoleTestingTabs({
                                   onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
                                 />
                               ) : (
-                                formatDateTime(t.ends_at)
+                                formatCompactDateTime(t.ends_at)
                               )}
                             </td>
                             <td>
@@ -1000,7 +1014,7 @@ export default function AdminConsoleTestingTabs({
                         <table className="admin-table" style={{ minWidth: 860 }}>
                           <thead>
                             <tr>
-                              <th>Created</th>
+                              <th style={compactDateColumnStyle}>Created</th>
                               <th>SetID</th>
                               <th>Category</th>
                               <th>Questions</th>
@@ -1015,7 +1029,7 @@ export default function AdminConsoleTestingTabs({
                                 key={t.id}
                                 onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                               >
-                                <td>{formatDateTime(t.created_at)}</td>
+                                <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td>
                                   {editingTestId === t.id ? (
                                     <input
@@ -1261,6 +1275,9 @@ export default function AdminConsoleTestingTabs({
                       <div className="admin-help" style={{ marginTop: 8 }}>
                         SetID is read from the CSV `set_id` column. If the file contains multiple `set_id` values, each one is imported as a separate model test set.
                       </div>
+                      <div className="admin-help" style={{ marginTop: 6, color: "#9a3412" }}>
+                        Use a new `set_id` for each new upload. If the `set_id` already exists, the upload will be blocked and you should change it in the CSV first.
+                      </div>
                       <div className="admin-help" style={{ marginTop: 8 }}>
                         Template: <a href="/question_csv_template.csv" download>Model CSV template</a>
                       </div>
@@ -1386,13 +1403,13 @@ export default function AdminConsoleTestingTabs({
                       </colgroup>
                       <thead>
                         <tr>
-                          <th>Created</th>
+                          <th style={compactDateColumnStyle}>Created</th>
                           <th>Test Title</th>
                           <th>Category</th>
                           <th>SetID</th>
                           <th><span className="daily-sessions-show-answers-head">Show Answers</span></th>
-                          <th>Start</th>
-                          <th>End</th>
+                          <th style={compactDateColumnStyle}>Start</th>
+                          <th style={compactDateColumnStyle}>End</th>
                           <th>Time (min)</th>
                           <th>Pass Rate</th>
                           <th style={{ textAlign: "center" }}>Action</th>
@@ -1404,8 +1421,8 @@ export default function AdminConsoleTestingTabs({
                       <tbody>
                         {dailySessions.map((t) => (
                           <tr key={t.id} {...getSessionRowProps(t, "daily")}>
-                            <td>{formatDateTime(t.created_at)}</td>
-                            <td>
+                            <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
+                            <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
                               {editingSessionId === t.id ? (
                                 <input
                                   value={editingSessionForm.title}
@@ -1417,7 +1434,7 @@ export default function AdminConsoleTestingTabs({
                             </td>
                             <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
-                            <td>
+                            <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
                               {editingSessionId === t.id ? (
                                 <select
                                   value={editingSessionForm.show_answers ? "yes" : "no"}
@@ -1439,7 +1456,7 @@ export default function AdminConsoleTestingTabs({
                                   onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
                                 />
                               ) : (
-                                formatDateTime(t.starts_at)
+                                formatCompactDateTime(t.starts_at)
                               )}
                             </td>
                             <td>
@@ -1451,7 +1468,7 @@ export default function AdminConsoleTestingTabs({
                                   onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
                                 />
                               ) : (
-                                formatDateTime(t.ends_at)
+                                formatCompactDateTime(t.ends_at)
                               )}
                             </td>
                             <td>
@@ -2383,7 +2400,7 @@ export default function AdminConsoleTestingTabs({
                         <table className="admin-table" style={{ minWidth: 860 }}>
                           <thead>
                             <tr>
-                              <th>Created</th>
+                              <th style={compactDateColumnStyle}>Created</th>
                               <th>Category</th>
                               <th>SetID</th>
                               <th>Questions</th>
@@ -2398,7 +2415,7 @@ export default function AdminConsoleTestingTabs({
                                 key={t.id}
                                 onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                               >
-                                <td>{formatDateTime(t.created_at)}</td>
+                                <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td>
                                   {editingTestId === t.id ? (
                                     <>
@@ -2650,6 +2667,9 @@ export default function AdminConsoleTestingTabs({
                       </div>
                       <div className="admin-help" style={{ marginTop: 8 }}>
                         SetID is read from the CSV `set_id` column. If the file contains multiple `set_id` values, each one is imported as a separate daily test set.
+                      </div>
+                      <div className="admin-help" style={{ marginTop: 6, color: "#9a3412" }}>
+                        Use a new `set_id` for each new upload. If the `set_id` already exists, the upload will be blocked and you should change it in the CSV first.
                       </div>
                       <div className="admin-help" style={{ marginTop: 8 }}>
                         Template: <a href="/daily_question_csv_template.csv" download>Daily CSV template</a>

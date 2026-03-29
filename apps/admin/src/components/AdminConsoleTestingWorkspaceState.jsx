@@ -772,6 +772,44 @@ export function useTestingWorkspaceState({
     return counts;
   }, [supabase]);
 
+  const mergeRegisteredTestsIntoState = useCallback((versions, { title, type, questionCountsByVersion = {} }) => {
+    const normalizedVersions = Array.from(new Set((versions ?? []).map((value) => String(value ?? "").trim()).filter(Boolean)));
+    if (!normalizedVersions.length) return;
+    const normalizedTitle = String(title ?? "").trim();
+    const normalizedType = String(type ?? "").trim();
+    const nowIso = new Date().toISOString();
+
+    setTests((current) => {
+      const existingList = Array.isArray(current) ? current : [];
+      const byVersion = new Map(existingList.map((test) => [String(test.version ?? "").trim(), test]));
+
+      normalizedVersions.forEach((version) => {
+        const existing = byVersion.get(version);
+        byVersion.set(version, {
+          ...(existing ?? {}),
+          id: existing?.id ?? `local-${normalizedType || "test"}-${version}`,
+          version,
+          title: normalizedTitle || existing?.title || version,
+          type: normalizedType || existing?.type || "mock",
+          is_public: true,
+          school_id: existing?.school_id ?? activeSchoolId ?? null,
+          question_count: Number.isFinite(questionCountsByVersion?.[version])
+            ? questionCountsByVersion[version]
+            : (existing?.question_count ?? 0),
+          created_at: existing?.created_at ?? nowIso,
+          updated_at: nowIso,
+        });
+      });
+
+      return Array.from(byVersion.values()).sort((left, right) => {
+        const leftUpdated = String(left?.updated_at ?? "");
+        const rightUpdated = String(right?.updated_at ?? "");
+        if (leftUpdated !== rightUpdated) return rightUpdated.localeCompare(leftUpdated);
+        return String(right?.created_at ?? "").localeCompare(String(left?.created_at ?? ""));
+      });
+    });
+  }, [activeSchoolId]);
+
   const seedModelCategory = useCallback(async (list) => {
     if (modelCategorySeededRef.current) return list;
     const mockTests = (list ?? []).filter((t) => t.type === "mock");
@@ -1308,8 +1346,9 @@ export function useTestingWorkspaceState({
     }
     const { data, error } = await supabase
       .from("tests")
-      .select("id, version, title, type, is_public, pass_rate, created_at, questions(count)")
+      .select("id, version, title, type, is_public, pass_rate, created_at, updated_at, questions(count)")
       .eq("is_public", true)
+      .order("updated_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
@@ -1318,8 +1357,9 @@ export function useTestingWorkspaceState({
         // Fallback: try without relationship query
         const fallback = await supabase
           .from("tests")
-          .select("id, version, title, type, pass_rate, is_public, created_at")
+          .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
           .eq("is_public", true)
+          .order("updated_at", { ascending: false, nullsFirst: false })
           .order("created_at", { ascending: false })
           .limit(200);
         if (fallback.error) {
@@ -1628,6 +1668,7 @@ export function useTestingWorkspaceState({
       const updatePayload = {
         school_id: schoolId,
         type,
+        is_public: true,
         updated_at: new Date().toISOString()
       };
       if (Number.isFinite(passRate)) updatePayload.pass_rate = passRate;
@@ -2440,6 +2481,21 @@ export function useTestingWorkspaceState({
     if (!versionSet.length) {
       return { ok: false, summary: missingVersionMessage };
     }
+    const questionCountsByVersion = questions.reduce((accumulator, question) => {
+      const version = String(question?.test_version ?? "").trim();
+      if (!version) return accumulator;
+      accumulator[version] = (accumulator[version] ?? 0) + 1;
+      return accumulator;
+    }, {});
+    const existingVersions = new Set((tests ?? []).map((test) => String(test?.version ?? "").trim()).filter(Boolean));
+    const duplicateVersions = versionSet.filter((version) => existingVersions.has(version));
+    if (duplicateVersions.length) {
+      return {
+        ok: false,
+        summary: `Upload stopped: ${duplicateVersions.length === 1 ? "this set_id already exists" : "these set_id values already exist"}.`,
+        detail: `Change the CSV set_id before uploading.\nExisting set_id${duplicateVersions.length === 1 ? "" : "s"}:\n${duplicateVersions.join("\n")}`,
+      };
+    }
     const resolvedVersion = versionSet.length === 1 ? versionSet[0] : "";
     if (resolvedVersion && resolvedVersion !== testVersion && typeof onResolvedVersion === "function") {
       onResolvedVersion(resolvedVersion);
@@ -2488,8 +2544,8 @@ export function useTestingWorkspaceState({
       return { ok: false, summary: missingVersionMessage };
     }
 
-    return { ok: true, resolvedVersion, versions: versionSet };
-  }, [supabase, validateAssetRefs, buildLocalAssetNameMap]);
+    return { ok: true, resolvedVersion, versions: versionSet, questionCountsByVersion };
+  }, [supabase, validateAssetRefs, buildLocalAssetNameMap, tests]);
 
   const uploadAssets = useCallback(async () => {
     setAssetUploadMsg("");
@@ -2571,58 +2627,75 @@ export function useTestingWorkspaceState({
       }
     }
 
-    setAssetUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
-    fetchTests();
-    fetchAssets();
-  }, [activeSchoolId, assetFile, assetFiles, assetForm, assetCsvFile, validateCsvAssetsBeforeUpload, parseQuestionCsv, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets]);
+    setAssetUploadMsg(`Uploaded files: ${ok} ok / ${ng} failed. Importing questions...`);
+    const importResult = await importModelQuestionsFromCsvFile(csvFile, category);
+    if (!importResult.ok) {
+      setAssetUploadMsg(`Uploaded files: ${ok} ok / ${ng} failed. Question import failed.`);
+      return;
+    }
 
-  const importQuestionsFromCsv = useCallback(async () => {
+    mergeRegisteredTestsIntoState(importResult.versions, {
+      title: category || DEFAULT_MODEL_CATEGORY,
+      type,
+      questionCountsByVersion: importResult.questionCountsByVersion,
+    });
+    setModelUploadCategory(category || "");
+    setAssetUploadMsg(`Uploaded files: ${ok} ok / ${ng} failed. Refreshing list...`);
+    await fetchTests();
+    await fetchAssets();
+    setAssetUploadMsg(`Uploaded files: ${ok} ok / ${ng} failed. Imported ${importResult.totalQuestions} questions.`);
+    setAssetCsvFile(null);
+  }, [activeSchoolId, assetFile, assetFiles, assetForm, assetCsvFile, validateCsvAssetsBeforeUpload, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets, mergeRegisteredTestsIntoState, DEFAULT_MODEL_CATEGORY, importModelQuestionsFromCsvFile]);
+
+  async function importModelQuestionsFromCsvFile(file, category) {
     setAssetImportMsg("");
     if (!activeSchoolId) {
       setAssetImportMsg("School scope is required.");
-      return;
+      return { ok: false };
     }
-    const file = assetCsvFile || assetFile;
+    const normalizedCategory = String(category ?? "").trim();
+    const csvFile = file ?? null;
     const type = "mock";
-    const category = assetForm.category.trim();
-    if (!category) {
+
+    if (!normalizedCategory) {
       setAssetImportMsg("Category is required.");
-      return;
+      return { ok: false };
     }
 
-    if (!file) {
+    if (!csvFile) {
       setAssetImportMsg("CSV file is required.");
-      return;
+      return { ok: false };
     }
-    if (!file.name.toLowerCase().endsWith(".csv")) {
+    if (!csvFile.name.toLowerCase().endsWith(".csv")) {
       setAssetImportMsg("CSV file is required.");
-      return;
+      return { ok: false };
     }
     setAssetImportMsg("Parsing...");
-    const text = await file.text();
+    const text = await csvFile.text();
     const { questions, choices, errors } = parseQuestionCsv(text, "");
     if (errors.length) {
       setAssetImportMsg(`CSV errors:\n${errors.slice(0, 5).join("\n")}`);
-      return;
+      return { ok: false };
     }
     if (questions.length === 0) {
       setAssetImportMsg("No questions found.");
-      return;
+      return { ok: false };
     }
     const groupedByVersion = groupParsedCsvByVersion(questions, choices);
     const versions = Array.from(groupedByVersion.keys());
     if (!versions.length) {
       setAssetImportMsg("set_id is required in the CSV.");
-      return;
+      return { ok: false };
     }
 
     setAssetImportMsg("Resolving assets...");
     let totalQuestions = 0;
     let totalChoiceRows = 0;
+    const questionCountsByVersion = {};
 
     if (!supabase) {
       setAssetImportMsg("Supabase not initialized.");
-      return;
+      return { ok: false };
     }
 
     for (const version of versions) {
@@ -2630,6 +2703,7 @@ export function useTestingWorkspaceState({
       if (!group) continue;
       const groupQuestions = group.questions.map((question) => ({ ...question }));
       const groupChoices = group.choices.map((choice) => ({ ...choice }));
+      questionCountsByVersion[version] = groupQuestions.length;
 
       const { data: assetRows, error: assetErr } = await supabase
         .from("test_assets")
@@ -2638,7 +2712,7 @@ export function useTestingWorkspaceState({
       if (assetErr) {
         console.error("assets fetch error:", assetErr);
         setAssetImportMsg(`Asset lookup failed: ${assetErr.message}`);
-        return;
+        return { ok: false };
       }
       const assetMap = {};
       for (const row of assetRows ?? []) {
@@ -2648,18 +2722,18 @@ export function useTestingWorkspaceState({
       const { missing, invalid } = validateAssetRefs(groupQuestions, groupChoices, assetMap);
       if (invalid.length) {
         setAssetImportMsg(`Invalid asset paths for ${version} (use filename only):\n${invalid.slice(0, 5).join("\n")}`);
-        return;
+        return { ok: false };
       }
       if (missing.length) {
         setAssetImportMsg(`Missing assets for ${version} (upload first):\n${missing.slice(0, 5).join("\n")}`);
-        return;
+        return { ok: false };
       }
       applyAssetMap(groupQuestions, groupChoices, assetMap);
 
-      const ensure = await ensureTestRecord(version, category || DEFAULT_MODEL_CATEGORY, type, null, activeSchoolId);
+      const ensure = await ensureTestRecord(version, normalizedCategory || DEFAULT_MODEL_CATEGORY, type, null, activeSchoolId);
       if (!ensure.ok) {
         setAssetImportMsg(ensure.message);
-        return;
+        return { ok: false };
       }
 
       const questionIds = groupQuestions.map((q) => q.question_id);
@@ -2673,7 +2747,7 @@ export function useTestingWorkspaceState({
         if (cleanupErr) {
           console.error("questions cleanup error:", cleanupErr);
           setAssetImportMsg(`Question cleanup failed: ${cleanupErr.message}`);
-          return;
+          return { ok: false };
         }
       }
 
@@ -2688,7 +2762,7 @@ export function useTestingWorkspaceState({
       if (qError) {
         console.error("questions upsert error:", qError);
         setAssetImportMsg(`Question upsert failed: ${qError.message}`);
-        return;
+        return { ok: false };
       }
       const { data: qRows, error: qFetchErr } = await supabase
         .from("questions")
@@ -2698,7 +2772,7 @@ export function useTestingWorkspaceState({
       if (qFetchErr) {
         console.error("questions fetch error:", qFetchErr);
         setAssetImportMsg(`Question fetch failed: ${qFetchErr.message}`);
-        return;
+        return { ok: false };
       }
 
       const idMap = {};
@@ -2722,7 +2796,7 @@ export function useTestingWorkspaceState({
         if (delErr) {
           console.error("choices delete error:", delErr);
           setAssetImportMsg(`Choice cleanup failed: ${delErr.message}`);
-          return;
+          return { ok: false };
         }
       }
 
@@ -2731,7 +2805,7 @@ export function useTestingWorkspaceState({
         if (cErr) {
           console.error("choices insert error:", cErr);
           setAssetImportMsg(`Choice insert failed: ${cErr.message}`);
-          return;
+          return { ok: false };
         }
       }
 
@@ -2744,17 +2818,26 @@ export function useTestingWorkspaceState({
       actionType: "import",
       entityType: "question_import",
       entityId: versions[0] || `mock-import-${Date.now()}`,
-      summary: `Imported ${versions.length} model set${versions.length === 1 ? "" : "s"} in ${category}.`,
+      summary: `Imported ${versions.length} model set${versions.length === 1 ? "" : "s"} in ${normalizedCategory}.`,
       metadata: {
-        category,
+        category: normalizedCategory,
         set_ids: versions,
         question_count: totalQuestions,
         choice_count: totalChoiceRows,
       },
     });
-    fetchTests();
+
+    return { ok: true, versions, totalQuestions, totalChoiceRows, questionCountsByVersion };
+  }
+
+  const importQuestionsFromCsv = useCallback(async () => {
+    const file = assetCsvFile || assetFile;
+    const category = assetForm.category.trim();
+    const result = await importModelQuestionsFromCsvFile(file, category);
+    if (!result.ok) return;
+    await fetchTests();
     setAssetCsvFile(null);
-  }, [activeSchoolId, assetCsvFile, assetFile, assetForm, supabase, parseQuestionCsv, groupParsedCsvByVersion, validateAssetRefs, applyAssetMap, resolveAdminAssetUrl, ensureTestRecord, recordAuditEvent, fetchTests]);
+  }, [assetCsvFile, assetFile, assetForm, importModelQuestionsFromCsvFile, fetchTests]);
 
   const uploadDailyAssets = useCallback(async () => {
     setDailyUploadMsg("");
@@ -2811,6 +2894,7 @@ export function useTestingWorkspaceState({
       return;
     }
     const versions = preflight.versions ?? [];
+    const questionCountsByVersion = preflight.questionCountsByVersion ?? {};
 
     setDailyUploadMsg("Uploading...");
     for (const version of versions) {
@@ -2837,10 +2921,17 @@ export function useTestingWorkspaceState({
       }
     }
 
+    mergeRegisteredTestsIntoState(versions, {
+      title: category || versions[0] || "",
+      type,
+      questionCountsByVersion,
+    });
+    setDailyUploadCategory(category || "");
+    setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed. Refreshing list...`);
+    await fetchTests();
+    await fetchAssets();
     setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed`);
-    fetchTests();
-    fetchAssets();
-  }, [activeSchoolId, dailyFile, dailyFiles, dailyForm, dailyCsvFile, validateCsvAssetsBeforeUpload, parseDailyCsv, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets]);
+  }, [activeSchoolId, dailyFile, dailyFiles, dailyForm, dailyCsvFile, validateCsvAssetsBeforeUpload, parseDailyCsv, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets, mergeRegisteredTestsIntoState]);
 
   const applySourceSessionToForm = useCallback((session, setForm) => {
     if (!session) return;
