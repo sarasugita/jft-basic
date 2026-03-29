@@ -6,17 +6,17 @@ import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceSt
 
 function formatDateShortFn(d) {
   if (!d) return "";
-  const date = new Date(`${d}T00:00:00Z`);
+  const date = new Date(`${d}T00:00:00`);
   if (isNaN(date.getTime())) return "";
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function formatWeekdayFn(d) {
   if (!d) return "";
-  const date = new Date(`${d}T00:00:00Z`);
+  const date = new Date(`${d}T00:00:00`);
   if (isNaN(date.getTime())) return "";
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return days[date.getUTCDay()] || "";
+  return days[date.getDay()] || "";
 }
 
 export default function AdminConsoleAttendanceWorkspace() {
@@ -39,6 +39,8 @@ export default function AdminConsoleAttendanceWorkspace() {
     absenceApplicationsMsg,
     buildAttendanceStats,
     getAttendanceStatusClassName,
+    deleteAttendanceDay,
+    attendanceModalDay,
     // Memos from hook
     attendanceDayColumns,
     attendanceRangeColumns,
@@ -185,6 +187,23 @@ export default function AdminConsoleAttendanceWorkspace() {
           }}>
             Open Day
           </button>
+          <button className="btn btn-danger" type="button" onClick={() => {
+            if (!attendanceDate) {
+              alert("Please select a date first");
+              return;
+            }
+            const dayToDelete = attendanceDayColumns.find((d) => d.day_date === attendanceDate);
+            if (!dayToDelete) {
+              alert("No attendance record found for this date");
+              return;
+            }
+            deleteAttendanceDay(dayToDelete).catch((err) => {
+              console.error("Delete day error:", err);
+              alert(`Failed to delete day: ${err?.message || "Unknown error"}`);
+            });
+          }}>
+            Delete Day
+          </button>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", justifyContent: "flex-end", marginLeft: "auto", alignSelf: "flex-start", flex: "0 0 auto" }}>
           <button className="btn results-page-action-btn" type="button" onClick={exportAttendanceGoogleSheetsCsv}>
@@ -291,9 +310,20 @@ export default function AdminConsoleAttendanceWorkspace() {
               <th className="att-col-absent att-sticky-4">Unexcused<br />Absence</th>
               {attendanceDayColumns.map((d) => (
                 <th key={d.id}>
-                  <button className="link-btn" type="button" onClick={() => openAttendanceDay(d.day_date)}>
-                    {d.label}
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <button className="link-btn" type="button" onClick={() => openAttendanceDay(d.day_date)}>
+                      {d.label}
+                    </button>
+                    <button
+                      className="btn admin-icon-btn"
+                      type="button"
+                      title="Delete this day"
+                      onClick={() => deleteAttendanceDay(d)}
+                      style={{ padding: "2px 6px", fontSize: "12px" }}
+                    >
+                      ✕
+                    </button>
+                  </div>
                   <div className="att-day-total">
                     {attendanceDayRates[d.id] == null ? "-" : formatRatePercent(attendanceDayRates[d.id])}
                   </div>
