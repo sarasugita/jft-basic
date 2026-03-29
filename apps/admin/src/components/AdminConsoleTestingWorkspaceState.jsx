@@ -599,6 +599,96 @@ export function useTestingWorkspaceState({
   const modelCategorySeededRef = useRef(false);
   const previewSectionRefs = useRef({});
 
+  // ============================================================================
+  // Data enrichment & processing callbacks
+  // ============================================================================
+
+  const fetchQuestionCounts = useCallback(async (versions) => {
+    if (!Array.isArray(versions) || versions.length === 0) return {};
+    const { data, error } = await supabase
+      .from("questions")
+      .select("test_version")
+      .in("test_version", versions);
+    if (error) {
+      console.error("question count fetch error:", error);
+      return {};
+    }
+    const counts = {};
+    for (const row of data ?? []) {
+      if (!row?.test_version) continue;
+      counts[row.test_version] = (counts[row.test_version] ?? 0) + 1;
+    }
+    return counts;
+  }, [supabase]);
+
+  const seedModelCategory = useCallback(async (list) => {
+    if (modelCategorySeededRef.current) return list;
+    const mockTests = (list ?? []).filter((t) => t.type === "mock");
+    if (!mockTests.length) {
+      modelCategorySeededRef.current = true;
+      return list;
+    }
+    const shouldSeed = mockTests.every((t) => !String(t.title ?? "").trim());
+    if (!shouldSeed) {
+      modelCategorySeededRef.current = true;
+      return list;
+    }
+    const ids = mockTests.map((t) => t.id).filter(Boolean);
+    if (!ids.length) {
+      modelCategorySeededRef.current = true;
+      return list;
+    }
+    const { error } = await supabase
+      .from("tests")
+      .update({ title: DEFAULT_MODEL_CATEGORY, updated_at: new Date().toISOString() })
+      .in("id", ids);
+    if (error) {
+      console.error("model category seed error:", error);
+      modelCategorySeededRef.current = true;
+      return list;
+    }
+    modelCategorySeededRef.current = true;
+    return list.map((t) => (t.type === "mock" ? { ...t, title: DEFAULT_MODEL_CATEGORY } : t));
+  }, [supabase]);
+
+  const attachGeneratedDailySourceSetIds = useCallback(async (list) => {
+    const generatedVersions = (list ?? [])
+      .filter((test) => test.type === "daily" && isGeneratedDailySessionVersion(test.version))
+      .map((test) => test.version)
+      .filter(Boolean);
+    if (!generatedVersions.length) return list;
+
+    const { data, error } = await supabase
+      .from("questions")
+      .select("test_version, order_index, data")
+      .in("test_version", generatedVersions)
+      .order("test_version", { ascending: true })
+      .order("order_index", { ascending: true });
+
+    if (error) {
+      console.error("generated daily source lookup error:", error);
+      return list;
+    }
+
+    const sourceMap = {};
+    (data ?? []).forEach((row) => {
+      const sourceVersion = String(row.data?.sourceVersion ?? "").trim();
+      if (!sourceVersion) return;
+      if (!Array.isArray(sourceMap[row.test_version])) {
+        sourceMap[row.test_version] = [];
+      }
+      if (!sourceMap[row.test_version].includes(sourceVersion)) {
+        sourceMap[row.test_version].push(sourceVersion);
+      }
+    });
+
+    return (list ?? []).map((test) => (
+      sourceMap[test.version]?.length
+        ? { ...test, source_set_ids: sourceMap[test.version] }
+        : test
+    ));
+  }, [supabase]);
+
   // ========================================================================
   // useMemo declarations (25+ memos)
   // ========================================================================
@@ -875,19 +965,87 @@ export function useTestingWorkspaceState({
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
+      const msg = String(error.message ?? "");
+      if (msg.includes("relationship") || msg.includes("questions")) {
+        // Fallback: try without relationship query
+        const fallback = await supabase
+          .from("tests")
+          .select("id, version, title, type, pass_rate, is_public, created_at")
+          .eq("is_public", true)
+          .order("created_at", { ascending: false })
+          .limit(200);
+        if (fallback.error) {
+          console.error("tests fetch error:", fallback.error);
+          setTests([]);
+          setTestsMsg(`Load failed: ${fallback.error.message}`);
+          return;
+        }
+        const list = fallback.data ?? [];
+        const counts = await fetchQuestionCounts(list.map((t) => t.version));
+        const withCounts = list.map((t) => ({
+          ...t,
+          question_count: counts[t.version] ?? 0
+        }));
+        const seeded = await seedModelCategory(withCounts);
+        const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+        setTests(hydrated);
+        const firstModel = hydrated.find((t) => t.type === "mock");
+        const firstDaily = hydrated.find((t) => t.type === "daily" && !isGeneratedDailySessionVersion(t.version));
+        if (firstModel && !testSessionForm.problem_set_id) {
+          setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
+        }
+        if (firstDaily && !dailySessionForm.problem_set_id) {
+          setDailySessionForm((s) => ({ ...s, problem_set_id: firstDaily.version }));
+        }
+        setTestsMsg(list.length ? "" : "No tests.");
+        return;
+      }
       console.error("tests fetch error:", error);
       setTests([]);
       setTestsMsg(`Load failed: ${error.message}`);
       return;
     }
     const list = data ?? [];
+    const hasRelation = list.some((t) => Array.isArray(t.questions));
+    if (!hasRelation) {
+      // No relationship data, fetch counts separately
+      const counts = await fetchQuestionCounts(list.map((t) => t.version));
+      const withCounts = list.map((t) => ({
+        ...t,
+        question_count: counts[t.version] ?? 0
+      }));
+      const seeded = await seedModelCategory(withCounts);
+      const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+      setTests(hydrated);
+      const firstModel = hydrated.find((t) => t.type === "mock");
+      const firstDaily = hydrated.find((t) => t.type === "daily" && !isGeneratedDailySessionVersion(t.version));
+      if (firstModel && !testSessionForm.problem_set_id) {
+        setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
+      }
+      if (firstDaily && !dailySessionForm.problem_set_id) {
+        setDailySessionForm((s) => ({ ...s, problem_set_id: firstDaily.version }));
+      }
+      setTestsMsg(list.length ? "" : "No tests.");
+      return;
+    }
+    // Relationship data is available, use it
     const withCounts = list.map((t) => ({
       ...t,
       question_count: t.questions?.[0]?.count ?? 0
     }));
-    setTests(withCounts);
+    const seeded = await seedModelCategory(withCounts);
+    const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+    setTests(hydrated);
+    const firstModel = hydrated.find((t) => t.type === "mock");
+    const firstDaily = hydrated.find((t) => t.type === "daily" && !isGeneratedDailySessionVersion(t.version));
+    if (firstModel && !testSessionForm.problem_set_id) {
+      setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
+    }
+    if (firstDaily && !dailySessionForm.problem_set_id) {
+      setDailySessionForm((s) => ({ ...s, problem_set_id: firstDaily.version }));
+    }
     setTestsMsg(list.length ? "" : "No tests.");
-  }, [supabase]);
+  }, [supabase, testSessionForm.problem_set_id, dailySessionForm.problem_set_id, fetchQuestionCounts, seedModelCategory, attachGeneratedDailySourceSetIds]);
 
   const fetchTestSessions = useCallback(async () => {
     if (!supabase) return;

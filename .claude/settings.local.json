@@ -51,7 +51,8 @@
       "Bash(grep -c \"function $func\\\\|const $func\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
       "Bash(done)",
       "Bash(grep -n \"^  };\\\\s*$\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
-      "Bash(awk 'NR>=11301 && NR<=11650' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)"
+      "Bash(awk 'NR>=11301 && NR<=11650' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(grep:*)"
     ]
   }
 }
