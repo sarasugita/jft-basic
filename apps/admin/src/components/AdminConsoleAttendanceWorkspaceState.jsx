@@ -301,7 +301,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
 
   // Async functions
   async function fetchAbsenceApplications() {
-    if (!activeSchoolId) {
+    if (!activeSchoolId || !supabase) {
       setAbsenceApplications([]);
       setAbsenceApplicationsMsg("");
       return;
@@ -356,7 +356,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
 
   async function fetchAttendanceDays() {
     const schoolIdSnapshot = activeSchoolIdRef.current;
-    if (!schoolIdSnapshot) {
+    if (!schoolIdSnapshot || !supabase) {
       setAttendanceDays([]);
       setAttendanceEntries({});
       setAttendanceMsg("");
@@ -418,11 +418,50 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
   // Delegate to context's openAttendanceDay which manages the core modal state
   async function openAttendanceDay(dayDate, options = {}) {
     if (openAttendanceDayCtx) {
-      return await openAttendanceDayCtx(dayDate, options);
+      await openAttendanceDayCtx(dayDate, options);
     }
     // Fallback if context function not provided
     if (!dayDate) return;
-    setAttendanceMsg("School context is missing.");
+
+    // Load existing attendance data for this day
+    const dayRecord = attendanceDayColumns.find((d) => d.day_date === dayDate);
+    if (dayRecord && attendanceEntriesByDay[dayRecord.id]) {
+      const entries = attendanceEntriesByDay[dayRecord.id];
+      const draft = {};
+
+      // Populate draft with existing attendance data
+      Object.entries(entries).forEach(([studentId, entry]) => {
+        draft[studentId] = {
+          status: entry.status || "",
+          comment: entry.comment || "",
+        };
+      });
+
+      // For students without existing data, default to N/A if they're test accounts, otherwise empty
+      students.forEach((student) => {
+        if (!draft[student.id]) {
+          draft[student.id] = {
+            status: student.is_test_account ? "N/A" : "",
+            comment: "",
+          };
+        } else if (!draft[student.id].status && student.is_test_account) {
+          // If test account but no status set, default to N/A
+          draft[student.id].status = "N/A";
+        }
+      });
+
+      setAttendanceDraft(draft);
+    } else {
+      // No existing data, initialize draft with empty values for regular students, N/A for test accounts
+      const draft = {};
+      students.forEach((student) => {
+        draft[student.id] = {
+          status: student.is_test_account ? "N/A" : "",
+          comment: "",
+        };
+      });
+      setAttendanceDraft(draft);
+    }
   }
 
   async function saveAttendanceDay() {
