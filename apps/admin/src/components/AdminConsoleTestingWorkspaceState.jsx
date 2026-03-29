@@ -240,35 +240,24 @@ function normalizeLookupValue(value) {
     .toLowerCase();
 }
 
-function getProblemSetTitle(problemSetId, testsList) {
-  const item = (testsList ?? []).find((t) => t.version === problemSetId);
-  return item?.title || problemSetId || "";
-}
-
-function isRetakeSessionTitle(title) {
-  return String(title ?? "").trim().startsWith("[Retake]");
-}
-
-function isPastSession(session) {
-  if (!session) return false;
-  const now = Date.now();
-  const endTime = session.ends_at ? new Date(session.ends_at).getTime() : NaN;
-  const startTime = session.starts_at ? new Date(session.starts_at).getTime() : NaN;
-  const createdTime = session.created_at ? new Date(session.created_at).getTime() : NaN;
-  if (Number.isFinite(endTime)) return endTime <= now;
-  if (Number.isFinite(startTime)) return startTime <= now;
-  if (Number.isFinite(createdTime)) return createdTime <= now;
-  return false;
-}
-
-function buildRetakeTitle(title) {
-  const baseTitle = String(title ?? "").trim();
-  if (!baseTitle) return "[Retake]";
-  return isRetakeSessionTitle(baseTitle) ? baseTitle : `[Retake] ${baseTitle}`;
+function normalizeTimeToFiveMinuteStep(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return text;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return text;
+  const totalMinutes = Math.max(0, Math.min((hours * 60) + minutes, (23 * 60) + 59));
+  const roundedMinutes = Math.round(totalMinutes / 5) * 5;
+  const normalizedTotal = Math.min(roundedMinutes, 23 * 60 + 55);
+  const nextHours = Math.floor(normalizedTotal / 60);
+  const nextMinutes = normalizedTotal % 60;
+  return `${String(nextHours).padStart(2, "0")}:${String(nextMinutes).padStart(2, "0")}`;
 }
 
 function getTwelveHourTimeParts(value) {
-  const match = String(value ?? "").trim().match(/^(\d{2}):(\d{2})$/);
+  const normalized = normalizeTimeToFiveMinuteStep(value);
+  const match = normalized.match(/^(\d{2}):(\d{2})$/);
   if (!match) {
     return {
       hour: "",
@@ -296,6 +285,39 @@ function buildTwentyFourHourTime(parts) {
   let normalizedHour = hourNumber % 12;
   if (period === "PM") normalizedHour += 12;
   return `${String(normalizedHour).padStart(2, "0")}:${minuteText}`;
+}
+
+function formatTwelveHourTimeDisplay(value) {
+  const parts = getTwelveHourTimeParts(value);
+  if (!parts.hour) return "--:-- --";
+  return `${parts.hour}:${parts.minute} ${parts.period}`;
+}
+
+function getProblemSetTitle(problemSetId, testsList) {
+  const item = (testsList ?? []).find((t) => t.version === problemSetId);
+  return item?.title || problemSetId || "";
+}
+
+function isRetakeSessionTitle(title) {
+  return String(title ?? "").trim().startsWith("[Retake]");
+}
+
+function isPastSession(session) {
+  if (!session) return false;
+  const now = Date.now();
+  const endTime = session.ends_at ? new Date(session.ends_at).getTime() : NaN;
+  const startTime = session.starts_at ? new Date(session.starts_at).getTime() : NaN;
+  const createdTime = session.created_at ? new Date(session.created_at).getTime() : NaN;
+  if (Number.isFinite(endTime)) return endTime <= now;
+  if (Number.isFinite(startTime)) return startTime <= now;
+  if (Number.isFinite(createdTime)) return createdTime <= now;
+  return false;
+}
+
+function buildRetakeTitle(title) {
+  const baseTitle = String(title ?? "").trim();
+  if (!baseTitle) return "[Retake]";
+  return isRetakeSessionTitle(baseTitle) ? baseTitle : `[Retake] ${baseTitle}`;
 }
 
 function combineBangladeshDateTime(dateValue, timeValue) {
@@ -2739,6 +2761,9 @@ export function useTestingWorkspaceState({
     openDailyConductModal,
     openModelUploadModal,
     getSessionEffectivePassRate,
+    getTwelveHourTimeParts,
+    buildTwentyFourHourTime,
+    formatTwelveHourTimeDisplay,
 
     // Refs
     dailySourceCategoryDropdownRef,
