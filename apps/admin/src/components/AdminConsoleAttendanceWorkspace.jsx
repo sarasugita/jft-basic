@@ -187,23 +187,6 @@ export default function AdminConsoleAttendanceWorkspace() {
           }}>
             Open Day
           </button>
-          <button className="btn btn-danger" type="button" onClick={() => {
-            if (!attendanceDate) {
-              alert("Please select a date first");
-              return;
-            }
-            const dayToDelete = attendanceDayColumns.find((d) => d.day_date === attendanceDate);
-            if (!dayToDelete) {
-              alert("No attendance record found for this date");
-              return;
-            }
-            deleteAttendanceDay(dayToDelete).catch((err) => {
-              console.error("Delete day error:", err);
-              alert(`Failed to delete day: ${err?.message || "Unknown error"}`);
-            });
-          }}>
-            Delete Day
-          </button>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", justifyContent: "flex-end", marginLeft: "auto", alignSelf: "flex-start", flex: "0 0 auto" }}>
           <button className="btn results-page-action-btn" type="button" onClick={exportAttendanceGoogleSheetsCsv}>
