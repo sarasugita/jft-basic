@@ -459,6 +459,7 @@ export function useTestingWorkspaceState({
   const [testsMsg, setTestsMsg] = useState("");
   const [testSessions, setTestSessions] = useState(externalTestSessions ?? []);
   const [testSessionsMsg, setTestSessionsMsg] = useState("");
+  const [examLinks, setExamLinks] = useState([]);
   const [linkMsg, setLinkMsg] = useState("");
 
   // Model test session modal
@@ -732,6 +733,23 @@ export function useTestingWorkspaceState({
     () => testSessions.filter((s) => dailyTests.some((t) => t.version === s.problem_set_id)),
     [testSessions, dailyTests]
   );
+
+  const linkBySession = useMemo(() => {
+    const map = {};
+    for (const link of examLinks) {
+      const sid = link.test_session_id;
+      if (!sid) continue;
+      const prev = map[sid];
+      if (!prev) {
+        map[sid] = link;
+        continue;
+      }
+      const prevTime = prev.created_at ? new Date(prev.created_at).getTime() : 0;
+      const curTime = link.created_at ? new Date(link.created_at).getTime() : 0;
+      if (curTime >= prevTime) map[sid] = link;
+    }
+    return map;
+  }, [examLinks]);
 
   const selectedSessionDetail = useMemo(() => {
     if (!sessionDetail?.sessionId) return null;
@@ -1086,6 +1104,23 @@ export function useTestingWorkspaceState({
     }
     setAssets(data ?? []);
     setAssetsMsg("");
+  }, [supabase]);
+
+  const fetchExamLinks = useCallback(async () => {
+    setLinkMsg("Loading...");
+    const { data, error } = await supabase
+      .from("exam_links")
+      .select("id, test_version, test_session_id, expires_at, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      console.error("exam_links fetch error:", error);
+      setExamLinks([]);
+      setLinkMsg(`Load failed: ${error.message}`);
+      return;
+    }
+    setExamLinks(data ?? []);
+    setLinkMsg(data?.length ? "" : "No links.");
   }, [supabase]);
 
   const buildGeneratedDailySessionTitle = useCallback(({ category, setIds, sessionDate, startTime }) => {
@@ -2636,6 +2671,11 @@ export function useTestingWorkspaceState({
   }, [supabase, activeSchoolId, fetchAssets]);
 
   useEffect(() => {
+    if (!supabase) return;
+    void fetchExamLinks();
+  }, [supabase, fetchExamLinks]);
+
+  useEffect(() => {
     if (modelCategorySeededRef.current) return;
     modelCategorySeededRef.current = true;
     if (modelCategories.length && !dailyConductCategory) {
@@ -2719,6 +2759,8 @@ export function useTestingWorkspaceState({
     setTestSessions,
     testSessionsMsg,
     setTestSessionsMsg,
+    examLinks,
+    setExamLinks,
     linkMsg,
     setLinkMsg,
 
@@ -2880,6 +2922,7 @@ export function useTestingWorkspaceState({
     dailyQuestionSets,
     modelSessions,
     dailySessions,
+    linkBySession,
     selectedSessionDetail,
     pastModelSessions,
     dailyRetakeSessions,
@@ -2920,6 +2963,7 @@ export function useTestingWorkspaceState({
     fetchTests,
     fetchTestSessions,
     fetchAssets,
+    fetchExamLinks,
     buildGeneratedDailySessionTitle,
     materializeDailyProblemSet,
     ensureTestRecord,
