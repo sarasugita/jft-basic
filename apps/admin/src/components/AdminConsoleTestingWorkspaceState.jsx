@@ -21,10 +21,51 @@ const ADMIN_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const TWELVE_HOUR_TIME_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
 const FIVE_MINUTE_MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"));
 const MERIDIEM_OPTIONS = ["AM", "PM"];
+const QUESTION_SELECT_BASE = "id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
+const QUESTION_SELECT_WITH_MEDIA = `${QUESTION_SELECT_BASE}, media_file, media_type`;
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message ?? "");
+  return message.includes(columnName) && message.toLowerCase().includes("does not exist");
+}
+
+async function fetchQuestionsForVersionWithFallback(supabaseClient, version) {
+  let result = await supabaseClient
+    .from("questions")
+    .select(QUESTION_SELECT_WITH_MEDIA)
+    .eq("test_version", version)
+    .order("order_index", { ascending: true });
+  if (result.error && (isMissingColumnError(result.error, "media_file") || isMissingColumnError(result.error, "media_type"))) {
+    result = await supabaseClient
+      .from("questions")
+      .select(QUESTION_SELECT_BASE)
+      .eq("test_version", version)
+      .order("order_index", { ascending: true });
+  }
+  return result;
+}
+
+async function fetchQuestionsForVersionsWithFallback(supabaseClient, versions) {
+  let result = await supabaseClient
+    .from("questions")
+    .select(QUESTION_SELECT_WITH_MEDIA)
+    .in("test_version", versions)
+    .order("test_version", { ascending: true })
+    .order("order_index", { ascending: true });
+  if (result.error && (isMissingColumnError(result.error, "media_file") || isMissingColumnError(result.error, "media_type"))) {
+    result = await supabaseClient
+      .from("questions")
+      .select(QUESTION_SELECT_BASE)
+      .in("test_version", versions)
+      .order("test_version", { ascending: true })
+      .order("order_index", { ascending: true });
+  }
+  return result;
+}
 
 function normalizePassRate(value, fallback = 0.8) {
   const rate = Number(value);
@@ -407,8 +448,6 @@ export function useTestingWorkspaceState({
   activeTab,
   modelSubTab,
   dailySubTab,
-  fetchQuestionsForVersionWithFallback,
-  fetchQuestionsForVersionsWithFallback,
   parseQuestionCsv: externalParseQuestionCsv,
   parseDailyCsv: externalParseDailyCsv,
   recordAuditEvent: externalRecordAuditEvent = recordAdminAuditEvent,
