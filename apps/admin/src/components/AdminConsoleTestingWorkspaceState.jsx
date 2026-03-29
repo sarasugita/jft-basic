@@ -39,6 +39,39 @@ function isGeneratedDailySessionVersion(version) {
 // Alias for readability in daily tests filtering
 const isDaily = isGeneratedDailySessionVersion;
 
+function mapQuestion(row) {
+  // Transform database question row to UI format
+  const data = row.data ?? {};
+  const stemAsset = joinAssetValues(
+    row.media_file,
+    data.stemAsset,
+    data.stem_asset,
+    data.stemAudio,
+    data.stem_audio,
+    data.stemImage,
+    data.stem_image
+  ) || null;
+  return {
+    dbId: row.id ?? null,
+    id: row.question_id,
+    questionId: row.question_id,
+    testVersion: row.test_version ?? "",
+    sectionKey: row.section_key,
+    sectionLabel: data.sectionLabel ?? data.section_label ?? null,
+    type: row.type,
+    promptEn: row.prompt_en,
+    promptBn: row.prompt_bn,
+    answerIndex: row.answer_index,
+    orderIndex: row.order_index ?? 0,
+    rawData: data,
+    sourceVersion: data.sourceVersion ?? null,
+    sourceQuestionId: data.sourceQuestionId ?? null,
+    ...data,
+    stemKind: normalizeModelCsvKind(data.stemKind ?? data.stem_kind ?? row.media_type ?? null) || null,
+    stemAsset,
+  };
+}
+
 function normalizeLookupValue(value) {
   return String(value ?? "")
     .trim()
