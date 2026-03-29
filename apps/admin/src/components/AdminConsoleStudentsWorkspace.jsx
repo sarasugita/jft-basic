@@ -955,7 +955,7 @@ export default function AdminConsoleStudentsWorkspace() {
             </div>
             {studentWarningIssueMsg ? <div className="admin-msg">{studentWarningIssueMsg}</div> : null}
             <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={issueStudentWarning} disabled={studentWarningIssueSaving}>
+              <button className="btn btn-primary" onClick={issueStudentWarningCtx} disabled={studentWarningIssueSaving}>
                 {studentWarningIssueSaving ? "Issuing..." : "Issue Warning"}
               </button>
               <button className="btn" onClick={() => setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters))}>
@@ -1017,7 +1017,7 @@ export default function AdminConsoleStudentsWorkspace() {
             <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
               <button
                 className="btn btn-danger"
-                onClick={() => deleteStudentWarning(selectedStudentWarning)}
+                onClick={() => deleteStudentWarningCtx(selectedStudentWarning)}
                 disabled={studentWarningDeletingId === selectedStudentWarning.id}
               >
                 {studentWarningDeletingId === selectedStudentWarning.id ? "Deleting..." : "Delete Warning"}
