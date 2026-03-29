@@ -82,6 +82,14 @@ function isMissingSessionAttemptOverrideTableError(error) {
   return /test_session_attempt_overrides/i.test(text) && /does not exist/i.test(text);
 }
 
+function getAssetTypeByExt(filename) {
+  const ext = String(filename ?? "").toLowerCase().split(".").pop() ?? "";
+  if (ext === "csv") return "csv";
+  if (["png", "jpg", "jpeg", "webp"].includes(ext)) return "image";
+  if (["mp3", "wav", "m4a", "ogg"].includes(ext)) return "audio";
+  return "file";
+}
+
 function normalizeLookupValue(value) {
   return String(value ?? "")
     .trim()
