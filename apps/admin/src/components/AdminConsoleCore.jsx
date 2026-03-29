@@ -7030,16 +7030,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setApprovedAbsenceByStudent(map);
     }
     setAttendanceModalDay(day);
-    let existing = day.id ? (attendanceEntriesByDay[day.id] ?? {}) : {};
+    let existing = {};
 
-    // If day exists, fetch fresh entries from database
+    // For existing days, fetch fresh entries from database
     if (day.id) {
       const { data: entries, error: entriesError } = await supabase
         .from("attendance_entries")
         .select("student_id, status, comment")
         .eq("day_id", day.id);
-      if (!entriesError && entries) {
-        existing = {};
+      if (!entriesError && entries && Array.isArray(entries)) {
         entries.forEach((row) => {
           if (row?.student_id) {
             existing[row.student_id] = {
@@ -7048,6 +7047,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
             };
           }
         });
+      } else if (entriesError) {
+        console.error("Failed to fetch attendance entries:", entriesError);
       }
     }
 
@@ -10707,6 +10708,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
     attendanceEntriesByDay,
     buildAttendanceStats,
     getAttendanceStatusClassName,
+    openAttendanceDay,
+    saveAttendanceDay,
+    deleteAttendanceDay,
     attendanceMsg,
     absenceApplications,
     decideAbsenceApplication,
