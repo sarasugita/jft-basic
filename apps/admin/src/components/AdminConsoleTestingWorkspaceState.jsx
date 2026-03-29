@@ -18,6 +18,9 @@ import { recordAdminAuditEvent } from "../lib/adminAudit";
 const DEFAULT_MODEL_CATEGORY = "Book Review";
 const CUSTOM_CATEGORY_OPTION = "__custom__";
 const ADMIN_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const TWELVE_HOUR_TIME_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
+const FIVE_MINUTE_MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"));
+const MERIDIEM_OPTIONS = ["AM", "PM"];
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -3013,6 +3016,13 @@ export function useTestingWorkspaceState({
     exportModelGoogleSheetsCsv,
     getSectionTitle,
     getProblemSetDisplayId,
+
+    // Constants
+    DEFAULT_MODEL_CATEGORY,
+    CUSTOM_CATEGORY_OPTION,
+    TWELVE_HOUR_TIME_OPTIONS,
+    FIVE_MINUTE_MINUTE_OPTIONS,
+    MERIDIEM_OPTIONS,
 
     // Refs
     dailySourceCategoryDropdownRef,
