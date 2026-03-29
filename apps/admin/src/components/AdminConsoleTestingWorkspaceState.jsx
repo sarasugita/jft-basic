@@ -161,6 +161,39 @@ function isAudioAsset(value) {
     || probe.includes("/audios/");
 }
 
+function formatSubSectionLabel(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const normalized = raw
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[()]/g, " ")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const labelMap = {
+    word_meaning: "Word Meaning",
+    word_usage: "Word Usage",
+    kanji_reading: "Kanji Reading",
+    kanji_meaning_and_usage: "Kanji Usage",
+    kanji_usage: "Kanji Usage",
+    grammar: "Grammar",
+    expression: "Expression",
+    comprehending_content_conversation: "Conversation",
+    conversation: "Conversation",
+    comprehending_content_communicating_at_shops_and_public_places: "Shops and Public Places",
+    public_place: "Shops and Public Places",
+    shops_and_public_places: "Shops and Public Places",
+    comprehending_content_listening_to_announcements_and_instructions: "Announcements and Instructions",
+    announcement: "Announcements and Instructions",
+    announcements_and_instructions: "Announcements and Instructions",
+    comprehending_content: "Comprehension",
+    comprehension: "Comprehension",
+    info_search: "Information Search",
+    information_search: "Information Search",
+  };
+  return labelMap[normalized] || raw;
+}
+
 function sanitizeStoragePathSegment(value, fallback = "file") {
   const normalized = String(value ?? "")
     .trim()
@@ -516,6 +549,10 @@ export function useTestingWorkspaceState({
   const getSectionTitle = (sectionKey) => {
     const section = sections.find((s) => s.key === sectionKey);
     return section?.title ?? sectionKey ?? "";
+  };
+
+  const getQuestionSectionLabel = (question) => {
+    return formatSubSectionLabel(question?.sectionLabel) || getSectionTitle(question?.sectionKey);
   };
 
   // ========================================================================
@@ -3198,6 +3235,7 @@ export function useTestingWorkspaceState({
     exportDailyGoogleSheetsCsv,
     exportModelGoogleSheetsCsv,
     getSectionTitle,
+    getQuestionSectionLabel,
     getProblemSetDisplayId,
     normalizeModelCsvKind,
     splitAssetValues,
