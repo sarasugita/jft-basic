@@ -257,6 +257,8 @@ export function useTestingWorkspaceState({
   dailySubTab,
   fetchQuestionsForVersionWithFallback,
   fetchQuestionsForVersionsWithFallback,
+  parseQuestionCsv: externalParseQuestionCsv,
+  parseDailyCsv: externalParseDailyCsv,
   recordAuditEvent: externalRecordAuditEvent = recordAdminAuditEvent,
   // Optional parameters with sensible defaults
   getAccessToken: externalGetAccessToken = async () => "",
@@ -281,6 +283,8 @@ export function useTestingWorkspaceState({
   const getAuditEvent = externalRecordAuditEvent || recordAdminAuditEvent;
   const recordAuditEvent = getAuditEvent; // Alias for consistency
   const getAccessToken = externalGetAccessToken;
+  const parseQuestionCsv = externalParseQuestionCsv || ((text, version) => ({ questions: [], choices: [], errors: ["parseQuestionCsv not provided"] }));
+  const parseDailyCsv = externalParseDailyCsv || ((text, version) => ({ questions: [], choices: [], errors: ["parseDailyCsv not provided"] }));
   const runSearch = externalRunSearch;
   const exportDailyGoogleSheetsCsv = externalExportDailyGoogleSheetsCsv;
   const exportModelGoogleSheetsCsv = externalExportModelGoogleSheetsCsv;

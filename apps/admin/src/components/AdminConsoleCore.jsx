@@ -9014,6 +9014,253 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   // CSV utility functions (shared by DailyRecord and Testing workspaces)
+  function parseQuestionCsv(text, defaultTestVersion = "") {
+    const delimiter = detectDelimiter(text);
+    const rows = parseSeparatedRows(text, delimiter);
+    if (rows.length === 0) return { questions: [], choices: [], errors: ["CSV is empty."] };
+    const header = rows[0].map((h) => String(h ?? "").trim().replace(/^\uFEFF/, ""));
+    const normalizedHeader = header.map(normalizeHeaderName);
+    const idx = (name) => header.indexOf(name);
+    const getCell = (row, name) => {
+      const i = idx(name);
+      return i === -1 ? "" : normalizeCsvValue(row[i]);
+    };
+    const getInt = (row, name) => {
+      const v = getCell(row, name);
+      if (!v) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    if (
+      normalizedHeader.includes("qid")
+      && normalizedHeader.includes("sub_section")
+      && normalizedHeader.includes("correct_option")
+    ) {
+      const findIdx = (names) => {
+        for (const name of names) {
+          const found = normalizedHeader.indexOf(normalizeHeaderName(name));
+          if (found !== -1) return found;
+        }
+        return -1;
+      };
+      const cell = (row, index) => (index === -1 ? "" : normalizeCsvValue(row[index]));
+      const idxSetId = findIdx(["set_id", "set id", "test_version"]);
+      const idxQid = findIdx(["qid"]);
+      const idxSubSection = findIdx(["sub_section", "sub section"]);
+      const idxPromptEn = findIdx(["prompt_en", "prompt en"]);
+      const idxPromptBn = findIdx(["prompt_bn", "prompt bn"]);
+      const idxStemKind = findIdx(["stem_kind", "stem kind"]);
+      const idxStemText = findIdx(["stem_text", "stem text"]);
+      const idxStemImage = findIdx(["stem_image", "stem image"]);
+      const idxStemAudio = findIdx(["stem_audio", "stem audio"]);
+      const idxSubQuestion = findIdx(["sub_question", "sub question"]);
+      const idxOptionType = findIdx(["option_type", "option type"]);
+      const idxCorrect = findIdx(["correct_option", "correct option"]);
+      const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1"]);
+      const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2"]);
+      const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3"]);
+
+      if (idxQid === -1 || idxSubSection === -1 || idxCorrect === -1) {
+        return { questions: [], choices: [], errors: ["CSV must include qid, sub_section, and correct_option."] };
+      }
+
+      const questions = [];
+      const choices = [];
+      const errors = [];
+      const seenQuestionIds = new Set();
+
+      for (let r = 1; r < rows.length; r += 1) {
+        const row = rows[r];
+        const testVersion = defaultTestVersion || cell(row, idxSetId);
+        const rawQid = cell(row, idxQid);
+        const subSection = cell(row, idxSubSection);
+        const promptEn = cell(row, idxPromptEn) || null;
+        const promptBn = cell(row, idxPromptBn) || null;
+        const stemKindInput = cell(row, idxStemKind);
+        const stemText = cell(row, idxStemText) || null;
+        const { stemKind, stemImage, stemAudio } = resolveModelStemAssets(
+          stemKindInput,
+          cell(row, idxStemImage) || null,
+          cell(row, idxStemAudio) || null
+        );
+        const subQuestion = cell(row, idxSubQuestion) || null;
+        const optionType = cell(row, idxOptionType) || null;
+        const correct = cell(row, idxCorrect);
+        const wrongs = [cell(row, idxWrong1), cell(row, idxWrong2), cell(row, idxWrong3)].filter(Boolean);
+
+        if (!rawQid && !subSection && !promptEn && !promptBn && !stemText && !stemImage && !stemAudio && !subQuestion && !correct) {
+          continue;
+        }
+        if (!testVersion) {
+          errors.push(`Row ${r + 1}: set_id is required.`);
+          continue;
+        }
+        if (!rawQid) {
+          errors.push(`Row ${r + 1}: qid is required.`);
+          continue;
+        }
+        if (seenQuestionIds.has(rawQid)) {
+          errors.push(`Row ${r + 1}: duplicate qid "${rawQid}".`);
+          continue;
+        }
+        seenQuestionIds.add(rawQid);
+        if (!subSection) {
+          errors.push(`Row ${r + 1} (${rawQid}): sub_section is required.`);
+          continue;
+        }
+        if (!correct) {
+          errors.push(`Row ${r + 1} (${rawQid}): correct_option is required.`);
+          continue;
+        }
+
+        const parsedId = parseModelQuestionId(rawQid);
+        const sectionKey = resolveModelSectionKey(rawQid, subSection);
+        const stemAsset = joinAssetValues(
+          stemAudio,
+          stemImage
+        ) || null;
+        const choicesList = [correct, ...wrongs].filter(Boolean);
+        if (!choicesList.length) {
+          errors.push(`Row ${r + 1} (${rawQid}): choices are required.`);
+          continue;
+        }
+
+        const type = inferModelQuestionType({
+          sectionKey,
+          stemKind,
+          stemText,
+          stemImage,
+          stemAudio,
+          subQuestion,
+          optionType,
+        });
+        const orderIndex = computeModelOrderIndex(rawQid, r, sectionKey);
+        const data = {
+          qid: parsedId.groupQid,
+          subId: parsedId.subId,
+          itemId: rawQid,
+          stemKind,
+          stemText,
+          stemAsset,
+          stemExtra: null,
+          boxText: subQuestion,
+          choices: choicesList,
+          sectionLabel: subSection,
+          optionType,
+        };
+
+        questions.push({
+          test_version: testVersion,
+          question_id: rawQid,
+          section_key: sectionKey,
+          type,
+          prompt_en: promptEn,
+          prompt_bn: promptBn,
+          answer_index: 0,
+          order_index: orderIndex,
+          data,
+        });
+        const useImageChoices = isModelOptionImageType(optionType);
+        choicesList.forEach((value, choiceIndex) => {
+          choices.push({
+            test_version: testVersion,
+            question_key: rawQid,
+            part_index: null,
+            choice_index: choiceIndex,
+            label: useImageChoices ? null : value,
+            choice_image: useImageChoices ? value : null,
+          });
+        });
+      }
+
+      return { questions, choices, errors };
+    }
+
+    if (idx("item_id") === -1 || idx("section_key") === -1 || idx("type") === -1) {
+      return { questions: [], choices: [], errors: ["CSV must include item_id, section_key, type."] };
+    }
+
+    const questions = [];
+    const choices = [];
+    const errors = [];
+
+    for (let r = 1; r < rows.length; r += 1) {
+      const row = rows[r];
+      const questionId = getCell(row, "item_id");
+      if (!questionId) continue;
+      const testVersion = defaultTestVersion || getCell(row, "test_version");
+      if (!testVersion) {
+        errors.push(`Row ${r + 1}: test_version is required.`);
+        continue;
+      }
+      const sectionKey = getCell(row, "section_key");
+      const type = getCell(row, "type");
+      const promptEn = getCell(row, "prompt_en") || null;
+      const promptBn = getCell(row, "prompt_bn") || null;
+      const orderIndex = getInt(row, "order_index");
+      const answerIndex = parseAnswerIndex(getCell(row, "answer"));
+      const choicesList = ["choiceA", "choiceB", "choiceC", "choiceD"]
+        .map((key) => getCell(row, key))
+        .filter(Boolean);
+      if (!sectionKey || !type) {
+        errors.push(`Row ${r + 1} (${questionId}): section_key and type are required.`);
+        continue;
+      }
+      if (answerIndex == null) {
+        errors.push(`Row ${r + 1} (${questionId}): answer must be A/B/C/D.`);
+        continue;
+      }
+      if (choicesList.length === 0) {
+        errors.push(`Row ${r + 1} (${questionId}): choices are required.`);
+        continue;
+      }
+      if (answerIndex >= choicesList.length) {
+        errors.push(`Row ${r + 1} (${questionId}): answer is out of range for choices.`);
+        continue;
+      }
+
+      const data = {
+        qid: getCell(row, "qid") || null,
+        subId: getCell(row, "sub_id") || null,
+        itemId: questionId,
+        stemKind: normalizeModelCsvKind(getCell(row, "stem_kind")) || null,
+        stemText: getCell(row, "stem_text") || null,
+        stemAsset: getCell(row, "stem_asset") || null,
+        stemExtra: getCell(row, "stem_extra") || null,
+        boxText: getCell(row, "box_text") || null,
+        choices: choicesList,
+        target: getCell(row, "target") || null,
+        blankStyle: getCell(row, "meta_blank_style") || null,
+      };
+
+      questions.push({
+        test_version: testVersion,
+        question_id: questionId,
+        section_key: sectionKey || null,
+        type,
+        prompt_en: promptEn,
+        prompt_bn: promptBn,
+        answer_index: answerIndex != null ? answerIndex : null,
+        order_index: orderIndex != null ? orderIndex : r,
+        data,
+      });
+      choicesList.forEach((value, i) => {
+        const isImage = /\.(png|jpe?g|webp)$/i.test(value);
+        choices.push({
+          test_version: testVersion,
+          question_key: questionId,
+          part_index: null,
+          choice_index: i,
+          label: isImage ? null : value,
+          choice_image: isImage ? value : null,
+        });
+      });
+    }
+
+    return { questions, choices, errors };
+  }
+
   function parseDailyCsv(text, defaultTestVersion = "") {
     const delimiter = detectDelimiter(text);
     const rows = parseSeparatedRows(text, delimiter);
@@ -11204,6 +11451,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
     sessionDetail,
     testingTabProps,
     resultsWorkspaceProps,
+    parseQuestionCsv,
+    parseDailyCsv,
   };
 
   return (

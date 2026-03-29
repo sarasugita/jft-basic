@@ -44,7 +44,14 @@
       "Bash(/tmp/remove_testing_funcs.sh)",
       "Bash(/tmp/remove_upload_funcs.sh:*)",
       "Bash(chmod +x /tmp/remove_upload_funcs.sh)",
-      "Bash(/tmp/remove_upload_funcs.sh)"
+      "Bash(/tmp/remove_upload_funcs.sh)",
+      "Bash(for func:*)",
+      "Bash(do)",
+      "Bash(echo -n \"$func: \")",
+      "Bash(grep -c \"function $func\\\\|const $func\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(done)",
+      "Bash(grep -n \"^  };\\\\s*$\" /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)",
+      "Bash(awk 'NR>=11301 && NR<=11650' /Users/1231s/Projects/jft-navi/apps/admin/src/components/AdminConsoleCore.jsx)"
     ]
   }
 }

@@ -34,6 +34,12 @@ export default function AdminConsoleTestingWorkspace() {
     recordAdminAuditEvent,
   } = context;
 
+  // Get CSV parsers from context
+  const {
+    parseQuestionCsv,
+    parseDailyCsv,
+  } = context;
+
   // Initialize testing workspace state hook
   const hookState = useTestingWorkspaceState({
     supabase,
@@ -43,6 +49,8 @@ export default function AdminConsoleTestingWorkspace() {
     activeTab,
     modelSubTab,
     dailySubTab,
+    parseQuestionCsv,
+    parseDailyCsv,
     recordAuditEvent: recordAdminAuditEvent,
     isAnalyticsExcludedStudent,
     getScoreRate,
