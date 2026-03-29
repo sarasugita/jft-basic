@@ -3174,6 +3174,7 @@ export function useTestingWorkspaceState({
     exportModelGoogleSheetsCsv,
     getSectionTitle,
     getProblemSetDisplayId,
+    normalizeModelCsvKind,
 
     // Constants
     DEFAULT_MODEL_CATEGORY,
