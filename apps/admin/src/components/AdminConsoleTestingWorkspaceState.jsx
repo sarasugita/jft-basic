@@ -560,6 +560,8 @@ export function useTestingWorkspaceState({
   const [dailyConductCategory, setDailyConductCategory] = useState("");
   const [modelUploadCategory, setModelUploadCategory] = useState("");
   const [dailyUploadCategory, setDailyUploadCategory] = useState("");
+  const [dailyResultsCategory, setDailyResultsCategory] = useState("");
+  const [modelResultsCategory, setModelResultsCategory] = useState("");
 
   // ========================================================================
   // useRef declarations (9 refs)
@@ -790,6 +792,21 @@ export function useTestingWorkspaceState({
     () => buildCategories(filteredDailyUploadTests),
     [filteredDailyUploadTests],
   );
+
+  const dailyResultCategories = useMemo(() => {
+    const sessionVersions = new Set((dailySessions ?? []).map((session) => session.problem_set_id).filter(Boolean));
+    return buildCategories((dailyTests ?? []).filter((test) => sessionVersions.has(test.version)));
+  }, [dailySessions, dailyTests]);
+
+  const modelResultCategories = useMemo(() => {
+    const sessionVersions = new Set(
+      (testSessions ?? [])
+        .filter((session) => !isRetakeSessionTitle(session.title))
+        .map((session) => session.problem_set_id)
+        .filter(Boolean)
+    );
+    return buildCategories((modelTests ?? []).filter((test) => sessionVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
+  }, [modelTests, testSessions]);
 
   // ========================================================================
   // useCallback functions (39+ callbacks)
@@ -2637,6 +2654,12 @@ export function useTestingWorkspaceState({
     selectedDailyQuestionCount,
     dailyCategories,
     modelCategories,
+    dailyResultCategories,
+    modelResultCategories,
+    dailyResultsCategory,
+    setDailyResultsCategory,
+    modelResultsCategory,
+    setModelResultsCategory,
     filteredModelUploadTests,
     groupedModelUploadTests,
     filteredDailyUploadTests,
