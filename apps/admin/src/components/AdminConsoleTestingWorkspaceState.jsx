@@ -90,6 +90,30 @@ function getAssetTypeByExt(filename) {
   return "file";
 }
 
+function sanitizeStoragePathSegment(value, fallback = "file") {
+  const normalized = String(value ?? "")
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const sanitized = normalized
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return sanitized || fallback;
+}
+
+function buildStorageObjectPath(testType, testVersion, assetType, relativePath) {
+  const baseSegments = [
+    sanitizeStoragePathSegment(testType, "test"),
+    sanitizeStoragePathSegment(testVersion, "set"),
+    sanitizeStoragePathSegment(assetType, "file"),
+  ];
+  const relativeSegments = String(relativePath ?? "")
+    .split("/")
+    .map((segment) => sanitizeStoragePathSegment(segment))
+    .filter(Boolean);
+  return [...baseSegments, ...(relativeSegments.length ? relativeSegments : ["file"])].join("/");
+}
+
 function normalizeLookupValue(value) {
   return String(value ?? "")
     .trim()
