@@ -52,6 +52,7 @@ export default function AdminConsoleTestingTabs({
   modelConductCategory,
   setModelConductCategory,
   modelCategories,
+  modelConductCategories,
   modelConductTests,
   getStudentBaseUrl,
   openModelUploadModal,
@@ -110,6 +111,7 @@ export default function AdminConsoleTestingTabs({
   dailySessionsMsg,
   dailySourceCategoryDropdownRef,
   dailyCategories,
+  dailyConductCategories,
   dailySourceCategoryDropdownOpen,
   setDailySourceCategoryDropdownOpen,
   selectedDailySourceCategoryNames,
@@ -130,7 +132,9 @@ export default function AdminConsoleTestingTabs({
   setDailyUploadCategory,
   groupedDailyUploadTests,
   dailyUploadMsg,
+  setDailyUploadMsg,
   dailyImportMsg,
+  setDailyImportMsg,
   editingTestMsg,
   dailyCategorySelect,
   setDailyCategorySelect,
@@ -164,12 +168,14 @@ export default function AdminConsoleTestingTabs({
     if (!value) return "";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-    return `${year}-${month}-${day} ${hours}:${minutes}`;
+    return date.toLocaleString("en-GB", {
+      timeZone: "Asia/Dhaka",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
   }
 
   const compactDateColumnStyle = { minWidth: 150, whiteSpace: "nowrap" };
@@ -334,24 +340,40 @@ export default function AdminConsoleTestingTabs({
                             </td>
                             <td>
                               {editingSessionId === t.id ? (
-                                <input
-                                  type="datetime-local"
-                                  step="300"
-                                  value={editingSessionForm.starts_at}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-                                />
+                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                                  <input
+                                    type="date"
+                                    value={editingSessionForm.starts_at_date}
+                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_date: e.target.value }))}
+                                  />
+                                  <input
+                                    type="time"
+                                    value={editingSessionForm.starts_at_time}
+                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_time: e.target.value }))}
+                                    step="300"
+                                  />
+                                  <span style={{ fontSize: "12px", whiteSpace: "nowrap" }}>BDT</span>
+                                </div>
                               ) : (
                                 formatCompactDateTime(t.starts_at)
                               )}
                             </td>
                             <td>
                               {editingSessionId === t.id ? (
-                                <input
-                                  type="datetime-local"
-                                  step="300"
-                                  value={editingSessionForm.ends_at}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-                                />
+                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                                  <input
+                                    type="date"
+                                    value={editingSessionForm.ends_at_date}
+                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_date: e.target.value }))}
+                                  />
+                                  <input
+                                    type="time"
+                                    value={editingSessionForm.ends_at_time}
+                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_time: e.target.value }))}
+                                    step="300"
+                                  />
+                                  <span style={{ fontSize: "12px", whiteSpace: "nowrap" }}>BDT</span>
+                                </div>
                               ) : (
                                 formatCompactDateTime(t.ends_at)
                               )}
@@ -702,10 +724,10 @@ export default function AdminConsoleTestingTabs({
                               value={modelConductCategory}
                               onChange={(e) => setModelConductCategory(e.target.value)}
                             >
-                              {modelCategories.length ? (
+                              {modelConductCategories.length ? (
                                 <>
                                   <option value="">Select category</option>
-                                  {modelCategories.map((c) => (
+                                  {modelConductCategories.map((c) => (
                                     <option key={`model-cat-${c.name}`} value={c.name}>
                                       {c.name}
                                     </option>
@@ -1449,24 +1471,40 @@ export default function AdminConsoleTestingTabs({
                             </td>
                             <td>
                               {editingSessionId === t.id ? (
-                                <input
-                                  type="datetime-local"
-                                  step="300"
-                                  value={editingSessionForm.starts_at}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at: e.target.value }))}
-                                />
+                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                                  <input
+                                    type="date"
+                                    value={editingSessionForm.starts_at_date}
+                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_date: e.target.value }))}
+                                  />
+                                  <input
+                                    type="time"
+                                    value={editingSessionForm.starts_at_time}
+                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_time: e.target.value }))}
+                                    step="300"
+                                  />
+                                  <span style={{ fontSize: "12px", whiteSpace: "nowrap" }}>BDT</span>
+                                </div>
                               ) : (
                                 formatCompactDateTime(t.starts_at)
                               )}
                             </td>
                             <td>
                               {editingSessionId === t.id ? (
-                                <input
-                                  type="datetime-local"
-                                  step="300"
-                                  value={editingSessionForm.ends_at}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at: e.target.value }))}
-                                />
+                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                                  <input
+                                    type="date"
+                                    value={editingSessionForm.ends_at_date}
+                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_date: e.target.value }))}
+                                  />
+                                  <input
+                                    type="time"
+                                    value={editingSessionForm.ends_at_time}
+                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_time: e.target.value }))}
+                                    step="300"
+                                  />
+                                  <span style={{ fontSize: "12px", whiteSpace: "nowrap" }}>BDT</span>
+                                </div>
                               ) : (
                                 formatCompactDateTime(t.ends_at)
                               )}
@@ -1904,8 +1942,8 @@ export default function AdminConsoleTestingTabs({
                                   </button>
                                   {dailySourceCategoryDropdownOpen ? (
                                     <div className="daily-session-create-set-list">
-                                      {dailyCategories.length ? (
-                                        dailyCategories.map((category) => {
+                                      {dailyConductCategories.length ? (
+                                        dailyConductCategories.map((category) => {
                                           const checked = selectedDailySourceCategoryNames.includes(category.name);
                                           return (
                                             <label
@@ -2343,7 +2381,14 @@ export default function AdminConsoleTestingTabs({
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                       <div className="admin-title">Daily Test Upload (CSV)</div>
-                      <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => setDailyUploadOpen(true)}>
+                      <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => {
+                        setAssetFile(null);
+                        setAssetFiles([]);
+                        setAssetCsvFile(null);
+                        setDailyUploadMsg("");
+                        setDailyImportMsg("");
+                        setDailyUploadOpen(true);
+                      }}>
                         <svg viewBox="0 0 20 20" aria-hidden="true">
                           <path
                             d="M10 13V4.5"

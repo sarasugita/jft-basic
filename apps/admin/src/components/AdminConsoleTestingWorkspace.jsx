@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import AdminConsoleTestingTabs from "./AdminConsoleTestingTabs";
 import { useTestingWorkspaceState } from "./AdminConsoleTestingWorkspaceState";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
@@ -40,6 +40,12 @@ export default function AdminConsoleTestingWorkspace() {
     parseDailyCsv,
   } = context;
 
+  // Memoize recordAuditEvent to prevent unnecessary re-renders in the hook
+  const memoizedRecordAuditEvent = useCallback(
+    (eventObj) => recordAdminAuditEvent(supabase, eventObj),
+    [supabase, recordAdminAuditEvent]
+  );
+
   // Initialize testing workspace state hook
   const hookState = useTestingWorkspaceState({
     supabase,
@@ -51,7 +57,7 @@ export default function AdminConsoleTestingWorkspace() {
     dailySubTab,
     parseQuestionCsv,
     parseDailyCsv,
-    recordAuditEvent: recordAdminAuditEvent,
+    recordAuditEvent: memoizedRecordAuditEvent,
     isAnalyticsExcludedStudent,
     getScoreRate,
     getTabLeftCount,

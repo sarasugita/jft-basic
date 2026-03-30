@@ -1672,7 +1672,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     return (
                       <tr key={`session-attempt-${attempt.id}`} onClick={() => openAttemptDetail(attempt)}>
                         <td>{index + 1}</td>
-                        <td>{formatDateTime(attempt.created_at)}</td>
+                        <td>{attempt.created_at ? new Date(attempt.created_at).toLocaleString("en-CA", { timeZone: "Asia/Dhaka", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(/,/, "") : ""}</td>
                         <td>{attempt.display_name ?? ""}</td>
                         <td>{attempt.student_code ?? ""}</td>
                         <td>{attempt.correct}/{attempt.total}</td>
