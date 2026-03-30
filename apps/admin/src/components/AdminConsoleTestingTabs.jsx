@@ -120,6 +120,7 @@ export default function AdminConsoleTestingTabs({
   setDailyConductCategory,
   dailySetDropdownRef,
   dailyConductTests,
+  dailySingleModeTests,
   selectedDailyProblemSetIds,
   toggleDailyProblemSetSelection,
   dailySessionCategories,
@@ -2061,8 +2062,8 @@ export default function AdminConsoleTestingTabs({
                                   }))
                                 }
                               >
-                                {dailyConductTests.length ? (
-                                  dailyConductTests.map((t) => (
+                                {dailySingleModeTests.length ? (
+                                  dailySingleModeTests.map((t) => (
                                     <option key={`daily-ps-${t.version}`} value={t.version}>
                                       {t.version}
                                     </option>

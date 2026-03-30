@@ -1117,6 +1117,21 @@ export function useTestingWorkspaceState({
     });
   }, [dailyQuestionSets, selectedDailySourceCategoryNames]);
 
+  // For single mode, get tests for the currently selected category
+  const dailySingleModeTests = useMemo(() => {
+    if (dailySessionForm.selection_mode !== "single" || !dailyConductCategory) {
+      return [];
+    }
+    // Filter tests by category - use dailyQuestionSets if available
+    const sourceTests = dailyQuestionSets.length > 0
+      ? dailyQuestionSets
+      : dailyTests.filter((t) => !String(t.version ?? "").startsWith("daily_session_"));
+    return sourceTests.filter((test) => {
+      const testCategory = String(test.title ?? "").trim() || "Uncategorized";
+      return testCategory === dailyConductCategory;
+    });
+  }, [dailyQuestionSets, dailyTests, dailyConductCategory, dailySessionForm.selection_mode]);
+
   const selectedDailyProblemSetIds = useMemo(() => {
     if (dailySessionForm.selection_mode === "multiple") {
       return dailySessionForm.problem_set_ids ?? [];
@@ -3375,10 +3390,22 @@ export function useTestingWorkspaceState({
     if (mode !== "retake") {
       setDailyRetakeCategory("");
       setDailyRetakeSourceId("");
+
+      // Get first available category and its first test
+      const firstCategory = dailyCategories[0]?.name ?? "";
+      let firstTestVersion = "";
+      if (firstCategory) {
+        const firstTest = dailyQuestionSets.find((t) => {
+          const testCategory = String(t.title ?? "").trim() || "Uncategorized";
+          return testCategory === firstCategory;
+        });
+        firstTestVersion = firstTest?.version ?? "";
+      }
+
       setDailySessionForm({
         selection_mode: "single",
-        problem_set_id: "",
-        problem_set_ids: [],
+        problem_set_id: firstTestVersion,
+        problem_set_ids: firstTestVersion ? [firstTestVersion] : [],
         source_categories: [],
         session_category: "",
         title: "",
@@ -3393,7 +3420,7 @@ export function useTestingWorkspaceState({
         pass_rate: "0.8",
         retake_release_scope: "all",
       });
-      setDailyConductCategory("");
+      setDailyConductCategory(firstCategory);
       return;
     }
     const firstCategory = pastDailySessionCategories[0]?.name ?? "";
@@ -3401,7 +3428,7 @@ export function useTestingWorkspaceState({
     const source = pastDailySessionCategories[0]?.sessions?.[0] ?? null;
     setDailyRetakeSourceId(source?.id ?? "");
     if (source) applyDailyRetakeSourceSession(source);
-  }, [pastDailySessionCategories, applyDailyRetakeSourceSession]);
+  }, [pastDailySessionCategories, dailyCategories, applyDailyRetakeSourceSession]);
 
   const openModelUploadModal = useCallback(() => {
     // Clear previous file selections and messages
@@ -3496,17 +3523,6 @@ export function useTestingWorkspaceState({
       return current;
     });
   }, [dailyCategories, dailyConductCategory]);
-
-  // In single mode, clear problem_set_id when selected category changes
-  useEffect(() => {
-    if (dailySessionForm.selection_mode !== "single") return;
-    setDailySessionForm((current) => {
-      if (current.problem_set_id) {
-        return { ...current, problem_set_id: "" };
-      }
-      return current;
-    });
-  }, [dailyConductCategory]);
 
   useEffect(() => {
     if (pastDailySessionCategories.length) {
@@ -3787,6 +3803,7 @@ export function useTestingWorkspaceState({
     sessionDetailStudentOptions,
     selectedDailySourceCategoryNames,
     dailyConductTests,
+    dailySingleModeTests,
     selectedDailyProblemSetIds,
     selectedDailyQuestionCount,
     dailyCategories,
