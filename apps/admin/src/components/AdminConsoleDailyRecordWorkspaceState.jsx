@@ -1012,8 +1012,15 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     const sessionsForDate = (testSessions ?? [])
       .filter((session) => {
         if (!session.starts_at) return false;
-        const sessionDate = session.starts_at.split("T")[0];
-        return sessionDate === recordDate;
+        // Convert UTC time to Bangladesh timezone (UTC+6) before extracting date
+        const dateObj = new Date(session.starts_at);
+        const bdtDate = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Dhaka",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(dateObj);
+        return bdtDate === recordDate;
       })
       .sort((a, b) => {
         const aTime = new Date(a.starts_at || "").getTime();
