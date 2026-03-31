@@ -1071,24 +1071,24 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
   // Auto-fill test fields based on scheduled tests for the day
   useEffect(() => {
-    if (!dailyRecordTodaySessions.dailyTests && !dailyRecordTodaySessions.modelTests) return;
+    if (!dailyRecordTodaySessions || (!dailyRecordTodaySessions.dailyTests?.length && !dailyRecordTodaySessions.modelTests?.length)) return;
 
     setDailyRecordForm((prev) => {
       const updated = { ...prev };
 
       // Fill daily test columns (mini_test_1, mini_test_2)
-      if (!updated.mini_test_1.trim() && dailyRecordTodaySessions.dailyTests[0]) {
+      if (!(updated.mini_test_1 || "").trim() && dailyRecordTodaySessions.dailyTests?.[0]) {
         updated.mini_test_1 = dailyRecordTodaySessions.dailyTests[0];
       }
-      if (!updated.mini_test_2.trim() && dailyRecordTodaySessions.dailyTests[1]) {
+      if (!(updated.mini_test_2 || "").trim() && dailyRecordTodaySessions.dailyTests?.[1]) {
         updated.mini_test_2 = dailyRecordTodaySessions.dailyTests[1];
       }
 
       // Fill model test columns (special_test_1, special_test_2)
-      if (!updated.special_test_1.trim() && dailyRecordTodaySessions.modelTests[0]) {
+      if (!(updated.special_test_1 || "").trim() && dailyRecordTodaySessions.modelTests?.[0]) {
         updated.special_test_1 = dailyRecordTodaySessions.modelTests[0];
       }
-      if (!updated.special_test_2.trim() && dailyRecordTodaySessions.modelTests[1]) {
+      if (!(updated.special_test_2 || "").trim() && dailyRecordTodaySessions.modelTests?.[1]) {
         updated.special_test_2 = dailyRecordTodaySessions.modelTests[1];
       }
 
