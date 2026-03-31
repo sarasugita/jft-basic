@@ -290,13 +290,11 @@ function getTodayDateInput() {
   return `${year}-${month}-${day}`;
 }
 
-function addDays(dateStr, days) {
-  const date = new Date(dateStr);
-  date.setDate(date.getDate() + days);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function addDays(dateString, offsetDays) {
+  const base = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return dateString;
+  base.setDate(base.getDate() + offsetDays);
+  return base.toISOString().slice(0, 10);
 }
 
 function getWeekdayNumber(dateString) {
@@ -940,10 +938,28 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   }, [dailyRecordCalendarMonth, dailyRecordCalendarMonths]);
 
   const dailyRecordTomorrowSessions = useMemo(() => {
-    const targetDate = addDays(dailyRecordForm.record_date || getTodayDateInput(), 1);
+    const recordDate = dailyRecordForm.record_date || getTodayDateInput();
+    const targetDate = addDays(recordDate, 1);
+
+    // Debug logging
+    const allSessionsByDate = {};
+    (testSessions ?? []).forEach((session) => {
+      if (session.starts_at) {
+        const date = session.starts_at.split("T")[0];
+        if (!allSessionsByDate[date]) allSessionsByDate[date] = 0;
+        allSessionsByDate[date]++;
+      }
+    });
+    console.log("Daily Record Filtering Debug:", {
+      recordDate,
+      targetDate,
+      totalSessions: testSessions?.length ?? 0,
+      sessionsByDate: allSessionsByDate,
+      matchedCount: (testSessions ?? []).filter((s) => s.starts_at?.split("T")[0] === targetDate).length
+    });
 
     // Filter testSessions directly by extracting date from starts_at
-    const tomorrow = (testSessions ?? []).filter((session) => {
+    const sessionsForDate = (testSessions ?? []).filter((session) => {
       if (!session.starts_at) return false;
       const sessionDate = session.starts_at.split("T")[0];
       return sessionDate === targetDate;
@@ -951,8 +967,8 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
     return {
       targetDate,
-      regular: tomorrow.filter((s) => !s.retake_source_session_id),
-      retake: tomorrow.filter((s) => s.retake_source_session_id),
+      regular: sessionsForDate.filter((s) => !s.retake_source_session_id),
+      retake: sessionsForDate.filter((s) => s.retake_source_session_id),
     };
   }, [dailyRecordForm.record_date, testSessions]);
 
