@@ -391,6 +391,11 @@ export default function AdminConsoleStudentsWorkspace() {
                       <td>{s.student_code ?? ""}</td>
                       <td>
                         <div className="student-list-name-cell">
+                          {s.is_test_account ? (
+                            <span className="student-test-account-badge" title="Test Account" aria-label="Test Account">
+                              T
+                            </span>
+                          ) : null}
                           <span>{s.display_name ?? ""}</span>
                           {studentWarningCounts[s.id] ? (
                             <button
@@ -515,7 +520,7 @@ export default function AdminConsoleStudentsWorkspace() {
                 </label>
               </div>
               <button
-                className={`btn student-detail-action-btn ${selectedStudent?.is_withdrawn ? "btn-withdrawn" : ""}`}
+                className={`btn student-detail-action-btn student-detail-withdraw-btn ${selectedStudent?.is_withdrawn ? "btn-withdrawn" : ""}`}
                 onClick={() => {
                   if (!selectedStudent) return;
                   toggleWithdrawn(selectedStudent, !selectedStudent.is_withdrawn);

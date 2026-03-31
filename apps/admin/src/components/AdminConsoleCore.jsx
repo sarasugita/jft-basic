@@ -817,11 +817,15 @@ function buildAttendanceSummary(list) {
   ).sort();
 
   const calc = (items) => {
-    const total = items.length;
-    const present = items.filter((item) => item.status === "P" || item.status === "L").length;
-    const late = items.filter((item) => item.status === "L").length;
-    const excused = items.filter((item) => item.status === "E").length;
-    const unexcused = items.filter((item) => item.status === "A").length;
+    const countedItems = items.filter((item) => isCountedAttendanceStatus(item?.status));
+    const total = countedItems.length;
+    const present = countedItems.filter((item) => {
+      const status = normalizeAttendanceStatusToken(item?.status);
+      return status === "P" || status === "L";
+    }).length;
+    const late = countedItems.filter((item) => normalizeAttendanceStatusToken(item?.status) === "L").length;
+    const excused = countedItems.filter((item) => normalizeAttendanceStatusToken(item?.status) === "E").length;
+    const unexcused = countedItems.filter((item) => normalizeAttendanceStatusToken(item?.status) === "A").length;
     const rate = total ? (present / total) * 100 : null;
     return { total, present, late, excused, unexcused, rate };
   };
@@ -877,8 +881,8 @@ function getStudentWarningIssues(row, criteria) {
   const maxDailyAvg = criteria.maxDailyAvg === "" ? null : Number(criteria.maxDailyAvg);
 
   if (maxAttendance != null) {
-    const rate = row.attendanceRate ?? 0;
-    if (rate <= maxAttendance) issues.push(`Attendance ${rate.toFixed(1)}% <= ${maxAttendance}%`);
+    const rate = row.attendanceRate;
+    if (rate != null && rate <= maxAttendance) issues.push(`Attendance ${rate.toFixed(1)}% <= ${maxAttendance}%`);
   }
   if (minUnexcused != null && (row.unexcused ?? 0) >= minUnexcused) {
     issues.push(`Unexcused ${row.unexcused ?? 0} >= ${minUnexcused}`);
@@ -4348,9 +4352,9 @@ export default function AdminConsole({
     return activeStudents.filter((s) => {
       const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
       const stats = buildAttendanceStats(perDay);
-      const rate = stats.total ? (stats.present / stats.total) * 100 : 0;
+      const rate = stats.total ? (stats.present / stats.total) * 100 : null;
       const absences = stats.unexcused;
-      if (minRate != null && rate >= minRate) return false;
+      if (minRate != null && (rate == null || rate >= minRate)) return false;
       if (minAbsences != null && absences < minAbsences) return false;
       return true;
     });
@@ -4563,8 +4567,8 @@ export default function AdminConsole({
 
     return rows.filter((row) => {
       if (maxAttendance != null) {
-        const rate = row.attendanceRate ?? 0;
-        if (rate > maxAttendance) return false;
+        const rate = row.attendanceRate;
+        if (rate == null || rate > maxAttendance) return false;
       }
       if (minUnexcused != null && row.unexcused < minUnexcused) return false;
       if (minModelAvg != null) {
@@ -5084,6 +5088,11 @@ export default function AdminConsole({
     studentListFilters.from,
     studentListFilters.to,
   ]);
+
+  useEffect(() => {
+    if (!canUseAdminConsole || !activeSchoolId) return;
+    fetchStudents();
+  }, [activeSchoolId, canUseAdminConsole]);
 
   useEffect(() => {
     if (!selectedSessionDetail?.id) return;
@@ -5731,9 +5740,10 @@ export default function AdminConsole({
           (entriesData ?? []).forEach((row) => {
             if (!row?.student_id) return;
             const stats = map[row.student_id] || { total: 0, present: 0, unexcused: 0 };
-            if (row.status) stats.total += 1;
-            if (row.status === "P" || row.status === "L") stats.present += 1;
-            if (row.status === "A") stats.unexcused += 1;
+            const status = normalizeAttendanceStatusToken(row.status);
+            if (isCountedAttendanceStatus(status)) stats.total += 1;
+            if (status === "P" || status === "L") stats.present += 1;
+            if (status === "A") stats.unexcused += 1;
             map[row.student_id] = stats;
           });
           Object.keys(map).forEach((id) => {
@@ -5905,9 +5915,10 @@ export default function AdminConsole({
       (entriesData ?? []).forEach((row) => {
         if (!row?.student_id) return;
         const stats = attendanceMap[row.student_id] || { total: 0, present: 0, unexcused: 0 };
-        if (row.status) stats.total += 1;
-        if (row.status === "P" || row.status === "L") stats.present += 1;
-        if (row.status === "A") stats.unexcused += 1;
+        const status = normalizeAttendanceStatusToken(row.status);
+        if (isCountedAttendanceStatus(status)) stats.total += 1;
+        if (status === "P" || status === "L") stats.present += 1;
+        if (status === "A") stats.unexcused += 1;
         attendanceMap[row.student_id] = stats;
       });
       Object.keys(attendanceMap).forEach((id) => {
@@ -7238,7 +7249,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     (activeStudents ?? []).forEach((s) => {
       const entry = existing[s.id] || {};
       draft[s.id] = {
-        status: entry.status || "P",
+        status: entry.status || (day.id ? "N/A" : (s.is_test_account ? "N/A" : "P")),
         comment: entry.comment || ""
       };
     });
@@ -9724,10 +9735,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
           "",
           "",
       ...exportColumns.map((day) => {
-            const statuses = sortedStudents
-              .filter((student) => !isAnalyticsExcludedStudent(student))
-              .map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "")
-              .filter((status) => status && status !== "W");
+      const statuses = sortedStudents
+        .filter((student) => !isAnalyticsExcludedStudent(student))
+        .map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "N/A")
+        .filter((status) => status && status !== "W");
             const stats = buildAttendanceStats(statuses);
             return stats.rate == null ? "N/A" : formatRatePercent(stats.rate);
           }),
@@ -9739,11 +9750,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
     sortedStudents.forEach((student, index) => {
       const allStatuses = allColumns.map((day) => {
         const status = attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
-        return status || (student.is_withdrawn ? "W" : "");
+        return status || (student.is_withdrawn ? "W" : "N/A");
       });
       const rangeStatuses = exportColumns.map((day) => {
         const status = attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
-        return status || (student.is_withdrawn ? "W" : "");
+        return status || (student.is_withdrawn ? "W" : "N/A");
       });
       const overallStats = buildAttendanceStats(allStatuses);
       const rangeStats = buildAttendanceStats(rangeStatuses);
@@ -9760,7 +9771,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
             rangeStats.rate == null ? "N/A" : formatRatePercent(rangeStats.rate),
             overallStats.unexcused ?? 0,
             formatBooleanCsv(student.is_withdrawn),
-            ...rangeStatuses.map((status) => status || ""),
+            ...rangeStatuses.map((status) => status || "N/A"),
           ],
           totalColumns
         )
@@ -10918,6 +10929,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     attendanceEntriesByDay,
     buildAttendanceStats,
     getAttendanceStatusClassName,
+    isAnalyticsExcludedStudent,
     openAttendanceDay,
     saveAttendanceDay,
     deleteAttendanceDay,
@@ -12202,6 +12214,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       <th>Late/Leave Early</th>
                       <th>Excused Absence</th>
                       <th>Unexcused Absence</th>
+                      <th>N/A</th>
                       <th>Comment</th>
                     </tr>
                   </thead>
@@ -12221,10 +12234,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               </div>
                             ) : null}
                           </td>
-                          {["P", "L", "E", "A"].map((code) => (
+                          {["P", "L", "E", "A", "N/A"].map((code) => (
                             <td key={`${s.id}-${code}`}>
                               <button
-                                className={`att-status-btn ${entry.status === code ? "active" : ""} att-${code}`}
+                                className={`att-status-btn ${entry.status === code ? "active" : ""} att-${code === "N/A" ? "NA" : code}`}
                                 type="button"
                                 onClick={() =>
                                   setAttendanceDraft((prev) => ({

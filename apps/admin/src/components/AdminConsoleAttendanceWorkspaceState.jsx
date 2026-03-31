@@ -74,11 +74,15 @@ function buildAttendanceSummary(list) {
   ).sort();
 
   const calc = (items) => {
-    const total = items.length;
-    const present = items.filter((item) => item.status === "P" || item.status === "L").length;
-    const late = items.filter((item) => item.status === "L").length;
-    const excused = items.filter((item) => item.status === "E").length;
-    const unexcused = items.filter((item) => item.status === "A").length;
+    const countedItems = items.filter((item) => isCountedAttendanceStatus(item?.status));
+    const total = countedItems.length;
+    const present = countedItems.filter((item) => {
+      const status = normalizeAttendanceStatusToken(item?.status);
+      return status === "P" || status === "L";
+    }).length;
+    const late = countedItems.filter((item) => normalizeAttendanceStatusToken(item?.status) === "L").length;
+    const excused = countedItems.filter((item) => normalizeAttendanceStatusToken(item?.status) === "E").length;
+    const unexcused = countedItems.filter((item) => normalizeAttendanceStatusToken(item?.status) === "A").length;
     const rate = total ? (present / total) * 100 : null;
     return { total, present, late, excused, unexcused, rate };
   };
@@ -277,9 +281,9 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     return activeStudents.filter((s) => {
       const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
       const stats = buildAttendanceStats(perDay);
-      const rate = stats.total ? (stats.present / stats.total) * 100 : 0;
+      const rate = stats.total ? (stats.present / stats.total) * 100 : null;
       const absences = stats.unexcused;
-      if (minRate != null && rate >= minRate) return false;
+      if (minRate != null && (rate == null || rate >= minRate)) return false;
       if (minAbsences != null && absences < minAbsences) return false;
       return true;
     });
@@ -432,20 +436,19 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       // Populate draft with existing attendance data
       Object.entries(entries).forEach(([studentId, entry]) => {
         draft[studentId] = {
-          status: entry.status || "",
+          status: entry.status || "N/A",
           comment: entry.comment || "",
         };
       });
 
-      // For students without existing data, default to N/A if they're test accounts, otherwise empty
+      // For existing days, normalize missing historical values to N/A.
       students.forEach((student) => {
         if (!draft[student.id]) {
           draft[student.id] = {
-            status: student.is_test_account ? "N/A" : "",
+            status: "N/A",
             comment: "",
           };
-        } else if (!draft[student.id].status && student.is_test_account) {
-          // If test account but no status set, default to N/A
+        } else if (!draft[student.id].status) {
           draft[student.id].status = "N/A";
         }
       });

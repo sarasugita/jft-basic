@@ -192,6 +192,36 @@ export default function AdminConsoleAttendanceWorkspace() {
           </button>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", justifyContent: "flex-end", marginLeft: "auto", alignSelf: "flex-start", flex: "0 0 auto" }}>
+          <button
+            className="btn admin-icon-action-btn"
+            type="button"
+            aria-label="Refresh attendance sheet"
+            title="Refresh attendance sheet"
+            onClick={() => {
+              if (!students.length) {
+                fetchStudents();
+              }
+              fetchAttendanceDays();
+            }}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M16 10a6 6 0 1 1-1.76-4.24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+              <path
+                d="M16 4.5v3.75h-3.75"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
           <button className="btn results-page-action-btn" type="button" onClick={exportAttendanceGoogleSheetsCsv}>
             <span className="results-page-action-icon" aria-hidden="true">↓</span>
             <span>Export CSV</span>
@@ -283,6 +313,7 @@ export default function AdminConsoleAttendanceWorkspace() {
           <span className="att-legend-item att-legend-late">L: Late/Leave Early</span>
           <span className="att-legend-item att-legend-excused">E: Excused Absence</span>
           <span className="att-legend-item att-legend-absent">A: Unexcused Absence</span>
+          <span className="att-legend-item">N/A: Not Counted</span>
         </div>
       </div>
 
@@ -308,20 +339,29 @@ export default function AdminConsoleAttendanceWorkspace() {
           </thead>
           <tbody>
             {attendanceFilteredStudents.map((s) => {
-              const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
+              const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "N/A");
               const stats = buildAttendanceStats(perDay);
-              const rate = stats.total ? (stats.present / stats.total) * 100 : 0;
+              const rate = stats.total ? (stats.present / stats.total) * 100 : null;
               return (
                 <tr key={s.id}>
                   <td className="att-col-code att-sticky-1">{s.student_code ?? ""}</td>
-                  <td className="att-col-name att-sticky-2">{s.display_name ?? s.email ?? s.id}</td>
-                  <td className="att-col-rate att-sticky-3">{rate.toFixed(2)}%</td>
+                  <td className="att-col-name att-sticky-2">
+                    <div className="student-list-name-cell">
+                      {s.is_test_account ? (
+                        <span className="student-test-account-badge" title="Test Account" aria-label="Test Account">
+                          T
+                        </span>
+                      ) : null}
+                      <span>{s.display_name ?? s.email ?? s.id}</span>
+                    </div>
+                  </td>
+                  <td className="att-col-rate att-sticky-3">{rate == null ? "N/A" : `${rate.toFixed(2)}%`}</td>
                   <td className="att-col-absent att-sticky-4">{stats.unexcused}</td>
                   {attendanceDayColumns.map((d) => {
-                    const status = attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "";
+                    const status = attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "N/A";
                     return (
                       <td key={`${s.id}-${d.id}`} className={`att-cell ${getAttendanceStatusClassName(status)}`}>
-                        {status || ""}
+                        {status}
                       </td>
                     );
                   })}

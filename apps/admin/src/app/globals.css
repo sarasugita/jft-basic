@@ -819,6 +819,20 @@ body { padding: 0; }
   border: 1px solid #4b5563;
 }
 
+.student-detail-withdraw-btn:hover,
+.student-detail-withdraw-btn:focus-visible {
+  background: #ffffff !important;
+  border-color: var(--admin-control-border) !important;
+  color: var(--admin-text) !important;
+}
+
+.student-detail-withdraw-btn.btn-withdrawn:hover,
+.student-detail-withdraw-btn.btn-withdrawn:focus-visible {
+  background: #4b5563 !important;
+  border-color: #4b5563 !important;
+  color: #fff !important;
+}
+
 .attendance-table tbody tr:hover {
   background: transparent;
   cursor: default;
@@ -1300,7 +1314,7 @@ body { padding: 0; }
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 10px;
-  min-height: 238px;
+  height: 238px;
 }
 
 .session-analysis-distribution-yaxis {
@@ -1319,7 +1333,7 @@ body { padding: 0; }
 
 .session-analysis-distribution-plot {
   position: relative;
-  min-height: 210px;
+  height: 210px;
   display: grid;
 }
 
@@ -2365,6 +2379,21 @@ body { padding: 0; }
   line-height: 1;
 }
 
+.student-test-account-badge {
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 0 5px;
+}
+
 .student-warning-badge-btn {
   border: 0;
   cursor: pointer;
@@ -2410,6 +2439,19 @@ body { padding: 0; }
 .session-analysis-title {
   font-weight: 900;
   margin-bottom: 4px;
+}
+
+.session-analysis-question-prompt {
+  font-weight: 800;
+  color: #111827;
+  line-height: 1.35;
+}
+
+.session-analysis-question-id {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
 }
 
 .session-analysis-table th,
@@ -4182,6 +4224,7 @@ body { padding: 0; }
 .att-status-btn.att-L.active { background: #ffe7a3; color: #8a5b00; }
 .att-status-btn.att-E.active { background: #ffd1a6; color: #92400e; }
 .att-status-btn.att-A.active { background: #ffc1c1; color: #9b1c1c; }
+.att-status-btn.att-NA.active { background: #e2e8f0; color: #475569; }
 
 .daily-results-table th,
 .daily-results-table td {

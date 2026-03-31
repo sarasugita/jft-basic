@@ -577,6 +577,15 @@ function buildImportedMainSectionAverageRows(attemptsList) {
     .filter(Boolean);
 }
 
+function getDistributionTickStep(maxCount) {
+  if (maxCount <= 5) return 1;
+  if (maxCount <= 10) return 2;
+  if (maxCount <= 25) return 5;
+  if (maxCount <= 50) return 10;
+  if (maxCount <= 100) return 20;
+  return Math.max(25, Math.ceil(maxCount / 5 / 5) * 5);
+}
+
 function buildSessionStudentRankingRows(attemptsList, questionsList, studentsList, getQuestionSectionLabel) {
   if (!attemptsList?.length) return [];
   const sectionAverageRows = buildSectionAverageRows(attemptsList, questionsList, getQuestionSectionLabel);
@@ -854,6 +863,15 @@ export default function AdminConsoleResultsWorkspace(props) {
             return String(a.qid).localeCompare(String(b.qid));
           })
     );
+  const sessionDetailDistributionStep = getDistributionTickStep(sessionDetailAnalysisSummary.maxBucketCount);
+  const sessionDetailDistributionMax = Math.max(
+    sessionDetailDistributionStep,
+    Math.ceil(Math.max(0, sessionDetailAnalysisSummary.maxBucketCount) / sessionDetailDistributionStep) * sessionDetailDistributionStep
+  );
+  const sessionDetailDistributionTicks = Array.from(
+    { length: Math.floor(sessionDetailDistributionMax / sessionDetailDistributionStep) + 1 },
+    (_, index) => sessionDetailDistributionMax - (index * sessionDetailDistributionStep)
+  );
   const sessionDetailQuestionStudents = Array.isArray(sessionDetailQuestionStudentsProp)
     ? sessionDetailQuestionStudentsProp
     : sessionDetailLatestAttempts
@@ -1802,34 +1820,30 @@ export default function AdminConsoleResultsWorkspace(props) {
                   <div className="session-analysis-top-heading">Grade Distribution</div>
                   <div className="session-analysis-distribution-chart">
                     <div className="session-analysis-distribution-yaxis">
-                      {Array.from({ length: Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1) }, (_, index) => {
-                        const value = sessionDetailAnalysisSummary.maxBucketCount - index;
-                        return (
-                          <div key={`dist-y-${value}`} className="session-analysis-distribution-ytick">
-                            <span>{value}</span>
-                          </div>
-                        );
-                      })}
+                      {sessionDetailDistributionTicks.map((value) => (
+                        <div key={`dist-y-${value}`} className="session-analysis-distribution-ytick">
+                          <span>{value}</span>
+                        </div>
+                      ))}
                     </div>
                     <div className="session-analysis-distribution-plot">
                       <div
                         className="session-analysis-distribution-grid"
-                        style={{ gridTemplateRows: `repeat(${Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1)}, 1fr)` }}
+                        style={{ gridTemplateRows: `repeat(${sessionDetailDistributionTicks.length}, 1fr)` }}
                       >
-                        {Array.from({ length: Math.max(1, sessionDetailAnalysisSummary.maxBucketCount + 1) }, (_, index) => (
-                          <div key={`dist-grid-${index}`} className="session-analysis-distribution-gridline" />
+                        {sessionDetailDistributionTicks.map((value) => (
+                          <div key={`dist-grid-${value}`} className="session-analysis-distribution-gridline" />
                         ))}
                       </div>
                       <div className="session-analysis-distribution-bars">
                         {sessionDetailAnalysisSummary.bucketLabels.map((label, index) => {
                           const count = sessionDetailAnalysisSummary.bucketCounts[index] ?? 0;
-                          const maxCount = Math.max(1, sessionDetailAnalysisSummary.maxBucketCount);
                           return (
                             <div key={`dist-bar-${label}`} className="session-analysis-distribution-bar-group">
                               <div className="session-analysis-distribution-bar-wrap">
                                 <div
                                   className={`session-analysis-distribution-bar ${index * 10 < sessionDetailPassRate * 100 ? "fail" : "pass"}`}
-                                  style={{ height: `${(count / maxCount) * 100}%` }}
+                                  style={{ height: `${(count / sessionDetailDistributionMax) * 100}%` }}
                                   title={`${label}: ${count} student${count === 1 ? "" : "s"}`}
                                 />
                               </div>
@@ -1983,8 +1997,8 @@ export default function AdminConsoleResultsWorkspace(props) {
                         <div key={`best-${row.qid}`} className="session-analysis-item">
                           <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
                           <div>
-                            <div className="session-analysis-title">{row.qid}</div>
-                            <div className="admin-help">{row.prompt}</div>
+                            <div className="session-analysis-question-prompt">{row.prompt || "Question"}</div>
+                            <div className="session-analysis-question-id">{row.qid}</div>
                           </div>
                         </div>
                       ))}
@@ -1999,8 +2013,8 @@ export default function AdminConsoleResultsWorkspace(props) {
                         <div key={`worst-${row.qid}`} className="session-analysis-item">
                           <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
                           <div>
-                            <div className="session-analysis-title">{row.qid}</div>
-                            <div className="admin-help">{row.prompt}</div>
+                            <div className="session-analysis-question-prompt">{row.prompt || "Question"}</div>
+                            <div className="session-analysis-question-id">{row.qid}</div>
                           </div>
                         </div>
                       ))}

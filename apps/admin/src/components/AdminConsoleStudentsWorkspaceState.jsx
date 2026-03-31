@@ -178,9 +178,10 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, s
           (entriesData ?? []).forEach((row) => {
             if (!row?.student_id) return;
             const stats = map[row.student_id] || { total: 0, present: 0, unexcused: 0 };
-            if (row.status) stats.total += 1;
-            if (row.status === "P" || row.status === "L") stats.present += 1;
-            if (row.status === "A") stats.unexcused += 1;
+            const status = String(row.status ?? "").trim().toUpperCase().replace(/\s+/g, "");
+            if (["P", "L", "E", "A"].includes(status)) stats.total += 1;
+            if (status === "P" || status === "L") stats.present += 1;
+            if (status === "A") stats.unexcused += 1;
             map[row.student_id] = stats;
           });
           Object.keys(map).forEach((id) => {
@@ -281,8 +282,8 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, s
 
     return rows.filter((row) => {
       if (maxAttendance != null) {
-        const rate = row.attendanceRate ?? 0;
-        if (rate > maxAttendance) return false;
+        const rate = row.attendanceRate;
+        if (rate == null || rate > maxAttendance) return false;
       }
       if (minUnexcused != null && row.unexcused < minUnexcused) return false;
       if (minModelAvg != null) {

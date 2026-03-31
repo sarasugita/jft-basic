@@ -89,6 +89,12 @@ export default function AdminConsoleTestingWorkspace() {
     if (activeTab === "daily" && dailySubTab === "results") {
       return { type: "daily", title: "Daily Test Results", tests: hookState.dailyTests };
     }
+    if (hookState.sessionDetail?.type === "mock" && hookState.sessionDetail?.sessionId) {
+      return { type: "mock", title: "Model Test Results", tests: hookState.modelTests };
+    }
+    if (hookState.sessionDetail?.type === "daily" && hookState.sessionDetail?.sessionId) {
+      return { type: "daily", title: "Daily Test Results", tests: hookState.dailyTests };
+    }
     return null;
   })();
 

@@ -327,12 +327,19 @@ export default function AdminConsoleDeferredFeatures({
                       </thead>
                       <tbody>
                         {(resultContext.type === "daily" ? dailyResultsMatrix.rows : modelResultsMatrix.rows)
-                          .filter((row) => !row.student.is_withdrawn)
+                          .filter((row) => !row.student.is_withdrawn && !row.student.is_test_account)
                           .map((row) => (
                             <tr key={`daily-row-${row.student.id}`}>
                               <td className="daily-sticky-1 daily-col-no">{row.student.student_code ?? ""}</td>
                               <td className="daily-sticky-2 daily-col-name">
-                                <div className="daily-name">{row.student.display_name ?? ""}</div>
+                                <div className="student-list-name-cell">
+                                  {row.student.is_test_account ? (
+                                    <span className="student-test-account-badge" title="Test Account" aria-label="Test Account">
+                                      T
+                                    </span>
+                                  ) : null}
+                                  <div className="daily-name">{row.student.display_name ?? ""}</div>
+                                </div>
                               </td>
                               {row.cells.map((attemptList, idx) => {
                                 const sessionItem = (resultContext.type === "daily"
