@@ -985,6 +985,24 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       ?? dailyRecordCalendarMonths[0];
   }, [dailyRecordCalendarMonth, dailyRecordCalendarMonths]);
 
+  const dailyRecordTodaySessions = useMemo(() => {
+    // Get tests scheduled for the current daily record date (same day, not tomorrow)
+    const recordDate = dailyRecordForm.record_date || getTodayDateInput();
+    const sessionsForDate = (testSessions ?? [])
+      .filter((session) => {
+        if (!session.starts_at) return false;
+        const sessionDate = session.starts_at.split("T")[0];
+        return sessionDate === recordDate;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(a.starts_at || "").getTime();
+        const bTime = new Date(b.starts_at || "").getTime();
+        return aTime - bTime;
+      });
+
+    return sessionsForDate.map((s) => s.title);
+  }, [dailyRecordForm.record_date, testSessions]);
+
   const dailyRecordTomorrowSessions = useMemo(() => {
     const recordDate = dailyRecordForm.record_date || getTodayDateInput();
     const targetDate = addDays(recordDate, 1);
@@ -1019,6 +1037,28 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       retake: sessionsForDate.filter((s) => s.retake_source_session_id),
     };
   }, [dailyRecordForm.record_date, testSessions]);
+
+  // Auto-fill test fields based on scheduled tests for the day
+  useEffect(() => {
+    if (dailyRecordTodaySessions.length === 0) return;
+
+    setDailyRecordForm((prev) => {
+      const updated = { ...prev };
+
+      // Only fill if the field is empty
+      if (!updated.mini_test_1.trim() && dailyRecordTodaySessions[0]) {
+        updated.mini_test_1 = dailyRecordTodaySessions[0];
+      }
+      if (!updated.mini_test_2.trim() && dailyRecordTodaySessions[1]) {
+        updated.mini_test_2 = dailyRecordTodaySessions[1];
+      }
+      if (!updated.special_test_1.trim() && dailyRecordTodaySessions[2]) {
+        updated.special_test_1 = dailyRecordTodaySessions[2];
+      }
+
+      return updated;
+    });
+  }, [dailyRecordTodaySessions]);
 
   // Effects for date/calendar sync
   useEffect(() => {
