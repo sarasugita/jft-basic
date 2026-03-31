@@ -515,6 +515,7 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Ques
   const errors: string[] = [];
   const warnings: string[] = [];
   const assetNames = new Set(assetFiles.map((file) => normalizeAssetName(file.name)));
+  const seenQids = new Set<string>();
   const questions: QuestionSetValidation["questions"] = [];
   let assetReferenceCount = 0;
 
@@ -543,6 +544,11 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Ques
     }
 
     const qid = noValue || `daily-${rowIndex}`;
+    if (seenQids.has(qid)) {
+      errors.push(`Row ${rowIndex + 1}: duplicate qid "${qid}".`);
+      continue;
+    }
+    seenQids.add(qid);
     const items = [
       ...wrongs.map((text) => ({ text, correct: false })),
       { text: correct, correct: true },
