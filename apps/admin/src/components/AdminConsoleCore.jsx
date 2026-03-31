@@ -7074,13 +7074,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setTestSessionsMsg("Loading...");
     let { data, error } = await supabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, test_type, day_date, created_at")
+      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, day_date, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
     if (error && isMissingRetakeSessionFieldsError(error)) {
       ({ data, error } = await supabase
         .from("test_sessions")
-        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, test_type, day_date, created_at")
+        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, day_date, created_at")
         .order("created_at", { ascending: false })
         .limit(500));
     }

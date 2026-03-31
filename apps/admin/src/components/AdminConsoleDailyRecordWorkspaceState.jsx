@@ -936,8 +936,8 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     const tomorrow = scheduleRecordActualTestsByDate[targetDate] ?? [];
     return {
       targetDate,
-      regular: tomorrow.filter((s) => s.test_type !== "retake"),
-      retake: tomorrow.filter((s) => s.test_type === "retake"),
+      regular: tomorrow.filter((s) => !s.retake_source_session_id),
+      retake: tomorrow.filter((s) => s.retake_source_session_id),
     };
   }, [dailyRecordForm.record_date, scheduleRecordActualTestsByDate]);
 
