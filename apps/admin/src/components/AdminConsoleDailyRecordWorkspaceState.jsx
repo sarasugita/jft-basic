@@ -302,7 +302,7 @@ function getWeekdayNumber(dateString) {
 }
 
 // Main hook
-export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [] }) {
+export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], tests = [] }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
@@ -325,6 +325,16 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   const [dailyRecordHolidaySavingDate, setDailyRecordHolidaySavingDate] = useState("");
   const dailyRecordTableWrapRef = useRef(null);
   const dailyRecordDatePickerRef = useRef(null);
+
+  const testMetaByVersion = useMemo(() => {
+    const meta = {};
+    (tests ?? []).forEach((test) => {
+      if (test.version) {
+        meta[test.version] = { type: test.type };
+      }
+    });
+    return meta;
+  }, [tests]);
 
   async function fetchDailyRecords() {
     if (!supabase) {
@@ -871,6 +881,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         mini_test_1: draft.mini_test_1,
         mini_test_2: draft.mini_test_2,
         special_test_1: draft.special_test_1,
+        special_test_2: draft.special_test_2,
       };
     });
     return displayData;
@@ -1000,8 +1011,28 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         return aTime - bTime;
       });
 
-    return sessionsForDate.map((s) => s.title);
-  }, [dailyRecordForm.record_date, testSessions]);
+    // Separate daily and model tests by problem_set_id (model tests have specific pattern or we can check tests table)
+    // For now, use a heuristic: if problem_set_id matches known tests table versions, determine type
+    const dailyTests = [];
+    const modelTests = [];
+
+    for (const session of sessionsForDate) {
+      // Try to determine if it's a daily or model test
+      // This is a simplification - ideally we'd check against the tests table
+      // For now, assume based on how tests are typically named or we need to fetch test type
+      const testMeta = (testMetaByVersion || {})[session.problem_set_id];
+      if (testMeta?.type === "daily") {
+        dailyTests.push(session.title);
+      } else if (testMeta?.type === "mock") {
+        modelTests.push(session.title);
+      } else {
+        // Default: assume daily if we can't determine
+        dailyTests.push(session.title);
+      }
+    }
+
+    return { dailyTests, modelTests };
+  }, [dailyRecordForm.record_date, testSessions, testMetaByVersion]);
 
   const dailyRecordTomorrowSessions = useMemo(() => {
     const recordDate = dailyRecordForm.record_date || getTodayDateInput();
@@ -1040,20 +1071,25 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
   // Auto-fill test fields based on scheduled tests for the day
   useEffect(() => {
-    if (dailyRecordTodaySessions.length === 0) return;
+    if (!dailyRecordTodaySessions.dailyTests && !dailyRecordTodaySessions.modelTests) return;
 
     setDailyRecordForm((prev) => {
       const updated = { ...prev };
 
-      // Only fill if the field is empty
-      if (!updated.mini_test_1.trim() && dailyRecordTodaySessions[0]) {
-        updated.mini_test_1 = dailyRecordTodaySessions[0];
+      // Fill daily test columns (mini_test_1, mini_test_2)
+      if (!updated.mini_test_1.trim() && dailyRecordTodaySessions.dailyTests[0]) {
+        updated.mini_test_1 = dailyRecordTodaySessions.dailyTests[0];
       }
-      if (!updated.mini_test_2.trim() && dailyRecordTodaySessions[1]) {
-        updated.mini_test_2 = dailyRecordTodaySessions[1];
+      if (!updated.mini_test_2.trim() && dailyRecordTodaySessions.dailyTests[1]) {
+        updated.mini_test_2 = dailyRecordTodaySessions.dailyTests[1];
       }
-      if (!updated.special_test_1.trim() && dailyRecordTodaySessions[2]) {
-        updated.special_test_1 = dailyRecordTodaySessions[2];
+
+      // Fill model test columns (special_test_1, special_test_2)
+      if (!updated.special_test_1.trim() && dailyRecordTodaySessions.modelTests[0]) {
+        updated.special_test_1 = dailyRecordTodaySessions.modelTests[0];
+      }
+      if (!updated.special_test_2.trim() && dailyRecordTodaySessions.modelTests[1]) {
+        updated.special_test_2 = dailyRecordTodaySessions.modelTests[1];
       }
 
       return updated;

@@ -451,6 +451,7 @@ function getEmptyDailyRecordPlanDraft() {
     mini_test_1: "",
     mini_test_2: "",
     special_test_1: "",
+    special_test_2: "",
   };
 }
 
@@ -685,6 +686,7 @@ function buildDailyRecordPlanDrafts(records) {
       mini_test_1: record.mini_test_1 ?? "",
       mini_test_2: record.mini_test_2 ?? "",
       special_test_1: record.special_test_1 ?? "",
+      special_test_2: record.special_test_2 ?? "",
     };
   });
   return drafts;
@@ -10789,6 +10791,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     session,
     canUseAdminConsole,
     activeTab,
+    tests,
     testSessions,
     attendanceSubTab,
     modelSubTab,

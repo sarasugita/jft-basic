@@ -95,6 +95,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
     students,
     fetchStudents,
     testSessions,
+    tests,
   } = useAdminConsoleWorkspaceContext();
 
   const {
@@ -139,7 +140,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
     setDailyRecordAnnouncementTitleDraft,
     dailyRecordAnnouncementDraft,
     setDailyRecordAnnouncementDraft,
-  } = useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions });
+  } = useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions, tests });
 
   useEffect(() => {
     if (!activeSchoolId) return;
@@ -351,9 +352,10 @@ export default function AdminConsoleDailyRecordWorkspace() {
               <th className="daily-record-holiday-head">Holiday</th>
               <th>Today&apos;s Content</th>
               <th>Student Comments</th>
-              <th>Test 1</th>
-              <th>Test 2</th>
-              <th>Test 3</th>
+              <th>Daily Test 1</th>
+              <th>Daily Test 2</th>
+              <th>Model Test 1</th>
+              <th>Model Test 2</th>
               <th>Save Plan</th>
             </tr>
           </thead>
@@ -365,6 +367,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 mini_test_1: draft.mini_test_1,
                 mini_test_2: draft.mini_test_2,
                 special_test_1: draft.special_test_1,
+                special_test_2: draft.special_test_2,
               };
               const weekdayLabel = formatWeekday(recordDate);
               return (
@@ -439,6 +442,18 @@ export default function AdminConsoleDailyRecordWorkspace() {
                             className="daily-record-plan-input"
                             value={display.special_test_1}
                             onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
+                            placeholder="Plan"
+                          />
+                        )}
+                      </td>
+                      <td>
+                        {display.isConfirmed ? (
+                          <span>{display.special_test_2}</span>
+                        ) : (
+                          <input
+                            className="daily-record-plan-input"
+                            value={display.special_test_2}
+                            onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_2", e.target.value)}
                             placeholder="Plan"
                           />
                         )}
