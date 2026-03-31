@@ -153,18 +153,28 @@ export default function AdminConsoleDailyRecordWorkspace() {
     // Auto-populate announcement fields when tomorrow's sessions change
     if (!dailyRecordModalOpen || !dailyRecordTomorrowSessions?.targetDate) return;
 
-    const allSessions = [...(dailyRecordTomorrowSessions.regular ?? []), ...(dailyRecordTomorrowSessions.retake ?? [])];
-    if (allSessions.length === 0) return;
+    const regularSessions = dailyRecordTomorrowSessions.regular ?? [];
+    const retakeSessions = dailyRecordTomorrowSessions.retake ?? [];
+
+    if (regularSessions.length === 0 && retakeSessions.length === 0) return;
 
     const tomorrowDate = dailyRecordTomorrowSessions.targetDate;
     const formattedDate = formatDateFull(tomorrowDate);
     const title = `Exam Schedule (${tomorrowDate})`;
 
-    // Build announcement body with test sessions (only start time)
-    const sessionsList = allSessions.map((session) => {
+    // Build announcement body with numbered test sessions
+    let sessionsList = regularSessions.map((session, idx) => {
       const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
-      return `${session.title} - ${startTime}`;
+      return `${idx + 1}. ${session.title} - ${startTime}`;
     }).join("\n");
+
+    if (retakeSessions.length > 0) {
+      const retakeList = retakeSessions.map((session, idx) => {
+        const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+        return `R${idx + 1}. ${session.title} - ${startTime}`;
+      }).join("\n");
+      sessionsList += `\n\nRetakes:\n${retakeList}`;
+    }
 
     const body = `The following tests are scheduled for ${formattedDate}:\n\n${sessionsList}`;
 
@@ -640,24 +650,30 @@ export default function AdminConsoleDailyRecordWorkspace() {
                     📅 Tomorrow's Exams
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {(dailyRecordTomorrowSessions.regular ?? []).map((session) => {
+                    {(dailyRecordTomorrowSessions.regular ?? []).map((session, idx) => {
                       const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
                       return (
                         <div key={session.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", backgroundColor: "#fff", borderRadius: "3px", fontSize: "13px" }}>
-                          <span style={{ fontWeight: "500", color: "#333" }}>{session.title}</span>
-                          <span style={{ color: "#1565c0", fontWeight: "600", fontSize: "12px" }}>{startTime}</span>
+                          <span style={{ fontWeight: "500", color: "#333" }}>
+                            <span style={{ display: "inline-block", minWidth: "20px", marginRight: "8px", color: "#1565c0", fontWeight: "600" }}>{idx + 1}.</span>
+                            {session.title}
+                          </span>
+                          <span style={{ color: "#1565c0", fontWeight: "600", fontSize: "12px", whiteSpace: "nowrap", marginLeft: "12px" }}>{startTime}</span>
                         </div>
                       );
                     })}
                     {(dailyRecordTomorrowSessions.retake ?? []).length > 0 && (
                       <>
                         <div style={{ fontSize: "11px", fontWeight: "600", color: "#666", marginTop: "4px", textTransform: "uppercase" }}>Retakes</div>
-                        {(dailyRecordTomorrowSessions.retake ?? []).map((session) => {
+                        {(dailyRecordTomorrowSessions.retake ?? []).map((session, idx) => {
                           const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
                           return (
                             <div key={session.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", backgroundColor: "#fff", borderRadius: "3px", fontSize: "13px", opacity: "0.8" }}>
-                              <span style={{ fontWeight: "500", color: "#555" }}>{session.title}</span>
-                              <span style={{ color: "#1565c0", fontWeight: "600", fontSize: "12px" }}>{startTime}</span>
+                              <span style={{ fontWeight: "500", color: "#555" }}>
+                                <span style={{ display: "inline-block", minWidth: "20px", marginRight: "8px", color: "#999", fontWeight: "600" }}>R{idx + 1}.</span>
+                                {session.title}
+                              </span>
+                              <span style={{ color: "#1565c0", fontWeight: "600", fontSize: "12px", whiteSpace: "nowrap", marginLeft: "12px" }}>{startTime}</span>
                             </div>
                           );
                         })}

@@ -839,7 +839,14 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   const scheduleRecordActualTestsByDate = useMemo(() => {
     const byDate = {};
     testSessions.forEach((session) => {
-      const date = session.day_date || getTodayDateInput();
+      let date = session.day_date;
+      if (!date && session.starts_at) {
+        // Extract date in Bangladesh timezone
+        const startDate = new Date(session.starts_at);
+        const dhakaTzDate = new Date(startDate.toLocaleString("en-US", { timeZone: "Asia/Dhaka" }));
+        date = `${dhakaTzDate.getFullYear()}-${String(dhakaTzDate.getMonth() + 1).padStart(2, "0")}-${String(dhakaTzDate.getDate()).padStart(2, "0")}`;
+      }
+      date = date || getTodayDateInput();
       if (!byDate[date]) byDate[date] = [];
       byDate[date].push(session);
     });
