@@ -119,10 +119,31 @@ serve(async (req) => {
       metadata: question.metadata,
     }));
 
-    const { error: questionError } = await context.adminClient
-      .from("question_set_questions")
-      .insert(questionRows);
-    if (questionError) throw new Error(questionError.message);
+    // Check for duplicate order_index values
+    const orderIndexCounts = new Map<number, number>();
+    for (const row of questionRows) {
+      const count = (orderIndexCounts.get(row.order_index) ?? 0) + 1;
+      orderIndexCounts.set(row.order_index, count);
+    }
+    const duplicateIndices = Array.from(orderIndexCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([index]) => index);
+    if (duplicateIndices.length > 0) {
+      throw new Error(
+        `Duplicate order_index values found: ${duplicateIndices.join(", ")}. ` +
+        `Each question must have a unique order_index within the same SetID.`
+      );
+    }
+
+    // Batch insert questions (250 per request to avoid payload size limits)
+    const QUESTION_BATCH_SIZE = 250;
+    for (let i = 0; i < questionRows.length; i += QUESTION_BATCH_SIZE) {
+      const batch = questionRows.slice(i, i + QUESTION_BATCH_SIZE);
+      const { error: questionError } = await context.adminClient
+        .from("question_set_questions")
+        .insert(batch);
+      if (questionError) throw new Error(questionError.message);
+    }
 
     await replaceVisibility(
       context.adminClient,
