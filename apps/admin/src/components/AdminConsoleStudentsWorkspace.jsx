@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useStudentsWorkspaceState } from "./AdminConsoleStudentsWorkspaceState";
+
+const LazyAdminConsoleResultsWorkspace = dynamic(() => import("./AdminConsoleResultsWorkspace"));
 
 export default function AdminConsoleStudentsWorkspace() {
   const contextData = useAdminConsoleWorkspaceContext();
@@ -20,7 +23,8 @@ export default function AdminConsoleStudentsWorkspace() {
     studentWarningCounts,
     handleCsvFile,
     csvMsg,
-    selectedStudent,
+    selectedStudent: contextSelectedStudent,
+    setSelectedStudentId: setContextSelectedStudentId,
     exportStudentReportPdf,
     setReissueStudent,
     setReissuePassword,
@@ -34,7 +38,11 @@ export default function AdminConsoleStudentsWorkspace() {
     fetchStudentAttendance,
     fetchStudentAttempts,
     fetchStudentDetail,
+    setStudentInfoForm: setCoreStudentInfoForm,
     getPersonalInfoForm,
+    setStudentInfoUploadFiles: setCoreStudentInfoUploadFiles,
+    setStudentInfoMsg: setCoreStudentInfoMsg,
+    setStudentInfoOpen: setCoreStudentInfoOpen,
     hasStudentDetailFields,
     formatDateFull,
     calculateAge,
@@ -48,9 +56,37 @@ export default function AdminConsoleStudentsWorkspace() {
     renderTwoLineHeader,
     getAttemptEffectivePassRate,
     studentAttemptSummaryById,
+    attemptCanOpenDetail,
     openAttemptDetail,
     getAttemptTitle,
     getAttemptDisplayDateValue,
+    getTabLeftCount,
+    selectedAttempt,
+    attemptDetailOpen,
+    setAttemptDetailOpen,
+    setSelectedAttemptObj,
+    attemptDetailSource,
+    setAttemptDetailSource,
+    attemptQuestionsLoading,
+    attemptQuestionsError,
+    attemptDetailTab,
+    setAttemptDetailTab,
+    selectedAttemptRows,
+    selectedAttemptScoreRate,
+    selectedAttemptUsesImportedSummary,
+    selectedAttemptUsesImportedModelSummary,
+    selectedAttemptMainSectionSummary,
+    selectedAttemptIsPass,
+    selectedAttemptIsModel,
+    selectedAttemptNestedSectionSummary,
+    selectedAttemptPassRate,
+    selectedAttemptSectionSummary,
+    selectedAttemptQuestionSectionsFiltered,
+    attemptDetailSectionRefs,
+    attemptDetailWrongOnly,
+    setAttemptDetailWrongOnly,
+    exportSelectedAttemptCsv,
+    deleteAttempt: deleteAttemptRecord,
     studentDailyCategorySummaryRows,
     studentDailyAttemptsByCategory,
     studentAttendancePrevMonthKey,
@@ -59,6 +95,7 @@ export default function AdminConsoleStudentsWorkspace() {
     studentAttendanceNextMonthKey,
     studentAttendancePie,
     attendanceSummary,
+    filteredStudentAttendance,
     formatDateShort,
     formatWeekday,
     formatDateTime,
@@ -153,6 +190,18 @@ export default function AdminConsoleStudentsWorkspace() {
     setStudentWarningIssueOpen,
   });
 
+  const selectedStudent = useMemo(() => {
+    if (!selectedStudentId) return null;
+    const selectedStudentSummary = students.find((student) => student.id === selectedStudentId) ?? null;
+    if (contextSelectedStudent?.id === selectedStudentId) {
+      return { ...(selectedStudentSummary ?? {}), ...contextSelectedStudent };
+    }
+    if (selectedStudentDetail?.id === selectedStudentId) {
+      return { ...(selectedStudentSummary ?? {}), ...selectedStudentDetail };
+    }
+    return selectedStudentSummary;
+  }, [contextSelectedStudent, selectedStudentDetail, selectedStudentId, students]);
+
   // Wrapper for loading metrics (since handleLoadStudentMetrics from context references old fetchStudentListMetrics)
   const loadMetrics = useCallback(() => {
     if (studentListLoading) return;
@@ -163,6 +212,10 @@ export default function AdminConsoleStudentsWorkspace() {
     if (!activeSchoolId || !session || !canUseAdminConsole) return;
     fetchStudents();
   }, [activeSchoolId, canUseAdminConsole, session]);
+
+  useEffect(() => {
+    setContextSelectedStudentId(selectedStudentId || "");
+  }, [selectedStudentId, setContextSelectedStudentId]);
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -528,10 +581,10 @@ export default function AdminConsoleStudentsWorkspace() {
                   className="btn btn-primary"
                   disabled={studentDetailLoading || !hasStudentDetailFields(selectedStudent)}
                   onClick={() => {
-                    setStudentInfoForm(getPersonalInfoForm(selectedStudent));
-                    setStudentInfoUploadFiles({});
-                    setStudentInfoMsg("");
-                    setStudentInfoOpen(true);
+                    setCoreStudentInfoForm(getPersonalInfoForm(selectedStudent));
+                    setCoreStudentInfoUploadFiles({});
+                    setCoreStudentInfoMsg("");
+                    setCoreStudentInfoOpen(true);
                   }}
                 >
                   Edit Information
@@ -1072,6 +1125,51 @@ export default function AdminConsoleStudentsWorkspace() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {attemptDetailOpen ? (
+        <LazyAdminConsoleResultsWorkspace
+          supabase={supabase}
+          resultContext={null}
+          sessionDetail={{ type: "", sessionId: "" }}
+          students={students}
+          testMetaByVersion={testMetaByVersion}
+          attemptCanOpenDetail={attemptCanOpenDetail}
+          openAttemptDetail={openAttemptDetail}
+          formatDateTime={formatDateTime}
+          getAttemptTitle={getAttemptTitle}
+          getTabLeftCount={getTabLeftCount}
+          getScoreRate={getScoreRate}
+          renderTwoLineHeader={renderTwoLineHeader}
+          attemptDetailOpen={attemptDetailOpen}
+          selectedAttempt={selectedAttempt}
+          selectedAttemptRows={selectedAttemptRows}
+          selectedAttemptScoreRate={selectedAttemptScoreRate}
+          studentAttemptRanks={studentAttemptRanks}
+          attemptDetailSource={attemptDetailSource}
+          selectedAttemptUsesImportedSummary={selectedAttemptUsesImportedSummary}
+          selectedAttemptUsesImportedModelSummary={selectedAttemptUsesImportedModelSummary}
+          selectedAttemptMainSectionSummary={selectedAttemptMainSectionSummary}
+          setAttemptDetailOpen={setAttemptDetailOpen}
+          setSelectedAttemptObj={setSelectedAttemptObj}
+          setAttemptDetailSource={setAttemptDetailSource}
+          attemptQuestionsLoading={attemptQuestionsLoading}
+          attemptQuestionsError={attemptQuestionsError}
+          attemptDetailTab={attemptDetailTab}
+          setAttemptDetailTab={setAttemptDetailTab}
+          selectedAttemptIsPass={selectedAttemptIsPass}
+          selectedAttemptIsModel={selectedAttemptIsModel}
+          selectedAttemptNestedSectionSummary={selectedAttemptNestedSectionSummary}
+          selectedAttemptPassRate={selectedAttemptPassRate}
+          selectedAttemptSectionSummary={selectedAttemptSectionSummary}
+          selectedAttemptQuestionSectionsFiltered={selectedAttemptQuestionSectionsFiltered}
+          attemptDetailSectionRefs={attemptDetailSectionRefs}
+          attemptDetailWrongOnly={attemptDetailWrongOnly}
+          setAttemptDetailWrongOnly={setAttemptDetailWrongOnly}
+          exportSelectedAttemptCsv={exportSelectedAttemptCsv}
+          deleteAttempt={deleteAttemptRecord}
+          previewOpen={false}
+        />
       ) : null}
     </div>
   );

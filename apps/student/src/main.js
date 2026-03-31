@@ -4171,7 +4171,8 @@ function renderTestSelect(app) {
                   </div>
                   <div>
                     <label class="form-label">Email</label>
-                    <input class="form-input" id="personalEmail" type="email" value="${escapeHtml(profile.email || authState.session?.user?.email || "")}" />
+                    <input class="form-input" id="personalEmail" type="email" value="${escapeHtml(profile.email || authState.session?.user?.email || "")}" disabled />
+                    <div class="text-muted">Login email can only be changed by admin.</div>
                   </div>
                   <div>
                     <label class="form-label">Phone Number</label>
@@ -4179,7 +4180,8 @@ function renderTestSelect(app) {
                   </div>
                   <div>
                     <label class="form-label">UID</label>
-                    <input class="form-input" id="personalUid" value="${escapeHtml(profile.student_code || "")}" />
+                    <input class="form-input" id="personalUid" value="${escapeHtml(profile.student_code || "")}" disabled />
+                    <div class="text-muted">Student number is managed by admin.</div>
                   </div>
                   <div>
                     <label class="form-label">Date of Birth</label>
@@ -4822,11 +4824,11 @@ function renderTestSelect(app) {
       }
       const payload = getPersonalInfoPayload({
         display_name: app.querySelector("#personalFullName")?.value,
-        email: app.querySelector("#personalEmail")?.value,
+        email: authState.profile?.email || authState.session?.user?.email || "",
         phone_number: app.querySelector("#personalPhone")?.value,
         date_of_birth: app.querySelector("#personalDob")?.value,
         sex: app.querySelector("#personalSex")?.value,
-        student_code: app.querySelector("#personalUid")?.value,
+        student_code: authState.profile?.student_code || "",
         current_working_facility: app.querySelector("#personalFacility")?.value,
         years_of_experience: app.querySelector("#personalYearsExperience")?.value,
         nursing_certificate: app.querySelector("#personalNursingCertificate")?.value,

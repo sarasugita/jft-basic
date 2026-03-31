@@ -244,6 +244,19 @@ function normalizeStudentNumberInput(value) {
   return String(value ?? "").replace(/\D+/g, "");
 }
 
+function getNextStudentCodeDefault(studentsList) {
+  const normalizedCodes = (studentsList ?? [])
+    .map((student) => normalizeStudentNumberInput(student?.student_code))
+    .filter(Boolean);
+  if (!normalizedCodes.length) return "1";
+  const maxNumber = normalizedCodes.reduce((currentMax, code) => {
+    const value = Number(code);
+    return Number.isFinite(value) ? Math.max(currentMax, value) : currentMax;
+  }, 0);
+  const maxWidth = normalizedCodes.reduce((currentMax, code) => Math.max(currentMax, String(code).length), 1);
+  return String(maxNumber + 1).padStart(maxWidth, "0");
+}
+
 async function fetchQuestionsForVersionWithFallback(client, version) {
   let result = await client
     .from("questions")
@@ -1236,6 +1249,15 @@ function attemptHasDetailData(attempt) {
 
 function attemptCanOpenDetail(attempt) {
   return attemptHasDetailData(attempt) || isImportedSummaryAttempt(attempt);
+}
+
+function normalizeAttemptDateKey(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const time = new Date(raw).getTime();
+  if (!Number.isFinite(time)) return raw;
+  return new Date(time).toISOString().slice(0, 10);
 }
 
 function createImportedStudentMatcher(studentsList) {
@@ -2893,6 +2915,7 @@ export default function AdminConsole({
   const dailyFolderInputRef = useRef(null);
   const attendanceImportInputRef = useRef(null);
   const resultsImportInputRef = useRef(null);
+  const wasInviteOpenRef = useRef(false);
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingSessionMsg, setEditingSessionMsg] = useState("");
   const [editingSessionForm, setEditingSessionForm] = useState({
@@ -4247,6 +4270,23 @@ export default function AdminConsole({
     return list;
   }, [students]);
 
+  const nextInviteStudentCode = useMemo(
+    () => getNextStudentCodeDefault(students),
+    [students]
+  );
+
+  useEffect(() => {
+    if (inviteOpen && !wasInviteOpenRef.current) {
+      setInviteForm({
+        email: "",
+        display_name: "",
+        student_code: nextInviteStudentCode,
+        temp_password: "",
+      });
+    }
+    wasInviteOpenRef.current = inviteOpen;
+  }, [inviteOpen, nextInviteStudentCode]);
+
 
   const dailyManualEntryStudent = useMemo(
     () => sortedStudents.find((student) => student.id === dailyManualEntryModal.studentId) ?? null,
@@ -5062,7 +5102,7 @@ export default function AdminConsole({
 
   useEffect(() => {
     const version = selectedAttempt?.test_version;
-    if (!attemptDetailOpen || !version) return;
+    if (!attemptDetailOpen || !version || isImportedSummaryAttempt(selectedAttempt)) return;
     if (attemptQuestionsByVersion[version]) return;
     let mounted = true;
     setAttemptQuestionsLoading(true);
@@ -5134,11 +5174,89 @@ export default function AdminConsole({
     setTimeout(() => runSearch(testType), 0);
   }
 
+  function resolvePreferredAttemptDetailAttempt(attempt) {
+    if (!attempt) return attempt;
+    if (attemptHasDetailData(attempt) || !isImportedSummaryAttempt(attempt)) {
+      return attempt;
+    }
+
+    const candidateMap = new Map();
+    [
+      ...(studentAttempts ?? []),
+      ...(sessionDetailAttempts ?? []),
+      ...(attempts ?? []),
+    ].forEach((candidate) => {
+      if (candidate?.id && !candidateMap.has(candidate.id)) {
+        candidateMap.set(candidate.id, candidate);
+      }
+    });
+
+    const targetStudentId = String(attempt.student_id ?? "").trim();
+    const targetSessionId = String(attempt.test_session_id ?? "").trim();
+    const targetVersion = String(attempt.test_version ?? "").trim();
+    const targetTitle = normalizeLookupValue(getAttemptTitle(attempt));
+    const targetDateKey = normalizeAttemptDateKey(getAttemptDisplayDateValue(attempt));
+    const targetCorrect = Number(attempt.correct ?? NaN);
+    const targetTotal = Number(attempt.total ?? NaN);
+    const targetRate = Number(getScoreRate(attempt));
+    const targetDisplayTimestamp = getAttemptDisplayTimestamp(attempt);
+
+    let bestCandidate = null;
+    let bestScore = -1;
+
+    candidateMap.forEach((candidate) => {
+      if (!attemptHasDetailData(candidate)) return;
+      if (targetStudentId && String(candidate.student_id ?? "").trim() !== targetStudentId) return;
+
+      const candidateSessionId = String(candidate.test_session_id ?? "").trim();
+      if (targetSessionId && candidateSessionId && candidateSessionId !== targetSessionId) return;
+
+      let score = 0;
+      if (targetSessionId && candidateSessionId === targetSessionId) score += 100;
+      if (targetVersion && String(candidate.test_version ?? "").trim() === targetVersion) score += 40;
+
+      const candidateTitle = normalizeLookupValue(getAttemptTitle(candidate));
+      if (targetTitle && candidateTitle === targetTitle) score += 25;
+
+      const candidateDateKey = normalizeAttemptDateKey(getAttemptDisplayDateValue(candidate));
+      if (targetDateKey && candidateDateKey === targetDateKey) score += 25;
+
+      const candidateCorrect = Number(candidate.correct ?? NaN);
+      if (Number.isFinite(targetCorrect) && Number.isFinite(candidateCorrect) && candidateCorrect === targetCorrect) {
+        score += 15;
+      }
+
+      const candidateTotal = Number(candidate.total ?? NaN);
+      if (Number.isFinite(targetTotal) && Number.isFinite(candidateTotal) && candidateTotal === targetTotal) {
+        score += 15;
+      }
+
+      const candidateRate = Number(getScoreRate(candidate));
+      if (Number.isFinite(targetRate) && Number.isFinite(candidateRate) && Math.abs(candidateRate - targetRate) < 0.000001) {
+        score += 10;
+      }
+
+      const candidateDisplayTimestamp = getAttemptDisplayTimestamp(candidate);
+      const timeDistance = Math.abs(candidateDisplayTimestamp - targetDisplayTimestamp);
+
+      if (
+        score > bestScore
+        || (score === bestScore && bestCandidate && timeDistance < Math.abs(getAttemptDisplayTimestamp(bestCandidate) - targetDisplayTimestamp))
+      ) {
+        bestCandidate = candidate;
+        bestScore = score;
+      }
+    });
+
+    return bestCandidate ?? attempt;
+  }
+
   function openAttemptDetail(attempt, source = "default") {
     if (!attempt?.id) return;
     if (!attemptCanOpenDetail(attempt)) return;
-    setSelectedId(attempt.id);
-    setSelectedAttemptObj(attempt);
+    const detailAttempt = resolvePreferredAttemptDetailAttempt(attempt);
+    setSelectedId(detailAttempt?.id ?? attempt.id);
+    setSelectedAttemptObj(detailAttempt);
     setAttemptDetailSource(source);
     setAttemptDetailOpen(true);
   }
@@ -5983,6 +6101,7 @@ export default function AdminConsole({
     if (!selectedStudentId) return;
     setStudentInfoMsg("");
     const normalizedStudentCode = normalizeStudentNumberInput(studentInfoForm.student_code).trim();
+    const normalizedCurrentEmail = String(selectedStudent?.email ?? "").trim().toLowerCase() || null;
     if (studentInfoForm.student_code.trim() && !normalizedStudentCode) {
       setStudentInfoMsg("Student No. must contain digits only.");
       return;
@@ -6028,9 +6147,31 @@ export default function AdminConsole({
       student_code: normalizedStudentCode,
       profile_uploads: nextUploads,
     });
+    const normalizedNextEmail = String(payload.email ?? "").trim().toLowerCase() || null;
+    const shouldSyncAuthEmail = ["admin", "super_admin"].includes(String(profile?.role ?? ""))
+      && normalizedNextEmail !== normalizedCurrentEmail;
+    if (shouldSyncAuthEmail) {
+      const confirmed = typeof window === "undefined"
+        ? true
+        : window.confirm(
+            "This will change the student's login email in Supabase Auth as well. Continue?",
+          );
+      if (!confirmed) {
+        setStudentInfoSaving(false);
+        return;
+      }
+    }
+
+    const profilePayload = shouldSyncAuthEmail
+      ? (() => {
+          const { email, ...rest } = payload;
+          return rest;
+        })()
+      : payload;
+
     const { data, error } = await supabase
       .from("profiles")
-      .update(payload)
+      .update(profilePayload)
       .eq("id", selectedStudentId)
       .select(STUDENT_DETAIL_SELECT_FIELDS)
       .single();
@@ -6044,8 +6185,33 @@ export default function AdminConsole({
       setStudentInfoSaving(false);
       return;
     }
-    mergeStudentIntoState({ id: selectedStudentId, ...(data ?? payload) });
-    setStudentInfoForm(getPersonalInfoForm(data ?? payload));
+
+    if (shouldSyncAuthEmail) {
+      const { data: emailUpdateData, error: emailUpdateError } = await supabase.functions.invoke(
+        "update-student-email",
+        {
+          body: {
+            user_id: selectedStudentId,
+            email: normalizedNextEmail,
+            school_id: activeSchoolId,
+          },
+        }
+      );
+      if (emailUpdateError || emailUpdateData?.error) {
+        const message = emailUpdateError?.message || emailUpdateData?.error || "Failed to update student login email.";
+        setStudentInfoMsg(`Profile saved, but login email update failed: ${message}`);
+        setStudentInfoSaving(false);
+        return;
+      }
+    }
+
+    const mergedStudent = {
+      id: selectedStudentId,
+      ...(data ?? profilePayload),
+      ...(shouldSyncAuthEmail ? { email: normalizedNextEmail } : {}),
+    };
+    mergeStudentIntoState(mergedStudent);
+    setStudentInfoForm(getPersonalInfoForm(mergedStudent));
     setStudentInfoUploadFiles({});
     setStudentInfoSaving(false);
     setStudentInfoOpen(false);
@@ -10666,10 +10832,38 @@ function openDailyRecordModal(record = null, recordDate = "") {
     getAttemptEffectivePassRate,
     studentAttemptRanks,
     studentAttemptSummaryById,
+    attemptCanOpenDetail,
     openAttemptDetail,
     getAttemptTitle,
     getAttemptDisplayDateValue,
+    getTabLeftCount,
     studentAttemptsMsg,
+    selectedAttempt,
+    attemptDetailOpen,
+    setAttemptDetailOpen,
+    setSelectedAttemptObj,
+    attemptDetailSource,
+    setAttemptDetailSource,
+    attemptQuestionsLoading,
+    attemptQuestionsError,
+    attemptDetailTab,
+    setAttemptDetailTab,
+    selectedAttemptRows,
+    selectedAttemptScoreRate,
+    selectedAttemptUsesImportedSummary,
+    selectedAttemptUsesImportedModelSummary,
+    selectedAttemptMainSectionSummary,
+    selectedAttemptIsPass,
+    selectedAttemptIsModel,
+    selectedAttemptNestedSectionSummary,
+    selectedAttemptPassRate,
+    selectedAttemptSectionSummary,
+    selectedAttemptQuestionSectionsFiltered,
+    attemptDetailSectionRefs,
+    attemptDetailWrongOnly,
+    setAttemptDetailWrongOnly,
+    exportSelectedAttemptCsv,
+    deleteAttempt,
     studentDailyCategorySummaryRows,
     studentDailyAttemptsByCategory,
     studentAttendancePrevMonthKey,
@@ -11138,6 +11332,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     value={studentInfoForm.email}
                     onChange={(e) => setStudentInfoForm((s) => ({ ...s, email: e.target.value }))}
                   />
+                  <div className="admin-help" style={{ marginTop: 4 }}>
+                    Warning: changing this also changes the student's login email in Supabase Auth.
+                  </div>
                 </div>
                 <div className="field">
                   <label>Student No.</label>
@@ -11461,8 +11658,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <label>Student No.</label>
                   <input
                     value={inviteForm.student_code}
-                    onChange={(e) => setInviteForm((s) => ({ ...s, student_code: e.target.value }))}
-                    placeholder="ID001"
+                    onChange={(e) => setInviteForm((s) => ({ ...s, student_code: normalizeStudentNumberInput(e.target.value) }))}
+                    placeholder={nextInviteStudentCode}
                   />
                 </div>
                 <div className="field">

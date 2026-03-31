@@ -261,6 +261,11 @@ function buildLatestAttemptMapByStudent(attemptsList) {
   return map;
 }
 
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message ?? "");
+  return message.includes(columnName) && message.toLowerCase().includes("does not exist");
+}
+
 function mapDbQuestion(row) {
   const data = row?.data ?? {};
   const stemAsset = [
@@ -1042,7 +1047,7 @@ export default function AdminConsoleResultsWorkspace(props) {
   useEffect(() => {
     if (canUseExternalAttemptDetail) return;
     const version = selectedAttempt?.test_version;
-    if (!attemptDetailOpen || !version || !supabase) return;
+    if (!attemptDetailOpen || !version || !supabase || isImportedSummaryAttempt(selectedAttempt)) return;
     if (selectedAttemptQuestions?.length) return;
     let cancelled = false;
     const loadQuestions = async () => {
@@ -1055,7 +1060,10 @@ export default function AdminConsoleResultsWorkspace(props) {
         .select(fieldsWithMedia)
         .eq("test_version", version)
         .order("order_index", { ascending: true });
-      if (result.error && /media_(file|type)/i.test(String(result.error?.message ?? ""))) {
+      if (result.error && (
+        isMissingColumnError(result.error, "media_file")
+        || isMissingColumnError(result.error, "media_type")
+      )) {
         result = await supabase
           .from("questions")
           .select(baseFields)

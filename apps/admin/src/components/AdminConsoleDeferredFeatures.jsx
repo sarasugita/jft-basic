@@ -3,6 +3,28 @@
 import { Fragment } from "react";
 import { createPortal } from "react-dom";
 
+function formatAttemptDetailDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value])
+  );
+  return `${parts.year ?? ""}-${parts.month ?? ""}-${parts.day ?? ""} ${parts.hour ?? ""}:${parts.minute ?? ""}`.trim();
+}
+
 export default function AdminConsoleDeferredFeatures({
   resultContext,
   sessionDetail,
@@ -744,7 +766,7 @@ export default function AdminConsoleDeferredFeatures({
                       </tr>
                       <tr>
                         <th>Attempt Date</th>
-                        <td>{formatDateTime(selectedAttempt.created_at)}</td>
+                        <td>{formatAttemptDetailDateTime(selectedAttempt.created_at)}</td>
                       </tr>
                       <tr>
                         <th>Tab left count</th>
@@ -973,7 +995,7 @@ export default function AdminConsoleDeferredFeatures({
                       />
                       Wrong questions only
                     </label>
-                    {selectedAttemptQuestionSectionsFiltered.length ? (
+                    {selectedAttemptIsModel && selectedAttemptQuestionSectionsFiltered.length ? (
                       <div className="attempt-detail-jumps">
                         {selectedAttemptQuestionSectionsFiltered.map((section) => (
                           <button
@@ -995,85 +1017,154 @@ export default function AdminConsoleDeferredFeatures({
                   </div>
 
                   {selectedAttemptQuestionSectionsFiltered.length ? (
-                    <div className="attempt-question-sections">
-                      {selectedAttemptQuestionSectionsFiltered.map((section) => (
-                        <div key={`attempt-question-section-${section.title}`} className="attempt-question-section">
-                          <div
-                            ref={(node) => {
-                              if (node) attemptDetailSectionRefs.current[section.title] = node;
-                            }}
-                            className="admin-title"
-                            style={{ fontSize: 22, marginTop: 6 }}
-                          >
-                            {section.title}
-                          </div>
-                          <div className="attempt-question-list">
-                            {section.rows.map((row, rowIndex) => (
-                              <div
-                                key={`attempt-question-row-${section.title}-${row.qid}-${rowIndex}`}
-                                className={`attempt-question-card ${row.isCorrect ? "correct" : "wrong"}`}
-                              >
-                                <div className="attempt-question-card-head">
-                                  <div className="attempt-question-card-title">
-                                    {row.qid} {row.section ? `(${row.section})` : ""}
-                                  </div>
-                                  <span className={`attempt-question-pill ${row.isCorrect ? "correct" : "wrong"}`}>
-                                    {row.isCorrect ? "Correct" : "Wrong"}
-                                  </span>
-                                </div>
+                    selectedAttemptIsModel ? (
+                      <div className="attempt-question-sections">
+                        {selectedAttemptQuestionSectionsFiltered.map((section) => (
+                          <div key={`attempt-question-section-${section.title}`} className="attempt-question-section">
+                            <div
+                              ref={(node) => {
+                                if (node) attemptDetailSectionRefs.current[section.title] = node;
+                              }}
+                              className="admin-title"
+                              style={{ fontSize: 22, marginTop: 6 }}
+                            >
+                              {section.title}
+                            </div>
+                            <div className="attempt-question-list">
+                              {section.rows.map((row, rowIndex) => (
                                 <div
-                                  className="attempt-question-card-prompt"
-                                  dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "") }}
-                                />
-                                {row.stemAudios?.length || row.stemImages?.length ? (
-                                  <div className="attempt-question-card-media">
-                                    {(row.stemAudios ?? []).map((asset, assetIndex) => (
-                                      <audio
-                                        key={`attempt-audio-${row.qid}-${assetIndex}`}
-                                        controls
-                                        preload="none"
-                                        src={asset}
-                                        className="attempt-question-card-audio"
-                                      />
-                                    ))}
-                                    {(row.stemImages ?? []).map((asset, assetIndex) => (
-                                      <img
-                                        key={`attempt-image-${row.qid}-${assetIndex}`}
-                                        src={asset}
-                                        alt="stem"
-                                        className="attempt-question-card-image"
-                                      />
-                                    ))}
+                                  key={`attempt-question-row-${section.title}-${row.qid}-${rowIndex}`}
+                                  className={`attempt-question-card ${row.isCorrect ? "correct" : "wrong"}`}
+                                >
+                                  <div className="attempt-question-card-head">
+                                    <div className="attempt-question-card-title">
+                                      {row.qid} {row.section ? `(${row.section})` : ""}
+                                    </div>
+                                    <span className={`attempt-question-pill ${row.isCorrect ? "correct" : "wrong"}`}>
+                                      {row.isCorrect ? "Correct" : "Wrong"}
+                                    </span>
                                   </div>
-                                ) : null}
-                                <div className="attempt-question-card-answer-grid">
-                                  <div className="attempt-question-card-answer">
-                                    <div className="attempt-question-card-answer-label">Chosen</div>
-                                    <div className="attempt-question-card-answer-value">
-                                      {row.chosenImage ? (
-                                        <img src={row.chosenImage} alt="chosen" className="attempt-question-card-choice-image" />
-                                      ) : (
-                                        row.chosen || "—"
-                                      )}
+                                  <div
+                                    className="attempt-question-card-prompt"
+                                    dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "") }}
+                                  />
+                                  {row.stemAudios?.length || row.stemImages?.length ? (
+                                    <div className="attempt-question-card-media">
+                                      {(row.stemAudios ?? []).map((asset, assetIndex) => (
+                                        <audio
+                                          key={`attempt-audio-${row.qid}-${assetIndex}`}
+                                          controls
+                                          preload="none"
+                                          src={asset}
+                                          className="attempt-question-card-audio"
+                                        />
+                                      ))}
+                                      {(row.stemImages ?? []).map((asset, assetIndex) => (
+                                        <img
+                                          key={`attempt-image-${row.qid}-${assetIndex}`}
+                                          src={asset}
+                                          alt="stem"
+                                          className="attempt-question-card-image"
+                                        />
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  <div className="attempt-question-card-answer-grid">
+                                    <div className="attempt-question-card-answer">
+                                      <div className="attempt-question-card-answer-label">Chosen</div>
+                                      <div className="attempt-question-card-answer-value">
+                                        {row.chosenImage ? (
+                                          <img src={row.chosenImage} alt="chosen" className="attempt-question-card-choice-image" />
+                                        ) : (
+                                          row.chosen || "—"
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="attempt-question-card-answer">
+                                      <div className="attempt-question-card-answer-label">Correct</div>
+                                      <div className="attempt-question-card-answer-value">
+                                        {row.correctImage ? (
+                                          <img src={row.correctImage} alt="correct" className="attempt-question-card-choice-image" />
+                                        ) : (
+                                          row.correct || "—"
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
-                                  <div className="attempt-question-card-answer">
-                                    <div className="attempt-question-card-answer-label">Correct</div>
-                                    <div className="attempt-question-card-answer-value">
-                                      {row.correctImage ? (
-                                        <img src={row.correctImage} alt="correct" className="attempt-question-card-choice-image" />
-                                      ) : (
-                                        row.correct || "—"
-                                      )}
-                                    </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="attempt-question-list">
+                        {selectedAttemptQuestionSectionsFiltered.flatMap((section) =>
+                          section.rows.map((row, rowIndex) => (
+                            <div
+                              key={`attempt-question-row-daily-${section.title}-${row.qid}-${rowIndex}`}
+                              className={`attempt-question-card ${row.isCorrect ? "correct" : "wrong"}`}
+                            >
+                              <div className="attempt-question-card-head">
+                                <div className="attempt-question-card-title">
+                                  {row.qid}
+                                </div>
+                                <span className={`attempt-question-pill ${row.isCorrect ? "correct" : "wrong"}`}>
+                                  {row.isCorrect ? "Correct" : "Wrong"}
+                                </span>
+                              </div>
+                              <div
+                                className="attempt-question-card-prompt"
+                                dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "") }}
+                              />
+                              {row.stemAudios?.length || row.stemImages?.length ? (
+                                <div className="attempt-question-card-media">
+                                  {(row.stemAudios ?? []).map((asset, assetIndex) => (
+                                    <audio
+                                      key={`attempt-audio-daily-${row.qid}-${assetIndex}`}
+                                      controls
+                                      preload="none"
+                                      src={asset}
+                                      className="attempt-question-card-audio"
+                                    />
+                                  ))}
+                                  {(row.stemImages ?? []).map((asset, assetIndex) => (
+                                    <img
+                                      key={`attempt-image-daily-${row.qid}-${assetIndex}`}
+                                      src={asset}
+                                      alt="stem"
+                                      className="attempt-question-card-image"
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                              <div className="attempt-question-card-answer-grid">
+                                <div className="attempt-question-card-answer">
+                                  <div className="attempt-question-card-answer-label">Chosen</div>
+                                  <div className="attempt-question-card-answer-value">
+                                    {row.chosenImage ? (
+                                      <img src={row.chosenImage} alt="chosen" className="attempt-question-card-choice-image" />
+                                    ) : (
+                                      row.chosen || "—"
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="attempt-question-card-answer">
+                                  <div className="attempt-question-card-answer-label">Correct</div>
+                                  <div className="attempt-question-card-answer-value">
+                                    {row.correctImage ? (
+                                      <img src={row.correctImage} alt="correct" className="attempt-question-card-choice-image" />
+                                    ) : (
+                                      row.correct || "—"
+                                    )}
                                   </div>
                                 </div>
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )
                   ) : (
                     <div className="admin-help" style={{ marginTop: 6 }}>
                       {attemptDetailWrongOnly ? "No wrong questions in this attempt." : "No questions available."}
