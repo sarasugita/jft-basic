@@ -160,11 +160,10 @@ export default function AdminConsoleDailyRecordWorkspace() {
     const formattedDate = formatDateFull(tomorrowDate);
     const title = `Exam Schedule (${tomorrowDate})`;
 
-    // Build announcement body with test sessions
+    // Build announcement body with test sessions (only start time)
     const sessionsList = allSessions.map((session) => {
       const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
-      const endTime = session.ends_at ? new Date(session.ends_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
-      return `${session.title} (${startTime} - ${endTime})`;
+      return `${session.title} - ${startTime}`;
     }).join("\n");
 
     const body = `The following tests are scheduled for ${formattedDate}:\n\n${sessionsList}`;
@@ -608,78 +607,78 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 </button>
               </div>
 
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0" }}>
-                <div style={{ marginBottom: "8px" }}>
-                  <label style={{ fontWeight: "bold" }}>Announcement Draft</label>
+              {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
+                <div style={{ padding: "16px", borderBottom: "1px solid #e0e0e0", backgroundColor: "#fafafa" }}>
+                  <div style={{ fontSize: "12px", fontWeight: "600", color: "#333", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    📢 Announcement to Students
+                  </div>
+                  <div style={{ marginBottom: "12px" }}>
+                    <label style={{ fontSize: "11px", color: "#666", marginBottom: "6px", display: "block", fontWeight: "600", textTransform: "uppercase" }}>Subject</label>
+                    <input
+                      type="text"
+                      value={dailyRecordAnnouncementTitleDraft || ""}
+                      onChange={(e) => setDailyRecordAnnouncementTitleDraft(e.target.value)}
+                      placeholder="Announcement subject..."
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: "4px", fontFamily: "inherit", fontSize: "13px", backgroundColor: "#fff" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "11px", color: "#666", marginBottom: "6px", display: "block", fontWeight: "600", textTransform: "uppercase" }}>Message</label>
+                    <textarea
+                      value={dailyRecordAnnouncementDraft || ""}
+                      onChange={(e) => setDailyRecordAnnouncementDraft(e.target.value)}
+                      placeholder="Announcement message..."
+                      style={{ width: "100%", minHeight: "80px", padding: "8px 12px", border: "1px solid #ddd", borderRadius: "4px", fontFamily: "inherit", fontSize: "13px", backgroundColor: "#fff", lineHeight: "1.4" }}
+                    />
+                  </div>
                 </div>
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ fontSize: "12px", color: "#666", marginBottom: "4px", display: "block" }}>Title</label>
-                  <input
-                    type="text"
-                    value={dailyRecordAnnouncementTitleDraft || ""}
-                    onChange={(e) => setDailyRecordAnnouncementTitleDraft(e.target.value)}
-                    placeholder="Announcement title..."
-                    style={{ width: "100%", padding: "8px", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", color: "#666", marginBottom: "4px", display: "block" }}>Body</label>
-                  <textarea
-                    value={dailyRecordAnnouncementDraft || ""}
-                    onChange={(e) => setDailyRecordAnnouncementDraft(e.target.value)}
-                    placeholder="Announcement body..."
-                    style={{ width: "100%", minHeight: "100px", padding: "8px", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit" }}
-                  />
-                </div>
-              </div>
+              ) : null}
 
-              <div style={{ padding: "12px 16px", borderTop: "1px solid #e0e0e0" }}>
-                {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
-                  <div style={{ marginBottom: "16px", padding: "12px", backgroundColor: "#f0f8ff", borderRadius: "4px", borderLeft: "4px solid #2196F3" }}>
-                    <div style={{ fontWeight: "bold", marginBottom: "8px", color: "#1976D2" }}>Tomorrow's Scheduled Tests</div>
-                    {(dailyRecordTomorrowSessions.regular ?? []).length > 0 && (
-                      <div style={{ marginBottom: "8px" }}>
-                        {(dailyRecordTomorrowSessions.regular ?? []).map((session) => {
-                          const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
-                          const endTime = session.ends_at ? new Date(session.ends_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
-                          return (
-                            <div key={session.id} style={{ fontSize: "13px", marginBottom: "4px" }}>
-                              • {session.title} ({startTime} - {endTime})
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+              {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
+                <div style={{ padding: "16px", backgroundColor: "#e3f2fd", borderTop: "1px solid #e0e0e0", borderBottom: "1px solid #e0e0e0" }}>
+                  <div style={{ fontSize: "12px", fontWeight: "600", color: "#1565c0", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    📅 Tomorrow's Exams
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {(dailyRecordTomorrowSessions.regular ?? []).map((session) => {
+                      const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+                      return (
+                        <div key={session.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", backgroundColor: "#fff", borderRadius: "3px", fontSize: "13px" }}>
+                          <span style={{ fontWeight: "500", color: "#333" }}>{session.title}</span>
+                          <span style={{ color: "#1565c0", fontWeight: "600", fontSize: "12px" }}>{startTime}</span>
+                        </div>
+                      );
+                    })}
                     {(dailyRecordTomorrowSessions.retake ?? []).length > 0 && (
-                      <div>
-                        <div style={{ fontSize: "12px", fontStyle: "italic", color: "#666", marginBottom: "4px" }}>Retakes:</div>
+                      <>
+                        <div style={{ fontSize: "11px", fontWeight: "600", color: "#666", marginTop: "4px", textTransform: "uppercase" }}>Retakes</div>
                         {(dailyRecordTomorrowSessions.retake ?? []).map((session) => {
                           const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
-                          const endTime = session.ends_at ? new Date(session.ends_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
                           return (
-                            <div key={session.id} style={{ fontSize: "13px", marginBottom: "4px" }}>
-                              • {session.title} ({startTime} - {endTime})
+                            <div key={session.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", backgroundColor: "#fff", borderRadius: "3px", fontSize: "13px", opacity: "0.8" }}>
+                              <span style={{ fontWeight: "500", color: "#555" }}>{session.title}</span>
+                              <span style={{ color: "#1565c0", fontWeight: "600", fontSize: "12px" }}>{startTime}</span>
                             </div>
                           );
                         })}
-                      </div>
+                      </>
                     )}
                   </div>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
 
-              <div style={{ padding: "12px 16px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                <button className="btn btn-primary" onClick={() => saveDailyRecord()} disabled={dailyRecordSaving} type="button">
+              <div style={{ padding: "16px", display: "flex", gap: "12px", justifyContent: "flex-end", borderTop: "1px solid #e0e0e0" }}>
+                <button className="btn" onClick={() => closeDailyRecordModal()} disabled={dailyRecordSaving} type="button" style={{ padding: "10px 24px" }}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={() => saveDailyRecord()} disabled={dailyRecordSaving} type="button" style={{ padding: "10px 24px" }}>
                   {dailyRecordSaving ? "Saving..." : "Save Record"}
                 </button>
                 {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
-                  <button className="btn btn-success" onClick={() => saveDailyRecord({ announcementAction: "send" })} disabled={dailyRecordSaving} type="button">
-                    {dailyRecordSaving ? "Saving..." : "Save and Send Announcement"}
+                  <button className="btn btn-success" onClick={() => saveDailyRecord({ announcementAction: "send" })} disabled={dailyRecordSaving} type="button" style={{ padding: "10px 24px" }}>
+                    {dailyRecordSaving ? "Saving..." : "Send Announcement"}
                   </button>
                 ) : null}
-                <button className="btn" onClick={() => closeDailyRecordModal()} disabled={dailyRecordSaving} type="button">
-                  Cancel
-                </button>
               </div>
             </div>
           </div>
