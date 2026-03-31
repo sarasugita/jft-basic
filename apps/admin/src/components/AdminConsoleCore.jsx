@@ -6528,15 +6528,32 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
     if (announcementAction === "send") {
       const nowIso = new Date().toISOString();
-      const { error: closePrevError } = await supabase
+      // Close previous "Exam Syllabus" announcements
+      const { error: closeSyllabusError } = await supabase
         .from("announcements")
         .update({ end_at: nowIso })
         .eq("school_id", activeSchoolId)
         .like("title", "Exam Syllabus (%)")
         .is("end_at", null);
-      if (closePrevError) {
-        console.error("daily record announcement close previous error:", closePrevError);
-        const failureMessage = `Record saved, but the previous syllabus announcement could not be closed: ${closePrevError.message}`;
+      if (closeSyllabusError) {
+        console.error("daily record announcement close previous syllabus error:", closeSyllabusError);
+        const failureMessage = `Record saved, but the previous syllabus announcement could not be closed: ${closeSyllabusError.message}`;
+        setDailyRecordSaving(false);
+        await fetchDailyRecords();
+        setDailyRecordsMsg(failureMessage);
+        return;
+      }
+
+      // Also close previous "Exam Schedule" announcements
+      const { error: closeScheduleError } = await supabase
+        .from("announcements")
+        .update({ end_at: nowIso })
+        .eq("school_id", activeSchoolId)
+        .like("title", "Exam Schedule (%)")
+        .is("end_at", null);
+      if (closeScheduleError) {
+        console.error("daily record announcement close previous schedule error:", closeScheduleError);
+        const failureMessage = `Record saved, but the previous schedule announcement could not be closed: ${closeScheduleError.message}`;
         setDailyRecordSaving(false);
         await fetchDailyRecords();
         setDailyRecordsMsg(failureMessage);
