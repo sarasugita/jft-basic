@@ -1031,6 +1031,14 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       }
     }
 
+    console.log("Daily Record Today Sessions Debug:", {
+      recordDate,
+      sessionsForDate: sessionsForDate.map(s => ({ title: s.title, problem_set_id: s.problem_set_id, starts_at: s.starts_at })),
+      testMetaByVersion,
+      dailyTests,
+      modelTests,
+    });
+
     return { dailyTests, modelTests };
   }, [dailyRecordForm.record_date, testSessions, testMetaByVersion]);
 
@@ -1071,7 +1079,21 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
   // Auto-fill test fields based on scheduled tests for the day
   useEffect(() => {
-    if (!dailyRecordTodaySessions || (!dailyRecordTodaySessions.dailyTests?.length && !dailyRecordTodaySessions.modelTests?.length)) return;
+    if (!dailyRecordTodaySessions || (!dailyRecordTodaySessions.dailyTests?.length && !dailyRecordTodaySessions.modelTests?.length)) {
+      console.log("Auto-fill early return: ", { dailyRecordTodaySessions });
+      return;
+    }
+
+    console.log("Auto-fill running with:", {
+      dailyTests: dailyRecordTodaySessions.dailyTests,
+      modelTests: dailyRecordTodaySessions.modelTests,
+      currentFormFields: {
+        mini_test_1: dailyRecordForm.mini_test_1,
+        mini_test_2: dailyRecordForm.mini_test_2,
+        special_test_1: dailyRecordForm.special_test_1,
+        special_test_2: dailyRecordForm.special_test_2,
+      }
+    });
 
     setDailyRecordForm((prev) => {
       const updated = { ...prev };
@@ -1092,9 +1114,10 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         updated.special_test_2 = dailyRecordTodaySessions.modelTests[1];
       }
 
+      console.log("Auto-fill updated form: ", updated);
       return updated;
     });
-  }, [dailyRecordTodaySessions]);
+  }, [dailyRecordTodaySessions, dailyRecordForm.mini_test_1, dailyRecordForm.mini_test_2, dailyRecordForm.special_test_1, dailyRecordForm.special_test_2]);
 
   // Effects for date/calendar sync
   useEffect(() => {
