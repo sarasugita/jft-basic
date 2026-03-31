@@ -932,13 +932,20 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
   const dailyRecordTomorrowSessions = useMemo(() => {
     const targetDate = addDays(dailyRecordForm.record_date || getTodayDateInput(), 1);
-    const tomorrow = scheduleRecordActualTestsByDate[targetDate] ?? [];
+
+    // Filter testSessions directly by extracting date from starts_at
+    const tomorrow = (testSessions ?? []).filter((session) => {
+      if (!session.starts_at) return false;
+      const sessionDate = session.starts_at.split("T")[0];
+      return sessionDate === targetDate;
+    });
+
     return {
       targetDate,
       regular: tomorrow.filter((s) => !s.retake_source_session_id),
       retake: tomorrow.filter((s) => s.retake_source_session_id),
     };
-  }, [dailyRecordForm.record_date, scheduleRecordActualTestsByDate]);
+  }, [dailyRecordForm.record_date, testSessions]);
 
   // Effects for date/calendar sync
   useEffect(() => {
