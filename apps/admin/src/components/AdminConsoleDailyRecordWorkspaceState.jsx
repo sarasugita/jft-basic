@@ -999,6 +999,16 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   const dailyRecordTodaySessions = useMemo(() => {
     // Get tests scheduled for the current daily record date (same day, not tomorrow)
     const recordDate = dailyRecordForm.record_date || getTodayDateInput();
+
+    // Debug: log all test sessions with their dates
+    console.log("All testSessions:", (testSessions ?? []).map(s => ({
+      title: s.title,
+      starts_at: s.starts_at,
+      extractedDate: s.starts_at?.split("T")[0],
+      problem_set_id: s.problem_set_id
+    })));
+    console.log("Looking for recordDate:", recordDate);
+
     const sessionsForDate = (testSessions ?? [])
       .filter((session) => {
         if (!session.starts_at) return false;
