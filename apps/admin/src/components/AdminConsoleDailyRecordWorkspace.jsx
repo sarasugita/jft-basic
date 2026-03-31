@@ -134,6 +134,11 @@ export default function AdminConsoleDailyRecordWorkspace() {
     removeDailyRecordTextbookEntry,
     addDailyRecordCommentRow,
     removeDailyRecordCommentRow,
+    dailyRecordTomorrowSessions,
+    dailyRecordAnnouncementTitleDraft,
+    setDailyRecordAnnouncementTitleDraft,
+    dailyRecordAnnouncementDraft,
+    setDailyRecordAnnouncementDraft,
   } = useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions });
 
   useEffect(() => {
@@ -143,6 +148,30 @@ export default function AdminConsoleDailyRecordWorkspace() {
       fetchStudents();
     }
   }, [activeSchoolId, students.length]);
+
+  useEffect(() => {
+    // Auto-populate announcement fields when tomorrow's sessions change
+    if (!dailyRecordModalOpen || !dailyRecordTomorrowSessions?.targetDate) return;
+
+    const allSessions = [...(dailyRecordTomorrowSessions.regular ?? []), ...(dailyRecordTomorrowSessions.retake ?? [])];
+    if (allSessions.length === 0) return;
+
+    const tomorrowDate = dailyRecordTomorrowSessions.targetDate;
+    const formattedDate = formatDateFull(tomorrowDate);
+    const title = `Exam Schedule (${tomorrowDate})`;
+
+    // Build announcement body with test sessions
+    const sessionsList = allSessions.map((session) => {
+      const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+      const endTime = session.ends_at ? new Date(session.ends_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+      return `${session.title} (${startTime} - ${endTime})`;
+    }).join("\n");
+
+    const body = `The following tests are scheduled for ${formattedDate}:\n\n${sessionsList}`;
+
+    setDailyRecordAnnouncementTitleDraft(title);
+    setDailyRecordAnnouncementDraft(body);
+  }, [dailyRecordModalOpen, dailyRecordTomorrowSessions]);
 
   useEffect(() => {
     // Scroll to today's date in the table
@@ -579,10 +608,50 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 </button>
               </div>
 
+              <div style={{ padding: "12px 16px", borderTop: "1px solid #e0e0e0" }}>
+                {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
+                  <div style={{ marginBottom: "16px", padding: "12px", backgroundColor: "#f0f8ff", borderRadius: "4px", borderLeft: "4px solid #2196F3" }}>
+                    <div style={{ fontWeight: "bold", marginBottom: "8px", color: "#1976D2" }}>Tomorrow's Scheduled Tests</div>
+                    {(dailyRecordTomorrowSessions.regular ?? []).length > 0 && (
+                      <div style={{ marginBottom: "8px" }}>
+                        {(dailyRecordTomorrowSessions.regular ?? []).map((session) => {
+                          const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+                          const endTime = session.ends_at ? new Date(session.ends_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+                          return (
+                            <div key={session.id} style={{ fontSize: "13px", marginBottom: "4px" }}>
+                              • {session.title} ({startTime} - {endTime})
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {(dailyRecordTomorrowSessions.retake ?? []).length > 0 && (
+                      <div>
+                        <div style={{ fontSize: "12px", fontStyle: "italic", color: "#666", marginBottom: "4px" }}>Retakes:</div>
+                        {(dailyRecordTomorrowSessions.retake ?? []).map((session) => {
+                          const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+                          const endTime = session.ends_at ? new Date(session.ends_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+                          return (
+                            <div key={session.id} style={{ fontSize: "13px", marginBottom: "4px" }}>
+                              • {session.title} ({startTime} - {endTime})
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
               <div style={{ padding: "12px 16px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <button className="btn btn-primary" onClick={() => saveDailyRecord()} disabled={dailyRecordSaving} type="button">
                   {dailyRecordSaving ? "Saving..." : "Save Record"}
                 </button>
+                {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
+                  <button className="btn btn-success" onClick={() => saveDailyRecord({ announcementAction: "send" })} disabled={dailyRecordSaving} type="button">
+                    {dailyRecordSaving ? "Saving..." : "Save and Send Announcement"}
+                  </button>
+                ) : null}
                 <button className="btn" onClick={() => closeDailyRecordModal()} disabled={dailyRecordSaving} type="button">
                   Cancel
                 </button>

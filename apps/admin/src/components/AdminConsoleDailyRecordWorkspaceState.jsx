@@ -278,7 +278,7 @@ function isMissingColumnError(error, columnName) {
 }
 
 function parseSyllabusAnnouncementDate(title) {
-  const match = title.match(/Exam Syllabus \((\d{4}-\d{2}-\d{2})\)/);
+  const match = title.match(/Exam Schedule \((\d{4}-\d{2}-\d{2})\)/);
   return match ? match[1] : null;
 }
 
@@ -398,7 +398,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       .from("announcements")
       .select("id, title, body, publish_at, end_at, created_at")
       .eq("school_id", schoolIdSnapshot)
-      .like("title", "Exam Syllabus (%)")
+      .like("title", "Exam Schedule (%)")
       .limit(400);
     if (announcementError) {
       console.error("daily record syllabus announcements fetch error:", announcementError);
@@ -637,11 +637,11 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         .from("announcements")
         .update({ end_at: nowIso })
         .eq("school_id", activeSchoolId)
-        .like("title", "Exam Syllabus (%)")
+        .like("title", "Exam Schedule (%)")
         .is("end_at", null);
       if (closePrevError) {
         console.error("daily record announcement close previous error:", closePrevError);
-        const failureMessage = `Record saved, but the previous syllabus announcement could not be closed: ${closePrevError.message}`;
+        const failureMessage = `Record saved, but the previous exam schedule announcement could not be closed: ${closePrevError.message}`;
         setDailyRecordSaving(false);
         await fetchDailyRecords();
         setDailyRecordsMsg(failureMessage);
