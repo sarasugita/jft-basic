@@ -841,10 +841,14 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     testSessions.forEach((session) => {
       let date = null;
       if (session.starts_at) {
-        // Extract date in Bangladesh timezone
-        const startDate = new Date(session.starts_at);
-        const dhakaTzDate = new Date(startDate.toLocaleString("en-US", { timeZone: "Asia/Dhaka" }));
-        date = `${dhakaTzDate.getFullYear()}-${String(dhakaTzDate.getMonth() + 1).padStart(2, "0")}-${String(dhakaTzDate.getDate()).padStart(2, "0")}`;
+        // Extract date in Bangladesh timezone using Intl API
+        const formatter = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Dhaka",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        });
+        date = formatter.format(new Date(session.starts_at));
       }
       date = date || getTodayDateInput();
       if (!byDate[date]) byDate[date] = [];
