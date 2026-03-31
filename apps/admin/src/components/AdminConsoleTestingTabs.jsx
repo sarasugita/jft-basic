@@ -1167,7 +1167,7 @@ export default function AdminConsoleTestingTabs({
                   </pre>
                 ) : null}
                 <div className="admin-msg">{assetsMsg}</div>
-                {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+                {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
                 {groupedModelUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
                 {modelUploadOpen && typeof document !== "undefined" ? createPortal((
@@ -1902,9 +1902,7 @@ export default function AdminConsoleTestingTabs({
                                   setDailySessionForm((s) => ({
                                     ...s,
                                     selection_mode: "multiple",
-                                    problem_set_ids: s.problem_set_id
-                                      ? Array.from(new Set([...(s.problem_set_ids ?? []), s.problem_set_id]))
-                                      : s.problem_set_ids ?? [],
+                                    problem_set_ids: [],
                                   }));
                                 }}
                               />
@@ -1982,6 +1980,7 @@ export default function AdminConsoleTestingTabs({
                                   setDailyConductCategory(e.target.value);
                                 }}
                               >
+                                <option value="">Select category</option>
                                 {dailyCategories.length ? (
                                   dailyCategories.map((category) => (
                                     <option key={`daily-source-single-${category.name}`} value={category.name}>
@@ -2062,6 +2061,7 @@ export default function AdminConsoleTestingTabs({
                                   }))
                                 }
                               >
+                                <option value="">Select Set ID</option>
                                 {dailySingleModeTests.length ? (
                                   dailySingleModeTests.map((t) => (
                                     <option key={`daily-ps-${t.version}`} value={t.version}>
@@ -2575,7 +2575,7 @@ export default function AdminConsoleTestingTabs({
                     {dailyImportMsg}
                   </pre>
                 ) : null}
-                {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
+                {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
                 {groupedDailyUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
                 {dailyUploadOpen && typeof document !== "undefined" ? createPortal((

@@ -948,6 +948,7 @@ const ATTENDANCE_COUNTED_STATUSES = ["P", "L", "E", "A"];
 const ATTENDANCE_SUPPORTED_STATUSES = [...ATTENDANCE_COUNTED_STATUSES, "N/A", "W"];
 const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
 const IMPORTED_ATTEMPT_QUERY_BATCH_SIZE = 50;
+const ATTENDANCE_IMPORT_BATCH_SIZE = 250;
 
 function padCsvRow(row, length) {
   const next = [...(row ?? [])];
@@ -3837,12 +3838,11 @@ export default function AdminConsole({
   }, [dailySessionCategories, dailySessionForm.session_category]);
 
   const selectedDailyProblemSetIds = useMemo(() => {
-    const availableIds = new Set(dailyConductTests.map((test) => test.version).filter(Boolean));
     const selectedIds = dailySessionForm.selection_mode === "multiple"
-      ? (dailySessionForm.problem_set_ids ?? []).filter((id) => availableIds.has(id))
-      : [dailySessionForm.problem_set_id].filter((id) => availableIds.has(id));
+      ? (dailySessionForm.problem_set_ids ?? []).filter(Boolean)
+      : [dailySessionForm.problem_set_id].filter(Boolean);
     return Array.from(new Set(selectedIds));
-  }, [dailyConductTests, dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
+  }, [dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
   const selectedDailyQuestionCount = useMemo(
     () => selectedDailyProblemSetIds.reduce((total, version) => {
       const test = dailyConductTests.find((item) => item.version === version);
@@ -10089,12 +10089,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
           .filter((row) => ATTENDANCE_SUPPORTED_STATUSES.includes(row.status));
 
         if (insertRows.length) {
-          const { error: insertError } = await supabase
-            .from("attendance_entries")
-            .upsert(insertRows, { onConflict: "day_id,student_id" });
-          if (insertError) {
-            showResultStatus(`Import failed: ${insertError.message}`, "error");
-            return;
+          for (const rowChunk of chunkItems(insertRows, ATTENDANCE_IMPORT_BATCH_SIZE)) {
+            const { error: insertError } = await supabase
+              .from("attendance_entries")
+              .upsert(rowChunk, { onConflict: "day_id,student_id" });
+            if (insertError) {
+              showResultStatus(`Import failed: ${insertError.message}`, "error");
+              return;
+            }
           }
         }
       }

@@ -327,7 +327,7 @@ export default function AdminConsoleDeferredFeatures({
                       </thead>
                       <tbody>
                         {(resultContext.type === "daily" ? dailyResultsMatrix.rows : modelResultsMatrix.rows)
-                          .filter((row) => !row.student.is_withdrawn && !row.student.is_test_account)
+                          .filter((row) => !row.student.is_withdrawn)
                           .map((row) => (
                             <tr key={`daily-row-${row.student.id}`}>
                               <td className="daily-sticky-1 daily-col-no">{row.student.student_code ?? ""}</td>

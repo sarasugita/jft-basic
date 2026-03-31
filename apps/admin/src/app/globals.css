@@ -2893,8 +2893,8 @@ body { padding: 0; }
   display: flex;
   flex: 1;
   min-width: 0;
-  align-items: center;
-  overflow: hidden;
+  align-items: flex-start;
+  overflow: visible;
 }
 
 .daily-session-create-trigger-chip-list {

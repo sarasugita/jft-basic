@@ -72,6 +72,17 @@ function normalizePassRate(value, fallback = 0.8) {
   return Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate : fallback;
 }
 
+function normalizeLegacyTestErrorMessage(error, action = "update") {
+  const text = String(error?.message ?? "").trim();
+  if (
+    error?.code === "23505"
+    && /tests_version_key|duplicate key value/i.test(text)
+  ) {
+    return "This SetID already exists. Use a different SetID.";
+  }
+  return `Test ${action} failed: ${text || "Unknown error"}`;
+}
+
 function isImportedResultsSummaryAttempt(attempt) {
   const source = String(attempt?.answers_json?.__meta?.imported_source ?? "");
   return Boolean(attempt?.answers_json?.__meta?.imported_summary)
@@ -643,6 +654,18 @@ export function useTestingWorkspaceState({
     show_answers: false,
     allow_multiple_attempts: true,
     pass_rate: ""
+  });
+  const [editingTestId, setEditingTestId] = useState("");
+  const [editingTestMsg, setEditingTestMsg] = useState("");
+  const [editingCategorySelect, setEditingCategorySelect] = useState(CUSTOM_CATEGORY_OPTION);
+  const [editingTestForm, setEditingTestForm] = useState({
+    id: "",
+    originalVersion: "",
+    version: "",
+    title: "",
+    pass_rate: "",
+    is_public: true,
+    type: ""
   });
 
   // Model test session form
@@ -2437,6 +2460,132 @@ export function useTestingWorkspaceState({
     setSessionDetailAllowMsg(`Allowed one more attempt for ${student?.display_name ?? sessionDetailAllowStudentId}.`);
   }, [supabase, activeSchoolId, selectedSessionDetail, sessionDetailAllowStudentId, sessionDetailAllowances, sessionDetailStudentOptions, isMissingSessionAttemptOverrideTableError]);
 
+  const startEditTest = useCallback((test, categoryOptions) => {
+    if (!test?.id) return;
+    const normalizedTitle = String(test.title ?? "").trim() || "Uncategorized";
+    const hasCategory = (categoryOptions ?? []).some((category) => category.name === normalizedTitle);
+    setEditingTestId(test.id);
+    setEditingTestMsg("");
+    setEditingCategorySelect(hasCategory ? normalizedTitle : CUSTOM_CATEGORY_OPTION);
+    setEditingTestForm({
+      id: test.id,
+      originalVersion: test.version ?? "",
+      version: test.version ?? "",
+      title: normalizedTitle,
+      pass_rate: test.pass_rate != null ? String(test.pass_rate) : "",
+      is_public: Boolean(test.is_public),
+      type: test.type ?? ""
+    });
+  }, []);
+
+  const cancelEditTest = useCallback(() => {
+    setEditingTestId("");
+    setEditingTestMsg("");
+    setEditingCategorySelect(CUSTOM_CATEGORY_OPTION);
+  }, []);
+
+  const updateVersionInTable = useCallback(async (table, column, oldVersion, newVersion) => {
+    const { error } = await supabase
+      .from(table)
+      .update({ [column]: newVersion })
+      .eq(column, oldVersion);
+    if (error) throw new Error(`${table}: ${error.message}`);
+  }, [supabase]);
+
+  const saveTestEdits = useCallback(async (categoryOptions) => {
+    if (!editingTestForm.id || !supabase) return;
+    setEditingTestMsg("Saving...");
+    const nextVersion = editingTestForm.version.trim();
+    if (!nextVersion) {
+      setEditingTestMsg("SetID is required.");
+      return;
+    }
+    const passRate = Number(editingTestForm.pass_rate);
+    if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
+      setEditingTestMsg("Pass Rate must be between 0 and 1.");
+      return;
+    }
+    const nextTitleRaw = editingCategorySelect === CUSTOM_CATEGORY_OPTION
+      ? editingTestForm.title
+      : editingCategorySelect;
+    const nextTitle = String(nextTitleRaw ?? "").trim() || "Uncategorized";
+
+    if (nextVersion !== editingTestForm.originalVersion) {
+      const { data: existingRows, error: existsErr } = await supabase
+        .from("tests")
+        .select("id")
+        .eq("version", nextVersion)
+        .limit(1);
+      if (existsErr) {
+        setEditingTestMsg(`Check failed: ${existsErr.message}`);
+        return;
+      }
+      if (existingRows?.length && existingRows[0].id !== editingTestForm.id) {
+        setEditingTestMsg("That SetID already exists.");
+        return;
+      }
+      const ok = window.confirm(
+        `Rename SetID from ${editingTestForm.originalVersion} to ${nextVersion}? This updates sessions, attempts, links, questions, assets.`
+      );
+      if (!ok) {
+        setEditingTestMsg("Rename cancelled.");
+        return;
+      }
+    }
+
+    const updatePayload = {
+      title: nextTitle,
+      pass_rate: passRate,
+      is_public: editingTestForm.is_public,
+      updated_at: new Date().toISOString()
+    };
+    if (nextVersion !== editingTestForm.originalVersion) {
+      updatePayload.version = nextVersion;
+    }
+
+    const { error: updateErr } = await supabase
+      .from("tests")
+      .update(updatePayload)
+      .eq("id", editingTestForm.id);
+    if (updateErr) {
+      setEditingTestMsg(normalizeLegacyTestErrorMessage(updateErr, "update"));
+      return;
+    }
+
+    if (nextVersion !== editingTestForm.originalVersion) {
+      try {
+        await updateVersionInTable("questions", "test_version", editingTestForm.originalVersion, nextVersion);
+        await updateVersionInTable("attempts", "test_version", editingTestForm.originalVersion, nextVersion);
+        await updateVersionInTable("test_sessions", "problem_set_id", editingTestForm.originalVersion, nextVersion);
+        await updateVersionInTable("exam_links", "test_version", editingTestForm.originalVersion, nextVersion);
+        await updateVersionInTable("test_assets", "test_version", editingTestForm.originalVersion, nextVersion);
+      } catch (err) {
+        console.error("rename error:", err);
+        setEditingTestMsg(`Saved, but rename failed: ${err.message}`);
+      }
+    }
+
+    setEditingTestMsg("Saved.");
+    setEditingTestId("");
+    fetchTests();
+    fetchTestSessions();
+    fetchExamLinks();
+    if (activeTab === "daily" && dailySubTab === "results") runSearch("daily");
+    if (activeTab === "model" && modelSubTab === "results") runSearch("mock");
+  }, [
+    activeTab,
+    dailySubTab,
+    editingCategorySelect,
+    editingTestForm,
+    fetchExamLinks,
+    fetchTestSessions,
+    fetchTests,
+    modelSubTab,
+    runSearch,
+    supabase,
+    updateVersionInTable,
+  ]);
+
   const openPreview = useCallback(async (testVersion) => {
     if (!testVersion) return;
     setPreviewOpen(true);
@@ -3314,7 +3463,15 @@ export function useTestingWorkspaceState({
     const isSelected = currentlySelected.includes(normalizedName);
 
     if (isSelected) {
-      if (currentlySelected.length <= 1) return;
+      if (currentlySelected.length <= 1) {
+        setDailyConductCategory("");
+        setDailySessionForm((current) => ({
+          ...current,
+          source_categories: [],
+          problem_set_ids: [],
+        }));
+        return;
+      }
       const remainingNames = currentlySelected.filter((name) => name !== normalizedName);
       const nextPrimary = dailyConductCategory === normalizedName
         ? remainingNames[0] ?? ""
@@ -3391,21 +3548,10 @@ export function useTestingWorkspaceState({
       setDailyRetakeCategory("");
       setDailyRetakeSourceId("");
 
-      // Get first available category and its first test
-      const firstCategory = dailyCategories[0]?.name ?? "";
-      let firstTestVersion = "";
-      if (firstCategory) {
-        const firstTest = dailyQuestionSets.find((t) => {
-          const testCategory = String(t.title ?? "").trim() || "Uncategorized";
-          return testCategory === firstCategory;
-        });
-        firstTestVersion = firstTest?.version ?? "";
-      }
-
       setDailySessionForm({
         selection_mode: "single",
-        problem_set_id: firstTestVersion,
-        problem_set_ids: firstTestVersion ? [firstTestVersion] : [],
+        problem_set_id: "",
+        problem_set_ids: [],
         source_categories: [],
         session_category: "",
         title: "",
@@ -3420,7 +3566,7 @@ export function useTestingWorkspaceState({
         pass_rate: "0.8",
         retake_release_scope: "all",
       });
-      setDailyConductCategory(firstCategory);
+      setDailyConductCategory("");
       return;
     }
     const firstCategory = pastDailySessionCategories[0]?.name ?? "";
@@ -3428,7 +3574,7 @@ export function useTestingWorkspaceState({
     const source = pastDailySessionCategories[0]?.sessions?.[0] ?? null;
     setDailyRetakeSourceId(source?.id ?? "");
     if (source) applyDailyRetakeSourceSession(source);
-  }, [pastDailySessionCategories, dailyCategories, applyDailyRetakeSourceSession]);
+  }, [pastDailySessionCategories, applyDailyRetakeSourceSession]);
 
   const openModelUploadModal = useCallback(() => {
     // Clear previous file selections and messages
@@ -3668,6 +3814,14 @@ export function useTestingWorkspaceState({
     setEditingSessionMsg,
     editingSessionForm,
     setEditingSessionForm,
+    editingTestId,
+    setEditingTestId,
+    editingTestMsg,
+    setEditingTestMsg,
+    editingCategorySelect,
+    setEditingCategorySelect,
+    editingTestForm,
+    setEditingTestForm,
 
     // Session forms
     testSessionForm,
@@ -3850,6 +4004,9 @@ export function useTestingWorkspaceState({
     startEditSession,
     cancelEditSession,
     saveSessionEdits,
+    startEditTest,
+    cancelEditTest,
+    saveTestEdits,
     deleteTestSession,
     deleteTest,
     deleteAttempt,
