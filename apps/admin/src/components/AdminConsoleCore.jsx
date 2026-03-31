@@ -7074,13 +7074,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setTestSessionsMsg("Loading...");
     let { data, error } = await supabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, day_date, created_at")
+      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
     if (error && isMissingRetakeSessionFieldsError(error)) {
       ({ data, error } = await supabase
         .from("test_sessions")
-        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, day_date, created_at")
+        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
         .order("created_at", { ascending: false })
         .limit(500));
     }
@@ -7091,8 +7091,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
     const list = (data ?? []).map((session) => ({
-      retake_source_session_id: null,
-      retake_release_scope: "all",
+      retake_source_session_id: session.retake_source_session_id ?? null,
+      retake_release_scope: session.retake_release_scope ?? "all",
       ...session,
     }));
     setTestSessions(list);

@@ -839,8 +839,8 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   const scheduleRecordActualTestsByDate = useMemo(() => {
     const byDate = {};
     testSessions.forEach((session) => {
-      let date = session.day_date;
-      if (!date && session.starts_at) {
+      let date = null;
+      if (session.starts_at) {
         // Extract date in Bangladesh timezone
         const startDate = new Date(session.starts_at);
         const dhakaTzDate = new Date(startDate.toLocaleString("en-US", { timeZone: "Asia/Dhaka" }));
