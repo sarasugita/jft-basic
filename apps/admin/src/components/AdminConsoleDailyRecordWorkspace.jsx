@@ -699,7 +699,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 </button>
                 {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
                   <button className="btn btn-success" onClick={() => saveDailyRecord({ announcementAction: "send" })} disabled={dailyRecordSaving} type="button" style={{ padding: "10px 24px" }}>
-                    {dailyRecordSaving ? "Saving..." : "Send Announcement"}
+                    {dailyRecordSaving ? "Saving..." : <>Save Record<br />Send Announcement</>}
                   </button>
                 ) : null}
               </div>
