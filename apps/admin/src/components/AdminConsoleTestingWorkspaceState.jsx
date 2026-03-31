@@ -628,6 +628,7 @@ export function useTestingWorkspaceState({
   const [modelConductMode, setModelConductMode] = useState("normal");
   const [modelRetakeSourceId, setModelRetakeSourceId] = useState("");
   const [activeModelTimePicker, setActiveModelTimePicker] = useState("");
+  const [modelConductError, setModelConductError] = useState("");
 
   // Daily test session modal
   const [dailyConductOpen, setDailyConductOpen] = useState(false);
@@ -636,6 +637,7 @@ export function useTestingWorkspaceState({
   const [dailyRetakeCategory, setDailyRetakeCategory] = useState("");
   const [dailyRetakeSourceId, setDailyRetakeSourceId] = useState("");
   const [dailySourceCategoryDropdownOpen, setDailySourceCategoryDropdownOpen] = useState(false);
+  const [dailyConductError, setDailyConductError] = useState("");
   const [dailySetDropdownOpen, setDailySetDropdownOpen] = useState(false);
   const [activeDailyTimePicker, setActiveDailyTimePicker] = useState("");
 
@@ -1799,13 +1801,14 @@ export function useTestingWorkspaceState({
   }, [supabase]);
 
   const createTestSession = useCallback(async () => {
+    setModelConductError("");
     setTestSessionsMsg("");
     if (!activeSchoolId) {
-      setTestSessionsMsg("School scope is required.");
+      setModelConductError("School scope is required.");
       return;
     }
     if (modelConductMode === "retake" && !modelRetakeSourceId) {
-      setTestSessionsMsg("Please choose a past session to retake.");
+      setModelConductError("Please choose a past session to retake.");
       return;
     }
     const problemSetId = testSessionForm.problem_set_id.trim();
@@ -1819,40 +1822,40 @@ export function useTestingWorkspaceState({
       || (modelConductMode === "retake" ? testSessionForm.ends_at : "");
     const passRate = Number(testSessionForm.pass_rate);
     if (!problemSetId) {
-      setTestSessionsMsg("SetID is required.");
+      setModelConductError("SetID is required.");
       return;
     }
     if (!title) {
-      setTestSessionsMsg("Test Title is required.");
+      setModelConductError("Test Title is required.");
       return;
     }
     if (!sessionDate) {
-      setTestSessionsMsg("Date is required.");
+      setModelConductError("Date is required.");
       return;
     }
     if (!startTime) {
-      setTestSessionsMsg("Start time is required.");
+      setModelConductError("Start time is required.");
       return;
     }
     if (!closeTime) {
-      setTestSessionsMsg("Close time is required.");
+      setModelConductError("Close time is required.");
       return;
     }
     if (!endsAt) {
-      setTestSessionsMsg("End time is required.");
+      setModelConductError("End time is required.");
       return;
     }
     if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
-      setTestSessionsMsg("Pass rate must be between 0 and 1.");
+      setModelConductError("Pass rate must be between 0 and 1.");
       return;
     }
     try {
       if (await hasDuplicateSessionTitle(title)) {
-        setTestSessionsMsg("That Test Title already exists.");
+        setModelConductError("That Test Title already exists.");
         return;
       }
     } catch (error) {
-      setTestSessionsMsg(`Check failed: ${error.message}`);
+      setModelConductError(`Check failed: ${error.message}`);
       return;
     }
     const payload = {
@@ -1929,13 +1932,14 @@ export function useTestingWorkspaceState({
   }, [supabase, activeSchoolId, modelConductMode, modelRetakeSourceId, testSessionForm, fetchTestSessions, hasDuplicateSessionTitle, recordAuditEvent]);
 
   const createDailySession = useCallback(async () => {
+    setDailyConductError("");
     setDailySessionsMsg("");
     if (!activeSchoolId) {
-      setDailySessionsMsg("School scope is required.");
+      setDailyConductError("School scope is required.");
       return;
     }
     if (dailyConductMode === "retake" && !dailyRetakeSourceId) {
-      setDailySessionsMsg("Please choose a past session to retake.");
+      setDailyConductError("Please choose a past session to retake.");
       return;
     }
     const isMultipleSelection = dailySessionForm.selection_mode === "multiple";
@@ -1957,51 +1961,51 @@ export function useTestingWorkspaceState({
     const endsAt = endsAtInput;
     const passRate = Number(dailySessionForm.pass_rate);
     if (!selectedSetIds.length) {
-      setDailySessionsMsg(isMultipleSelection ? "Choose one or more SetID values." : "SetID is required.");
+      setDailyConductError(isMultipleSelection ? "Choose one or more SetID values." : "SetID is required.");
       return;
     }
     if (!title) {
-      setDailySessionsMsg("Test Title is required.");
+      setDailyConductError("Test Title is required.");
       return;
     }
     if (!sessionDate) {
-      setDailySessionsMsg("Date is required.");
+      setDailyConductError("Date is required.");
       return;
     }
     if (!startTime) {
-      setDailySessionsMsg("Start time is required.");
+      setDailyConductError("Start time is required.");
       return;
     }
     if (!endsAt) {
-      setDailySessionsMsg("End time is required.");
+      setDailyConductError("End time is required.");
       return;
     }
     if (!closeTime) {
-      setDailySessionsMsg("Close time is required.");
+      setDailyConductError("Close time is required.");
       return;
     }
     if (dailySessionForm.question_count_mode === "specify") {
       const requestedQuestionCount = Number(dailySessionForm.question_count);
       if (!Number.isFinite(requestedQuestionCount) || requestedQuestionCount <= 0) {
-        setDailySessionsMsg("Specify a valid number of questions.");
+        setDailyConductError("Specify a valid number of questions.");
         return;
       }
       if (requestedQuestionCount > selectedDailyQuestionCount) {
-        setDailySessionsMsg(`Only ${selectedDailyQuestionCount} questions are available for the selected SetID.`);
+        setDailyConductError(`Only ${selectedDailyQuestionCount} questions are available for the selected SetID.`);
         return;
       }
     }
     if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
-      setDailySessionsMsg("Pass rate must be between 0 and 1.");
+      setDailyConductError("Pass rate must be between 0 and 1.");
       return;
     }
     try {
       if (await hasDuplicateSessionTitle(title)) {
-        setDailySessionsMsg("That Test Title already exists.");
+        setDailyConductError("That Test Title already exists.");
         return;
       }
     } catch (error) {
-      setDailySessionsMsg(`Check failed: ${error.message}`);
+      setDailyConductError(`Check failed: ${error.message}`);
       return;
     }
     let problemSetId = selectedSetIds[0] ?? "";
@@ -3780,6 +3784,10 @@ export function useTestingWorkspaceState({
     setDailyConductOpen,
     dailyUploadOpen,
     setDailyUploadOpen,
+    modelConductError,
+    setModelConductError,
+    dailyConductError,
+    setDailyConductError,
 
     // Conduct modes
     modelConductMode,

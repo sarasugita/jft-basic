@@ -36,6 +36,8 @@ export default function AdminConsoleTestingTabs({
   setModelRetakeSourceId,
   setActiveModelTimePicker,
   modelConductMode,
+  modelConductError,
+  setModelConductError,
   pastModelSessions,
   selectModelRetakeSource,
   testSessionForm,
@@ -98,6 +100,8 @@ export default function AdminConsoleTestingTabs({
   setDailySetDropdownOpen,
   setActiveDailyTimePicker,
   dailyConductMode,
+  dailyConductError,
+  setDailyConductError,
   pastDailySessionCategories,
   dailyRetakeCategory,
   filteredPastDailySessions,
@@ -465,6 +469,7 @@ export default function AdminConsoleTestingTabs({
                     setModelConductMode("normal");
                     setModelRetakeSourceId("");
                     setActiveModelTimePicker("");
+                    setModelConductError("");
                   }}
                 >
                   <div
@@ -480,12 +485,19 @@ export default function AdminConsoleTestingTabs({
                           setModelConductMode("normal");
                           setModelRetakeSourceId("");
                           setActiveModelTimePicker("");
+                          setModelConductError("");
                         }}
                         aria-label="Close"
                       >
                         &times;
                       </button>
                     </div>
+
+                    {modelConductError && (
+                      <div style={{ padding: "12px 20px", backgroundColor: "#fee", borderBottom: "1px solid #fcc", color: "#c33", fontSize: "13px", lineHeight: 1.4 }}>
+                        {modelConductError}
+                      </div>
+                    )}
 
                     <div className="daily-session-create-body">
                       {modelConductMode === "retake" ? (
@@ -1598,6 +1610,7 @@ export default function AdminConsoleTestingTabs({
                     setDailyRetakeSourceId("");
                     setDailySetDropdownOpen(false);
                     setActiveDailyTimePicker("");
+                    setDailyConductError("");
                   }}
                 >
                   <div
@@ -1615,12 +1628,19 @@ export default function AdminConsoleTestingTabs({
                           setDailyRetakeSourceId("");
                           setDailySetDropdownOpen(false);
                           setActiveDailyTimePicker("");
+                          setDailyConductError("");
                         }}
                         aria-label="Close"
                       >
                         &times;
                       </button>
                     </div>
+
+                    {dailyConductError && (
+                      <div style={{ padding: "12px 20px", backgroundColor: "#fee", borderBottom: "1px solid #fcc", color: "#c33", fontSize: "13px", lineHeight: 1.4 }}>
+                        {dailyConductError}
+                      </div>
+                    )}
 
                     <div className="daily-session-create-body">
                       {dailyConductMode === "retake" ? (
