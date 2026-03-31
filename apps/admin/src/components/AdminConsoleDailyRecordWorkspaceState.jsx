@@ -889,42 +889,90 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
   const dailyRecordCalendarMonths = useMemo(() => {
     if (!scheduleRecordRows.length) return [];
-    const monthMap = new Map();
+
+    // Build a map of recordDate -> record data for quick lookup
+    const recordMap = new Map();
     scheduleRecordRows.forEach(({ recordDate, record }) => {
-      const monthKey = recordDate.slice(0, 7);
-      if (!monthMap.has(monthKey)) {
-        const [year, month] = monthKey.split("-");
-        const date = new Date(Number(year), Number(month) - 1, 1);
-        const label = date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", year: "numeric", month: "long" });
-        monthMap.set(monthKey, {
-          monthKey,
-          label,
-          weeks: [],
+      recordMap.set(recordDate, record);
+    });
+
+    // Get unique months from scheduleRecordRows
+    const monthKeys = Array.from(new Set(scheduleRecordRows.map(({ recordDate }) => recordDate.slice(0, 7)))).sort();
+
+    return monthKeys.map((monthKey) => {
+      const [year, month] = monthKey.split("-");
+      const yearNum = Number(year);
+      const monthNum = Number(month);
+
+      // Create label for the month
+      const date = new Date(yearNum, monthNum - 1, 1);
+      const label = date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", year: "numeric", month: "long" });
+
+      // Build the calendar weeks properly
+      const weeks = [];
+      const firstDay = new Date(yearNum, monthNum - 1, 1);
+      const lastDay = new Date(yearNum, monthNum, 0);
+      const startDayOfWeek = firstDay.getDay(); // 0=Sunday, 6=Saturday
+
+      // Add days from previous month
+      const prevMonthLastDay = new Date(yearNum, monthNum - 1, 0).getDate();
+      let currentWeek = [];
+
+      // Fill in previous month's trailing days
+      for (let i = startDayOfWeek - 1; i >= 0; i--) {
+        const prevMonthDate = prevMonthLastDay - i;
+        const prevMonthKey = monthNum === 1 ? `${yearNum - 1}-12` : `${yearNum}-${String(monthNum - 1).padStart(2, "0")}`;
+        const prevMonthDateStr = `${prevMonthKey}-${String(prevMonthDate).padStart(2, "0")}`;
+        currentWeek.push({
+          recordDate: null,
+          dayNumber: prevMonthDate,
+          isFromOtherMonth: true,
+          isHoliday: false,
+          isSelectable: false,
         });
       }
-      const monthData = monthMap.get(monthKey);
-      const [year, month, day] = recordDate.split("-");
-      const dateObj = new Date(Number(year), Number(month) - 1, Number(day));
-      const weekIndex = Math.floor(dateObj.getDate() / 7);
-      if (!monthData.weeks[weekIndex]) {
-        monthData.weeks[weekIndex] = [];
+
+      // Fill in current month's days
+      for (let day = 1; day <= lastDay.getDate(); day++) {
+        const recordDate = `${monthKey}-${String(day).padStart(2, "0")}`;
+        const record = recordMap.get(recordDate);
+
+        currentWeek.push({
+          recordDate,
+          dayNumber: day,
+          isFromOtherMonth: false,
+          isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
+          isSelectable: dailyRecordSelectableDateSet.has(recordDate),
+        });
+
+        // If week is full (7 days), push to weeks array and start new week
+        if (currentWeek.length === 7) {
+          weeks.push(currentWeek);
+          currentWeek = [];
+        }
       }
-      const lastWeekRowIndex = monthData.weeks.filter((w) => w && w.length > 0).length - 1;
-      const weekRowIndex = lastWeekRowIndex >= 0 ? lastWeekRowIndex : 0;
-      const weekOfMonth = Math.floor((dateObj.getDate() - 1) / 7);
-      if (!monthData.weeks[weekOfMonth]) monthData.weeks[weekOfMonth] = [];
-      const dayOfWeek = dateObj.getDay();
-      if (!monthData.weeks[weekOfMonth][dayOfWeek]) {
-        monthData.weeks[weekOfMonth][dayOfWeek] = null;
+
+      // Fill in next month's leading days
+      if (currentWeek.length > 0) {
+        for (let day = 1; currentWeek.length < 7; day++) {
+          const nextMonthKey = monthNum === 12 ? `${yearNum + 1}-01` : `${yearNum}-${String(monthNum + 1).padStart(2, "0")}`;
+          currentWeek.push({
+            recordDate: null,
+            dayNumber: day,
+            isFromOtherMonth: true,
+            isHoliday: false,
+            isSelectable: false,
+          });
+        }
+        weeks.push(currentWeek);
       }
-      monthData.weeks[weekOfMonth][dayOfWeek] = {
-        recordDate,
-        dayNumber: Number(day),
-        isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
-        isSelectable: dailyRecordSelectableDateSet.has(recordDate),
+
+      return {
+        monthKey,
+        label,
+        weeks,
       };
     });
-    return Array.from(monthMap.values());
   }, [scheduleRecordRows, dailyRecordSelectableDateSet]);
 
   const dailyRecordCalendarMonthKeys = useMemo(

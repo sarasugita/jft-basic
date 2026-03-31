@@ -3702,6 +3702,10 @@ body { padding: 0; }
   gap: 4px;
 }
 
+.daily-record-calendar-week {
+  display: contents;
+}
+
 .daily-record-date-picker-weekdays {
   margin-bottom: 10px;
   font-size: 11px;
@@ -3765,6 +3769,13 @@ body { padding: 0; }
   background: #3f6b0f;
   border-color: #2f520b;
   color: #fff;
+}
+
+.daily-record-date-picker-day.is-other-month {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+  color: #cbd5e1;
+  cursor: default;
 }
 
 .daily-record-date-picker-day.is-holiday {

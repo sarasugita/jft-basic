@@ -256,33 +256,40 @@ export default function AdminConsoleDailyRecordWorkspace() {
                             ))}
                           </div>
                           <div className="daily-record-date-picker-grid">
-                            {dailyRecordActiveCalendarMonth.weeks.flat().map((cell, index) => {
-                              if (!cell) {
-                                return <span key={`daily-record-empty-${dailyRecordActiveCalendarMonth.monthKey}-${index}`} className="daily-record-date-cell-empty" />;
-                              }
-                              const isSelected = cell.recordDate === dailyRecordDate;
-                              const className = [
-                                "daily-record-date-picker-day",
-                                cell.isHoliday ? "is-holiday" : "",
-                                cell.isSelectable ? "is-selectable" : "",
-                                isSelected ? "is-selected" : "",
-                              ].filter(Boolean).join(" ");
-                              return (
-                                <button
-                                  key={cell.recordDate}
-                                  type="button"
-                                  className={className}
-                                  disabled={!cell.isSelectable}
-                                  onClick={() => {
-                                    setDailyRecordDate(cell.recordDate);
-                                    setDailyRecordDatePickerOpen(false);
-                                  }}
-                                  title={cell.isHoliday ? "Holiday" : formatDateFull(cell.recordDate)}
-                                >
-                                  {cell.dayNumber}
-                                </button>
-                              );
-                            })}
+                            {dailyRecordActiveCalendarMonth.weeks.map((week, weekIndex) => (
+                              <div key={`week-${weekIndex}`} className="daily-record-calendar-week">
+                                {week.map((cell, dayIndex) => {
+                                  if (!cell) {
+                                    return <span key={`empty-${weekIndex}-${dayIndex}`} className="daily-record-date-cell-empty" />;
+                                  }
+                                  const isSelected = cell.recordDate === dailyRecordDate;
+                                  const className = [
+                                    "daily-record-date-picker-day",
+                                    cell.isFromOtherMonth ? "is-other-month" : "",
+                                    cell.isHoliday ? "is-holiday" : "",
+                                    cell.isSelectable ? "is-selectable" : "",
+                                    isSelected ? "is-selected" : "",
+                                  ].filter(Boolean).join(" ");
+                                  return (
+                                    <button
+                                      key={`${cell.recordDate}-${dayIndex}`}
+                                      type="button"
+                                      className={className}
+                                      disabled={!cell.isSelectable}
+                                      onClick={() => {
+                                        if (cell.recordDate) {
+                                          setDailyRecordDate(cell.recordDate);
+                                          setDailyRecordDatePickerOpen(false);
+                                        }
+                                      }}
+                                      title={cell.isHoliday ? "Holiday" : (cell.recordDate ? formatDateFull(cell.recordDate) : "")}
+                                    >
+                                      {cell.dayNumber}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ))}
                           </div>
                         </div>
                       ) : null}
