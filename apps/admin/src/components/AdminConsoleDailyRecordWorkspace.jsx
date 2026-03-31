@@ -618,33 +618,6 @@ export default function AdminConsoleDailyRecordWorkspace() {
               </div>
 
               {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
-                <div style={{ padding: "16px", borderBottom: "1px solid #e0e0e0", backgroundColor: "#fafafa" }}>
-                  <div style={{ fontSize: "12px", fontWeight: "600", color: "#333", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                    📢 Announcement to Students
-                  </div>
-                  <div style={{ marginBottom: "12px" }}>
-                    <label style={{ fontSize: "11px", color: "#666", marginBottom: "6px", display: "block", fontWeight: "600", textTransform: "uppercase" }}>Subject</label>
-                    <input
-                      type="text"
-                      value={dailyRecordAnnouncementTitleDraft || ""}
-                      onChange={(e) => setDailyRecordAnnouncementTitleDraft(e.target.value)}
-                      placeholder="Announcement subject..."
-                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: "4px", fontFamily: "inherit", fontSize: "13px", backgroundColor: "#fff" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "11px", color: "#666", marginBottom: "6px", display: "block", fontWeight: "600", textTransform: "uppercase" }}>Message</label>
-                    <textarea
-                      value={dailyRecordAnnouncementDraft || ""}
-                      onChange={(e) => setDailyRecordAnnouncementDraft(e.target.value)}
-                      placeholder="Announcement message..."
-                      style={{ width: "100%", minHeight: "80px", padding: "8px 12px", border: "1px solid #ddd", borderRadius: "4px", fontFamily: "inherit", fontSize: "13px", backgroundColor: "#fff", lineHeight: "1.4" }}
-                    />
-                  </div>
-                </div>
-              ) : null}
-
-              {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
                 <div style={{ padding: "16px", backgroundColor: "#e3f2fd", borderTop: "1px solid #e0e0e0", borderBottom: "1px solid #e0e0e0" }}>
                   <div style={{ fontSize: "12px", fontWeight: "600", color: "#1565c0", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                     📅 Tomorrow's Exams
@@ -679,6 +652,33 @@ export default function AdminConsoleDailyRecordWorkspace() {
                         })}
                       </>
                     )}
+                  </div>
+                </div>
+              ) : null}
+
+              {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
+                <div style={{ padding: "16px", borderBottom: "1px solid #e0e0e0", backgroundColor: "#fafafa" }}>
+                  <div style={{ fontSize: "12px", fontWeight: "600", color: "#333", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    📢 Announcement to Students
+                  </div>
+                  <div style={{ marginBottom: "12px" }}>
+                    <label style={{ fontSize: "11px", color: "#666", marginBottom: "6px", display: "block", fontWeight: "600", textTransform: "uppercase" }}>Subject</label>
+                    <input
+                      type="text"
+                      value={dailyRecordAnnouncementTitleDraft || ""}
+                      onChange={(e) => setDailyRecordAnnouncementTitleDraft(e.target.value)}
+                      placeholder="Announcement subject..."
+                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: "4px", fontFamily: "inherit", fontSize: "13px", backgroundColor: "#fff" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "11px", color: "#666", marginBottom: "6px", display: "block", fontWeight: "600", textTransform: "uppercase" }}>Message</label>
+                    <textarea
+                      value={dailyRecordAnnouncementDraft || ""}
+                      onChange={(e) => setDailyRecordAnnouncementDraft(e.target.value)}
+                      placeholder="Announcement message..."
+                      style={{ width: "100%", minHeight: "80px", padding: "8px 12px", border: "1px solid #ddd", borderRadius: "4px", fontFamily: "inherit", fontSize: "13px", backgroundColor: "#fff", lineHeight: "1.4" }}
+                    />
                   </div>
                 </div>
               ) : null}
