@@ -608,6 +608,31 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 </button>
               </div>
 
+              <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0" }}>
+                <div style={{ marginBottom: "8px" }}>
+                  <label style={{ fontWeight: "bold" }}>Announcement Draft</label>
+                </div>
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ fontSize: "12px", color: "#666", marginBottom: "4px", display: "block" }}>Title</label>
+                  <input
+                    type="text"
+                    value={dailyRecordAnnouncementTitleDraft || ""}
+                    onChange={(e) => setDailyRecordAnnouncementTitleDraft(e.target.value)}
+                    placeholder="Announcement title..."
+                    style={{ width: "100%", padding: "8px", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", color: "#666", marginBottom: "4px", display: "block" }}>Body</label>
+                  <textarea
+                    value={dailyRecordAnnouncementDraft || ""}
+                    onChange={(e) => setDailyRecordAnnouncementDraft(e.target.value)}
+                    placeholder="Announcement body..."
+                    style={{ width: "100%", minHeight: "100px", padding: "8px", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit" }}
+                  />
+                </div>
+              </div>
+
               <div style={{ padding: "12px 16px", borderTop: "1px solid #e0e0e0" }}>
                 {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
                   <div style={{ marginBottom: "16px", padding: "12px", backgroundColor: "#f0f8ff", borderRadius: "4px", borderLeft: "4px solid #2196F3" }}>

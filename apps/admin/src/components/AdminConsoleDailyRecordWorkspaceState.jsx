@@ -890,7 +890,8 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         });
       }
       const monthData = monthMap.get(monthKey);
-      const dateObj = new Date(recordDate);
+      const [year, month, day] = recordDate.split("-");
+      const dateObj = new Date(Number(year), Number(month) - 1, Number(day));
       const weekIndex = Math.floor(dateObj.getDate() / 7);
       if (!monthData.weeks[weekIndex]) {
         monthData.weeks[weekIndex] = [];
@@ -905,7 +906,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       }
       monthData.weeks[weekOfMonth][dayOfWeek] = {
         recordDate,
-        dayNumber: dateObj.getDate(),
+        dayNumber: Number(day),
         isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
         isSelectable: dailyRecordSelectableDateSet.has(recordDate),
       };
