@@ -59,7 +59,9 @@
       "Bash(find /Users/1231s/Projects/jft-navi/apps/student/src/components -type f -name \"*.jsx\" -exec wc -l {} +)",
       "Bash(do echo:*)",
       "Bash(/tmp/check_tests.sql:*)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(find /Users/1231s/Projects/jft-navi -name *.sql -o -name *migrations* -o -name *schema*)",
+      "Bash(find /Users/1231s/Projects/jft-navi/apps/admin/src -type f -name *.js -o -name *.jsx -o -name *.ts -o -name *.tsx)"
     ]
   }
 }

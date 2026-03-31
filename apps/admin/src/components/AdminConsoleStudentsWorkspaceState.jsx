@@ -241,9 +241,9 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, s
       setSelectedStudentDetail(null);
     }
     if (fetchStudentDetail) {
-      await fetchStudentDetail(studentId);
+      await fetchStudentDetail(studentId, { force: true });
     }
-  }, [selectedStudentDetail?.id, fetchStudentDetail]);
+  }, [fetchStudentDetail]);
 
   // Memos for derived data
   const sortedStudents = useMemo(() => {
