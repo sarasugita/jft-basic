@@ -329,6 +329,15 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   const dailyRecordDatePickerRef = useRef(null);
 
   async function fetchDailyRecords() {
+    if (!supabase) {
+      setDailyRecords([]);
+      setDailyRecordPlanDrafts({});
+      setDailyRecordSyllabusAnnouncements([]);
+      setDailyRecordConfirmedDates([]);
+      setDailyRecordHolidaySavingDate("");
+      setDailyRecordsMsg("Loading...");
+      return;
+    }
     const schoolIdSnapshot = activeSchoolIdRef.current;
     if (!schoolIdSnapshot) {
       setDailyRecords([]);
