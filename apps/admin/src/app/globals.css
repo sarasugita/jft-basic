@@ -78,9 +78,10 @@ body { padding: 0; }
   min-width: 120px;
 }
 .btn-primary { background: #3f6b0f; border-color: #2f520b; color: #fff; }
+.btn-success { background: #16a34a; border-color: #15803d; color: #fff; }
 .btn-retake { background: #b45309; border-color: #92400e; color: #fff; }
 .btn-danger { background: #b00020; border-color: #7a0016; color: #fff; }
-.btn:not(.btn-primary):not(.btn-retake):not(.btn-danger):not(.student-warning-launch-btn):hover {
+.btn:not(.btn-primary):not(.btn-success):not(.btn-retake):not(.btn-danger):not(.student-warning-launch-btn):hover {
   background: #eef4e7;
   border-color: #5e8a34;
 }
