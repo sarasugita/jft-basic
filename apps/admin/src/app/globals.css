@@ -78,7 +78,7 @@ body { padding: 0; }
   min-width: 120px;
 }
 .btn-primary { background: #3f6b0f; border-color: #2f520b; color: #fff; }
-.btn-success { background: #fff; border-color: #16a34a; color: #16a34a; }
+.btn-success { background: #fff; border-color: #3f6b0f; color: #3f6b0f; }
 .btn-retake { background: #b45309; border-color: #92400e; color: #fff; }
 .btn-danger { background: #b00020; border-color: #7a0016; color: #fff; }
 .btn:not(.btn-primary):not(.btn-success):not(.btn-retake):not(.btn-danger):not(.student-warning-launch-btn):hover {
