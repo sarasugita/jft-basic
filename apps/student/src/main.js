@@ -4025,6 +4025,7 @@ function renderTestSelect(app) {
                   const startLabel = formatTimeBdt(session.starts_at);
                   const name = session.title || session.problem_set_id || "Test";
                   const startMs = new Date(session.starts_at).getTime();
+                  const endMs = session.ends_at ? new Date(session.ends_at).getTime() : NaN;
                   const attemptAvailabilityReady = isSessionAttemptAvailabilityReady();
                   const alreadyTaken =
                     attemptAvailabilityReady &&
@@ -4032,7 +4033,9 @@ function renderTestSelect(app) {
                   const canStart =
                     attemptAvailabilityReady &&
                     Number.isFinite(startMs) &&
+                    Number.isFinite(endMs) &&
                     nowMs >= startMs &&
+                    nowMs < endMs &&
                     !alreadyTaken;
                   return `
                     <div class="student-home-card">
@@ -4747,7 +4750,10 @@ function renderTestSelect(app) {
         const session = testSessionsState.list.find((s) => s.id === sessionId);
         if (!session?.starts_at) return;
         const startMs = new Date(session.starts_at).getTime();
-        if (!Number.isFinite(startMs) || Date.now() < startMs) return;
+        const endMs = session.ends_at ? new Date(session.ends_at).getTime() : NaN;
+        const now = Date.now();
+        if (!Number.isFinite(startMs) || now < startMs) return;
+        if (!Number.isFinite(endMs) || now >= endMs) return;
         if (authState.session) {
           await fetchSessionAttemptOverrides({ force: true });
         }
