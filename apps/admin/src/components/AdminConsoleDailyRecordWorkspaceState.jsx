@@ -841,14 +841,9 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     testSessions.forEach((session) => {
       let date = null;
       if (session.starts_at) {
-        // Extract date in Bangladesh timezone using Intl API
-        const formatter = new Intl.DateTimeFormat("en-CA", {
-          timeZone: "Asia/Dhaka",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit"
-        });
-        date = formatter.format(new Date(session.starts_at));
+        // Extract date from ISO timestamp (already in Dhaka time)
+        // Format: YYYY-MM-DD
+        date = session.starts_at.split("T")[0];
       }
       date = date || getTodayDateInput();
       if (!byDate[date]) byDate[date] = [];
