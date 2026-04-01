@@ -8,11 +8,15 @@ function formatDateShortFn(d) {
   if (!d) return "";
   const parts = d.split("-");
   if (parts.length === 3) {
-    return `${parseInt(parts[1])}/${parseInt(parts[2])}`;
+    const month = parseInt(parts[1]);
+    const day = parseInt(parts[2]);
+    // Validate that day is between 1-31 to catch invalid dates like 3/32
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      return `INVALID: ${month}/${day}`;
+    }
+    return `${month}/${day}`;
   }
-  const date = new Date(`${d}T00:00:00`);
-  if (isNaN(date.getTime())) return "";
-  return `${date.getMonth() + 1}/${date.getDate()}`;
+  return "";
 }
 
 function formatWeekdayFn(d) {
@@ -43,6 +47,7 @@ export default function AdminConsoleAttendanceWorkspace() {
     buildAttendanceStats,
     getAttendanceStatusClassName,
     deleteAttendanceDay,
+    cleanupInvalidAttendanceDates,
     attendanceModalDay,
     // Memos from hook
     attendanceDayColumns,
@@ -233,6 +238,14 @@ export default function AdminConsoleAttendanceWorkspace() {
             disabled={attendanceClearing}
           >
             <span>{attendanceClearing ? "Clearing..." : "Clear All Attendance"}</span>
+          </button>
+          <button
+            className="btn results-page-action-btn"
+            type="button"
+            onClick={cleanupInvalidAttendanceDates}
+            title="Remove invalid attendance dates (e.g., 3/32, 4/1 when data only goes to 3/31)"
+          >
+            <span>Clean Up Invalid Dates</span>
           </button>
           <button
             className="btn results-page-action-btn"

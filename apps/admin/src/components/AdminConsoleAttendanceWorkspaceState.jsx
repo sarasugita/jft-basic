@@ -469,6 +469,21 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
 
   async function saveAttendanceDay() {
     if (!attendanceModalDay?.day_date) return;
+
+    // Validate that the date is in YYYY-MM-DD format and is valid
+    const dateMatch = String(attendanceModalDay.day_date).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!dateMatch) {
+      setAttendanceMsg(`Save failed: Invalid date format "${attendanceModalDay.day_date}". Expected YYYY-MM-DD.`);
+      return;
+    }
+    const [, yearStr, monthStr, dayStr] = dateMatch;
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      setAttendanceMsg(`Save failed: Invalid date "${attendanceModalDay.day_date}". Month must be 1-12 and day must be 1-31.`);
+      return;
+    }
+
     setAttendanceSaving(true);
     let dayId = attendanceModalDay.id;
     if (!dayId) {
@@ -621,6 +636,93 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     }
   }
 
+  async function cleanupInvalidAttendanceDates() {
+    if (!activeSchoolId || !supabase) {
+      setAttendanceMsg("School context is missing.");
+      return;
+    }
+
+    setAttendanceMsg("Scanning for invalid attendance dates...");
+    try {
+      // Fetch all attendance days for this school
+      const { data: allDays, error: fetchError } = await supabase
+        .from("attendance_days")
+        .select("id, day_date")
+        .eq("school_id", activeSchoolId)
+        .limit(1000);
+
+      if (fetchError) throw fetchError;
+
+      // Identify invalid dates (dates with month > 12 or day > 31)
+      const invalidDayIds = (allDays ?? [])
+        .filter((day) => {
+          const match = String(day.day_date).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+          if (!match) return true; // Invalid format
+          const month = Number(match[2]);
+          const dayNum = Number(match[3]);
+          return month < 1 || month > 12 || dayNum < 1 || dayNum > 31;
+        })
+        .map((day) => day.id);
+
+      if (!invalidDayIds.length) {
+        setAttendanceMsg("No invalid attendance dates found.");
+        return;
+      }
+
+      // Confirm deletion
+      const confirmed = window.confirm(
+        `Found ${invalidDayIds.length} invalid attendance date(s). Delete them?\n\nInvalid dates: ${
+          (allDays ?? [])
+            .filter((day) => invalidDayIds.includes(day.id))
+            .map((day) => day.day_date)
+            .join(", ")
+        }`
+      );
+      if (!confirmed) {
+        setAttendanceMsg("Cleanup cancelled.");
+        return;
+      }
+
+      // Delete invalid attendance entries first
+      for (let index = 0; index < invalidDayIds.length; index += 200) {
+        const chunk = invalidDayIds.slice(index, index + 200);
+        const { error: deleteEntriesError } = await supabase
+          .from("attendance_entries")
+          .delete()
+          .in("day_id", chunk);
+        if (deleteEntriesError) throw deleteEntriesError;
+      }
+
+      // Then delete invalid attendance days
+      for (let index = 0; index < invalidDayIds.length; index += 200) {
+        const chunk = invalidDayIds.slice(index, index + 200);
+        const { error: deleteDaysError } = await supabase
+          .from("attendance_days")
+          .delete()
+          .in("id", chunk)
+          .eq("school_id", activeSchoolId);
+        if (deleteDaysError) throw deleteDaysError;
+      }
+
+      await recordAdminAuditEvent(supabase, {
+        actionType: "delete",
+        entityType: "attendance_day",
+        entityId: `${activeSchoolId}:invalid`,
+        summary: `Deleted ${invalidDayIds.length} invalid attendance date(s).`,
+        schoolId: activeSchoolId,
+        metadata: {
+          invalid_day_count: invalidDayIds.length,
+        },
+      });
+
+      setAttendanceMsg(`Deleted ${invalidDayIds.length} invalid attendance date(s).`);
+      await fetchAttendanceDays();
+    } catch (error) {
+      console.error("cleanup invalid attendance dates error:", error);
+      setAttendanceMsg(`Cleanup failed: ${error.message || error}`);
+    }
+  }
+
   return {
     attendanceSubTab,
     setAttendanceSubTab,
@@ -660,6 +762,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     saveAttendanceDay,
     deleteAttendanceDay,
     clearAllAttendanceValues,
+    cleanupInvalidAttendanceDates,
     fetchAbsenceApplications,
     decideAbsenceApplication,
     buildAttendanceStats,
