@@ -147,6 +147,10 @@ let resultDetailState = {
   questionsByVersion: {},
 };
 
+let resultQuestionRefreshPromise = null;
+let resultQuestionRefreshKey = "";
+let lastHydratedResultsTab = "";
+
 let modelRankState = {
   loading: false,
   loaded: false,
@@ -397,6 +401,7 @@ function mapDbQuestion(row, version) {
     promptEn: row.prompt_en,
     promptBn: row.prompt_bn,
     answerIndex: row.answer_index,
+    answerIndices: Array.isArray(data.answer_indices) ? data.answer_indices : null,
     orderIndex: row.order_index ?? 0,
     stemKind: normalizeStemKindValue(data.stemKind || data.stem_kind || row.media_type || null),
     stemText: data.stemText || null,
@@ -410,6 +415,28 @@ function mapDbQuestion(row, version) {
     target: data.target || null,
   };
   return normalizeQuestionAssets(base, version);
+}
+
+function getEffectiveAnswerIndices(question) {
+  const fromArray = Array.isArray(question?.answerIndices)
+    ? question.answerIndices
+    : Array.isArray(question?.answer_indices)
+      ? question.answer_indices
+      : Array.isArray(question?.data?.answer_indices)
+        ? question.data.answer_indices
+        : [];
+  const normalized = fromArray
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  if (normalized.length) return Array.from(new Set(normalized));
+  const single = Number(question?.answerIndex);
+  return Number.isFinite(single) ? [single] : [];
+}
+
+function isChoiceCorrect(choiceIndex, answerIndices) {
+  const chosen = Number(choiceIndex);
+  if (!Number.isFinite(chosen)) return false;
+  return (answerIndices ?? []).includes(chosen);
 }
 
 function hashString(value) {
@@ -1217,6 +1244,31 @@ function getScoreRateFromAttempt(attempt) {
   return total ? correct / total : 0;
 }
 
+function buildAttemptScoreSummaryFromQuestions(attempt, questionsList) {
+  const rows = buildAttemptDetailRows(attempt, questionsList);
+  const total = rows.length || (Number(attempt?.total) || 0);
+  const correct = rows.reduce((sum, row) => sum + (row.isCorrect ? 1 : 0), 0);
+  return {
+    correct,
+    total,
+    rate: total ? correct / total : 0,
+  };
+}
+
+function getVisibleAttemptScoreSummary(attempt) {
+  const fallback = {
+    correct: Number(attempt?.correct) || 0,
+    total: Number(attempt?.total) || 0,
+    rate: getScoreRateFromAttempt(attempt),
+  };
+  const version = String(attempt?.test_version ?? "").trim();
+  if (!version) return fallback;
+  if (!Object.prototype.hasOwnProperty.call(resultDetailState.questionsByVersion, version)) {
+    return fallback;
+  }
+  return buildAttemptScoreSummaryFromQuestions(attempt, resultDetailState.questionsByVersion[version] ?? []);
+}
+
 function getCurrentStudentWarningIssues(criteria = {}) {
   const normalized = normalizeStudentWarningCriteria(criteria);
   const needsAttendance = normalized.maxAttendance !== "" || normalized.minUnexcused !== "";
@@ -1299,7 +1351,7 @@ function buildResultAttemptEntries(testType) {
     const sourceSession = getSourceSessionForRetake(session);
     if (!sourceSession?.id) return;
     const passRate = getPassRateForVersion(sourceSession.problem_set_id || session.problem_set_id || attempt.test_version);
-    if (getScoreRateFromAttempt(attempt) >= passRate) {
+    if (getVisibleAttemptScoreSummary(attempt).rate >= passRate) {
       convertedSourceSessionIds.add(sourceSession.id);
     }
   });
@@ -1309,7 +1361,7 @@ function buildResultAttemptEntries(testType) {
     const sourceSession = isRetakeSession(session) ? getSourceSessionForRetake(session) : null;
     const isRetake = Boolean(sourceSession?.id);
     const actualPassRate = getPassRateForVersion(sourceSession?.problem_set_id || attempt.test_version);
-    const actualPass = getScoreRateFromAttempt(attempt) >= actualPassRate;
+    const actualPass = getVisibleAttemptScoreSummary(attempt).rate >= actualPassRate;
     const convertedToPass = !isRetake && Boolean(session?.id) && convertedSourceSessionIds.has(session.id);
     const hideFromFailedOnly = convertedToPass || (isRetake && Boolean(sourceSession?.id) && convertedSourceSessionIds.has(sourceSession.id));
     return {
@@ -1521,6 +1573,7 @@ async function fetchStudentResults() {
       return;
     }
     studentResultsState.list = dedupeAttempts(data ?? []);
+    await refreshQuestionsForResultAttempts(studentResultsState.list, { force: true });
     studentResultsState.loaded = true;
     await fetchSessionAttemptOverrides();
   } catch (error) {
@@ -1895,34 +1948,99 @@ async function fetchIssuedStudentWarnings() {
 }
 
 async function fetchQuestionsForDetail(version) {
+  return fetchQuestionsForDetailWithOptions(version);
+}
+
+async function fetchQuestionsForDetailWithOptions(version, options = {}) {
+  const { silent = false, force = false } = options;
   if (!version) return [];
-  if (resultDetailState.questionsByVersion[version]) {
-    resultDetailState.loading = false;
-    resultDetailState.error = "";
-    return resultDetailState.questionsByVersion[version];
+  const versionKey = String(version).trim();
+  if (!versionKey) return [];
+  if (!force && Object.prototype.hasOwnProperty.call(resultDetailState.questionsByVersion, versionKey)) {
+    if (!silent) {
+      resultDetailState.loading = false;
+      resultDetailState.error = "";
+    }
+    return resultDetailState.questionsByVersion[versionKey];
   }
-  resultDetailState.loading = true;
-  resultDetailState.error = "";
+  if (!silent) {
+    resultDetailState.loading = true;
+    resultDetailState.error = "";
+  }
   try {
-    const { data, error } = await fetchQuestionRowsWithFallback(version);
+    const { data, error } = await fetchQuestionRowsWithFallback(versionKey);
     if (error) {
       logSupabaseError("result detail questions fetch error", error);
-      resultDetailState.error = getErrorMessage(error, "Failed to load questions.");
+      if (!silent) {
+        resultDetailState.error = getErrorMessage(error, "Failed to load questions.");
+      }
       return [];
     }
-    const list = (data ?? []).map((row) => mapDbQuestion(row, version));
+    const list = (data ?? []).map((row) => mapDbQuestion(row, versionKey));
     resultDetailState.questionsByVersion = {
       ...resultDetailState.questionsByVersion,
-      [version]: list,
+      [versionKey]: list,
     };
     return list;
   } catch (error) {
     logUnexpectedError("result detail questions fetch failed", error);
-    resultDetailState.error = getErrorMessage(error, "Failed to load questions.");
+    if (!silent) {
+      resultDetailState.error = getErrorMessage(error, "Failed to load questions.");
+    }
     return [];
   } finally {
-    resultDetailState.loading = false;
+    if (!silent) {
+      resultDetailState.loading = false;
+    }
   }
+}
+
+async function refreshQuestionsForResultAttempts(attemptsList, options = {}) {
+  const { force = false } = options;
+  const versions = Array.from(
+    new Set(
+      (attemptsList ?? [])
+        .map((attempt) => String(attempt?.test_version ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+  if (!versions.length) return {};
+  const refreshKey = versions.slice().sort().join("|");
+  if (!force && resultQuestionRefreshPromise && resultQuestionRefreshKey === refreshKey) {
+    return resultQuestionRefreshPromise;
+  }
+  const client = authState.session ? supabase : publicSupabase;
+  resultQuestionRefreshKey = refreshKey;
+  resultQuestionRefreshPromise = (async () => {
+    try {
+      const { data, error } = await client
+        .from("questions")
+        .select(`test_version, ${QUESTION_SELECT_BASE}`)
+        .in("test_version", versions)
+        .order("order_index", { ascending: true });
+      if (error) {
+        logSupabaseError("results question refresh error", error);
+        return {};
+      }
+      const grouped = Object.fromEntries(versions.map((currentVersion) => [currentVersion, []]));
+      (data ?? []).forEach((row) => {
+        const currentVersion = String(row?.test_version ?? "").trim();
+        if (!currentVersion || !Object.prototype.hasOwnProperty.call(grouped, currentVersion)) return;
+        grouped[currentVersion].push(mapDbQuestion(row, currentVersion));
+      });
+      resultDetailState.questionsByVersion = {
+        ...resultDetailState.questionsByVersion,
+        ...grouped,
+      };
+      return grouped;
+    } catch (error) {
+      logUnexpectedError("results question refresh failed", error);
+      return {};
+    } finally {
+      resultQuestionRefreshPromise = null;
+    }
+  })();
+  return resultQuestionRefreshPromise;
 }
 
 function renderLogin(app) {
@@ -2521,7 +2639,7 @@ function scoreAll() {
   const list = getQuestions();
   for (const q of list) {
     const ans = state.answers[q.id];
-    if (ans === q.answerIndex) correct++;
+    if (isChoiceCorrect(ans, getEffectiveAnswerIndices(q))) correct++;
   }
   const total = list.length;
   return { correct, total };
@@ -2791,6 +2909,10 @@ function registerStudentMenu() {
       closeStudentMenu();
       if ((nextTab === "dailyResults" || nextTab === "modelResults") && !studentResultsState.loaded) {
         fetchStudentResults().finally(render);
+        return;
+      }
+      if ((nextTab === "dailyResults" || nextTab === "modelResults") && studentResultsState.loaded) {
+        refreshQuestionsForResultAttempts(studentResultsState.list, { force: true }).finally(render);
         return;
       }
       if (nextTab === "ranking" && !rankingState.loaded) {
@@ -3360,6 +3482,13 @@ function renderTestSelect(app) {
   if ((showDailyResults || showModelResults) && authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(render);
   }
+  if ((showDailyResults || showModelResults) && studentResultsState.loaded && lastHydratedResultsTab !== activeTab) {
+    lastHydratedResultsTab = activeTab;
+    refreshQuestionsForResultAttempts(studentResultsState.list, { force: true }).finally(render);
+  }
+  if (!showDailyResults && !showModelResults) {
+    lastHydratedResultsTab = "";
+  }
   if (showTabs && authState.profile?.school_id && !studentSchoolState.loading && (!studentSchoolState.loaded || studentSchoolState.schoolId !== authState.profile.school_id)) {
     fetchStudentSchool().finally(render);
   }
@@ -3604,7 +3733,7 @@ function renderTestSelect(app) {
                 ${filteredAttemptEntries
                   .map((entry) => {
                     const attempt = entry.attempt;
-                    const rate = getScoreRateFromAttempt(attempt);
+                    const scoreSummary = getVisibleAttemptScoreSummary(attempt);
                     const isPass = entry.effectivePass;
                     const passLabel = entry.convertedToPass
                       ? "Converted to Pass"
@@ -3615,8 +3744,8 @@ function renderTestSelect(app) {
                       <tr class="student-results-row" data-daily-attempt-id="${attempt.id}">
                         <td>${escapeHtml(getAttemptDateLabel(attempt))}</td>
                         <td>${escapeHtml(getAttemptTitle(attempt))}</td>
-                        <td>${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
-                        <td>${(rate * 100).toFixed(1)}%</td>
+                        <td>${scoreSummary.correct} / ${scoreSummary.total}</td>
+                        <td>${(scoreSummary.rate * 100).toFixed(1)}%</td>
                         <td class="col-pf ${entry.convertedToPass ? "result-converted-cell" : isPass ? "result-pass-cell" : "result-fail-cell"}">${passLabel}</td>
                       </tr>
                     `;
@@ -3653,7 +3782,8 @@ function renderTestSelect(app) {
           const summary = buildSectionSummary(detailRows);
           const mainSummary = buildMainSectionSummary(detailRows);
           const nestedSummary = buildNestedSectionSummary(detailRows);
-          const detailRate = getScoreRateFromAttempt(attempt);
+          const detailScoreSummary = getVisibleAttemptScoreSummary(attempt);
+          const detailRate = detailScoreSummary.rate;
           const detailPassRate = getPassRateForVersion(attempt.test_version);
           const detailIsPass = detailRate >= detailPassRate;
           const detailRank = modelRankState.map[attempt.id] || "";
@@ -3717,8 +3847,8 @@ function renderTestSelect(app) {
           } else if (resultDetailState.error) {
             detailBody = `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`;
           } else if (subTab === "score") {
-            const totalCorrect = attempt.correct ?? summary.reduce((acc, s) => acc + (s.correct || 0), 0);
-            const totalQuestions = attempt.total ?? summary.reduce((acc, s) => acc + (s.total || 0), 0);
+            const totalCorrect = detailScoreSummary.correct;
+            const totalQuestions = detailScoreSummary.total;
             const totalRate = totalQuestions ? ((totalCorrect / totalQuestions) * 100).toFixed(1) : "0.0";
             const scorePassRate = getPassRateForVersion(attempt.test_version);
             const radarData = mainSummary.map((row) => ({
@@ -3889,7 +4019,7 @@ function renderTestSelect(app) {
                 ${modelAttemptEntries
                   .map((entry) => {
                     const attempt = entry.attempt;
-                    const rate = getScoreRateFromAttempt(attempt);
+                    const scoreSummary = getVisibleAttemptScoreSummary(attempt);
                     const isPass = entry.effectivePass;
                     const rank = modelRankState.map[attempt.id] || "";
                     const totalRank = modelRankState.totalMap[attempt.id] || "";
@@ -3904,8 +4034,8 @@ function renderTestSelect(app) {
                         <td>${escapeHtml(getAttemptDateLabel(attempt))}</td>
                         <td>${escapeHtml(getAttemptTitle(attempt))}</td>
                         <td class="col-pf ${entry.convertedToPass ? "result-converted-cell" : isPass ? "result-pass-cell" : "result-fail-cell"}">${passLabel}</td>
-                        <td>${(rate * 100).toFixed(1)}%</td>
-                        <td class="col-total-score">${Number(attempt.correct) || 0} / ${Number(attempt.total) || 0}</td>
+                        <td>${(scoreSummary.rate * 100).toFixed(1)}%</td>
+                        <td class="col-total-score">${scoreSummary.correct} / ${scoreSummary.total}</td>
                         <td>${escapeHtml(rankLabel)}</td>
                       </tr>
                     `;
@@ -5074,7 +5204,7 @@ function renderTestSelect(app) {
         resultDetailState.attempt = attempt;
         resultDetailState.error = "";
         if (attempt.test_version) {
-          await fetchQuestionsForDetail(attempt.test_version);
+          await fetchQuestionsForDetailWithOptions(attempt.test_version, { force: true });
         }
         render();
       });
@@ -5098,7 +5228,7 @@ function renderTestSelect(app) {
         resultDetailState.attempt = attempt;
         resultDetailState.error = "";
         if (attempt.test_version) {
-          await fetchQuestionsForDetail(attempt.test_version);
+          await fetchQuestionsForDetailWithOptions(attempt.test_version, { force: true });
         }
         render();
       });
@@ -5476,7 +5606,7 @@ function buildResultRows() {
 
   for (const q of getQuestions()) {
     const chosenIdx = state.answers[q.id];
-    const correctIdx = q.answerIndex;
+    const correctIndices = getEffectiveAnswerIndices(q);
     const stemMedia = getStemMediaAssets(q);
 
     // 問題文の表示テキスト（最低限）
@@ -5486,15 +5616,15 @@ function buildResultRows() {
     rows.push({
       id: String(q.id),
       prompt: promptText,
-      isCorrect: chosenIdx === correctIdx,
+      isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
       stemImages: stemMedia.images,
       stemAudios: stemMedia.audios,
 
       chosen: getChoiceText(q, chosenIdx),
-      correct: getChoiceText(q, correctIdx),
+      correct: correctIndices.map((value) => getChoiceText(q, value)).filter(Boolean).join(" / "),
 
       chosenImg: pickChoiceImage(q, chosenIdx),
-      correctImg: pickChoiceImage(q, correctIdx),
+      correctImg: pickChoiceImage(q, correctIndices[0]),
     });
   }
 
@@ -5505,7 +5635,7 @@ function buildAttemptDetailRows(attempt, questionsList) {
   const answers = attempt?.answers_json ?? {};
   return (questionsList ?? []).map((q) => {
     const chosenIdx = answers[q.id];
-    const correctIdx = q.answerIndex;
+    const correctIndices = getEffectiveAnswerIndices(q);
     const stemMedia = getStemMediaAssets(q);
     return {
       qid: String(q.id),
@@ -5516,9 +5646,9 @@ function buildAttemptDetailRows(attempt, questionsList) {
       stemAudios: stemMedia.audios,
       chosen: getChoiceText(q, chosenIdx),
       chosenImg: pickChoiceImage(q, chosenIdx),
-      correct: getChoiceText(q, correctIdx),
-      correctImg: pickChoiceImage(q, correctIdx),
-      isCorrect: chosenIdx === correctIdx,
+      correct: correctIndices.map((value) => getChoiceText(q, value)).filter(Boolean).join(" / "),
+      correctImg: pickChoiceImage(q, correctIndices[0]),
+      isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
     };
   });
 }

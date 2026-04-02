@@ -903,11 +903,37 @@ export default function AdminConsoleResultsWorkspace(props) {
       && sessionDetailUsesImportedResultsSummary
       && sessionDetailLatestAttempts.every((attempt) => isImportedModelResultsSummaryAttempt(attempt))
     );
+  const resolveSessionAttemptScoreSummary = (attempt) => {
+    if (!attempt || isImportedSummaryAttempt(attempt)) {
+      return {
+        correct: Number(attempt?.correct ?? 0),
+        total: Number(attempt?.total ?? 0),
+        rate: getAttemptScoreRate(attempt, getScoreRate),
+      };
+    }
+    if (sessionDetailQuestions.length) {
+      const nextScore = buildAttemptScorePreviewFromQuestions(attempt, sessionDetailQuestions, getQuestionSectionLabel);
+      return {
+        correct: nextScore.correct,
+        total: nextScore.total,
+        rate: nextScore.scoreRate,
+      };
+    }
+    return {
+      correct: Number(attempt?.correct ?? 0),
+      total: Number(attempt?.total ?? 0),
+      rate: getAttemptScoreRate(attempt, getScoreRate),
+    };
+  };
   const sessionDetailOverview = sessionDetailOverviewProp ?? (() => {
     const count = sessionDetailLatestAttempts.length;
-    const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
+    const passCount = sessionDetailLatestAttempts.filter((attempt) => (
+      resolveSessionAttemptScoreSummary(attempt).rate >= sessionDetailPassRate
+    )).length;
     const averageScore = count
-      ? sessionDetailLatestAttempts.reduce((total, attempt) => total + getScoreRate(attempt), 0) / count
+      ? sessionDetailLatestAttempts.reduce((total, attempt) => (
+        total + resolveSessionAttemptScoreSummary(attempt).rate
+      ), 0) / count
       : 0;
     return {
       count,
@@ -920,15 +946,17 @@ export default function AdminConsoleResultsWorkspace(props) {
     const attendedCount = sessionDetailLatestAttempts.length;
     const activeStudentCount = sessionStudents.filter((student) => !(student?.is_withdrawn || student?.is_test_account)).length;
     const absentCount = Math.max(0, activeStudentCount - attendedCount);
-    const passCount = sessionDetailLatestAttempts.filter((attempt) => getScoreRate(attempt) >= sessionDetailPassRate).length;
+    const passCount = sessionDetailLatestAttempts.filter((attempt) => (
+      resolveSessionAttemptScoreSummary(attempt).rate >= sessionDetailPassRate
+    )).length;
     const failCount = Math.max(0, attendedCount - passCount);
     const totalQuestions = sessionDetailUsesImportedResultsSummary
-      ? Math.max(0, ...sessionDetailLatestAttempts.map((attempt) => Number(attempt.total ?? 0)))
+      ? Math.max(0, ...sessionDetailLatestAttempts.map((attempt) => resolveSessionAttemptScoreSummary(attempt).total))
       : sessionDetailQuestions.length;
     const averageCorrect = attendedCount
-      ? sessionDetailLatestAttempts.reduce((total, attempt) => {
-        return total + Number(attempt.correct ?? (attempt.total ? getScoreRate(attempt) * attempt.total : 0));
-      }, 0) / attendedCount
+      ? sessionDetailLatestAttempts.reduce((total, attempt) => (
+        total + resolveSessionAttemptScoreSummary(attempt).correct
+      ), 0) / attendedCount
       : 0;
     const bucketLabels = Array.from({ length: 10 }, (_, index) => {
       const start = index * 10;
@@ -937,7 +965,7 @@ export default function AdminConsoleResultsWorkspace(props) {
     });
     const bucketCounts = Array.from({ length: 10 }, () => 0);
     sessionDetailLatestAttempts.forEach((attempt) => {
-      const ratePercent = Math.max(0, Math.min(100, getScoreRate(attempt) * 100));
+      const ratePercent = Math.max(0, Math.min(100, resolveSessionAttemptScoreSummary(attempt).rate * 100));
       const bucketIndex = ratePercent >= 100 ? 9 : Math.floor(ratePercent / 10);
       bucketCounts[bucketIndex] += 1;
     });

@@ -119,8 +119,10 @@ function mapQuestion(row) {
     promptEn: row.prompt_en,
     promptBn: row.prompt_bn,
     answerIndex: row.answer_index,
+    answerIndices: Array.isArray(data.answer_indices) ? data.answer_indices : null,
     orderIndex: row.order_index ?? 0,
     rawData: data,
+    data,
     sourceVersion: data.sourceVersion ?? null,
     sourceQuestionId: data.sourceQuestionId ?? null,
     ...data,
@@ -2424,6 +2426,10 @@ export function useTestingWorkspaceState({
     }
 
     setSessionDetailQuestions(questionsList);
+    setAttemptQuestionsByVersion((current) => ({
+      ...(current ?? {}),
+      [String(session.problem_set_id ?? "").trim()]: questionsList,
+    }));
     setSessionDetailAttempts(attemptsList);
     setSessionDetailAllowances(allowancesMap);
     setSessionDetailAllowStudentId((current) => {
@@ -3789,6 +3795,59 @@ export function useTestingWorkspaceState({
     if (!supabase || !activeSchoolId) return;
     void fetchAttempts();
   }, [activeTab, supabase, activeSchoolId, fetchAttempts]);
+
+  useEffect(() => {
+    const isDailyResults = activeTab === "daily" && dailySubTab === "results";
+    const isModelResults = activeTab === "model" && modelSubTab === "results";
+    if (!isDailyResults && !isModelResults) return;
+    if (!supabase) return;
+    const matrix = isDailyResults ? dailyResultsMatrix : modelResultsMatrix;
+    const versions = Array.from(
+      new Set(
+        (matrix?.rows ?? [])
+          .flatMap((row) => row?.cells ?? [])
+          .flatMap((attemptList) => attemptList ?? [])
+          .filter((attempt) => attempt && !isImportedResultsSummaryAttempt(attempt))
+          .map((attempt) => String(attempt?.test_version ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+    const missing = versions.filter((version) => !attemptQuestionsByVersion[version]);
+    if (!missing.length) return;
+
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await fetchQuestionsForVersionsWithFallback(supabase, missing);
+      if (cancelled || error) {
+        if (error) console.error("results matrix question preload error:", error);
+        return;
+      }
+      const grouped = {};
+      (data ?? []).forEach((row) => {
+        const version = String(row?.test_version ?? "").trim();
+        if (!version) return;
+        if (!grouped[version]) grouped[version] = [];
+        const mapped = mapQuestion(row);
+        if (mapped) grouped[version].push(mapped);
+      });
+      if (!cancelled && Object.keys(grouped).length) {
+        setAttemptQuestionsByVersion((current) => ({ ...(current ?? {}), ...grouped }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    dailySubTab,
+    modelSubTab,
+    dailyResultsMatrix,
+    modelResultsMatrix,
+    attemptQuestionsByVersion,
+    supabase,
+    fetchQuestionsForVersionsWithFallback,
+  ]);
 
   // ========================================================================
   // Return statement

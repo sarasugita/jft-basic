@@ -5421,6 +5421,10 @@ export default function AdminConsole({
     }
 
     setSessionDetailQuestions(questionsList);
+    setAttemptQuestionsByVersion((current) => ({
+      ...(current ?? {}),
+      [String(session.problem_set_id ?? "").trim()]: questionsList,
+    }));
     setSessionDetailAttempts(attemptsList);
     setSessionDetailAllowances(allowancesMap);
     setSessionDetailAllowStudentId((current) => {
