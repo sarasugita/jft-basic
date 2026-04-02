@@ -288,6 +288,7 @@ function mapDbQuestion(row) {
     promptEn: row?.prompt_en ?? "",
     promptBn: row?.prompt_bn ?? "",
     answerIndex: row?.answer_index,
+    answerIndices: row?.data?.answer_indices ?? null,
     orderIndex: row?.order_index ?? 0,
     rawData: data,
     data,
@@ -943,6 +944,10 @@ export default function AdminConsoleResultsWorkspace(props) {
   const [localAttemptQuestionsByVersion, setLocalAttemptQuestionsByVersion] = useState({});
   const [localAttemptQuestionsLoading, setLocalAttemptQuestionsLoading] = useState(false);
   const [localAttemptQuestionsError, setLocalAttemptQuestionsError] = useState("");
+  const [previewEditMode, setPreviewEditMode] = useState(false);
+  const [pendingAnswerEdits, setPendingAnswerEdits] = useState({});
+  const [previewChangeMsg, setPreviewChangeMsg] = useState("");
+  const [previewChangeSaving, setPreviewChangeSaving] = useState(false);
   const attemptDetailOpen = canUseExternalAttemptDetail ? Boolean(attemptDetailOpenProp) : attemptDetailOpenState;
   const selectedAttempt = canUseExternalAttemptDetail ? (selectedAttemptProp ?? null) : selectedAttemptObjState;
   const attemptDetailSource = canUseExternalAttemptDetail ? (attemptDetailSourceProp ?? "default") : attemptDetailSourceState;
@@ -1061,6 +1066,15 @@ export default function AdminConsoleResultsWorkspace(props) {
     }
     return null;
   }, [localAttemptQuestionsByVersion, selectedAttempt, selectedSessionDetail?.id, sessionDetailQuestions]);
+
+  useEffect(() => {
+    if (!previewOpen) {
+      setPreviewEditMode(false);
+      setPendingAnswerEdits({});
+      setPreviewChangeMsg("");
+      setPreviewChangeSaving(false);
+    }
+  }, [previewOpen]);
 
   useEffect(() => {
     if (canUseExternalAttemptDetail) return;
@@ -1320,7 +1334,68 @@ export default function AdminConsoleResultsWorkspace(props) {
     fetchTests();
   }
 
-  function QuestionPreviewCard({ question, index, children }) {
+  async function saveAnswerChanges() {
+    const edits = Object.entries(pendingAnswerEdits);
+    if (!edits.length) return;
+
+    const multipleAnswerEdits = edits.filter(([, answers]) => answers.length > 1);
+    if (multipleAnswerEdits.length > 0) {
+      const confirmed = window.confirm(
+        `${multipleAnswerEdits.length} question${multipleAnswerEdits.length > 1 ? "s" : ""} ` +
+        `will have multiple correct answers. Students who selected any of those choices ` +
+        `will be marked correct.\n\nAre you sure this is intentional?`
+      );
+      if (!confirmed) return;
+    }
+
+    setPreviewChangeSaving(true);
+    setPreviewChangeMsg("Saving...");
+
+    for (const [dbId, answerIndices] of edits) {
+      const question = previewQuestions.find(q => q.dbId === dbId);
+      if (!question) continue;
+
+      const existingData = question?.rawData ?? {};
+      const dataUpdate = answerIndices.length > 1
+        ? { ...existingData, answer_indices: answerIndices }
+        : (() => {
+          const newData = { ...existingData };
+          delete newData.answer_indices;
+          return newData;
+        })();
+
+      const { error } = await supabase
+        .from("questions")
+        .update({
+          answer_index: answerIndices[0],
+          data: dataUpdate,
+        })
+        .eq("id", dbId);
+
+      if (error) {
+        setPreviewChangeMsg(`Save failed: ${error.message}`);
+        setPreviewChangeSaving(false);
+        return;
+      }
+    }
+
+    setPreviewQuestions(prev => prev.map(q => {
+      const newAnswers = pendingAnswerEdits[q.dbId];
+      if (!newAnswers) return q;
+      return {
+        ...q,
+        answerIndex: newAnswers[0],
+        answerIndices: newAnswers.length > 1 ? newAnswers : null,
+      };
+    }));
+
+    setPreviewChangeMsg(`Saved ${edits.length} answer${edits.length > 1 ? "s" : ""}.`);
+    setPendingAnswerEdits({});
+    setPreviewEditMode(false);
+    setPreviewChangeSaving(false);
+  }
+
+  function QuestionPreviewCard({ question, index, children, isEditMode = false, pendingAnswer = null, onAnswerChange = null }) {
     const prompt = question.promptEn || question.promptBn || "";
     const choices = question.choices ?? question.choicesJa ?? [];
     const stemKind = normalizeModelCsvKind(question.stemKind || "");
@@ -1342,29 +1417,52 @@ export default function AdminConsoleResultsWorkspace(props) {
       || String(question.id ?? "").split("__").filter(Boolean)[1]
       || String(question.id ?? "").trim();
 
+    const effectiveAnswers = pendingAnswer !== null
+      ? pendingAnswer
+      : (question.answerIndices ? question.answerIndices : [question.answerIndex].filter(i => i != null));
+    const hasMultipleAnswers = effectiveAnswers.length > 1;
+
     const renderChoices = () => (
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-        {choices.map((choice, choiceIndex) => {
-          const isCorrect = question.answerIndex === choiceIndex;
-          const isImage = isImageAsset(choice);
-          return (
-            <div
-              key={`choice-${question.id}-${choiceIndex}`}
-              className="btn"
-              style={{
-                border: isCorrect ? "2px solid #1a7f37" : "1px solid #ddd",
-                background: isCorrect ? "#e7f7ee" : "#fff",
-                padding: 8,
-              }}
-            >
-              {isImage ? (
-                <img src={choice} alt="choice" style={{ maxWidth: "100%" }} />
-              ) : (
-                choice
-              )}
-            </div>
-          );
-        })}
+      <div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
+          {choices.map((choice, choiceIndex) => {
+            const isSelected = effectiveAnswers.includes(choiceIndex);
+            const isImage = isImageAsset(choice);
+            return (
+              <button
+                key={`choice-${question.id}-${choiceIndex}`}
+                onClick={() => isEditMode && onAnswerChange && onAnswerChange(question.dbId, choiceIndex)}
+                className="btn"
+                type="button"
+                style={{
+                  border: isSelected && hasMultipleAnswers ? "2px solid #d97706" : isSelected ? "2px solid #1a7f37" : "1px solid #ddd",
+                  background: isSelected && hasMultipleAnswers ? "#fef3c7" : isSelected ? "#e7f7ee" : "#fff",
+                  padding: 8,
+                  cursor: isEditMode ? "pointer" : "default",
+                  position: "relative",
+                }}
+              >
+                {isImage ? (
+                  <img src={choice} alt="choice" style={{ maxWidth: "100%" }} />
+                ) : (
+                  choice
+                )}
+                {isSelected && hasMultipleAnswers && (
+                  <span style={{
+                    position: "absolute", top: 2, right: 2, fontSize: 14, fontWeight: "bold", color: "#d97706",
+                  }}>✓</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {hasMultipleAnswers && (
+          <div style={{
+            marginTop: 8, padding: 8, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 4, fontSize: 12, color: "#92400e",
+          }}>
+            ⚠ Multiple answers selected — confirm this is intentional before saving
+          </div>
+        )}
       </div>
     );
 
@@ -1470,7 +1568,23 @@ export default function AdminConsoleResultsWorkspace(props) {
     );
 
     return (
-      <QuestionPreviewCard key={`${question.id}-${index}`} question={question} index={index}>
+      <QuestionPreviewCard
+        key={`${question.id}-${index}`}
+        question={question}
+        index={index}
+        isEditMode={previewEditMode}
+        pendingAnswer={pendingAnswerEdits[question.dbId] ?? null}
+        onAnswerChange={(dbId, choiceIndex) => {
+          setPendingAnswerEdits(prev => {
+            const current = prev[dbId] ?? [question.answerIndex].filter(i => i != null);
+            const next = current.includes(choiceIndex)
+              ? current.filter(i => i !== choiceIndex)
+              : [...current, choiceIndex];
+            if (next.length === 0) return prev;
+            return { ...prev, [dbId]: next };
+          });
+        }}
+      >
         {canReplace ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <select
@@ -2153,6 +2267,12 @@ export default function AdminConsoleResultsWorkspace(props) {
       attemptDetailSectionRefs={attemptDetailSectionRefs}
       attemptDetailWrongOnly={attemptDetailWrongOnly}
       setAttemptDetailWrongOnly={setAttemptDetailWrongOnly}
+      previewEditMode={previewEditMode}
+      setPreviewEditMode={setPreviewEditMode}
+      pendingAnswerEdits={pendingAnswerEdits}
+      saveAnswerChanges={saveAnswerChanges}
+      previewChangeSaving={previewChangeSaving}
+      previewChangeMsg={previewChangeMsg}
     />
   );
 }

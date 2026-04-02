@@ -90,6 +90,12 @@ export default function AdminConsoleDeferredFeatures({
   previewSectionBreaks,
   renderPreviewQuestionCard,
   previewDisplayQuestions,
+  previewEditMode,
+  setPreviewEditMode,
+  pendingAnswerEdits,
+  saveAnswerChanges,
+  previewChangeSaving,
+  previewChangeMsg,
   attemptDetailOpen,
   selectedAttempt,
   selectedAttemptDisplayName,
@@ -657,13 +663,32 @@ export default function AdminConsoleDeferredFeatures({
               <div className="admin-title">
                 {previewSession ? previewSession.title || previewSession.problem_set_id : previewTest || "Preview"}
               </div>
-              <button
-                className="admin-modal-close"
-                onClick={closePreview}
-                aria-label="Close"
-              >
-                ×
-              </button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {previewEditMode ? (
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => setPreviewEditMode(false)}
+                  >
+                    Cancel
+                  </button>
+                ) : (
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => setPreviewEditMode(true)}
+                  >
+                    Change Answers
+                  </button>
+                )}
+                <button
+                  className="admin-modal-close"
+                  onClick={closePreview}
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
             </div>
 
             <div className="daily-session-create-body">
@@ -714,6 +739,27 @@ export default function AdminConsoleDeferredFeatures({
                   previewDisplayQuestions.map((question, index) => renderPreviewQuestionCard(question, index))
                 )}
               </div>
+              {(previewEditMode || Object.keys(pendingAnswerEdits ?? {}).length > 0) ? (
+                <div style={{
+                  position: "sticky", bottom: 0, background: "#fff",
+                  borderTop: "1px solid #ddd", padding: "12px 0 4px",
+                  display: "flex", alignItems: "center", gap: 12, marginTop: 16,
+                }}>
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    disabled={previewChangeSaving || Object.keys(pendingAnswerEdits ?? {}).length === 0}
+                    onClick={saveAnswerChanges}
+                  >
+                    {previewChangeSaving ? "Saving..." : `Save ${Object.keys(pendingAnswerEdits ?? {}).length} Change${Object.keys(pendingAnswerEdits ?? {}).length !== 1 ? "s" : ""}`}
+                  </button>
+                  {previewChangeMsg ? (
+                    <span className="admin-help" style={{ color: previewChangeMsg.startsWith("Save failed") ? "#dc2626" : "#1a7f37" }}>
+                      {previewChangeMsg}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

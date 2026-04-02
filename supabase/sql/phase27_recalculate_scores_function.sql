@@ -19,9 +19,9 @@ as $$
 declare
   v_updated_count int;
 begin
-  -- Only super_admin can run this
-  if public.current_user_role() <> 'super_admin' then
-    raise exception 'only super_admin can recalculate scores';
+  -- Only super_admin and admin can run this
+  if public.current_user_role() not in ('super_admin', 'admin') then
+    raise exception 'only super_admin and admin can recalculate scores';
   end if;
 
   -- Validate question set exists
@@ -105,9 +105,9 @@ declare
   v_question_set_id uuid;
   v_updated_count int;
 begin
-  -- Only super_admin can run this
-  if public.current_user_role() <> 'super_admin' then
-    raise exception 'only super_admin can recalculate scores';
+  -- Only super_admin and admin can run this
+  if public.current_user_role() not in ('super_admin', 'admin') then
+    raise exception 'only super_admin and admin can recalculate scores';
   end if;
 
   -- Get the question set for this test instance
