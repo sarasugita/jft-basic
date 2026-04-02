@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sections } from "../../../../packages/shared/questions.js";
 import AdminConsoleDeferredFeatures from "./AdminConsoleDeferredFeatures";
 
@@ -312,6 +312,59 @@ function mergeQuestionData(question) {
   };
 }
 
+function getEffectiveAnswerIndices(question) {
+  const fromArray = Array.isArray(question?.answerIndices)
+    ? question.answerIndices
+    : Array.isArray(question?.data?.answer_indices)
+      ? question.data.answer_indices
+      : [];
+  const normalized = fromArray
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  if (normalized.length) return Array.from(new Set(normalized));
+  const single = Number(question?.answerIndex);
+  return Number.isFinite(single) ? [single] : [];
+}
+
+function isChoiceCorrect(choiceIndex, answerIndices) {
+  const chosen = Number(choiceIndex);
+  if (!Number.isFinite(chosen)) return false;
+  return (answerIndices ?? []).includes(chosen);
+}
+
+function normalizeAnswerIndices(answerIndices) {
+  return Array.from(
+    new Set(
+      (answerIndices ?? [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+    )
+  );
+}
+
+function applyAnswerIndicesToQuestion(question, answerIndices) {
+  const normalizedAnswers = normalizeAnswerIndices(answerIndices);
+  if (!normalizedAnswers.length) return question;
+  const nextRawData = {
+    ...(question?.rawData ?? question?.data ?? {}),
+  };
+  if (normalizedAnswers.length > 1) {
+    nextRawData.answer_indices = normalizedAnswers;
+  } else {
+    delete nextRawData.answer_indices;
+  }
+  return {
+    ...question,
+    answerIndex: normalizedAnswers[0],
+    answerIndices: normalizedAnswers.length > 1 ? normalizedAnswers : null,
+    rawData: nextRawData,
+    data: {
+      ...(question?.data ?? {}),
+      ...nextRawData,
+    },
+  };
+}
+
 function getQuestionPrompt(question) {
   const q = mergeQuestionData(question);
   if (q.boxText) return q.boxText;
@@ -333,24 +386,25 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList, getQuestionS
       const answer = answers[answerKey];
       question.parts.forEach((part, index) => {
         const chosenIdx = answer?.partAnswers?.[index];
-        const correctIdx = part?.answerIndex;
+        const correctIndices = getEffectiveAnswerIndices(part);
         rows.push({
           qid: `${answerKey}-${index + 1}`,
           sectionKey: question.sectionKey || "",
           section,
           prompt: `${question.promptEn ?? question.promptBn ?? ""} ${part?.partLabel ?? ""} ${part?.questionJa ?? part?.promptEn ?? ""}`.trim(),
-          isCorrect: chosenIdx === correctIdx,
+          isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
         });
       });
       continue;
     }
     const chosenIdx = answers[answerKey];
+    const correctIndices = getEffectiveAnswerIndices(question);
     rows.push({
       qid: String(answerKey),
       sectionKey: question.sectionKey || "",
       section,
       prompt: getQuestionPrompt(question),
-      isCorrect: chosenIdx === question.answerIndex,
+      isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
     });
   }
   return rows;
@@ -587,7 +641,32 @@ function getDistributionTickStep(maxCount) {
   return Math.max(25, Math.ceil(maxCount / 5 / 5) * 5);
 }
 
-function buildSessionStudentRankingRows(attemptsList, questionsList, studentsList, getQuestionSectionLabel) {
+function getAttemptScoreRate(attempt, getScoreRate = null) {
+  if (typeof getScoreRate === "function") {
+    const resolvedRate = Number(getScoreRate(attempt));
+    if (Number.isFinite(resolvedRate)) return resolvedRate;
+  }
+  const correct = Number(attempt?.correct ?? 0);
+  const total = Number(attempt?.total ?? 0);
+  if (Number.isFinite(correct) && Number.isFinite(total) && total > 0) {
+    return correct / total;
+  }
+  const rate = Number(attempt?.score_rate);
+  return Number.isFinite(rate) ? rate : 0;
+}
+
+function buildAttemptScorePreviewFromQuestions(attempt, questionsList, getQuestionSectionLabel) {
+  const detailRows = buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel);
+  const total = detailRows.length || Number(attempt?.total ?? 0) || 0;
+  const correct = detailRows.filter((row) => row.isCorrect).length;
+  return {
+    total,
+    correct,
+    scoreRate: total > 0 ? correct / total : 0,
+  };
+}
+
+function buildSessionStudentRankingRows(attemptsList, questionsList, studentsList, getQuestionSectionLabel, getScoreRate = null) {
   if (!attemptsList?.length) return [];
   const sectionAverageRows = buildSectionAverageRows(attemptsList, questionsList, getQuestionSectionLabel);
   const sectionTitles = sectionAverageRows.map((row) => row.section);
@@ -605,7 +684,7 @@ function buildSessionStudentRankingRows(attemptsList, questionsList, studentsLis
       student_code: attempt.student_code || student?.student_code || "",
       totalCorrect: Number(attempt?.correct ?? 0),
       totalQuestions: Number(attempt?.total ?? 0),
-      totalRate: Number(attempt?.score_rate ?? 0),
+      totalRate: getAttemptScoreRate(attempt, getScoreRate),
       sectionRates,
     };
   });
@@ -619,7 +698,7 @@ function buildSessionStudentRankingRows(attemptsList, questionsList, studentsLis
   return rows.map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
-function buildImportedSessionStudentRankingRows(attemptsList, studentsList) {
+function buildImportedSessionStudentRankingRows(attemptsList, studentsList, getScoreRate = null) {
   if (!attemptsList?.length) return [];
   const sectionTitles = sections.filter((section) => section.key !== "DAILY").map((section) => section.title);
   const rows = attemptsList.map((attempt) => {
@@ -635,7 +714,7 @@ function buildImportedSessionStudentRankingRows(attemptsList, studentsList) {
       student_code: attempt.student_code || student?.student_code || "",
       totalCorrect: Number(attempt?.correct ?? 0),
       totalQuestions: Number(attempt?.total ?? 0),
-      totalRate: Number(attempt?.score_rate ?? 0),
+      totalRate: getAttemptScoreRate(attempt, getScoreRate),
       sectionRates,
     };
   });
@@ -735,19 +814,41 @@ export default function AdminConsoleResultsWorkspace(props) {
     previewReplacementMsg,
     setPreviewReplacementMsg,
     setPreviewQuestions,
+    setAttempts = null,
+    setSessionDetailQuestions = null,
+    setSessionDetailAttempts = null,
     normalizeModelCsvKind,
     splitAssetValues,
     isImageAsset,
     isAudioAsset,
+    fetchAttempts = null,
+    runSearch = () => {},
+    fetchSessionDetail = null,
   } = props;
 
   const sessionStudents = Array.isArray(students) ? students : [];
   const studentsById = new Map(sessionStudents.map((student) => [student.id, student]));
+  const sessionDetailRawAttempts = Array.isArray(sessionDetailAttempts) ? sessionDetailAttempts : [];
+  const sessionDetailUsesImportedResultsSummaryRaw = sessionDetailRawAttempts.length > 0
+    && sessionDetailRawAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt));
   const sessionDetailDisplayAttempts = Array.isArray(sessionDetailDisplayAttemptsProp)
     ? sessionDetailDisplayAttemptsProp
     : (() => {
-      const actualAttempts = sessionDetailAttempts.filter((attempt) => !isImportedResultsSummaryAttempt(attempt));
-      return actualAttempts.length ? actualAttempts : sessionDetailAttempts;
+      const actualAttempts = sessionDetailRawAttempts.filter((attempt) => !isImportedResultsSummaryAttempt(attempt));
+      const attemptsList = actualAttempts.length ? actualAttempts : sessionDetailRawAttempts;
+      if (!attemptsList.length || sessionDetailUsesImportedResultsSummaryRaw || !sessionDetailQuestions.length) {
+        return attemptsList;
+      }
+      return attemptsList.map((attempt) => {
+        if (isImportedResultsSummaryAttempt(attempt)) return attempt;
+        const nextScore = buildAttemptScorePreviewFromQuestions(attempt, sessionDetailQuestions, getQuestionSectionLabel);
+        return {
+          ...attempt,
+          correct: nextScore.correct,
+          total: nextScore.total,
+          score_rate: nextScore.scoreRate,
+        };
+      });
     })();
   const sessionDetailStudentOptions = Array.isArray(sessionDetailStudentOptionsProp)
     ? sessionDetailStudentOptionsProp
@@ -791,10 +892,7 @@ export default function AdminConsoleResultsWorkspace(props) {
     })();
   const sessionDetailUsesImportedResultsSummary = typeof sessionDetailUsesImportedResultsSummaryProp === "boolean"
     ? sessionDetailUsesImportedResultsSummaryProp
-    : (
-      sessionDetailDisplayAttempts.length > 0
-      && sessionDetailDisplayAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt))
-    );
+    : sessionDetailUsesImportedResultsSummaryRaw;
   const sessionDetailUsesImportedModelSummary = typeof sessionDetailUsesImportedModelSummaryProp === "boolean"
     ? sessionDetailUsesImportedModelSummaryProp
     : (
@@ -907,8 +1005,8 @@ export default function AdminConsoleResultsWorkspace(props) {
     ? sessionDetailStudentRankingRowsProp
     : (
       sessionDetailUsesImportedResultsSummary
-        ? buildImportedSessionStudentRankingRows(sessionDetailLatestAttempts, sessionStudents)
-        : buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, sessionStudents, getQuestionSectionLabel)
+        ? buildImportedSessionStudentRankingRows(sessionDetailLatestAttempts, sessionStudents, getScoreRate)
+        : buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, sessionStudents, getQuestionSectionLabel, getScoreRate)
     );
   const sessionDetailRankingSections = Array.isArray(sessionDetailRankingSectionsProp)
     ? sessionDetailRankingSectionsProp
@@ -946,8 +1044,11 @@ export default function AdminConsoleResultsWorkspace(props) {
   const [localAttemptQuestionsError, setLocalAttemptQuestionsError] = useState("");
   const [previewEditMode, setPreviewEditMode] = useState(false);
   const [pendingAnswerEdits, setPendingAnswerEdits] = useState({});
+  const [pendingAnswerEditModes, setPendingAnswerEditModes] = useState({});
   const [previewChangeMsg, setPreviewChangeMsg] = useState("");
   const [previewChangeSaving, setPreviewChangeSaving] = useState(false);
+  const previewBodyRef = useRef(null);
+  const previewOpenRef = useRef(previewOpen);
   const attemptDetailOpen = canUseExternalAttemptDetail ? Boolean(attemptDetailOpenProp) : attemptDetailOpenState;
   const selectedAttempt = canUseExternalAttemptDetail ? (selectedAttemptProp ?? null) : selectedAttemptObjState;
   const attemptDetailSource = canUseExternalAttemptDetail ? (attemptDetailSourceProp ?? "default") : attemptDetailSourceState;
@@ -971,6 +1072,318 @@ export default function AdminConsoleResultsWorkspace(props) {
     setAttemptDetailOpen(true);
   };
   const openAttemptDetail = canUseExternalAttemptDetail ? openAttemptDetailProp : localOpenAttemptDetail;
+
+  const applyPendingAnswerEditsToQuestions = useCallback((questionsList, edits) => (
+    (questionsList ?? []).map((question) => {
+      const nextAnswers = edits?.[question.dbId];
+      if (!nextAnswers) return question;
+      return applyAnswerIndicesToQuestion(question, nextAnswers);
+    })
+  ), []);
+
+  const buildAnswerEditDescriptors = useCallback((editsMap) => (
+    Object.entries(editsMap ?? {})
+      .map(([dbId, answerIndices]) => {
+        const question = (previewQuestions ?? []).find((item) => String(item?.dbId ?? "") === String(dbId));
+        if (!question) return null;
+        const normalizedAnswers = normalizeAnswerIndices(answerIndices);
+        if (!normalizedAnswers.length) return null;
+        return {
+          dbId,
+          question,
+          questionId: String(question.questionId ?? question.id ?? "").trim(),
+          answerIndices: normalizedAnswers,
+        };
+      })
+      .filter(Boolean)
+  ), [previewQuestions]);
+
+  const loadAffectedQuestionVersionsForEdits = useCallback(async (editsMap = pendingAnswerEdits) => {
+    const targetVersion = String(previewSession?.problem_set_id || previewTest || "").trim();
+    const editDescriptors = buildAnswerEditDescriptors(editsMap);
+    const targetQuestions = applyPendingAnswerEditsToQuestions(previewQuestions, editsMap);
+    const versionQuestionsMap = targetVersion ? { [targetVersion]: targetQuestions } : {};
+    const questionUpdates = editDescriptors.map(({ dbId, answerIndices }) => ({ dbId, answerIndices }));
+
+    if (!supabase || !targetVersion || !editDescriptors.length) {
+      return {
+        ok: true,
+        targetVersion,
+        versionQuestionsMap,
+        questionUpdates,
+        impactedVersions: Object.keys(versionQuestionsMap),
+        linkedVersionCount: 0,
+        warning: "",
+      };
+    }
+
+    const answerIndicesBySourceQuestionId = new Map(
+      editDescriptors.map(({ questionId, answerIndices }) => [questionId, answerIndices])
+    );
+
+    const { data, error } = await supabase
+      .from("questions")
+      .select("id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data")
+      .contains("data", { sourceVersion: targetVersion })
+      .order("test_version", { ascending: true })
+      .order("order_index", { ascending: true });
+
+    if (error) {
+      console.error("linked question lookup error:", error);
+      return {
+        ok: true,
+        targetVersion,
+        versionQuestionsMap,
+        questionUpdates,
+        impactedVersions: Object.keys(versionQuestionsMap),
+        linkedVersionCount: 0,
+        warning: error.message || "Linked session updates could not be checked.",
+      };
+    }
+
+    const linkedQuestions = (data ?? []).map(mapDbQuestion);
+    const groupedLinkedQuestions = new Map();
+    linkedQuestions.forEach((question) => {
+      const version = String(question?.testVersion ?? "").trim();
+      if (!version) return;
+      if (!groupedLinkedQuestions.has(version)) groupedLinkedQuestions.set(version, []);
+      groupedLinkedQuestions.get(version).push(question);
+    });
+
+    groupedLinkedQuestions.forEach((questionsList, version) => {
+      let hasMatchingSourceQuestion = false;
+      const nextQuestions = questionsList.map((question) => {
+        const sourceQuestionId = String(question?.sourceQuestionId ?? "").trim();
+        const nextAnswers = answerIndicesBySourceQuestionId.get(sourceQuestionId);
+        if (!nextAnswers) return question;
+        hasMatchingSourceQuestion = true;
+        questionUpdates.push({ dbId: question.dbId, answerIndices: nextAnswers });
+        return applyAnswerIndicesToQuestion(question, nextAnswers);
+      });
+      if (hasMatchingSourceQuestion) {
+        versionQuestionsMap[version] = nextQuestions;
+      }
+    });
+
+    const impactedVersions = Object.keys(versionQuestionsMap);
+    return {
+      ok: true,
+      targetVersion,
+      versionQuestionsMap,
+      questionUpdates,
+      impactedVersions,
+      linkedVersionCount: Math.max(0, impactedVersions.length - (targetVersion ? 1 : 0)),
+      warning: "",
+    };
+  }, [
+    applyPendingAnswerEditsToQuestions,
+    buildAnswerEditDescriptors,
+    pendingAnswerEdits,
+    previewQuestions,
+    previewSession?.problem_set_id,
+    previewTest,
+    supabase,
+  ]);
+
+  const updatePreviewLinkedQuestionCaches = useCallback((edits, affectedQuestionData = null) => {
+    if (!Object.keys(edits ?? {}).length) return;
+    const targetVersion = String(previewSession?.problem_set_id || previewTest || "").trim();
+    const fallbackPreviewQuestions = applyPendingAnswerEditsToQuestions(previewQuestions, edits);
+    const versionQuestionsMap = affectedQuestionData?.versionQuestionsMap ?? (targetVersion
+      ? { [targetVersion]: fallbackPreviewQuestions }
+      : {});
+    const nextPreviewQuestions = versionQuestionsMap[targetVersion] ?? fallbackPreviewQuestions;
+
+    setPreviewQuestions(nextPreviewQuestions);
+
+    const applyAttemptPreview = (attempt) => {
+      if (!attempt || isImportedSummaryAttempt(attempt)) return attempt;
+      const versionKey = String(attempt.test_version ?? "").trim();
+      const questionsList = versionQuestionsMap[versionKey];
+      if (!questionsList?.length) return attempt;
+      const nextScore = buildAttemptScorePreviewFromQuestions(attempt, questionsList, getQuestionSectionLabel);
+      return {
+        ...attempt,
+        correct: nextScore.correct,
+        total: nextScore.total,
+        score_rate: nextScore.scoreRate,
+      };
+    };
+
+    if (typeof setAttempts === "function") {
+      setAttempts((current) => (current ?? []).map(applyAttemptPreview));
+    }
+    if (
+      typeof setSessionDetailQuestions === "function"
+      && selectedSessionDetail?.problem_set_id
+      && versionQuestionsMap[String(selectedSessionDetail.problem_set_id ?? "").trim()]
+    ) {
+      setSessionDetailQuestions(versionQuestionsMap[String(selectedSessionDetail.problem_set_id ?? "").trim()]);
+    }
+    if (typeof setSessionDetailAttempts === "function") {
+      setSessionDetailAttempts((current) => (current ?? []).map(applyAttemptPreview));
+    }
+    if (selectedAttempt?.id) {
+      setSelectedAttemptObj((current) => applyAttemptPreview(current ?? selectedAttempt));
+    }
+    setLocalAttemptQuestionsByVersion((current) => ({
+      ...(current ?? {}),
+      ...versionQuestionsMap,
+    }));
+  }, [
+    applyPendingAnswerEditsToQuestions,
+    getQuestionSectionLabel,
+    previewQuestions,
+    previewSession?.problem_set_id,
+    previewTest,
+    selectedSessionDetail?.problem_set_id,
+    selectedAttempt,
+    setPreviewQuestions,
+    setSessionDetailQuestions,
+    setSessionDetailAttempts,
+    setAttempts,
+    setSelectedAttemptObj,
+  ]);
+
+  const preservePreviewScrollPosition = useCallback((callback) => {
+    const container = previewBodyRef.current;
+    const scrollTop = container?.scrollTop ?? 0;
+    callback();
+    if (!container) return;
+    requestAnimationFrame(() => {
+      if (previewBodyRef.current) {
+        previewBodyRef.current.scrollTop = scrollTop;
+      }
+    });
+  }, []);
+
+  const buildAttemptScorePreview = useCallback((attempt, questionsList) => (
+    buildAttemptScorePreviewFromQuestions(attempt, questionsList, getQuestionSectionLabel)
+  ), [getQuestionSectionLabel]);
+
+  const applyUpdatedAttemptScoresToCaches = useCallback((attemptUpdates) => {
+    if (!attemptUpdates?.length) return;
+    const updatesById = new Map(attemptUpdates.map((attempt) => [attempt.id, attempt]));
+    if (typeof setAttempts === "function") {
+      setAttempts((current) => (current ?? []).map((attempt) => (
+        updatesById.has(attempt.id)
+          ? { ...attempt, ...updatesById.get(attempt.id) }
+          : attempt
+      )));
+    }
+    if (typeof setSessionDetailAttempts === "function") {
+      setSessionDetailAttempts((current) => (current ?? []).map((attempt) => (
+        updatesById.has(attempt.id)
+          ? { ...attempt, ...updatesById.get(attempt.id) }
+          : attempt
+      )));
+    }
+    if (selectedAttempt?.id && updatesById.has(selectedAttempt.id)) {
+      setSelectedAttemptObj((current) => ({
+        ...(current ?? selectedAttempt),
+        ...updatesById.get(selectedAttempt.id),
+      }));
+    }
+  }, [selectedAttempt, setAttempts, setSelectedAttemptObj, setSessionDetailAttempts]);
+
+  const inspectPendingAnswerChangeImpact = useCallback(async (affectedQuestionData = null) => {
+    const resolvedQuestionData = affectedQuestionData ?? await loadAffectedQuestionVersionsForEdits(pendingAnswerEdits);
+    const impactedVersions = resolvedQuestionData?.impactedVersions ?? [];
+
+    if (!supabase || !impactedVersions.length) {
+      return {
+        ok: true,
+        attemptsChecked: 0,
+        changedAttemptCount: 0,
+        changedStudentCount: 0,
+        increasedAttemptCount: 0,
+        decreasedAttemptCount: 0,
+        attemptUpdates: [],
+        impactedVersions: [],
+        linkedVersionCount: 0,
+        warning: resolvedQuestionData?.warning ?? "",
+      };
+    }
+    const { data, error } = await supabase
+      .from("attempts")
+      .select("id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, answers_json")
+      .in("test_version", impactedVersions);
+
+    if (error) {
+      return { ok: false, error };
+    }
+
+    const attemptsList = (data ?? []).filter((attempt) => !isImportedSummaryAttempt(attempt));
+    const changedStudents = new Set();
+    let changedAttemptCount = 0;
+    let increasedAttemptCount = 0;
+    let decreasedAttemptCount = 0;
+    const attemptUpdates = [];
+
+    attemptsList.forEach((attempt) => {
+      const versionKey = String(attempt?.test_version ?? "").trim();
+      const questionsList = resolvedQuestionData?.versionQuestionsMap?.[versionKey];
+      if (!questionsList?.length) return;
+      const nextScore = buildAttemptScorePreview(attempt, questionsList);
+      const previousCorrect = Number(attempt?.correct ?? 0);
+      const previousTotal = Number(attempt?.total ?? 0);
+      const previousScoreRate = getAttemptScoreRate(attempt, getScoreRate);
+      const correctChanged = nextScore.correct !== previousCorrect;
+      const totalChanged = nextScore.total !== previousTotal;
+      const scoreChanged = Math.abs(nextScore.scoreRate - previousScoreRate) > 0.000001;
+      if (!correctChanged && !totalChanged && !scoreChanged) return;
+      changedAttemptCount += 1;
+      if (attempt?.student_id) changedStudents.add(attempt.student_id);
+      if (nextScore.correct > previousCorrect) increasedAttemptCount += 1;
+      if (nextScore.correct < previousCorrect) decreasedAttemptCount += 1;
+      attemptUpdates.push({
+        ...attempt,
+        correct: nextScore.correct,
+        total: nextScore.total,
+        score_rate: nextScore.scoreRate,
+      });
+    });
+
+    return {
+      ok: true,
+      attemptsChecked: attemptsList.length,
+      changedAttemptCount,
+      changedStudentCount: changedStudents.size,
+      increasedAttemptCount,
+      decreasedAttemptCount,
+      attemptUpdates,
+      impactedVersions,
+      linkedVersionCount: resolvedQuestionData?.linkedVersionCount ?? 0,
+      warning: resolvedQuestionData?.warning ?? "",
+    };
+  }, [
+    buildAttemptScorePreview,
+    getScoreRate,
+    loadAffectedQuestionVersionsForEdits,
+    pendingAnswerEdits,
+    supabase,
+  ]);
+
+  const persistUpdatedAttemptScores = useCallback(async (attemptUpdates) => {
+    if (!attemptUpdates?.length) return { ok: true, updatedCount: 0 };
+    for (let index = 0; index < attemptUpdates.length; index += 25) {
+      const chunk = attemptUpdates.slice(index, index + 25);
+      const results = await Promise.all(chunk.map((attempt) => (
+        supabase
+          .from("attempts")
+          .update({
+            correct: attempt.correct,
+            total: attempt.total,
+          })
+          .eq("id", attempt.id)
+      )));
+      const failed = results.find((result) => result.error);
+      if (failed?.error) {
+        return { ok: false, error: failed.error };
+      }
+    }
+    return { ok: true, updatedCount: attemptUpdates.length };
+  }, [supabase]);
 
   const buildDetailedAttemptRows = (answersJson, questionsList) => {
     const answers = answersJson ?? {};
@@ -1024,7 +1437,7 @@ export default function AdminConsoleResultsWorkspace(props) {
         const answer = answers[answerKey];
         return question.parts.map((part, index) => {
           const chosenIdx = answer?.partAnswers?.[index];
-          const correctIdx = part?.answerIndex;
+          const correctIndices = getEffectiveAnswerIndices(part);
           return {
             qid: `${answerKey}-${index + 1}`,
             sectionKey: question.sectionKey || "",
@@ -1032,15 +1445,16 @@ export default function AdminConsoleResultsWorkspace(props) {
             prompt: `${question.promptEn ?? question.promptBn ?? ""} ${part?.partLabel ?? ""} ${part?.questionJa ?? part?.promptEn ?? ""}`.trim(),
             chosen: getPartChoiceText(part, chosenIdx),
             chosenImage: getPartChoiceImage(part, chosenIdx),
-            correct: getPartChoiceText(part, correctIdx),
-            correctImage: getPartChoiceImage(part, correctIdx),
-            isCorrect: chosenIdx === correctIdx,
+            correct: correctIndices.map((value) => getPartChoiceText(part, value)).filter(Boolean).join(" / "),
+            correctImage: getPartChoiceImage(part, correctIndices[0]),
+            isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
             stemImages,
             stemAudios,
           };
         });
       }
       const chosenIdx = answers[answerKey];
+      const correctIndices = getEffectiveAnswerIndices(question);
       return [{
         qid: String(answerKey),
         sectionKey: question.sectionKey || "",
@@ -1048,9 +1462,9 @@ export default function AdminConsoleResultsWorkspace(props) {
         prompt: getQuestionPrompt(question),
         chosen: getChoiceText(question, chosenIdx),
         chosenImage: getChoiceImage(question, chosenIdx),
-        correct: getChoiceText(question, question.answerIndex),
-        correctImage: getChoiceImage(question, question.answerIndex),
-        isCorrect: chosenIdx === question.answerIndex,
+        correct: correctIndices.map((value) => getChoiceText(question, value)).filter(Boolean).join(" / "),
+        correctImage: getChoiceImage(question, correctIndices[0]),
+        isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
         stemImages,
         stemAudios,
       }];
@@ -1068,13 +1482,26 @@ export default function AdminConsoleResultsWorkspace(props) {
   }, [localAttemptQuestionsByVersion, selectedAttempt, selectedSessionDetail?.id, sessionDetailQuestions]);
 
   useEffect(() => {
+    const wasOpen = previewOpenRef.current;
+    previewOpenRef.current = previewOpen;
     if (!previewOpen) {
       setPreviewEditMode(false);
       setPendingAnswerEdits({});
+      setPendingAnswerEditModes({});
       setPreviewChangeMsg("");
       setPreviewChangeSaving(false);
     }
-  }, [previewOpen]);
+    if (!wasOpen || previewOpen) return;
+    if (typeof fetchAttempts === "function") {
+      void fetchAttempts();
+    }
+    if (selectedSessionDetail?.id && typeof fetchSessionDetail === "function") {
+      void fetchSessionDetail(selectedSessionDetail);
+    }
+    if (typeof runSearch === "function") {
+      void runSearch();
+    }
+  }, [fetchAttempts, fetchSessionDetail, previewOpen, runSearch, selectedSessionDetail]);
 
   useEffect(() => {
     if (canUseExternalAttemptDetail) return;
@@ -1183,9 +1610,21 @@ export default function AdminConsoleResultsWorkspace(props) {
         }))
         .filter((section) => section.rows.length > 0);
     })();
-  const selectedAttemptScoreRate = Number.isFinite(selectedAttemptScoreRateProp)
-    ? selectedAttemptScoreRateProp
-    : (selectedAttempt ? getScoreRate(selectedAttempt) : 0);
+  const selectedAttemptDerivedSummary = useMemo(() => {
+    if (!selectedAttemptRows.length || selectedAttemptUsesImportedSummary) return null;
+    const correct = selectedAttemptRows.reduce((sum, row) => sum + (row.isCorrect ? 1 : 0), 0);
+    const total = selectedAttemptRows.length;
+    return {
+      correct,
+      total,
+      rate: total > 0 ? correct / total : 0,
+    };
+  }, [selectedAttemptRows, selectedAttemptUsesImportedSummary]);
+  const selectedAttemptScoreRate = selectedAttemptDerivedSummary
+    ? selectedAttemptDerivedSummary.rate
+    : (Number.isFinite(selectedAttemptScoreRateProp)
+      ? selectedAttemptScoreRateProp
+      : (selectedAttempt ? getScoreRate(selectedAttempt) : 0));
   const selectedAttemptIsPass = typeof selectedAttemptIsPassProp === "boolean"
     ? selectedAttemptIsPassProp
     : selectedAttemptScoreRate >= selectedAttemptPassRate;
@@ -1198,6 +1637,36 @@ export default function AdminConsoleResultsWorkspace(props) {
       || ""
     )
     : "";
+  const getVisibleAttemptScoreSummary = useCallback((attempt) => {
+    const fallback = {
+      correct: Number(attempt?.correct ?? 0),
+      total: Number(attempt?.total ?? 0),
+      rate: getAttemptScoreRate(attempt, getScoreRate),
+    };
+    if (!attempt || isImportedSummaryAttempt(attempt)) return fallback;
+    const versionKey = String(attempt?.test_version ?? "").trim();
+    const sessionQuestions = (
+      selectedSessionDetail?.id
+      && String(attempt?.test_session_id ?? "").trim() === String(selectedSessionDetail.id ?? "").trim()
+      && sessionDetailQuestions.length
+    )
+      ? sessionDetailQuestions
+      : null;
+    const questionsList = sessionQuestions ?? localAttemptQuestionsByVersion[versionKey] ?? null;
+    if (!questionsList?.length) return fallback;
+    const nextScore = buildAttemptScorePreviewFromQuestions(attempt, questionsList, getQuestionSectionLabel);
+    return {
+      correct: nextScore.correct,
+      total: nextScore.total,
+      rate: nextScore.scoreRate,
+    };
+  }, [
+    getQuestionSectionLabel,
+    getScoreRate,
+    localAttemptQuestionsByVersion,
+    selectedSessionDetail?.id,
+    sessionDetailQuestions,
+  ]);
   const studentAttemptRanks = studentAttemptRanksProp ?? {};
   const attemptQuestionsLoading = canUseExternalAttemptDetail && typeof attemptQuestionsLoadingProp === "boolean"
     ? attemptQuestionsLoadingProp
@@ -1349,10 +1818,42 @@ export default function AdminConsoleResultsWorkspace(props) {
     }
 
     setPreviewChangeSaving(true);
+    setPreviewChangeMsg("Checking score impact...");
+
+    const affectedQuestionData = await loadAffectedQuestionVersionsForEdits(pendingAnswerEdits);
+    const impact = await inspectPendingAnswerChangeImpact(affectedQuestionData);
+    if (!impact.ok) {
+      const proceedWithoutImpactCheck = window.confirm(
+        `Could not verify whether recorded student scores would change.\n\n${impact.error?.message ?? "Unknown error"}\n\nSave the answer changes anyway?`
+      );
+      if (!proceedWithoutImpactCheck) {
+        setPreviewChangeSaving(false);
+        setPreviewChangeMsg("");
+        return;
+      }
+    } else if (impact.changedAttemptCount > 0) {
+      const proceedWithScoreImpact = window.confirm(
+        `Saving these answer changes would affect ${impact.changedAttemptCount} recorded attempt${impact.changedAttemptCount === 1 ? "" : "s"} ` +
+        `across ${impact.changedStudentCount} student${impact.changedStudentCount === 1 ? "" : "s"}.\n\n` +
+        `${impact.linkedVersionCount > 0 ? `Linked session versions affected: ${impact.linkedVersionCount}\n` : ""}` +
+        `Score increases: ${impact.increasedAttemptCount}\n` +
+        `Score decreases: ${impact.decreasedAttemptCount}\n\n` +
+        `Confirm to save the answer key changes and update those displayed scores now.`
+      );
+      if (!proceedWithScoreImpact) {
+        setPreviewChangeSaving(false);
+        setPreviewChangeMsg("");
+        return;
+      }
+    }
+
     setPreviewChangeMsg("Saving...");
 
-    for (const [dbId, answerIndices] of edits) {
-      const question = previewQuestions.find(q => q.dbId === dbId);
+    for (const { dbId, answerIndices } of (affectedQuestionData?.questionUpdates ?? [])) {
+      const question = (previewQuestions ?? []).find((item) => item.dbId === dbId)
+        ?? Object.values(affectedQuestionData?.versionQuestionsMap ?? {})
+          .flatMap((questionsList) => questionsList ?? [])
+          .find((item) => item?.dbId === dbId);
       if (!question) continue;
 
       const existingData = question?.rawData ?? {};
@@ -1379,23 +1880,54 @@ export default function AdminConsoleResultsWorkspace(props) {
       }
     }
 
-    setPreviewQuestions(prev => prev.map(q => {
-      const newAnswers = pendingAnswerEdits[q.dbId];
-      if (!newAnswers) return q;
-      return {
-        ...q,
-        answerIndex: newAnswers[0],
-        answerIndices: newAnswers.length > 1 ? newAnswers : null,
-      };
-    }));
+    updatePreviewLinkedQuestionCaches(pendingAnswerEdits, affectedQuestionData);
 
-    setPreviewChangeMsg(`Saved ${edits.length} answer${edits.length > 1 ? "s" : ""}.`);
+    if (impact.ok && impact.attemptUpdates.length > 0) {
+      setPreviewChangeMsg("Updating scores...");
+      const persistScoresResult = await persistUpdatedAttemptScores(impact.attemptUpdates);
+      if (!persistScoresResult.ok) {
+        setPreviewChangeMsg(`Answers saved, but score refresh failed: ${persistScoresResult.error.message}`);
+        setPreviewChangeSaving(false);
+        return;
+      }
+      applyUpdatedAttemptScoresToCaches(impact.attemptUpdates);
+      if (typeof fetchAttempts === "function") {
+        await fetchAttempts();
+      }
+      if (
+        impact.impactedVersions.includes(String(selectedSessionDetail?.problem_set_id ?? "").trim())
+        && typeof fetchSessionDetail === "function"
+      ) {
+        await fetchSessionDetail(selectedSessionDetail);
+      }
+      if (resultContext?.type === "daily") {
+        await runSearch("daily");
+      } else if (resultContext?.type === "mock") {
+        await runSearch("mock");
+      }
+    }
+
+    setPreviewChangeMsg(
+      impact.ok && impact.attemptUpdates.length > 0
+        ? `Saved ${edits.length} answer${edits.length > 1 ? "s" : ""} and updated ${impact.attemptUpdates.length} score${impact.attemptUpdates.length === 1 ? "" : "s"}${impact.linkedVersionCount > 0 ? ` across ${impact.linkedVersionCount} linked session version${impact.linkedVersionCount === 1 ? "" : "s"}` : ""}.${impact.warning ? ` ${impact.warning}` : ""}`
+        : `Saved ${edits.length} answer${edits.length > 1 ? "s" : ""}.${impact.warning ? ` ${impact.warning}` : ""}`
+    );
     setPendingAnswerEdits({});
+    setPendingAnswerEditModes({});
     setPreviewEditMode(false);
     setPreviewChangeSaving(false);
   }
 
-  function QuestionPreviewCard({ question, index, children, isEditMode = false, pendingAnswer = null, onAnswerChange = null }) {
+  function QuestionPreviewCard({
+    question,
+    index,
+    children,
+    isEditMode = false,
+    pendingAnswer = null,
+    multiSelectMode = false,
+    onAnswerChange = null,
+    onToggleMultiSelect = null,
+  }) {
     const prompt = question.promptEn || question.promptBn || "";
     const choices = question.choices ?? question.choicesJa ?? [];
     const stemKind = normalizeModelCsvKind(question.stemKind || "");
@@ -1419,8 +1951,9 @@ export default function AdminConsoleResultsWorkspace(props) {
 
     const effectiveAnswers = pendingAnswer !== null
       ? pendingAnswer
-      : (question.answerIndices ? question.answerIndices : [question.answerIndex].filter(i => i != null));
+      : getEffectiveAnswerIndices(question);
     const hasMultipleAnswers = effectiveAnswers.length > 1;
+    const isMultiSelect = multiSelectMode || hasMultipleAnswers;
 
     const renderChoices = () => (
       <div>
@@ -1431,7 +1964,13 @@ export default function AdminConsoleResultsWorkspace(props) {
             return (
               <button
                 key={`choice-${question.id}-${choiceIndex}`}
-                onClick={() => isEditMode && onAnswerChange && onAnswerChange(question.dbId, choiceIndex)}
+                onMouseDown={(event) => {
+                  if (isEditMode) event.preventDefault();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (isEditMode && onAnswerChange) onAnswerChange(question.dbId, choiceIndex, event, isMultiSelect);
+                }}
                 className="btn"
                 type="button"
                 style={{
@@ -1460,7 +1999,7 @@ export default function AdminConsoleResultsWorkspace(props) {
           <div style={{
             marginTop: 8, padding: 8, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 4, fontSize: 12, color: "#92400e",
           }}>
-            ⚠ Multiple answers selected — confirm this is intentional before saving
+            ⚠ Multiple answers selected. Keep Multiple mode on to add or remove options before saving.
           </div>
         )}
       </div>
@@ -1472,7 +2011,28 @@ export default function AdminConsoleResultsWorkspace(props) {
           <div style={{ fontWeight: 700 }}>
             {displayQuestionId} {sectionLabel ? `(${sectionLabel})` : ""} {index != null ? `#${index + 1}` : ""}
           </div>
-          {children ? <div style={{ display: "flex", justifyContent: "flex-end" }}>{children}</div> : null}
+          {isEditMode || children ? (
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {isEditMode ? (
+                <div className="daily-session-create-toggle-row" style={{ minHeight: 20, gap: 8, justifyContent: "flex-end", width: "auto" }}>
+                  <span>Multiple</span>
+                  <label className="daily-session-create-switch" aria-label="Multiple answer mode">
+                    <input
+                      type="checkbox"
+                      checked={isMultiSelect}
+                      onChange={() => {
+                        if (typeof onToggleMultiSelect === "function") {
+                          onToggleMultiSelect(question.dbId, isMultiSelect);
+                        }
+                      }}
+                    />
+                    <span className="daily-session-create-switch-slider" />
+                  </label>
+                </div>
+              ) : null}
+              {children ? <div style={{ display: "flex", justifyContent: "flex-end" }}>{children}</div> : null}
+            </div>
+          ) : null}
         </div>
         {prompt ? <div style={{ marginTop: 6, whiteSpace: question.type === "daily" ? "pre-wrap" : "normal" }}>{prompt}</div> : null}
         {question.type === "daily" && stemExtra ? (
@@ -1574,14 +2134,40 @@ export default function AdminConsoleResultsWorkspace(props) {
         index={index}
         isEditMode={previewEditMode}
         pendingAnswer={pendingAnswerEdits[question.dbId] ?? null}
-        onAnswerChange={(dbId, choiceIndex) => {
-          setPendingAnswerEdits(prev => {
-            const current = prev[dbId] ?? [question.answerIndex].filter(i => i != null);
-            const next = current.includes(choiceIndex)
-              ? current.filter(i => i !== choiceIndex)
-              : [...current, choiceIndex];
-            if (next.length === 0) return prev;
-            return { ...prev, [dbId]: next };
+        multiSelectMode={pendingAnswerEditModes[question.dbId] ?? false}
+        onToggleMultiSelect={(dbId, currentMode) => {
+          preservePreviewScrollPosition(() => {
+            setPendingAnswerEditModes((prev) => {
+              const nextMode = !currentMode;
+              if (!nextMode) {
+                setPendingAnswerEdits((answerPrev) => {
+                  const current = answerPrev[dbId] ?? getEffectiveAnswerIndices(question);
+                  if (current.length <= 1) return answerPrev;
+                  return {
+                    ...answerPrev,
+                    [dbId]: current.length ? [current[0]] : current,
+                  };
+                });
+              }
+              return { ...prev, [dbId]: nextMode };
+            });
+          });
+        }}
+        onAnswerChange={(dbId, choiceIndex, event, questionMultiSelectMode) => {
+          preservePreviewScrollPosition(() => {
+            setPendingAnswerEdits((prev) => {
+              const current = prev[dbId] ?? getEffectiveAnswerIndices(question);
+              const shouldToggleMultiple = questionMultiSelectMode || event?.metaKey || event?.ctrlKey || event?.shiftKey;
+              const next = shouldToggleMultiple
+                ? (
+                  current.includes(choiceIndex)
+                    ? current.filter((value) => value !== choiceIndex)
+                    : [...current, choiceIndex]
+                )
+                : [choiceIndex];
+              if (!next.length) return prev;
+              return { ...prev, [dbId]: next };
+            });
           });
         }}
       >
@@ -2273,6 +2859,8 @@ export default function AdminConsoleResultsWorkspace(props) {
       saveAnswerChanges={saveAnswerChanges}
       previewChangeSaving={previewChangeSaving}
       previewChangeMsg={previewChangeMsg}
+      previewBodyRef={previewBodyRef}
+      getVisibleAttemptScoreSummary={getVisibleAttemptScoreSummary}
     />
   );
 }

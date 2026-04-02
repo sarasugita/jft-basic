@@ -49,6 +49,7 @@ export default function AdminConsoleDeferredFeatures({
   importDailyResultsGoogleSheetsCsv,
   importModelResultsGoogleSheetsCsv,
   quizMsg,
+  getVisibleAttemptScoreSummary,
   dailyResultsMatrix,
   modelResultsMatrix,
   dailyResultsSessionHeaderAverages,
@@ -96,6 +97,7 @@ export default function AdminConsoleDeferredFeatures({
   saveAnswerChanges,
   previewChangeSaving,
   previewChangeMsg,
+  previewBodyRef,
   attemptDetailOpen,
   selectedAttempt,
   selectedAttemptDisplayName,
@@ -132,6 +134,18 @@ export default function AdminConsoleDeferredFeatures({
       && typeof openAttemptDetail === "function"
       && attemptCanOpenDetail(attempt)
   );
+  const resolveAttemptScoreSummary = (attempt) => {
+    if (typeof getVisibleAttemptScoreSummary === "function") {
+      return getVisibleAttemptScoreSummary(attempt);
+    }
+    const correct = Number(attempt?.correct ?? 0);
+    const total = Number(attempt?.total ?? 0);
+    return {
+      correct,
+      total,
+      rate: getScoreRate(attempt),
+    };
+  };
 
   return (
     <>
@@ -298,7 +312,7 @@ export default function AdminConsoleDeferredFeatures({
                               .filter(Boolean);
                             const sessionAverage = visibleAttempts.length
                               ? {
-                                  averageRate: visibleAttempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / visibleAttempts.length,
+                                  averageRate: visibleAttempts.reduce((sum, attempt) => sum + resolveAttemptScoreSummary(attempt).rate, 0) / visibleAttempts.length,
                                 }
                               : precomputedSessionAverage;
                             return (
@@ -382,7 +396,7 @@ export default function AdminConsoleDeferredFeatures({
                                   >
                                     <div className="daily-score-stack">
                                       {visibleAttempts.map((attempt, attemptIdx) => {
-                                        const rateValue = getScoreRate(attempt);
+                                        const rateValue = resolveAttemptScoreSummary(attempt).rate;
                                         const label = `${(rateValue * 100).toFixed(1)}%`;
                                         const isLow = Number.isFinite(passRate) && passRate > 0 && rateValue < passRate;
                                         const tabLeftCount = getTabLeftCount(attempt);
@@ -586,8 +600,9 @@ export default function AdminConsoleDeferredFeatures({
                       </thead>
                       <tbody>
                         {attempts.map((a) => {
-                          const score = `${a.correct}/${a.total}`;
-                          const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                          const scoreSummary = resolveAttemptScoreSummary(a);
+                          const score = `${scoreSummary.correct}/${scoreSummary.total}`;
+                          const rate = `${(scoreSummary.rate * 100).toFixed(1)}%`;
                           return (
                             <tr key={a.id}>
                               <td>
@@ -691,7 +706,7 @@ export default function AdminConsoleDeferredFeatures({
               </div>
             </div>
 
-            <div className="daily-session-create-body">
+            <div className="daily-session-create-body" ref={previewBodyRef}>
               <div className="admin-help">
                 Total: <b>{previewQuestions.length}</b> questions
               </div>
@@ -766,9 +781,19 @@ export default function AdminConsoleDeferredFeatures({
       ), document.body) : null}
 
       {attemptDetailOpen && selectedAttempt && typeof document !== "undefined" ? (() => {
-        const totalCorrect = Number(selectedAttempt.correct ?? selectedAttemptRows.filter((row) => row.isCorrect).length);
-        const totalQuestions = Number(selectedAttempt.total ?? selectedAttemptRows.length);
-        const scorePercent = (selectedAttemptScoreRate * 100).toFixed(1);
+        const derivedRowSummary = !selectedAttemptUsesImportedSummary && selectedAttemptRows.length
+          ? {
+            correct: selectedAttemptRows.reduce((sum, row) => sum + (row.isCorrect ? 1 : 0), 0),
+            total: selectedAttemptRows.length,
+          }
+          : null;
+        const totalCorrect = derivedRowSummary?.correct ?? Number(selectedAttempt.correct ?? 0);
+        const totalQuestions = derivedRowSummary?.total ?? Number(selectedAttempt.total ?? 0);
+        const scoreRate = derivedRowSummary && derivedRowSummary.total > 0
+          ? derivedRowSummary.correct / derivedRowSummary.total
+          : (Number.isFinite(selectedAttemptScoreRate) ? selectedAttemptScoreRate : (selectedAttempt ? getScoreRate(selectedAttempt) : 0));
+        const scorePercent = (scoreRate * 100).toFixed(1);
+        const isPass = scoreRate >= selectedAttemptPassRate;
         const attemptTitle = getAttemptTitle(selectedAttempt) || selectedAttempt.test_version || "";
         const tabLeftCount = getTabLeftCount(selectedAttempt);
         const selectedAttemptRankInfo = studentAttemptRanks[selectedAttempt.id] ?? null;
@@ -900,7 +925,7 @@ export default function AdminConsoleDeferredFeatures({
                   <div className="attempt-detail-score-summary">
                     <div className="attempt-detail-score-row">
                       <span className="attempt-detail-score-label">Total Score</span>
-                      <span className={`attempt-detail-score-right ${selectedAttemptIsPass ? "" : "attempt-detail-score-right-fail"}`}>
+                      <span className={`attempt-detail-score-right ${isPass ? "" : "attempt-detail-score-right-fail"}`}>
                         <span className="attempt-detail-score-value">
                           <span className="attempt-detail-score-value-primary">{totalCorrect}</span>
                           <span className="attempt-detail-score-value-separator">/</span>
@@ -911,8 +936,8 @@ export default function AdminConsoleDeferredFeatures({
                     </div>
                     <div className="attempt-detail-score-row">
                       <span className="attempt-detail-score-label">Pass/Fail</span>
-                      <span className={`attempt-detail-score-pass ${selectedAttemptIsPass ? "pass" : "fail"}`}>
-                        {selectedAttemptIsPass ? "Pass" : "Fail"}
+                      <span className={`attempt-detail-score-pass ${isPass ? "pass" : "fail"}`}>
+                        {isPass ? "Pass" : "Fail"}
                       </span>
                     </div>
                     <div className="attempt-detail-score-row">

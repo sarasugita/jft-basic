@@ -1851,6 +1851,28 @@ function mapDbQuestion(row) {
   };
 }
 
+function getEffectiveAnswerIndices(question) {
+  const fromArray = Array.isArray(question?.answerIndices)
+    ? question.answerIndices
+    : Array.isArray(question?.answer_indices)
+      ? question.answer_indices
+      : Array.isArray(question?.data?.answer_indices)
+        ? question.data.answer_indices
+        : [];
+  const normalized = fromArray
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  if (normalized.length) return Array.from(new Set(normalized));
+  const single = Number(question?.answerIndex);
+  return Number.isFinite(single) ? [single] : [];
+}
+
+function isChoiceCorrect(choiceIndex, answerIndices) {
+  const chosen = Number(choiceIndex);
+  if (!Number.isFinite(chosen)) return false;
+  return (answerIndices ?? []).includes(chosen);
+}
+
 function buildAttemptDetailRows(answersJson) {
   const answers = answersJson ?? {};
   const rows = [];
@@ -1861,7 +1883,7 @@ function buildAttemptDetailRows(answersJson) {
       const ans = answers[q.id];
       q.parts.forEach((part, i) => {
         const chosenIdx = ans?.partAnswers?.[i];
-        const correctIdx = part.answerIndex;
+        const correctIndices = getEffectiveAnswerIndices(part);
         rows.push({
           qid: `${q.id}-${i + 1}`,
           sectionKey: q.sectionKey || "",
@@ -1872,16 +1894,16 @@ function buildAttemptDetailRows(answersJson) {
           stemAudios: stemMedia.audios,
           chosen: getPartChoiceText(part, chosenIdx),
           chosenImage: getPartChoiceImage(part, chosenIdx),
-          correct: getPartChoiceText(part, correctIdx),
-          correctImage: getPartChoiceImage(part, correctIdx),
-          isCorrect: chosenIdx === correctIdx
+          correct: correctIndices.map((value) => getPartChoiceText(part, value)).filter(Boolean).join(" / "),
+          correctImage: getPartChoiceImage(part, correctIndices[0]),
+          isCorrect: isChoiceCorrect(chosenIdx, correctIndices)
         });
       });
       continue;
     }
 
     const chosenIdx = answers[q.id];
-    const correctIdx = q.answerIndex;
+    const correctIndices = getEffectiveAnswerIndices(q);
     rows.push({
       qid: String(q.id),
       sectionKey: q.sectionKey || "",
@@ -1892,9 +1914,9 @@ function buildAttemptDetailRows(answersJson) {
       stemAudios: stemMedia.audios,
       chosen: getChoiceText(q, chosenIdx),
       chosenImage: getChoiceImage(q, chosenIdx),
-      correct: getChoiceText(q, correctIdx),
-      correctImage: getChoiceImage(q, correctIdx),
-      isCorrect: chosenIdx === correctIdx
+      correct: correctIndices.map((value) => getChoiceText(q, value)).filter(Boolean).join(" / "),
+      correctImage: getChoiceImage(q, correctIndices[0]),
+      isCorrect: isChoiceCorrect(chosenIdx, correctIndices)
     });
   }
 
@@ -1910,27 +1932,27 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
       const ans = answers[q.id];
       q.parts.forEach((part, i) => {
         const chosenIdx = ans?.partAnswers?.[i];
-        const correctIdx = part.answerIndex;
-      rows.push({
-        qid: `${q.id}-${i + 1}`,
-        sectionKey: q.sectionKey || "",
-        section: getQuestionSectionLabel(q),
-        prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
-        image: getQuestionIllustration(q),
-        stemImages: stemMedia.images,
-        stemAudios: stemMedia.audios,
-        chosen: getPartChoiceText(part, chosenIdx),
-        chosenImage: getPartChoiceImage(part, chosenIdx),
-        correct: getPartChoiceText(part, correctIdx),
-        correctImage: getPartChoiceImage(part, correctIdx),
-        isCorrect: chosenIdx === correctIdx
-      });
+        const correctIndices = getEffectiveAnswerIndices(part);
+        rows.push({
+          qid: `${q.id}-${i + 1}`,
+          sectionKey: q.sectionKey || "",
+          section: getQuestionSectionLabel(q),
+          prompt: `${q.promptEn ?? ""} ${part.partLabel ?? ""} ${part.questionJa ?? ""}`.trim(),
+          image: getQuestionIllustration(q),
+          stemImages: stemMedia.images,
+          stemAudios: stemMedia.audios,
+          chosen: getPartChoiceText(part, chosenIdx),
+          chosenImage: getPartChoiceImage(part, chosenIdx),
+          correct: correctIndices.map((value) => getPartChoiceText(part, value)).filter(Boolean).join(" / "),
+          correctImage: getPartChoiceImage(part, correctIndices[0]),
+          isCorrect: isChoiceCorrect(chosenIdx, correctIndices)
+        });
       });
       continue;
     }
 
     const chosenIdx = answers[q.id];
-    const correctIdx = q.answerIndex;
+    const correctIndices = getEffectiveAnswerIndices(q);
     rows.push({
       qid: String(q.id),
       sectionKey: q.sectionKey || "",
@@ -1941,12 +1963,23 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList) {
       stemAudios: stemMedia.audios,
       chosen: getChoiceText(q, chosenIdx),
       chosenImage: getChoiceImage(q, chosenIdx),
-      correct: getChoiceText(q, correctIdx),
-      correctImage: getChoiceImage(q, correctIdx),
-      isCorrect: chosenIdx === correctIdx
+      correct: correctIndices.map((value) => getChoiceText(q, value)).filter(Boolean).join(" / "),
+      correctImage: getChoiceImage(q, correctIndices[0]),
+      isCorrect: isChoiceCorrect(chosenIdx, correctIndices)
     });
   }
   return rows;
+}
+
+function buildAttemptScorePreviewFromQuestions(attempt, questionsList) {
+  const detailRows = buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList);
+  const total = detailRows.length || Number(attempt?.total ?? 0) || 0;
+  const correct = detailRows.filter((row) => row.isCorrect).length;
+  return {
+    total,
+    correct,
+    scoreRate: total > 0 ? correct / total : 0,
+  };
 }
 
 function buildSectionSummary(rows) {
@@ -2567,12 +2600,14 @@ function formatWeekday(value) {
 }
 
 function getScoreRate(attempt) {
-  const rate = Number(attempt?.score_rate);
-  if (Number.isFinite(rate)) return rate;
   const correct = Number(attempt?.correct ?? 0);
   const total = Number(attempt?.total ?? 0);
-  if (!total) return 0;
-  return correct / total;
+  if (Number.isFinite(correct) && Number.isFinite(total) && total > 0) {
+    return correct / total;
+  }
+  const rate = Number(attempt?.score_rate);
+  if (Number.isFinite(rate)) return rate;
+  return 0;
 }
 
 function getTabLeftCount(attempt) {
@@ -3399,11 +3434,34 @@ export default function AdminConsole({
     [testSessions]
   );
 
+  const sessionDetailRawAttempts = useMemo(
+    () => (Array.isArray(sessionDetailAttempts) ? sessionDetailAttempts : []),
+    [sessionDetailAttempts]
+  );
+
+  const sessionDetailUsesImportedResultsSummary = useMemo(
+    () => sessionDetailRawAttempts.length > 0
+      && sessionDetailRawAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt)),
+    [sessionDetailRawAttempts]
+  );
+
   const sessionDetailDisplayAttempts = useMemo(() => {
-    const attemptsList = Array.isArray(sessionDetailAttempts) ? sessionDetailAttempts : [];
-    const actualAttempts = attemptsList.filter((attempt) => !isImportedResultsSummaryAttempt(attempt));
-    return actualAttempts.length ? actualAttempts : attemptsList;
-  }, [sessionDetailAttempts]);
+    const actualAttempts = sessionDetailRawAttempts.filter((attempt) => !isImportedResultsSummaryAttempt(attempt));
+    const attemptsList = actualAttempts.length ? actualAttempts : sessionDetailRawAttempts;
+    if (!attemptsList.length || sessionDetailUsesImportedResultsSummary || !sessionDetailQuestions.length) {
+      return attemptsList;
+    }
+    return attemptsList.map((attempt) => {
+      if (isImportedResultsSummaryAttempt(attempt)) return attempt;
+      const nextScore = buildAttemptScorePreviewFromQuestions(attempt, sessionDetailQuestions);
+      return {
+        ...attempt,
+        correct: nextScore.correct,
+        total: nextScore.total,
+        score_rate: nextScore.scoreRate,
+      };
+    });
+  }, [sessionDetailQuestions, sessionDetailRawAttempts, sessionDetailUsesImportedResultsSummary]);
 
   const sessionDetailStudentOptions = useMemo(() => {
     const unique = new Map();
@@ -3436,14 +3494,11 @@ export default function AdminConsole({
   }, [sessionDetailDisplayAttempts, studentsById]);
 
   const sessionDetailPassRate = useMemo(() => {
-    if (
-      sessionDetailDisplayAttempts.length
-      && sessionDetailDisplayAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt))
-    ) {
+    if (sessionDetailDisplayAttempts.length && sessionDetailUsesImportedResultsSummary) {
       return 0.8;
     }
     return normalizePassRate(testPassRateByVersion[selectedSessionDetail?.problem_set_id]);
-  }, [selectedSessionDetail, sessionDetailDisplayAttempts, testPassRateByVersion]);
+  }, [selectedSessionDetail, sessionDetailDisplayAttempts, sessionDetailUsesImportedResultsSummary, testPassRateByVersion]);
 
   const sessionDetailOverview = useMemo(() => {
     const count = sessionDetailLatestAttempts.length;
@@ -3458,11 +3513,6 @@ export default function AdminConsole({
       passRate: count ? passCount / count : 0,
     };
   }, [sessionDetailLatestAttempts, sessionDetailPassRate]);
-
-  const sessionDetailUsesImportedResultsSummary = useMemo(() => {
-    return sessionDetailDisplayAttempts.length > 0
-      && sessionDetailDisplayAttempts.every((attempt) => isImportedResultsSummaryAttempt(attempt));
-  }, [sessionDetailDisplayAttempts]);
 
   const sessionDetailUsesImportedModelSummary = useMemo(() => {
     return sessionDetail.type === "mock"
@@ -4200,7 +4250,13 @@ export default function AdminConsole({
       .filter((section) => section.rows.length > 0);
   }, [selectedAttemptQuestionSections, attemptDetailWrongOnly]);
 
-  const selectedAttemptScoreRate = selectedAttempt ? getScoreRate(selectedAttempt) : 0;
+  const selectedAttemptDerivedScoreRate = useMemo(() => {
+    if (!selectedAttemptRows.length || selectedAttemptUsesImportedSummary) return null;
+    const correct = selectedAttemptRows.reduce((sum, row) => sum + (row.isCorrect ? 1 : 0), 0);
+    const total = selectedAttemptRows.length;
+    return total > 0 ? correct / total : 0;
+  }, [selectedAttemptRows, selectedAttemptUsesImportedSummary]);
+  const selectedAttemptScoreRate = selectedAttemptDerivedScoreRate ?? (selectedAttempt ? getScoreRate(selectedAttempt) : 0);
   const selectedAttemptIsPass = selectedAttemptScoreRate >= selectedAttemptPassRate;
 
   const attendanceSummary = useMemo(() => buildAttendanceSummary(studentAttendance), [studentAttendance]);
@@ -6847,10 +6903,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
       const latestRows = Array.from(buildLatestAttemptMapByStudent(rows).values())
         .filter((row) => !isAnalyticsExcludedStudent(studentsById.get(row.student_id)));
       const sorted = latestRows
-        .map((row) => Number(row.score_rate ?? (row.total ? row.correct / row.total : 0)))
+        .map((row) => getScoreRate(row))
         .sort((a, b) => b - a);
       latestRows.forEach((row) => {
-        const attemptRate = Number(row.score_rate ?? (row.total ? row.correct / row.total : 0));
+        const attemptRate = getScoreRate(row);
         let rank = sorted.findIndex((v) => v === attemptRate);
         if (rank === -1) {
           rank = sorted.findIndex((v) => v < attemptRate);
