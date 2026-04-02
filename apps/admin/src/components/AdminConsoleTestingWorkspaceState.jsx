@@ -2594,13 +2594,23 @@ export function useTestingWorkspaceState({
     if (!testVersion) return;
     setPreviewOpen(true);
     setPreviewTest(testVersion);
+    setPreviewSession(null);
+    setPreviewReplacementPool([]);
+    setPreviewReplacementDrafts({});
+    setPreviewReplacementSavingId("");
+    setPreviewReplacementMsg("");
+    setPreviewAnswers({});
+    setPreviewMsg("Loading...");
     try {
       const { data, error } = await fetchQuestionsForVersionWithFallback(supabase, testVersion);
       if (error) {
+        setPreviewQuestions([]);
         setPreviewMsg(`Load failed: ${error.message}`);
         return;
       }
-      setPreviewQuestions((data ?? []).map(mapQuestion));
+      const list = (data ?? []).map(mapQuestion);
+      setPreviewQuestions(list);
+      setPreviewMsg(list.length ? "" : "No questions.");
     } catch (error) {
       console.error("preview load error:", error);
       setPreviewMsg(error.message);
@@ -2611,27 +2621,55 @@ export function useTestingWorkspaceState({
     if (!session?.id || !session?.problem_set_id) return;
     setPreviewOpen(true);
     setPreviewSession(session);
+    setPreviewTest(session.title || session.problem_set_id);
+    setPreviewReplacementPool([]);
+    setPreviewReplacementDrafts({});
+    setPreviewReplacementSavingId("");
+    setPreviewReplacementMsg("");
+    setPreviewAnswers({});
+    setPreviewMsg("Loading...");
     try {
-      if (isDaily(session.problem_set_id)) {
-        const { data, error } = await fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id);
-        if (error) {
-          setPreviewMsg(`Load failed: ${error.message}`);
-          return;
-        }
-        setPreviewQuestions((data ?? []).map(mapQuestion));
-      } else {
-        const { data, error } = await fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id);
-        if (error) {
-          setPreviewMsg(`Load failed: ${error.message}`);
-          return;
-        }
-        setPreviewQuestions((data ?? []).map(mapQuestion));
+      const { data, error } = await fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id);
+      if (error) {
+        setPreviewQuestions([]);
+        setPreviewMsg(`Load failed: ${error.message}`);
+        return;
       }
+      const list = (data ?? []).map(mapQuestion);
+      setPreviewQuestions(list);
+      setPreviewMsg(list.length ? "" : "No questions.");
+
+      if (!isDaily(session.problem_set_id)) return;
+
+      const sourceSetIds = Array.from(
+        new Set(list.map((question) => question.sourceVersion).filter(Boolean))
+      );
+      if (!sourceSetIds.length) return;
+
+      const { data: sourceData, error: sourceError } = await fetchQuestionsForVersionsWithFallback(
+        supabase,
+        sourceSetIds
+      );
+      if (sourceError) {
+        console.error("session preview source questions error:", sourceError);
+        setPreviewReplacementMsg(`Replacement load failed: ${sourceError.message}`);
+        return;
+      }
+
+      const replacementPool = (sourceData ?? []).map((row) => {
+        const mapped = mapQuestion(row);
+        return {
+          ...mapped,
+          sourceVersion: row.test_version,
+          sourceQuestionId: row.question_id,
+        };
+      });
+      setPreviewReplacementPool(replacementPool);
     } catch (error) {
       console.error("session preview load error:", error);
       setPreviewMsg(error.message);
     }
-  }, [supabase, fetchQuestionsForVersionWithFallback, mapQuestion, isDaily]);
+  }, [supabase, fetchQuestionsForVersionWithFallback, fetchQuestionsForVersionsWithFallback, mapQuestion, isDaily]);
 
   const closePreview = useCallback(() => {
     setPreviewOpen(false);

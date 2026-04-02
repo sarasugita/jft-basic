@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useDailyRecordWorkspaceState } from "./AdminConsoleDailyRecordWorkspaceState";
@@ -193,6 +193,8 @@ export default function AdminConsoleDailyRecordWorkspace() {
       todayRow.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [scheduleRecordRows]);
+
+  const hasTomorrowSessions = ((dailyRecordTomorrowSessions?.regular ?? []).length + (dailyRecordTomorrowSessions?.retake ?? []).length) > 0;
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -396,7 +398,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                     </label>
                   </td>
                   {display.isHoliday ? (
-                    <td colSpan={5} className="daily-record-holiday-summary">
+                    <td colSpan={7} className="daily-record-holiday-summary">
                       {dailyRecordHolidaySavingDate === recordDate ? "Saving..." : "Holiday"}
                     </td>
                   ) : (
@@ -480,10 +482,10 @@ export default function AdminConsoleDailyRecordWorkspace() {
 
       {dailyRecordModalOpen && typeof document !== "undefined" ? createPortal((
         <div
-          className="admin-modal-overlay"
+          className="admin-modal-overlay daily-record-modal-overlay"
           onClick={() => closeDailyRecordModal()}
         >
-          <div className="admin-modal daily-record-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="admin-modal daily-record-modal daily-record-modal-shell" onClick={(e) => e.stopPropagation()}>
             <div className="admin-modal-header">
               <div className="admin-title">
                 Daily Record - {dailyRecordForm?.record_date ? formatDateFull(dailyRecordForm.record_date) : "New Record"}
@@ -497,26 +499,45 @@ export default function AdminConsoleDailyRecordWorkspace() {
               </button>
             </div>
 
-            <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0" }}>
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontWeight: "bold", marginBottom: "8px" }}>Today's Content</label>
+            <div className="daily-record-modal-body" style={{ maxHeight: "calc(100vh - 110px)", overflowY: "auto" }}>
+              <section className="daily-record-modal-section">
+                <div className="daily-record-modal-section-head">
+                  <div className="daily-record-modal-section-title">Today's Content</div>
+                  <button
+                    className="btn"
+                    onClick={() => addDailyRecordTextbookEntry()}
+                    type="button"
+                  >
+                    Add Textbook Entry
+                  </button>
+                </div>
 
-                  <div style={{ marginBottom: "12px" }}>
-                    <div style={{ marginBottom: "8px" }}>
-                      <label style={{ fontSize: "13px", color: "#333" }}>Textbook Entries</label>
-                    </div>
+                <div>
+                  <label style={{ display: "block", fontWeight: 800 }}>Textbook Entries</label>
+                  <div className="daily-record-textbook-list">
                     {(dailyRecordForm?.textbook_entries ?? []).map((entry) => {
                       const candoOptions = getIrodoriCanDoOptions(entry.book || "starter", entry.lesson || "1");
                       return (
-                        <div key={entry.tempId} style={{ marginBottom: "12px", padding: "12px", border: "1px solid #e0e0e0", borderRadius: "4px", backgroundColor: "#f9f9f9" }}>
-                          <div style={{ display: "flex", gap: "12px", marginBottom: "8px", alignItems: "flex-end" }}>
+                        <div key={entry.tempId} className="daily-record-textbook-row">
+                          <div className="daily-record-textbook-row-head">
+                            {dailyRecordForm.textbook_entries.length > 1 ? (
+                              <button
+                                className="daily-record-textbook-remove-icon"
+                                onClick={() => removeDailyRecordTextbookEntry(entry.tempId)}
+                                type="button"
+                                aria-label="Remove textbook entry"
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                          </div>
+
+                          <div className="daily-record-textbook-grid">
                             <div>
-                              <label style={{ fontSize: "12px", color: "#666" }}>Book</label>
+                              <label>Book</label>
                               <select
                                 value={entry.book || "starter"}
                                 onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { book: e.target.value })}
-                                style={{ padding: "6px", border: "1px solid #ccc", borderRadius: "4px", minWidth: "140px" }}
                               >
                                 <option value="starter">Starter</option>
                                 <option value="beginner_1">Beginner 1</option>
@@ -524,197 +545,186 @@ export default function AdminConsoleDailyRecordWorkspace() {
                               </select>
                             </div>
                             <div>
-                              <label style={{ fontSize: "12px", color: "#666" }}>Lesson</label>
+                              <label>Lesson</label>
                               <select
                                 value={entry.lesson || "1"}
                                 onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { lesson: e.target.value })}
-                                style={{ padding: "6px", border: "1px solid #ccc", borderRadius: "4px", minWidth: "120px" }}
                               >
                                 {Array.from({ length: 18 }, (_, i) => String(i + 1)).map((lessonNum) => (
                                   <option key={lessonNum} value={lessonNum}>Lesson {lessonNum}</option>
                                 ))}
                               </select>
                             </div>
-                            {dailyRecordForm.textbook_entries.length > 1 && (
-                              <button
-                                className="btn btn-danger"
-                                onClick={() => removeDailyRecordTextbookEntry(entry.tempId)}
-                                type="button"
-                                style={{ padding: "6px 12px" }}
-                              >
-                                Remove
-                              </button>
-                            )}
                           </div>
 
-                          {candoOptions.length > 0 && (
-                            <div>
-                              <label style={{ fontSize: "12px", color: "#666", marginBottom: "6px", display: "block" }}>Can-do Goals</label>
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                          {candoOptions.length > 0 ? (
+                            <div className="daily-record-cando-wrap">
+                              <label>Can-do Goals</label>
+                              <div className="daily-record-cando-list">
                                 {candoOptions.map((candoId) => {
                                   const isSelected = (entry.cando_ids || []).includes(candoId);
                                   return (
-                                    <label key={candoId} style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                                    <label key={candoId} className="daily-record-cando-option">
                                       <input
                                         type="checkbox"
                                         checked={isSelected}
                                         onChange={() => toggleDailyRecordCanDo(entry.tempId, candoId)}
                                       />
-                                      <span style={{ fontSize: "13px" }}>{candoId}</span>
+                                      <span>{candoId}</span>
                                     </label>
                                   );
                                 })}
                               </div>
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       );
                     })}
-                    <button
-                      className="btn"
-                      onClick={() => addDailyRecordTextbookEntry()}
-                      type="button"
-                      style={{ marginTop: "8px" }}
-                    >
-                      + Add Textbook Entry
-                    </button>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: "13px", color: "#333", marginBottom: "6px", display: "block" }}>Other Content Covered</label>
-                    <textarea
-                      value={dailyRecordForm?.free_writing || ""}
-                      onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, free_writing: e.target.value }))}
-                      placeholder="Additional content, activities, notes, etc."
-                      style={{ width: "100%", minHeight: "80px", padding: "8px", border: "1px solid #ccc", borderRadius: "4px", fontFamily: "inherit", fontSize: "inherit" }}
-                    />
                   </div>
                 </div>
-              </div>
 
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid #e0e0e0" }}>
-                <div style={{ marginBottom: "8px" }}>
-                  <label style={{ fontWeight: "bold" }}>Student Comments</label>
+                <div className="daily-record-comments-section">
+                  <div className="daily-record-comments-header">
+                    <div className="daily-record-modal-section-title">Other Content Covered</div>
+                  </div>
+                  <textarea
+                    className="daily-record-other-content"
+                    value={dailyRecordForm?.free_writing || ""}
+                    onChange={(e) => setDailyRecordForm((prev) => ({ ...prev, free_writing: e.target.value }))}
+                    placeholder="Additional content, activities, notes, etc."
+                  />
                 </div>
-                {(dailyRecordForm?.comments ?? []).map((comment) => (
-                  <div key={comment.tempId} style={{ marginBottom: "8px", display: "flex", gap: "8px", alignItems: "center" }}>
-                    <select
-                      value={comment.student_id || ""}
-                      onChange={(e) => updateDailyRecordComment(comment.tempId, { student_id: e.target.value })}
-                      style={{ padding: "6px", border: "1px solid #ccc", borderRadius: "4px", minWidth: "160px" }}
-                    >
-                      <option value="">Select student...</option>
-                      {(students ?? []).map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.display_name || s.email || s.id}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      value={comment.comment || ""}
-                      onChange={(e) => updateDailyRecordComment(comment.tempId, { comment: e.target.value })}
-                      placeholder="Enter comment..."
-                      style={{ flex: 1, padding: "6px", border: "1px solid #ccc", borderRadius: "4px" }}
-                    />
-                    {dailyRecordForm.comments.length > 1 && (
-                      <button
-                        className="btn btn-danger"
-                        onClick={() => removeDailyRecordCommentRow(comment.tempId)}
-                        type="button"
-                        style={{ padding: "6px 10px" }}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button
-                  className="btn"
-                  onClick={() => addDailyRecordCommentRow()}
-                  type="button"
-                  style={{ marginTop: "8px" }}
-                >
-                  + Add Comment
-                </button>
-              </div>
+              </section>
 
-              {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
-                <div style={{ padding: "16px", backgroundColor: "#e3f2fd", borderTop: "1px solid #e0e0e0", borderBottom: "1px solid #e0e0e0" }}>
-                  <div style={{ fontSize: "12px", fontWeight: "600", color: "#1565c0", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                    📅 Tomorrow's Exams
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {(dailyRecordTomorrowSessions.regular ?? []).map((session, idx) => {
-                      const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
-                      return (
-                        <div key={session.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", backgroundColor: "#fff", borderRadius: "3px", fontSize: "13px" }}>
-                          <span style={{ fontWeight: "500", color: "#333" }}>
-                            <span style={{ display: "inline-block", minWidth: "20px", marginRight: "8px", color: "#1565c0", fontWeight: "600" }}>{idx + 1}.</span>
-                            {session.title}
-                          </span>
-                          <span style={{ color: "#1565c0", fontWeight: "600", fontSize: "12px", whiteSpace: "nowrap", marginLeft: "12px" }}>{startTime}</span>
+              <section className="daily-record-modal-section">
+                <div className="daily-record-comments-header">
+                  <div className="daily-record-modal-section-title">Student Comments</div>
+                  <button
+                    className="btn"
+                    onClick={() => addDailyRecordCommentRow()}
+                    type="button"
+                  >
+                    Add Comment
+                  </button>
+                </div>
+
+                <div className="daily-record-comments-list">
+                  {(dailyRecordForm?.comments ?? []).map((comment) => (
+                    <div key={comment.tempId} className="daily-record-comment-row">
+                      <div className="daily-record-comment-row-head">
+                        {dailyRecordForm.comments.length > 1 ? (
+                          <button
+                            className="daily-record-textbook-remove-icon"
+                            onClick={() => removeDailyRecordCommentRow(comment.tempId)}
+                            type="button"
+                            aria-label="Remove comment"
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <div className="daily-record-comment-fields">
+                        <div>
+                          <label>Student</label>
+                          <select
+                            value={comment.student_id || ""}
+                            onChange={(e) => updateDailyRecordComment(comment.tempId, { student_id: e.target.value })}
+                          >
+                            <option value="">Select student...</option>
+                            {(students ?? []).map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.display_name || s.email || s.id}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                      );
-                    })}
-                    {(dailyRecordTomorrowSessions.retake ?? []).length > 0 && (
-                      <>
-                        <div style={{ fontSize: "11px", fontWeight: "600", color: "#666", marginTop: "4px", textTransform: "uppercase" }}>Retakes</div>
-                        {(dailyRecordTomorrowSessions.retake ?? []).map((session, idx) => {
-                          const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
+                        <div>
+                          <label>Comment</label>
+                          <textarea
+                            value={comment.comment || ""}
+                            onChange={(e) => updateDailyRecordComment(comment.tempId, { comment: e.target.value })}
+                            placeholder="Enter comment..."
+                            rows={3}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {hasTomorrowSessions ? (
+                <section className="daily-record-modal-section">
+                  <div className="daily-record-upcoming-grid">
+                    <div>
+                      <div className="daily-record-upcoming-label">Tomorrow's Exams</div>
+                      <div className="daily-record-upcoming-list">
+                        {(dailyRecordTomorrowSessions.regular ?? []).map((session, idx) => {
+                          const startTime = session.starts_at
+                            ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false })
+                            : "TBD";
                           return (
-                            <div key={session.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", backgroundColor: "#fff", borderRadius: "3px", fontSize: "13px", opacity: "0.8" }}>
-                              <span style={{ fontWeight: "500", color: "#555" }}>
-                                <span style={{ display: "inline-block", minWidth: "20px", marginRight: "8px", color: "#999", fontWeight: "600" }}>R{idx + 1}.</span>
-                                {session.title}
-                              </span>
-                              <span style={{ color: "#1565c0", fontWeight: "600", fontSize: "12px", whiteSpace: "nowrap", marginLeft: "12px" }}>{startTime}</span>
+                            <div key={session.id} className="daily-record-upcoming-item">
+                              <span>{`${idx + 1}. ${session.title}`}</span>
+                              <strong>{startTime}</strong>
                             </div>
                           );
                         })}
-                      </>
-                    )}
+                        {(dailyRecordTomorrowSessions.retake ?? []).map((session, idx) => {
+                          const startTime = session.starts_at
+                            ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false })
+                            : "TBD";
+                          return (
+                            <div key={session.id} className="daily-record-upcoming-item">
+                              <span>{`R${idx + 1}. ${session.title}`}</span>
+                              <strong>{startTime}</strong>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="daily-record-upcoming-label">Announcement to Students</div>
+                      <div className="daily-record-announcement-box">
+                        <div className="daily-record-announcement-fields">
+                          <div>
+                            <label>Subject</label>
+                            <input
+                              className="daily-record-announcement-title"
+                              type="text"
+                              value={dailyRecordAnnouncementTitleDraft || ""}
+                              onChange={(e) => setDailyRecordAnnouncementTitleDraft(e.target.value)}
+                              placeholder="Announcement subject..."
+                            />
+                          </div>
+                          <div>
+                            <label>Message</label>
+                            <textarea
+                              className="daily-record-announcement-draft"
+                              value={dailyRecordAnnouncementDraft || ""}
+                              onChange={(e) => setDailyRecordAnnouncementDraft(e.target.value)}
+                              placeholder="Announcement message..."
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </section>
               ) : null}
 
-              {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
-                <div style={{ padding: "16px", borderBottom: "1px solid #e0e0e0", backgroundColor: "#fafafa" }}>
-                  <div style={{ fontSize: "12px", fontWeight: "600", color: "#333", marginBottom: "12px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                    📢 Announcement to Students
-                  </div>
-                  <div style={{ marginBottom: "12px" }}>
-                    <label style={{ fontSize: "11px", color: "#666", marginBottom: "6px", display: "block", fontWeight: "600", textTransform: "uppercase" }}>Subject</label>
-                    <input
-                      type="text"
-                      value={dailyRecordAnnouncementTitleDraft || ""}
-                      onChange={(e) => setDailyRecordAnnouncementTitleDraft(e.target.value)}
-                      placeholder="Announcement subject..."
-                      style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: "4px", fontFamily: "inherit", fontSize: "13px", backgroundColor: "#fff" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "11px", color: "#666", marginBottom: "6px", display: "block", fontWeight: "600", textTransform: "uppercase" }}>Message</label>
-                    <textarea
-                      value={dailyRecordAnnouncementDraft || ""}
-                      onChange={(e) => setDailyRecordAnnouncementDraft(e.target.value)}
-                      placeholder="Announcement message..."
-                      style={{ width: "100%", minHeight: "80px", padding: "8px 12px", border: "1px solid #ddd", borderRadius: "4px", fontFamily: "inherit", fontSize: "13px", backgroundColor: "#fff", lineHeight: "1.4" }}
-                    />
-                  </div>
-                </div>
-              ) : null}
-
-              <div style={{ padding: "16px", display: "flex", gap: "12px", justifyContent: "flex-end", borderTop: "1px solid #e0e0e0" }}>
-                <button className="btn" onClick={() => closeDailyRecordModal()} disabled={dailyRecordSaving} type="button" style={{ padding: "10px 24px" }}>
+              <div className="daily-record-modal-actions">
+                <button className="btn" onClick={() => closeDailyRecordModal()} disabled={dailyRecordSaving} type="button">
                   Cancel
                 </button>
-                <button className="btn btn-primary" onClick={() => saveDailyRecord()} disabled={dailyRecordSaving} type="button" style={{ padding: "10px 24px" }}>
+                <button className="btn btn-primary" onClick={() => saveDailyRecord()} disabled={dailyRecordSaving} type="button">
                   {dailyRecordSaving ? "Saving..." : "Save Record"}
                 </button>
-                {(dailyRecordTomorrowSessions?.regular ?? []).length > 0 || (dailyRecordTomorrowSessions?.retake ?? []).length > 0 ? (
-                  <button className="btn btn-success" onClick={() => saveDailyRecord({ announcementAction: "send" })} disabled={dailyRecordSaving} type="button" style={{ padding: "10px 24px" }}>
-                    {dailyRecordSaving ? "Saving..." : <>Save Record<br />Send Announcement</>}
+                {hasTomorrowSessions ? (
+                  <button className="btn btn-success" onClick={() => saveDailyRecord({ announcementAction: "send" })} disabled={dailyRecordSaving} type="button">
+                    {dailyRecordSaving ? "Saving..." : "Save Record & Send Announcement"}
                   </button>
                 ) : null}
               </div>

@@ -731,6 +731,7 @@ function buildImportedSessionStudentRankingRows(attemptsList, studentsList, getS
 export default function AdminConsoleResultsWorkspace(props) {
   const {
     supabase,
+    role = null,
     fetchTests,
     deleteTest,
     deleteTestSession,
@@ -789,6 +790,8 @@ export default function AdminConsoleResultsWorkspace(props) {
     setAttemptDetailOpen: setAttemptDetailOpenProp,
     setSelectedAttemptObj: setSelectedAttemptObjProp,
     setAttemptDetailSource: setAttemptDetailSourceProp,
+    attemptQuestionsByVersion: attemptQuestionsByVersionProp,
+    setAttemptQuestionsByVersion: setAttemptQuestionsByVersionProp,
     attemptQuestionsLoading: attemptQuestionsLoadingProp,
     attemptQuestionsError: attemptQuestionsErrorProp,
     attemptDetailTab: attemptDetailTabProp,
@@ -1039,7 +1042,7 @@ export default function AdminConsoleResultsWorkspace(props) {
   const [attemptDetailTabState, setAttemptDetailTabState] = useState("overview");
   const [attemptDetailWrongOnlyState, setAttemptDetailWrongOnlyState] = useState(false);
   const attemptDetailSectionRefsState = useRef({});
-  const [localAttemptQuestionsByVersion, setLocalAttemptQuestionsByVersion] = useState({});
+  const [localAttemptQuestionsByVersionState, setLocalAttemptQuestionsByVersionState] = useState({});
   const [localAttemptQuestionsLoading, setLocalAttemptQuestionsLoading] = useState(false);
   const [localAttemptQuestionsError, setLocalAttemptQuestionsError] = useState("");
   const [previewEditMode, setPreviewEditMode] = useState(false);
@@ -1049,6 +1052,7 @@ export default function AdminConsoleResultsWorkspace(props) {
   const [previewChangeSaving, setPreviewChangeSaving] = useState(false);
   const previewBodyRef = useRef(null);
   const previewOpenRef = useRef(previewOpen);
+  const unscopedSupabaseRef = useRef(null);
   const attemptDetailOpen = canUseExternalAttemptDetail ? Boolean(attemptDetailOpenProp) : attemptDetailOpenState;
   const selectedAttempt = canUseExternalAttemptDetail ? (selectedAttemptProp ?? null) : selectedAttemptObjState;
   const attemptDetailSource = canUseExternalAttemptDetail ? (attemptDetailSourceProp ?? "default") : attemptDetailSourceState;
@@ -1057,6 +1061,10 @@ export default function AdminConsoleResultsWorkspace(props) {
   const setAttemptDetailSource = canUseExternalAttemptDetail ? setAttemptDetailSourceProp : setAttemptDetailSourceState;
   const attemptDetailTab = typeof setAttemptDetailTabProp === "function" ? (attemptDetailTabProp ?? "overview") : attemptDetailTabState;
   const setAttemptDetailTab = typeof setAttemptDetailTabProp === "function" ? setAttemptDetailTabProp : setAttemptDetailTabState;
+  const localAttemptQuestionsByVersion = attemptQuestionsByVersionProp ?? localAttemptQuestionsByVersionState;
+  const setLocalAttemptQuestionsByVersion = typeof setAttemptQuestionsByVersionProp === "function"
+    ? setAttemptQuestionsByVersionProp
+    : setLocalAttemptQuestionsByVersionState;
   const attemptDetailWrongOnly = typeof setAttemptDetailWrongOnlyProp === "function"
     ? Boolean(attemptDetailWrongOnlyProp)
     : attemptDetailWrongOnlyState;
@@ -1242,6 +1250,7 @@ export default function AdminConsoleResultsWorkspace(props) {
     setSessionDetailQuestions,
     setSessionDetailAttempts,
     setAttempts,
+    setLocalAttemptQuestionsByVersion,
     setSelectedAttemptObj,
   ]);
 
@@ -1384,6 +1393,104 @@ export default function AdminConsoleResultsWorkspace(props) {
     }
     return { ok: true, updatedCount: attemptUpdates.length };
   }, [supabase]);
+
+  const getUnscopedSupabaseClient = useCallback(async () => {
+    if (unscopedSupabaseRef.current) return unscopedSupabaseRef.current;
+    const { createAdminSupabaseClient } = await import("../lib/adminSupabase");
+    const client = createAdminSupabaseClient();
+    unscopedSupabaseRef.current = client;
+    return client;
+  }, []);
+
+  const persistQuestionAnswerChanges = useCallback(async (questionUpdates, affectedQuestionData = null) => {
+    if (!questionUpdates?.length) return { ok: true, updatedCount: 0, usedUnscopedClient: false };
+
+    const questionsById = new Map();
+    (previewQuestions ?? []).forEach((question) => {
+      if (question?.dbId != null) questionsById.set(String(question.dbId), question);
+    });
+    Object.values(affectedQuestionData?.versionQuestionsMap ?? {}).forEach((questionsList) => {
+      (questionsList ?? []).forEach((question) => {
+        if (question?.dbId != null) questionsById.set(String(question.dbId), question);
+      });
+    });
+
+    const persistWithClient = async (client, update) => {
+      const question = questionsById.get(String(update.dbId));
+      if (!question) {
+        return {
+          ok: false,
+          error: new Error(`Question ${update.dbId} was not found in the current preview.`),
+        };
+      }
+
+      const existingData = question?.rawData ?? {};
+      const dataUpdate = update.answerIndices.length > 1
+        ? { ...existingData, answer_indices: update.answerIndices }
+        : (() => {
+          const nextData = { ...existingData };
+          delete nextData.answer_indices;
+          return nextData;
+        })();
+
+      const { data, error } = await client
+        .from("questions")
+        .update({
+          answer_index: update.answerIndices[0],
+          data: dataUpdate,
+        })
+        .eq("id", update.dbId)
+        .select("id")
+        .maybeSingle();
+
+      if (error) {
+        return { ok: false, error };
+      }
+
+      return {
+        ok: true,
+        matched: Boolean(data?.id),
+      };
+    };
+
+    const missingUpdates = [];
+    for (const update of questionUpdates) {
+      const result = await persistWithClient(supabase, update);
+      if (!result.ok) return result;
+      if (!result.matched) missingUpdates.push(update);
+    }
+
+    let unresolvedUpdates = missingUpdates;
+    let usedUnscopedClient = false;
+    if (missingUpdates.length && role === "super_admin") {
+      const unscopedClient = await getUnscopedSupabaseClient();
+      unresolvedUpdates = [];
+      for (const update of missingUpdates) {
+        const result = await persistWithClient(unscopedClient, update);
+        if (!result.ok) return result;
+        if (!result.matched) unresolvedUpdates.push(update);
+      }
+      usedUnscopedClient = missingUpdates.length !== unresolvedUpdates.length;
+    }
+
+    if (unresolvedUpdates.length) {
+      const sourceSetNote = role === "super_admin"
+        ? "Those rows are visible in this scope, but were still not writable from the database."
+        : "This usually happens when the question set is visible in your school scope but the source rows are owned outside that scope.";
+      return {
+        ok: false,
+        error: new Error(
+          `Could not save ${unresolvedUpdates.length} answer change${unresolvedUpdates.length === 1 ? "" : "s"}. ${sourceSetNote}`
+        ),
+      };
+    }
+
+    return {
+      ok: true,
+      updatedCount: questionUpdates.length,
+      usedUnscopedClient,
+    };
+  }, [getUnscopedSupabaseClient, previewQuestions, role, supabase]);
 
   const buildDetailedAttemptRows = (answersJson, questionsList) => {
     const answers = answersJson ?? {};
@@ -1545,7 +1652,14 @@ export default function AdminConsoleResultsWorkspace(props) {
     return () => {
       cancelled = true;
     };
-  }, [attemptDetailOpen, canUseExternalAttemptDetail, selectedAttempt, selectedAttemptQuestions, supabase]);
+  }, [
+    attemptDetailOpen,
+    canUseExternalAttemptDetail,
+    selectedAttempt,
+    selectedAttemptQuestions,
+    setLocalAttemptQuestionsByVersion,
+    supabase,
+  ]);
 
   useEffect(() => {
     if (!attemptDetailOpen) return;
@@ -1849,35 +1963,14 @@ export default function AdminConsoleResultsWorkspace(props) {
 
     setPreviewChangeMsg("Saving...");
 
-    for (const { dbId, answerIndices } of (affectedQuestionData?.questionUpdates ?? [])) {
-      const question = (previewQuestions ?? []).find((item) => item.dbId === dbId)
-        ?? Object.values(affectedQuestionData?.versionQuestionsMap ?? {})
-          .flatMap((questionsList) => questionsList ?? [])
-          .find((item) => item?.dbId === dbId);
-      if (!question) continue;
-
-      const existingData = question?.rawData ?? {};
-      const dataUpdate = answerIndices.length > 1
-        ? { ...existingData, answer_indices: answerIndices }
-        : (() => {
-          const newData = { ...existingData };
-          delete newData.answer_indices;
-          return newData;
-        })();
-
-      const { error } = await supabase
-        .from("questions")
-        .update({
-          answer_index: answerIndices[0],
-          data: dataUpdate,
-        })
-        .eq("id", dbId);
-
-      if (error) {
-        setPreviewChangeMsg(`Save failed: ${error.message}`);
-        setPreviewChangeSaving(false);
-        return;
-      }
+    const persistQuestionResult = await persistQuestionAnswerChanges(
+      affectedQuestionData?.questionUpdates ?? [],
+      affectedQuestionData
+    );
+    if (!persistQuestionResult.ok) {
+      setPreviewChangeMsg(`Save failed: ${persistQuestionResult.error.message}`);
+      setPreviewChangeSaving(false);
+      return;
     }
 
     updatePreviewLinkedQuestionCaches(pendingAnswerEdits, affectedQuestionData);
@@ -1909,8 +2002,8 @@ export default function AdminConsoleResultsWorkspace(props) {
 
     setPreviewChangeMsg(
       impact.ok && impact.attemptUpdates.length > 0
-        ? `Saved ${edits.length} answer${edits.length > 1 ? "s" : ""} and updated ${impact.attemptUpdates.length} score${impact.attemptUpdates.length === 1 ? "" : "s"}${impact.linkedVersionCount > 0 ? ` across ${impact.linkedVersionCount} linked session version${impact.linkedVersionCount === 1 ? "" : "s"}` : ""}.${impact.warning ? ` ${impact.warning}` : ""}`
-        : `Saved ${edits.length} answer${edits.length > 1 ? "s" : ""}.${impact.warning ? ` ${impact.warning}` : ""}`
+        ? `Saved ${edits.length} answer${edits.length > 1 ? "s" : ""} and updated ${impact.attemptUpdates.length} score${impact.attemptUpdates.length === 1 ? "" : "s"}${impact.linkedVersionCount > 0 ? ` across ${impact.linkedVersionCount} linked session version${impact.linkedVersionCount === 1 ? "" : "s"}` : ""}.${persistQuestionResult.usedUnscopedClient ? " Saved with superadmin global scope." : ""}${impact.warning ? ` ${impact.warning}` : ""}`
+        : `Saved ${edits.length} answer${edits.length > 1 ? "s" : ""}.${persistQuestionResult.usedUnscopedClient ? " Saved with superadmin global scope." : ""}${impact.warning ? ` ${impact.warning}` : ""}`
     );
     setPendingAnswerEdits({});
     setPendingAnswerEditModes({});

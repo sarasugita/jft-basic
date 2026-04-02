@@ -13,6 +13,7 @@ export default function AdminConsoleTestingWorkspace() {
   const {
     activeTab,
     activeSchoolId,
+    role,
     session,
     canUseAdminConsole,
     dailySubTab,
@@ -103,6 +104,7 @@ export default function AdminConsoleTestingWorkspace() {
     modelSubTab,
     dailySubTab,
     canUseAdminConsole,
+    role,
     resultContext,
     students,
     // Add context utilities

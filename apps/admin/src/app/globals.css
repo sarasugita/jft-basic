@@ -3258,30 +3258,30 @@ body { padding: 0; }
   max-height: calc(100vh - 40px);
 }
 
-.daily-record-modal-shell {
-  padding: 0;
+.admin-modal.daily-record-modal-shell {
+  padding: 0 !important;
   border-radius: 12px;
   overflow: hidden;
   background: #ffffff;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
 }
 
-.daily-record-modal-shell .admin-modal-header {
+.admin-modal.daily-record-modal-shell .admin-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 0;
-  padding: 14px 16px;
+  margin: 0 !important;
+  padding: 14px 16px !important;
   background: #d9e7d7;
   border-bottom: 1px solid #d1dbcf;
 }
 
-.daily-record-modal-shell .admin-title {
+.admin-modal.daily-record-modal-shell .admin-title {
   font-size: 16px;
 }
 
-.daily-record-modal-shell .admin-modal-close {
+.admin-modal.daily-record-modal-shell .admin-modal-close {
   padding: 0 2px;
   min-width: 28px;
   min-height: 28px;
@@ -3451,14 +3451,43 @@ body { padding: 0; }
   padding: 14px;
 }
 
+.daily-record-announcement-box {
+  margin-top: 12px;
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px 14px 14px;
+}
+
+.daily-record-announcement-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-record-announcement-fields label {
+  display: block;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.daily-record-announcement-title,
+.daily-record-announcement-draft {
+  width: 100%;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 6px;
+  padding: 10px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #ffffff;
+}
+
 .daily-record-announcement-draft {
   min-height: 220px;
-  font-family: inherit;
-  border-radius: 6px;
+  resize: vertical;
 }
 
 .daily-record-announcement-title {
-  border-radius: 6px !important;
+  min-height: 42px;
 }
 
 .daily-record-other-content {

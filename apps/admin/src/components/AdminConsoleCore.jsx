@@ -10843,6 +10843,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
   })();
   const workspaceContextValue = {
     supabase,
+    role: profile?.role ?? null,
     activeSchoolId,
     session,
     canUseAdminConsole,

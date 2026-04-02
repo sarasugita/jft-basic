@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
+import { getBangladeshDateInput } from "../lib/adminFormatters";
 
 // Constants - Irodori textbook and lessons
 const DAILY_RECORD_CONTENT_FORMAT = "daily_record_content_v1";
@@ -95,8 +96,12 @@ const IRODORI_CANDO_BY_BOOK = {
 
 // Helper function definitions
 function isDefaultDailyRecordHoliday(dateString) {
-  const weekday = new Date(dateString).getDay();
-  return weekday === 5 || weekday === 6;
+  if (!dateString) return false;
+  const weekday = new Date(`${dateString}T00:00:00`).toLocaleDateString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    weekday: "short",
+  });
+  return weekday === "Fri" || weekday === "Sat";
 }
 
 function resolveDailyRecordHoliday(dateString, explicitValue) {
@@ -109,6 +114,7 @@ function getEmptyDailyRecordPlanDraft() {
     mini_test_1: "",
     mini_test_2: "",
     special_test_1: "",
+    special_test_2: "",
   };
 }
 
@@ -224,7 +230,11 @@ function getEmptyDailyRecordForm(recordDate = "") {
     record_date: recordDate,
     textbook_entries: [createDailyRecordTextbookRow()],
     free_writing: "",
-    comments: [createDailyRecordCommentRow("")]
+    comments: [createDailyRecordCommentRow("")],
+    mini_test_1: "",
+    mini_test_2: "",
+    special_test_1: "",
+    special_test_2: "",
   };
 }
 
@@ -245,6 +255,10 @@ function getDailyRecordForm(record) {
     textbook_entries: content.textbook_entries,
     free_writing: content.free_writing,
     comments,
+    mini_test_1: record.mini_test_1 ?? "",
+    mini_test_2: record.mini_test_2 ?? "",
+    special_test_1: record.special_test_1 ?? "",
+    special_test_2: record.special_test_2 ?? "",
   };
 }
 
@@ -256,6 +270,7 @@ function buildDailyRecordPlanDrafts(records) {
       mini_test_1: record.mini_test_1 ?? "",
       mini_test_2: record.mini_test_2 ?? "",
       special_test_1: record.special_test_1 ?? "",
+      special_test_2: record.special_test_2 ?? "",
     };
   });
   return drafts;
@@ -299,6 +314,24 @@ function addDays(dateString, offsetDays) {
 
 function getWeekdayNumber(dateString) {
   return new Date(dateString).getDay();
+}
+
+function getSessionScheduleSource(session) {
+  return session?.starts_at || session?.ends_at || session?.created_at || "";
+}
+
+function getSessionDisplayTitle(session, testsList) {
+  const explicitTitle = String(session?.title ?? "").trim();
+  if (explicitTitle) return explicitTitle;
+  const matchingTest = (testsList ?? []).find((test) => test.version === session?.problem_set_id);
+  return matchingTest?.title || session?.problem_set_id || "-";
+}
+
+function getEmptyScheduledTests() {
+  return {
+    dailyTests: [],
+    modelTests: [],
+  };
 }
 
 // Main hook
@@ -744,9 +777,14 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     if (!activeSchoolId || !recordDate) return;
     setDailyRecordPlanSavingDate(recordDate);
     setDailyRecordsMsg("");
+    const scheduledTests = scheduleRecordActualTestsByDate[addDays(recordDate, 1)] ?? getEmptyScheduledTests();
     const draft = {
       ...getEmptyDailyRecordPlanDraft(),
-      ...(dailyRecordPlanDrafts[recordDate] ?? {})
+      ...(dailyRecordPlanDrafts[recordDate] ?? {}),
+      mini_test_1: (dailyRecordPlanDrafts[recordDate]?.mini_test_1 ?? "").trim() || scheduledTests.dailyTests[0] || "",
+      mini_test_2: (dailyRecordPlanDrafts[recordDate]?.mini_test_2 ?? "").trim() || scheduledTests.dailyTests[1] || "",
+      special_test_1: (dailyRecordPlanDrafts[recordDate]?.special_test_1 ?? "").trim() || scheduledTests.modelTests[0] || "",
+      special_test_2: (dailyRecordPlanDrafts[recordDate]?.special_test_2 ?? "").trim() || scheduledTests.modelTests[1] || "",
     };
     const existingRecord = dailyRecords.find((item) => item.record_date === recordDate) ?? null;
     const payload = {
@@ -755,7 +793,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       mini_test_1: draft.mini_test_1.trim() || null,
       mini_test_2: draft.mini_test_2.trim() || null,
       special_test_1: draft.special_test_1.trim() || null,
-      special_test_2: null,
+      special_test_2: draft.special_test_2.trim() || null,
       updated_at: new Date().toISOString(),
       created_by: session?.user?.id ?? null,
     };
@@ -855,19 +893,40 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
   const scheduleRecordActualTestsByDate = useMemo(() => {
     const byDate = {};
-    testSessions.forEach((session) => {
-      let date = null;
-      if (session.starts_at) {
-        // Extract date from ISO timestamp (already in Dhaka time)
-        // Format: YYYY-MM-DD
-        date = session.starts_at.split("T")[0];
+    (testSessions ?? []).forEach((session) => {
+      if (session?.retake_source_session_id) return;
+      const date = getBangladeshDateInput(getSessionScheduleSource(session));
+      if (!date) return;
+      if (!byDate[date]) {
+        byDate[date] = {
+          dailyTests: [],
+          modelTests: [],
+        };
       }
-      date = date || getTodayDateInput();
-      if (!byDate[date]) byDate[date] = [];
-      byDate[date].push(session);
+      const nextBucket = testMetaByVersion?.[session.problem_set_id]?.type === "mock"
+        ? byDate[date].modelTests
+        : byDate[date].dailyTests;
+      nextBucket.push({
+        id: session.id || `${date}-${session.problem_set_id || "session"}`,
+        title: getSessionDisplayTitle(session, tests),
+        sortValue: new Date(getSessionScheduleSource(session)).getTime(),
+      });
     });
-    return byDate;
-  }, [testSessions]);
+
+    return Object.fromEntries(
+      Object.entries(byDate).map(([date, groupedTests]) => [
+        date,
+        {
+          dailyTests: groupedTests.dailyTests
+            .sort((a, b) => a.sortValue - b.sortValue)
+            .map((item) => item.title),
+          modelTests: groupedTests.modelTests
+            .sort((a, b) => a.sortValue - b.sortValue)
+            .map((item) => item.title),
+        },
+      ])
+    );
+  }, [testSessions, testMetaByVersion, tests]);
 
   const scheduleRecordDisplayByDate = useMemo(() => {
     const confirmedSet = new Set(dailyRecordConfirmedDates);
@@ -875,17 +934,19 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     const displayData = {};
     scheduleRecordRows.forEach(({ recordDate, draft }) => {
       const record = recordByDate[recordDate];
+      const plannedDate = addDays(recordDate, 1);
+      const scheduledTests = scheduleRecordActualTestsByDate[plannedDate] ?? getEmptyScheduledTests();
       displayData[recordDate] = {
-        isConfirmed: confirmedSet.has(recordDate),
+        isConfirmed: confirmedSet.has(plannedDate),
         isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
-        mini_test_1: draft.mini_test_1,
-        mini_test_2: draft.mini_test_2,
-        special_test_1: draft.special_test_1,
-        special_test_2: draft.special_test_2,
+        mini_test_1: draft.mini_test_1 || scheduledTests.dailyTests[0] || "",
+        mini_test_2: draft.mini_test_2 || scheduledTests.dailyTests[1] || "",
+        special_test_1: draft.special_test_1 || scheduledTests.modelTests[0] || "",
+        special_test_2: draft.special_test_2 || scheduledTests.modelTests[1] || "",
       };
     });
     return displayData;
-  }, [dailyRecordConfirmedDates, dailyRecords, scheduleRecordRows]);
+  }, [dailyRecordConfirmedDates, dailyRecords, scheduleRecordActualTestsByDate, scheduleRecordRows]);
 
   const dailyRecordSelectableDates = useMemo(() => {
     return scheduleRecordRows
@@ -997,94 +1058,40 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   }, [dailyRecordCalendarMonth, dailyRecordCalendarMonths]);
 
   const dailyRecordTodaySessions = useMemo(() => {
-    // Get tests scheduled for the current daily record date (same day, not tomorrow)
     const recordDate = dailyRecordForm.record_date || getTodayDateInput();
-
-    // Debug: log all test sessions with their dates
-    console.log("All testSessions:", (testSessions ?? []).map(s => ({
-      title: s.title,
-      starts_at: s.starts_at,
-      extractedDate: s.starts_at?.split("T")[0],
-      problem_set_id: s.problem_set_id
-    })));
-    console.log("Looking for recordDate:", recordDate);
 
     const sessionsForDate = (testSessions ?? [])
       .filter((session) => {
-        if (!session.starts_at) return false;
-        // Convert UTC time to Bangladesh timezone (UTC+6) before extracting date
-        const dateObj = new Date(session.starts_at);
-        const bdtDate = new Intl.DateTimeFormat("en-CA", {
-          timeZone: "Asia/Dhaka",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit"
-        }).format(dateObj);
-        return bdtDate === recordDate;
+        return getBangladeshDateInput(getSessionScheduleSource(session)) === recordDate;
       })
       .sort((a, b) => {
-        const aTime = new Date(a.starts_at || "").getTime();
-        const bTime = new Date(b.starts_at || "").getTime();
+        const aTime = new Date(getSessionScheduleSource(a)).getTime();
+        const bTime = new Date(getSessionScheduleSource(b)).getTime();
         return aTime - bTime;
       });
 
-    // Separate daily and model tests by problem_set_id (model tests have specific pattern or we can check tests table)
-    // For now, use a heuristic: if problem_set_id matches known tests table versions, determine type
     const dailyTests = [];
     const modelTests = [];
 
     for (const session of sessionsForDate) {
-      // Try to determine if it's a daily or model test
-      // This is a simplification - ideally we'd check against the tests table
-      // For now, assume based on how tests are typically named or we need to fetch test type
       const testMeta = (testMetaByVersion || {})[session.problem_set_id];
       if (testMeta?.type === "daily") {
-        dailyTests.push(session.title);
+        dailyTests.push(getSessionDisplayTitle(session, tests));
       } else if (testMeta?.type === "mock") {
-        modelTests.push(session.title);
+        modelTests.push(getSessionDisplayTitle(session, tests));
       } else {
-        // Default: assume daily if we can't determine
-        dailyTests.push(session.title);
+        dailyTests.push(getSessionDisplayTitle(session, tests));
       }
     }
 
-    console.log("Daily Record Today Sessions Debug:", {
-      recordDate,
-      sessionsForDate: sessionsForDate.map(s => ({ title: s.title, problem_set_id: s.problem_set_id, starts_at: s.starts_at })),
-      testMetaByVersion,
-      dailyTests,
-      modelTests,
-    });
-
     return { dailyTests, modelTests };
-  }, [dailyRecordForm.record_date, testSessions, testMetaByVersion]);
+  }, [dailyRecordForm.record_date, testSessions, testMetaByVersion, tests]);
 
   const dailyRecordTomorrowSessions = useMemo(() => {
     const recordDate = dailyRecordForm.record_date || getTodayDateInput();
     const targetDate = addDays(recordDate, 1);
-
-    // Debug logging
-    const allSessionsByDate = {};
-    (testSessions ?? []).forEach((session) => {
-      if (session.starts_at) {
-        const date = session.starts_at.split("T")[0];
-        if (!allSessionsByDate[date]) allSessionsByDate[date] = 0;
-        allSessionsByDate[date]++;
-      }
-    });
-    console.log("Daily Record Filtering Debug:", {
-      recordDate,
-      targetDate,
-      totalSessions: testSessions?.length ?? 0,
-      sessionsByDate: allSessionsByDate,
-      matchedCount: (testSessions ?? []).filter((s) => s.starts_at?.split("T")[0] === targetDate).length
-    });
-
-    // Filter testSessions directly by extracting date from starts_at
     const sessionsForDate = (testSessions ?? []).filter((session) => {
-      if (!session.starts_at) return false;
-      const sessionDate = session.starts_at.split("T")[0];
-      return sessionDate === targetDate;
+      return getBangladeshDateInput(getSessionScheduleSource(session)) === targetDate;
     });
 
     return {
@@ -1094,23 +1101,10 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     };
   }, [dailyRecordForm.record_date, testSessions]);
 
-  // Auto-fill test fields based on scheduled tests for the day
   useEffect(() => {
     if (!dailyRecordTodaySessions || (!dailyRecordTodaySessions.dailyTests?.length && !dailyRecordTodaySessions.modelTests?.length)) {
-      console.log("Auto-fill early return: ", { dailyRecordTodaySessions });
       return;
     }
-
-    console.log("Auto-fill running with:", {
-      dailyTests: dailyRecordTodaySessions.dailyTests,
-      modelTests: dailyRecordTodaySessions.modelTests,
-      currentFormFields: {
-        mini_test_1: dailyRecordForm.mini_test_1,
-        mini_test_2: dailyRecordForm.mini_test_2,
-        special_test_1: dailyRecordForm.special_test_1,
-        special_test_2: dailyRecordForm.special_test_2,
-      }
-    });
 
     setDailyRecordForm((prev) => {
       const updated = { ...prev };
@@ -1131,7 +1125,6 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         updated.special_test_2 = dailyRecordTodaySessions.modelTests[1];
       }
 
-      console.log("Auto-fill updated form: ", updated);
       return updated;
     });
   }, [dailyRecordTodaySessions, dailyRecordForm.mini_test_1, dailyRecordForm.mini_test_2, dailyRecordForm.special_test_1, dailyRecordForm.special_test_2]);
