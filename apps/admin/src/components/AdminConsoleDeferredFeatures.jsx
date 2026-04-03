@@ -885,7 +885,12 @@ export default function AdminConsoleDeferredFeatures({
                   <button
                     className="attempt-detail-action-button attempt-detail-action-button-danger"
                     type="button"
-                    onClick={() => deleteAttempt(selectedAttempt.id)}
+                    onClick={async () => {
+                      const didDelete = await deleteAttempt(selectedAttempt.id);
+                      if (didDelete) {
+                        closeAttemptDetail();
+                      }
+                    }}
                   >
                     <span className="attempt-detail-action-icon" aria-hidden="true">
                       <svg viewBox="0 0 20 20" focusable="false">

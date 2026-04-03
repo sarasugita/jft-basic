@@ -2500,7 +2500,7 @@ export default function AdminConsoleResultsWorkspace(props) {
             {sessionDetailAllowMsg ? <div className="admin-msg">{sessionDetailAllowMsg}</div> : null}
 
             <div className="admin-table-wrap" style={{ marginTop: 12 }}>
-              <table className="admin-table" style={{ minWidth: 980 }}>
+                      <table className="admin-table session-detail-attempts-table" style={{ minWidth: 980 }}>
                 <thead>
                   <tr>
                     <th>No.</th>
@@ -2514,10 +2514,14 @@ export default function AdminConsoleResultsWorkspace(props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {sessionDetailDisplayAttempts.map((attempt, index) => {
+                      {sessionDetailDisplayAttempts.map((attempt, index) => {
                     const passed = getScoreRate(attempt) >= sessionDetailPassRate;
                     return (
-                      <tr key={`session-attempt-${attempt.id}`} onClick={() => openAttemptDetail(attempt)}>
+                      <tr
+                        key={`session-attempt-${attempt.id}`}
+                        className="session-detail-attempt-row"
+                        onClick={() => openAttemptDetail(attempt)}
+                      >
                         <td>{index + 1}</td>
                         <td>{attempt.created_at ? new Date(attempt.created_at).toLocaleString("en-CA", { timeZone: "Asia/Dhaka", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(/,/, "") : ""}</td>
                         <td>{attempt.display_name ?? ""}</td>

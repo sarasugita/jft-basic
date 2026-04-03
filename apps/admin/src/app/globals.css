@@ -786,6 +786,18 @@ body { padding: 0; }
 .admin-table tbody tr:hover { background: rgba(106, 163, 50, 0.08); cursor: pointer; }
 .admin-table tbody tr.row-withdrawn { background: #e5e7eb; }
 .admin-table tbody tr.row-withdrawn:hover { background: #e5e7eb; }
+.session-detail-attempts-table tbody tr {
+  position: relative;
+  z-index: 2;
+}
+.session-detail-attempts-table tbody td {
+  position: relative;
+  z-index: 2;
+  background: #fff;
+}
+.session-detail-attempt-row:hover td {
+  background: rgba(106, 163, 50, 0.08);
+}
 
 .daily-sessions-table .daily-sessions-col-setid {
   width: 180px;
