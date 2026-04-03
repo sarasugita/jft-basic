@@ -8477,6 +8477,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const {
       confirmDelete = true,
       closeDetail = true,
+      sessionId = null,
     } = options;
     if (confirmDelete) {
       const ok = window.confirm(`Delete attempt ${attemptId}?`);
@@ -8491,6 +8492,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     setAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
     setStudentAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
+    setSessionDetailAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
     if (closeDetail) {
       setAttemptDetailOpen(false);
       setSelectedAttemptObj(null);
@@ -8503,8 +8505,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
     if (selectedId === attemptId) setSelectedId(null);
     setMsg(`Deleted attempt ${attemptId}.`);
     setStudentAttemptsMsg(`Deleted attempt ${attemptId}.`);
+    if (!sessionId || String(sessionDetail?.sessionId ?? "") === String(sessionId)) {
+      setSessionDetailMsg(`Deleted attempt ${attemptId}.`);
+    }
     if (selectedStudentId) {
       fetchStudentAttempts(selectedStudentId);
+    }
+    if (sessionDetail?.sessionId && (!sessionId || String(sessionDetail.sessionId) === String(sessionId))) {
+      void fetchSessionDetail(sessionDetail);
     }
     runSearch();
     return true;
