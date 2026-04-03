@@ -1255,7 +1255,7 @@ function attemptHasDetailData(attempt) {
 }
 
 function attemptCanOpenDetail(attempt) {
-  return attemptHasDetailData(attempt) || isImportedSummaryAttempt(attempt);
+  return Boolean(attempt?.id);
 }
 
 function normalizeAttemptDateKey(value) {

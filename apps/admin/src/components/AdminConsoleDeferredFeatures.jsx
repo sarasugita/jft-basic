@@ -886,10 +886,15 @@ export default function AdminConsoleDeferredFeatures({
                     className="attempt-detail-action-button attempt-detail-action-button-danger"
                     type="button"
                     onClick={async () => {
-                      const didDelete = await deleteAttempt(selectedAttempt.id);
-                      if (didDelete) {
-                        closeAttemptDetail();
-                      }
+                      const confirmed = typeof window === "undefined"
+                        ? true
+                        : window.confirm(`Delete attempt ${selectedAttempt.id}?`);
+                      if (!confirmed) return;
+                      closeAttemptDetail();
+                      void deleteAttempt(selectedAttempt.id, {
+                        confirmDelete: false,
+                        closeDetail: false,
+                      });
                     }}
                   >
                     <span className="attempt-detail-action-icon" aria-hidden="true">

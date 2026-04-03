@@ -1058,12 +1058,7 @@ export default function AdminConsoleResultsWorkspace(props) {
     && typeof setAttemptDetailSourceProp === "function";
   const attemptCanOpenDetail = typeof attemptCanOpenDetailProp === "function"
     ? attemptCanOpenDetailProp
-    : (attempt) => {
-      if (!attempt?.id) return false;
-      if (isImportedSummaryAttempt(attempt)) return true;
-      if (!attempt?.answers_json || typeof attempt.answers_json !== "object") return false;
-      return Object.keys(attempt.answers_json).some((key) => key !== "__meta");
-    };
+    : (attempt) => Boolean(attempt?.id);
   const [attemptDetailOpenState, setAttemptDetailOpenState] = useState(false);
   const [selectedAttemptObjState, setSelectedAttemptObjState] = useState(null);
   const [attemptDetailSourceState, setAttemptDetailSourceState] = useState("default");
