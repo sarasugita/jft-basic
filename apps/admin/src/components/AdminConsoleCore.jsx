@@ -8472,32 +8472,42 @@ function openDailyRecordModal(record = null, recordDate = "") {
     fetchTests();
   }
 
-  async function deleteAttempt(attemptId) {
+  async function deleteAttempt(attemptId, options = {}) {
     if (!attemptId) return;
-    const ok = window.confirm(`Delete attempt ${attemptId}?`);
-    if (!ok) return;
+    const {
+      confirmDelete = true,
+      closeDetail = true,
+    } = options;
+    if (confirmDelete) {
+      const ok = window.confirm(`Delete attempt ${attemptId}?`);
+      if (!ok) return false;
+    }
     const { error } = await supabase.from("attempts").delete().eq("id", attemptId);
     if (error) {
       console.error("delete attempt error:", error);
       setMsg(`Delete failed: ${error.message}`);
       setStudentAttemptsMsg(`Delete failed: ${error.message}`);
-      return;
+      return false;
     }
     setAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
     setStudentAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
-    if (selectedAttemptObj?.id === attemptId || selectedId === attemptId) {
+    if (closeDetail) {
       setAttemptDetailOpen(false);
       setSelectedAttemptObj(null);
       setAttemptDetailSource("default");
       setSelectedId(null);
+      setAttemptDetailTab("overview");
+      setAttemptDetailWrongOnly(false);
+      attemptDetailSectionRefs.current = {};
     }
     if (selectedId === attemptId) setSelectedId(null);
-    setMsg(`Deleted: ${attemptId}`);
-    setStudentAttemptsMsg(`Deleted: ${attemptId}`);
+    setMsg(`Deleted attempt ${attemptId}.`);
+    setStudentAttemptsMsg(`Deleted attempt ${attemptId}.`);
     if (selectedStudentId) {
       fetchStudentAttempts(selectedStudentId);
     }
     runSearch();
+    return true;
   }
 
   function getAttemptTitle(attempt) {
