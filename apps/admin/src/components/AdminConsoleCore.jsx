@@ -5986,26 +5986,46 @@ export default function AdminConsole({
       return;
     }
     setStudentMsg("Loading...");
-    let query = supabase
-      .from("profiles")
-      .select(STUDENT_LIST_SELECT_FIELDS)
-      .eq("role", "student")
-      .eq("school_id", activeSchoolId)
-      .order("created_at", { ascending: false })
-      .limit(500);
-    const { data, error } = await query;
-    if (error) {
-      finishTrace("failed", {
-        message: error.message || "",
-        code: error.code || "",
-        status: error.status ?? null,
-      });
-      console.error("profiles fetch error:", error);
-      setStudents([]);
-      setStudentMsg(`Load failed: ${error.message}`);
-      return;
+    const allStudents = [];
+    let offset = 0;
+    const pageSize = 500;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select(STUDENT_LIST_SELECT_FIELDS)
+        .eq("role", "student")
+        .eq("school_id", activeSchoolId)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (error) {
+        finishTrace("failed", {
+          message: error.message || "",
+          code: error.code || "",
+          status: error.status ?? null,
+        });
+        console.error("profiles fetch error:", error);
+        setStudents([]);
+        setStudentMsg(`Load failed: ${error.message}`);
+        return;
+      }
+
+      const pageData = data ?? [];
+      if (pageData.length === 0) {
+        hasMore = false;
+      } else {
+        allStudents.push(...pageData);
+        if (pageData.length < pageSize) {
+          hasMore = false;
+        } else {
+          offset += pageSize;
+        }
+      }
     }
-    const list = data ?? [];
+
+    const list = allStudents;
     finishTrace("success", {
       count: list.length,
       firstStudentId: list[0]?.id ?? null,
