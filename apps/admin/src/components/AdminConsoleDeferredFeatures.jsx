@@ -129,6 +129,13 @@ export default function AdminConsoleDeferredFeatures({
   setAttemptDetailWrongOnly,
   renderUnderlinesHtml,
 }) {
+  const handleOpenResultsImportStatus = typeof openResultsImportStatus === "function"
+    ? openResultsImportStatus
+    : null;
+  const handleClearDailyResultsForCategory = typeof clearDailyResultsForCategory === "function"
+    ? clearDailyResultsForCategory
+    : null;
+
   const canAttemptOpenDetail = (attempt) => (
     typeof attemptCanOpenDetail === "function"
       && typeof openAttemptDetail === "function"
@@ -227,7 +234,8 @@ export default function AdminConsoleDeferredFeatures({
                     <button
                       className="btn results-page-action-btn"
                       type="button"
-                      onClick={() => openResultsImportStatus(resultContext.type)}
+                      onClick={() => handleOpenResultsImportStatus?.(resultContext.type)}
+                      disabled={!handleOpenResultsImportStatus}
                     >
                       <span className="results-page-action-icon" aria-hidden="true">↑</span>
                       <span>Import CSV</span>
@@ -247,8 +255,8 @@ export default function AdminConsoleDeferredFeatures({
                       <button
                         className="btn btn-danger results-page-action-btn"
                         type="button"
-                        onClick={() => clearDailyResultsForCategory(selectedDailyCategory)}
-                        disabled={!selectedDailyCategory}
+                        onClick={() => handleClearDailyResultsForCategory?.(selectedDailyCategory)}
+                        disabled={!selectedDailyCategory || !handleClearDailyResultsForCategory}
                       >
                         <span>Clear All Results</span>
                       </button>
@@ -800,6 +808,7 @@ export default function AdminConsoleDeferredFeatures({
         const attemptStudentName = selectedAttemptDisplayName || selectedAttempt.display_name || "";
         const showSummaryOnly = selectedAttemptUsesImportedSummary;
         const showRankingMainSectionsOnly = attemptDetailSource === "sessionRanking" || selectedAttemptUsesImportedModelSummary;
+        const isImportedAttempt = isImportedSummaryAttempt(selectedAttempt);
         const radarData = selectedAttemptMainSectionSummary.map((row) => ({
           label: row.section,
           value: row.total ? row.correct / row.total : 0,
@@ -930,12 +939,18 @@ export default function AdminConsoleDeferredFeatures({
                     <div className="attempt-detail-score-row">
                       <span className="attempt-detail-score-label">Total Score</span>
                       <span className={`attempt-detail-score-right ${isPass ? "" : "attempt-detail-score-right-fail"}`}>
-                        <span className="attempt-detail-score-value">
-                          <span className="attempt-detail-score-value-primary">{totalCorrect}</span>
-                          <span className="attempt-detail-score-value-separator">/</span>
-                          <span>{totalQuestions}</span>
-                        </span>
-                        <span className="attempt-detail-score-rate">({scorePercent}%)</span>
+                        {isImportedAttempt ? (
+                          <span className="attempt-detail-score-rate">{scorePercent}%</span>
+                        ) : (
+                          <>
+                            <span className="attempt-detail-score-value">
+                              <span className="attempt-detail-score-value-primary">{totalCorrect}</span>
+                              <span className="attempt-detail-score-value-separator">/</span>
+                              <span>{totalQuestions}</span>
+                            </span>
+                            <span className="attempt-detail-score-rate">({scorePercent}%)</span>
+                          </>
+                        )}
                       </span>
                     </div>
                     <div className="attempt-detail-score-row">
@@ -975,8 +990,8 @@ export default function AdminConsoleDeferredFeatures({
                               <tr>
                                 <th className="attempt-score-detail-head-section">Section</th>
                                 {showRankingMainSectionsOnly ? null : <th className="attempt-score-detail-head-subsection">Sub-section</th>}
-                                <th className="attempt-score-detail-head-total">Total</th>
-                                <th className="attempt-score-detail-head-correct">Correct</th>
+                                {!isImportedAttempt && <th className="attempt-score-detail-head-total">Total</th>}
+                                {!isImportedAttempt && <th className="attempt-score-detail-head-correct">Correct</th>}
                                 <th className="attempt-score-detail-head-rate">%</th>
                               </tr>
                             </thead>
@@ -989,8 +1004,8 @@ export default function AdminConsoleDeferredFeatures({
                                         <td className="attempt-score-detail-cell-section">
                                           <span className="session-ranking-section-header">{renderTwoLineHeader(section.section)}</span>
                                         </td>
-                                        <td className="attempt-score-detail-cell-total">{section.total}</td>
-                                        <td className={`attempt-score-detail-cell-correct ${isSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{section.correct}</td>
+                                        {!isImportedAttempt && <td className="attempt-score-detail-cell-total">{section.total}</td>}
+                                        {!isImportedAttempt && <td className={`attempt-score-detail-cell-correct ${isSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{section.correct}</td>}
                                         <td className={`attempt-score-detail-cell-rate ${isSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(section.rate * 100).toFixed(1)}%</td>
                                       </tr>
                                     );
@@ -1007,8 +1022,8 @@ export default function AdminConsoleDeferredFeatures({
                                           <td className="attempt-score-detail-cell-subsection">
                                             <span className="attempt-score-detail-total-label">Total</span>
                                           </td>
-                                          <td className="attempt-score-detail-cell-total">{group.total}</td>
-                                          <td className={`attempt-score-detail-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{group.correct}</td>
+                                          {!isImportedAttempt && <td className="attempt-score-detail-cell-total">{group.total}</td>}
+                                          {!isImportedAttempt && <td className={`attempt-score-detail-cell-correct ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{group.correct}</td>}
                                           <td className={`attempt-score-detail-cell-rate ${isGroupBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(group.rate * 100).toFixed(1)}%</td>
                                         </tr>
                                         {group.subSections.map((subSection) => {
@@ -1016,8 +1031,8 @@ export default function AdminConsoleDeferredFeatures({
                                           return (
                                             <tr key={`attempt-sub-${group.mainSection}-${subSection.section}`}>
                                               <td className="attempt-score-detail-cell-subsection">{subSection.section}</td>
-                                              <td className="attempt-score-detail-cell-total">{subSection.total}</td>
-                                              <td className={`attempt-score-detail-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{subSection.correct}</td>
+                                              {!isImportedAttempt && <td className="attempt-score-detail-cell-total">{subSection.total}</td>}
+                                              {!isImportedAttempt && <td className={`attempt-score-detail-cell-correct ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{subSection.correct}</td>}
                                               <td className={`attempt-score-detail-cell-rate ${isSubSectionBelowPass ? "attempt-score-detail-below-pass" : ""}`}>{(subSection.rate * 100).toFixed(1)}%</td>
                                             </tr>
                                           );

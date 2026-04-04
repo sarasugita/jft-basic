@@ -2559,6 +2559,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                 <tbody>
                       {sessionDetailDisplayAttempts.map((attempt, index) => {
                     const passed = getScoreRate(attempt) >= sessionDetailPassRate;
+                    const isImportedAttempt = isImportedSummaryAttempt(attempt);
                     return (
                       <tr
                         key={`session-attempt-${attempt.id}`}
@@ -2569,7 +2570,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                         <td>{attempt.created_at ? new Date(attempt.created_at).toLocaleString("en-CA", { timeZone: "Asia/Dhaka", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(/,/, "") : ""}</td>
                         <td>{attempt.display_name ?? ""}</td>
                         <td>{attempt.student_code ?? ""}</td>
-                        <td>{attempt.correct}/{attempt.total}</td>
+                        <td>{isImportedAttempt ? "—" : `${attempt.correct}/${attempt.total}`}</td>
                         <td>{(getScoreRate(attempt) * 100).toFixed(1)}%</td>
                         <td className={passed ? "pf-pass" : "pf-fail"}>{passed ? "Pass" : "Fail"}</td>
                         <td style={{ whiteSpace: "nowrap" }}>{attempt.id}</td>
@@ -2610,12 +2611,14 @@ export default function AdminConsoleResultsWorkspace(props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {sessionDetailStudentRankingRows.map((row) => (
+                  {sessionDetailStudentRankingRows.map((row) => {
+                    const isImportedAttempt = isImportedSummaryAttempt(row.attempt);
+                    return (
                     <tr key={`student-ranking-row-${row.student_id}`} onClick={() => openAttemptDetail(row.attempt, "sessionRanking")}>
                       <td>{formatOrdinal(row.rank)}</td>
                       <td>{row.display_name}</td>
                       <td>{row.student_code || "—"}</td>
-                      <td>{row.totalCorrect}/{row.totalQuestions}</td>
+                      <td>{isImportedAttempt ? "—" : `${row.totalCorrect}/${row.totalQuestions}`}</td>
                       <td>{(row.totalRate * 100).toFixed(1)}%</td>
                       {sessionDetailRankingSections.map((section) => (
                         <td key={`student-ranking-cell-${row.student_id}-${section.section}`}>
@@ -2623,7 +2626,8 @@ export default function AdminConsoleResultsWorkspace(props) {
                         </td>
                       ))}
                     </tr>
-                  ))}
+                    );
+                  })}
                   {!sessionDetailStudentRankingRows.length ? (
                     <tr>
                       <td colSpan={Math.max(5, 5 + sessionDetailRankingSections.length)}>No ranking data available.</td>
