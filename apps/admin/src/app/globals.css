@@ -2597,6 +2597,10 @@ body { padding: 0; }
   width: min(1100px, 96vw);
 }
 
+.admin-modal.edit-modal {
+  padding: 16px;
+}
+
 .daily-session-create-modal {
   display: flex;
   flex-direction: column;

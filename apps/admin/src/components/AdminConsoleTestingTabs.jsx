@@ -189,7 +189,46 @@ export default function AdminConsoleTestingTabs({
     });
   }
 
+  function formatCompactDateTimeParts(value) {
+    if (!value) return { date: "", time: "" };
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return { date: "", time: "" };
+    return {
+      date: date.toLocaleDateString("en-GB", {
+        timeZone: "Asia/Dhaka",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }),
+      time: date.toLocaleTimeString("en-GB", {
+        timeZone: "Asia/Dhaka",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true
+      }),
+    };
+  }
+
+  function renderCompactDateTime(value) {
+    const parts = formatCompactDateTimeParts(value);
+    if (!parts.date) return "";
+    return (
+      <span style={{ display: "inline-grid", gap: 2, lineHeight: 1.1, whiteSpace: "normal", justifyItems: "start", width: "100%", textAlign: "left" }}>
+        <span>{parts.date}</span>
+        <span>{parts.time}</span>
+      </span>
+    );
+  }
+
+  function getQuestionCount(problemSetId) {
+    const item = (tests ?? []).find((test) => test.version === problemSetId);
+    return Number(item?.question_count ?? 0);
+  }
+
   const compactDateColumnStyle = { minWidth: 150, whiteSpace: "nowrap" };
+  const activeTestCategoryOptions = activeTab === "model" ? modelCategories : dailyCategories;
+  const shouldRenderSharedSessionEditModal = (activeTab === "model" ? modelSubTab : dailySubTab) !== "upload";
+  const shouldRenderSharedTestEditModal = (activeTab === "model" ? modelSubTab : dailySubTab) !== "upload";
 
   return (
     <>
@@ -301,17 +340,36 @@ export default function AdminConsoleTestingTabs({
                   </div>
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                     <table className="admin-table" style={{ minWidth: 860 }}>
+                      <colgroup>
+                        <col style={{ minWidth: 180 }} />
+                        <col />
+                        <col style={{ minWidth: 150 }} />
+                        <col style={{ minWidth: 100 }} />
+                        <col style={{ minWidth: 120 }} />
+                        <col style={{ minWidth: 88 }} />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                        <col style={{ minWidth: 120 }} />
+                        <col style={{ minWidth: 120 }} />
+                        <col />
+                        <col />
+                        <col />
+                      </colgroup>
                       <thead>
                         <tr>
-                          <th style={compactDateColumnStyle}>Created</th>
                           <th>Test Title</th>
+                          <th>Category</th>
                           <th>SetID</th>
-                          <th>Show Answers</th>
-                          <th>Attempts</th>
-                          <th style={compactDateColumnStyle}>Start</th>
-                          <th style={compactDateColumnStyle}>End</th>
-                          <th>Time (min)</th>
+                          <th style={{ minWidth: 100, textAlign: "left" }}>Start</th>
+                          <th style={{ minWidth: 120, textAlign: "left" }}>End</th>
+                          <th>Questions</th>
+                          <th>Time</th>
                           <th>Pass Rate</th>
+                          <th>Show Answers</th>
+                          <th style={{ minWidth: 102 }}>Multiple Attempts</th>
+                          <th style={{ minWidth: 100 }}>Created</th>
                           <th style={{ textAlign: "center" }}>Action</th>
                           <th style={{ textAlign: "center" }}>Preview</th>
                           <th style={{ textAlign: "center" }}>Edit</th>
@@ -321,106 +379,17 @@ export default function AdminConsoleTestingTabs({
                       <tbody>
                         {filteredModelSessions.map((t) => (
                           <tr key={t.id} {...getSessionRowProps(t, "mock")}>
-                            <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                            <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
-                              {editingSessionId === t.id ? (
-                                <input
-                                  value={editingSessionForm.title}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
-                                />
-                              ) : (
-                                t.title ?? ""
-                              )}
-                            </td>
+                            <td>{t.title ?? ""}</td>
+                            <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
-                            <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
-                              {editingSessionId === t.id ? (
-                                <select
-                                  value={editingSessionForm.show_answers ? "yes" : "no"}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-                                >
-                                  <option value="yes">Yes</option>
-                                  <option value="no">No</option>
-                                </select>
-                              ) : (
-                                t.show_answers ? "Yes" : "No"
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <select
-                                  value={editingSessionForm.allow_multiple_attempts ? "multiple" : "once"}
-                                  onChange={(e) =>
-                                    setEditingSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.value === "multiple" }))
-                                  }
-                                >
-                                  <option value="once">Only once</option>
-                                  <option value="multiple">Allow multiple</option>
-                                </select>
-                              ) : (
-                                t.allow_multiple_attempts === false ? "Only once" : "Allow multiple"
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                                  <input
-                                    type="date"
-                                    value={editingSessionForm.starts_at_date}
-                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_date: e.target.value }))}
-                                  />
-                                  <input
-                                    type="time"
-                                    value={editingSessionForm.starts_at_time}
-                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_time: e.target.value }))}
-                                    step="300"
-                                  />
-                                  <span style={{ fontSize: "12px", whiteSpace: "nowrap" }}>BDT</span>
-                                </div>
-                              ) : (
-                                formatCompactDateTime(t.starts_at)
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                                  <input
-                                    type="date"
-                                    value={editingSessionForm.ends_at_date}
-                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_date: e.target.value }))}
-                                  />
-                                  <input
-                                    type="time"
-                                    value={editingSessionForm.ends_at_time}
-                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_time: e.target.value }))}
-                                    step="300"
-                                  />
-                                  <span style={{ fontSize: "12px", whiteSpace: "nowrap" }}>BDT</span>
-                                </div>
-                              ) : (
-                                formatCompactDateTime(t.ends_at)
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <input
-                                  value={editingSessionForm.time_limit_min}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                                />
-                              ) : (
-                                t.time_limit_min ?? ""
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <input
-                                  value={editingSessionForm.pass_rate}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                                />
-                              ) : (
-                                `${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`
-                              )}
-                            </td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
+                            <td style={{ textAlign: "center" }}>{getQuestionCount(t.problem_set_id)}</td>
+                            <td>{t.time_limit_min ?? ""}</td>
+                            <td>{`${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`}</td>
+                            <td>{t.show_answers ? "Yes" : "No"}</td>
+                            <td>{t.allow_multiple_attempts === false ? "Only once" : "Allow multiple"}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.created_at)}</td>
                             <td style={{ textAlign: "center" }}>
                               {linkBySession[t.id]?.id ? (
                                 <button
@@ -448,20 +417,9 @@ export default function AdminConsoleTestingTabs({
                               </button>
                             </td>
                             <td style={{ textAlign: "center" }}>
-                              {editingSessionId === t.id ? (
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                  <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); saveSessionEdits(); }}>
-                                    Save
-                                  </button>
-                                  <button className="btn" onClick={(e) => { e.stopPropagation(); cancelEditSession(); }}>
-                                    Cancel
-                                  </button>
-                                </div>
-                              ) : (
-                                <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
-                                  Edit
-                                </button>
-                              )}
+                              <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
+                                Edit
+                              </button>
                             </td>
                             <td style={{ textAlign: "center" }}>
                               <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
@@ -475,7 +433,6 @@ export default function AdminConsoleTestingTabs({
                   </div>
                   <div className="admin-msg">{testSessionsMsg}</div>
                   <div className="admin-msg">{linkMsg}</div>
-                  {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
                 </>
               )}
 
@@ -1074,7 +1031,7 @@ export default function AdminConsoleTestingTabs({
                               <th>Category</th>
                               <th>SetID</th>
                               <th style={compactDateColumnStyle}>Created</th>
-                              <th>Questions</th>
+                              <th style={{ width: 72, textAlign: "center" }}>Questions</th>
                               <th>Preview</th>
                               <th>Edit</th>
                               <th>Delete</th>
@@ -1086,49 +1043,10 @@ export default function AdminConsoleTestingTabs({
                                 key={t.id}
                                 onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                               >
-                                <td>
-                                  {editingTestId === t.id ? (
-                                    <>
-                                      <select
-                                        value={editingCategorySelect}
-                                        onChange={(e) => {
-                                          const next = e.target.value;
-                                          setEditingCategorySelect(next);
-                                          if (next !== "__custom__") {
-                                            setEditingTestForm((s) => ({ ...s, title: next }));
-                                          }
-                                        }}
-                                      >
-                                        {modelCategories.map((c) => (
-                                          <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
-                                        ))}
-                                        <option value="__custom__">Custom...</option>
-                                      </select>
-                                      {editingCategorySelect === "__custom__" ? (
-                                        <input
-                                          value={editingTestForm.title}
-                                          onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
-                                          placeholder="Grammar Review"
-                                          style={{ marginTop: 6 }}
-                                        />
-                                      ) : null}
-                                    </>
-                                  ) : (
-                                    t.title ?? ""
-                                  )}
-                                </td>
-                                <td>
-                                  {editingTestId === t.id ? (
-                                    <input
-                                      value={editingTestForm.version}
-                                      onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
-                                    />
-                                  ) : (
-                                    t.version ?? ""
-                                  )}
-                                </td>
+                                <td>{t.title ?? ""}</td>
+                                <td>{t.version ?? ""}</td>
                                 <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                                <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                                <td style={{ width: 72, textAlign: "center" }}>{t.question_count ?? 0}</td>
                                 <td>
                                   <button
                                     className="btn"
@@ -1141,38 +1059,15 @@ export default function AdminConsoleTestingTabs({
                                   </button>
                                 </td>
                                 <td>
-                                  {editingTestId === t.id ? (
-                                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                      <button
-                                        className="btn btn-primary"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          saveTestEdits(modelCategories);
-                                        }}
-                                      >
-                                        Save
-                                      </button>
-                                      <button
-                                        className="btn"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          cancelEditTest();
-                                        }}
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      className="btn"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        startEditTest(t, modelCategories);
-                                      }}
-                                    >
-                                      Edit
-                                    </button>
-                                  )}
+                                  <button
+                                    className="btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditTest(t, modelCategories);
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
                                 </td>
                                 <td>
                                   <button
@@ -1201,7 +1096,6 @@ export default function AdminConsoleTestingTabs({
                   </pre>
                 ) : null}
                 <div className="admin-msg">{assetsMsg}</div>
-                {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
                 {groupedModelUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
                 {modelUploadOpen && typeof document !== "undefined" ? createPortal((
@@ -1456,15 +1350,16 @@ export default function AdminConsoleTestingTabs({
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                     <table className="admin-table daily-sessions-table" style={{ minWidth: 860 }}>
                       <colgroup>
+                        <col style={{ minWidth: 180 }} />
+                        <col />
+                        <col className="daily-sessions-col-setid" style={{ minWidth: 150 }} />
+                        <col style={{ minWidth: 100 }} />
+                        <col style={{ minWidth: 88 }} />
                         <col />
                         <col />
-                        <col />
-                        <col className="daily-sessions-col-setid" />
                         <col className="daily-sessions-col-show-answers" />
-                        <col />
-                        <col />
-                        <col />
-                        <col />
+                        <col style={{ minWidth: 102 }} />
+                        <col style={{ minWidth: 100 }} />
                         <col />
                         <col />
                         <col />
@@ -1472,15 +1367,17 @@ export default function AdminConsoleTestingTabs({
                       </colgroup>
                       <thead>
                         <tr>
-                          <th style={compactDateColumnStyle}>Created</th>
                           <th>Test Title</th>
                           <th>Category</th>
                           <th>SetID</th>
-                          <th><span className="daily-sessions-show-answers-head">Show Answers</span></th>
-                          <th style={compactDateColumnStyle}>Start</th>
-                          <th style={compactDateColumnStyle}>End</th>
-                          <th>Time (min)</th>
+                          <th style={{ minWidth: 100, textAlign: "left" }}>Start</th>
+                          <th style={{ minWidth: 120, textAlign: "left" }}>End</th>
+                          <th>Questions</th>
+                          <th>Time</th>
                           <th>Pass Rate</th>
+                          <th><span className="daily-sessions-show-answers-head">Show Answers</span></th>
+                          <th style={{ minWidth: 102 }}>Multiple Attempts</th>
+                          <th style={{ minWidth: 100 }}>Created</th>
                           <th style={{ textAlign: "center" }}>Action</th>
                           <th style={{ textAlign: "center" }}>Preview</th>
                           <th style={{ textAlign: "center" }}>Edit</th>
@@ -1490,92 +1387,17 @@ export default function AdminConsoleTestingTabs({
                       <tbody>
                         {filteredDailySessions.map((t) => (
                           <tr key={t.id} {...getSessionRowProps(t, "daily")}>
-                            <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                            <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
-                              {editingSessionId === t.id ? (
-                                <input
-                                  value={editingSessionForm.title}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
-                                />
-                              ) : (
-                                t.title ?? ""
-                              )}
-                            </td>
+                            <td>{t.title ?? ""}</td>
                             <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
-                            <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
-                              {editingSessionId === t.id ? (
-                                <select
-                                  value={editingSessionForm.show_answers ? "yes" : "no"}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.value === "yes" }))}
-                                >
-                                  <option value="yes">Yes</option>
-                                  <option value="no">No</option>
-                                </select>
-                              ) : (
-                                t.show_answers ? "Yes" : "No"
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                                  <input
-                                    type="date"
-                                    value={editingSessionForm.starts_at_date}
-                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_date: e.target.value }))}
-                                  />
-                                  <input
-                                    type="time"
-                                    value={editingSessionForm.starts_at_time}
-                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_time: e.target.value }))}
-                                    step="300"
-                                  />
-                                  <span style={{ fontSize: "12px", whiteSpace: "nowrap" }}>BDT</span>
-                                </div>
-                              ) : (
-                                formatCompactDateTime(t.starts_at)
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                                  <input
-                                    type="date"
-                                    value={editingSessionForm.ends_at_date}
-                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_date: e.target.value }))}
-                                  />
-                                  <input
-                                    type="time"
-                                    value={editingSessionForm.ends_at_time}
-                                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_time: e.target.value }))}
-                                    step="300"
-                                  />
-                                  <span style={{ fontSize: "12px", whiteSpace: "nowrap" }}>BDT</span>
-                                </div>
-                              ) : (
-                                formatCompactDateTime(t.ends_at)
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <input
-                                  value={editingSessionForm.time_limit_min}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
-                                />
-                              ) : (
-                                t.time_limit_min ?? ""
-                              )}
-                            </td>
-                            <td>
-                              {editingSessionId === t.id ? (
-                                <input
-                                  value={editingSessionForm.pass_rate}
-                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
-                                />
-                              ) : (
-                                `${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`
-                              )}
-                            </td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
+                            <td style={{ textAlign: "center" }}>{getQuestionCount(t.problem_set_id)}</td>
+                            <td>{t.time_limit_min ?? ""}</td>
+                            <td>{`${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`}</td>
+                            <td>{t.show_answers ? "Yes" : "No"}</td>
+                            <td>{t.allow_multiple_attempts === false ? "Only once" : "Allow multiple"}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.created_at)}</td>
                             <td style={{ textAlign: "center" }}>
                               {linkBySession[t.id]?.id ? (
                                 <button
@@ -1603,20 +1425,9 @@ export default function AdminConsoleTestingTabs({
                               </button>
                             </td>
                             <td style={{ textAlign: "center" }}>
-                              {editingSessionId === t.id ? (
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                  <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); saveSessionEdits(); }}>
-                                    Save
-                                  </button>
-                                  <button className="btn" onClick={(e) => { e.stopPropagation(); cancelEditSession(); }}>
-                                    Cancel
-                                  </button>
-                                </div>
-                              ) : (
-                                <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
-                                  Edit
-                                </button>
-                              )}
+                              <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
+                                Edit
+                              </button>
                             </td>
                             <td style={{ textAlign: "center" }}>
                               <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
@@ -1630,7 +1441,6 @@ export default function AdminConsoleTestingTabs({
                   </div>
                   <div className="admin-msg">{dailySessionsMsg}</div>
                   <div className="admin-msg">{linkMsg}</div>
-                  {editingSessionMsg ? <div className="admin-msg">{editingSessionMsg}</div> : null}
                 </>
               )}
 
@@ -2521,7 +2331,7 @@ export default function AdminConsoleTestingTabs({
                               <th>Category</th>
                               <th>SetID</th>
                               <th style={compactDateColumnStyle}>Created</th>
-                              <th>Questions</th>
+                              <th style={{ width: 72, textAlign: "center" }}>Questions</th>
                               <th>Preview</th>
                               <th>Edit</th>
                               <th>Delete</th>
@@ -2533,49 +2343,10 @@ export default function AdminConsoleTestingTabs({
                                 key={t.id}
                                 onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                               >
-                                <td>
-                                  {editingTestId === t.id ? (
-                                    <>
-                                      <select
-                                        value={editingCategorySelect}
-                                        onChange={(e) => {
-                                          const next = e.target.value;
-                                          setEditingCategorySelect(next);
-                                          if (next !== "__custom__") {
-                                            setEditingTestForm((s) => ({ ...s, title: next }));
-                                          }
-                                        }}
-                                      >
-                                        {dailyCategories.map((c) => (
-                                          <option key={`edit-cat-${c.name}`} value={c.name}>{c.name}</option>
-                                        ))}
-                                        <option value="__custom__">Custom...</option>
-                                      </select>
-                                      {editingCategorySelect === "__custom__" ? (
-                                        <input
-                                          value={editingTestForm.title}
-                                          onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
-                                          placeholder="Vocabulary Test"
-                                          style={{ marginTop: 6 }}
-                                        />
-                                      ) : null}
-                                    </>
-                                  ) : (
-                                    t.title ?? ""
-                                  )}
-                                </td>
-                                <td>
-                                  {editingTestId === t.id ? (
-                                    <input
-                                      value={editingTestForm.version}
-                                      onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
-                                    />
-                                  ) : (
-                                    t.version ?? ""
-                                  )}
-                                </td>
+                                <td>{t.title ?? ""}</td>
+                                <td>{t.version ?? ""}</td>
                                 <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                                <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
+                                <td style={{ width: 72, textAlign: "center" }}>{t.question_count ?? 0}</td>
                                 <td>
                                   <button
                                     className="btn"
@@ -2588,38 +2359,15 @@ export default function AdminConsoleTestingTabs({
                                   </button>
                                 </td>
                                 <td>
-                                  {editingTestId === t.id ? (
-                                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                      <button
-                                        className="btn btn-primary"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          saveTestEdits(dailyCategories);
-                                        }}
-                                      >
-                                        Save
-                                      </button>
-                                      <button
-                                        className="btn"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          cancelEditTest();
-                                        }}
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      className="btn"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        startEditTest(t, dailyCategories);
-                                      }}
-                                    >
-                                      Edit
-                                    </button>
-                                  )}
+                                  <button
+                                    className="btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditTest(t, dailyCategories);
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
                                 </td>
                                 <td>
                                   <button
@@ -2647,7 +2395,6 @@ export default function AdminConsoleTestingTabs({
                     {dailyImportMsg}
                   </pre>
                 ) : null}
-                {editingTestMsg ? <div className="admin-msg">{editingTestMsg}</div> : null}
                 {groupedDailyUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
 
                 {dailyUploadOpen && typeof document !== "undefined" ? createPortal((
@@ -2795,11 +2542,367 @@ export default function AdminConsoleTestingTabs({
                     </div>
                   </div>
                 ), document.body) : null}
+                {editingSessionId && typeof document !== "undefined" ? createPortal((
+                  <div className="admin-modal-overlay" onClick={cancelEditSession}>
+                    <div
+                      className="admin-modal admin-modal-wide"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ padding: 0, maxWidth: 780, width: "min(780px, calc(100vw - 28px))" }}
+                    >
+                      <div className="admin-modal-header">
+                        <div className="admin-title">{activeTab === "model" ? "Edit Test Session" : "Edit Daily Test Session"}</div>
+                        <button className="admin-modal-close" onClick={cancelEditSession} aria-label="Close">
+                          &times;
+                        </button>
+                      </div>
+                      {editingSessionMsg ? <div className="admin-msg" style={{ margin: "0 16px 8px" }}>{editingSessionMsg}</div> : null}
+                      <div className="admin-form upload-question-form" style={{ padding: "0 16px 16px" }}>
+                        <div className="field">
+                          <label>Test Title</label>
+                          <input
+                            value={editingSessionForm.title}
+                            onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
+                            placeholder="Test Title"
+                          />
+                        </div>
+                        <div className="field">
+                          <label>SetID</label>
+                          <input value={editingSessionForm.problem_set_id} disabled readOnly />
+                        </div>
+                        <div className="daily-session-create-split-row">
+                          <div className="daily-session-create-field">
+                            <label>Start Date</label>
+                            <input
+                              type="date"
+                              value={editingSessionForm.starts_at_date}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_date: e.target.value }))}
+                            />
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Start Time</label>
+                            <input
+                              type="time"
+                              value={editingSessionForm.starts_at_time}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_time: e.target.value }))}
+                              step="300"
+                            />
+                          </div>
+                        </div>
+                        <div className="daily-session-create-split-row">
+                          <div className="daily-session-create-field">
+                            <label>End Date</label>
+                            <input
+                              type="date"
+                              value={editingSessionForm.ends_at_date}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_date: e.target.value }))}
+                            />
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>End Time</label>
+                            <input
+                              type="time"
+                              value={editingSessionForm.ends_at_time}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_time: e.target.value }))}
+                              step="300"
+                            />
+                          </div>
+                        </div>
+                        <div className="daily-session-create-two-col">
+                          <div className="daily-session-create-field">
+                            <label>Time Limit (min)</label>
+                            <input
+                              value={editingSessionForm.time_limit_min}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                              placeholder="10"
+                            />
+                          </div>
+                          <div className="daily-session-create-field">
+                            <label>Pass Rate</label>
+                            <input
+                              value={editingSessionForm.pass_rate}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                              placeholder="0.8"
+                            />
+                          </div>
+                        </div>
+                        <div className="daily-session-create-toggle-row">
+                          <span>Show Answers After Attempt</span>
+                          <label className="daily-session-create-switch" aria-label="Show Answers After Attempt">
+                            <input
+                              type="checkbox"
+                              checked={editingSessionForm.show_answers}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.checked }))}
+                            />
+                            <span className="daily-session-create-switch-slider" />
+                          </label>
+                        </div>
+                        <div className="daily-session-create-toggle-row">
+                          <span>Allow Multiple Attempts</span>
+                          <label className="daily-session-create-switch" aria-label="Allow Multiple Attempts">
+                            <input
+                              type="checkbox"
+                              checked={editingSessionForm.allow_multiple_attempts}
+                              onChange={(e) => setEditingSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.checked }))}
+                            />
+                            <span className="daily-session-create-switch-slider" />
+                          </label>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px", borderTop: "1px solid #e5e7eb" }}>
+                        <button className="btn" type="button" onClick={cancelEditSession}>
+                          Cancel
+                        </button>
+                        <button className="btn btn-primary" type="button" onClick={saveSessionEdits}>
+                          Save Edits
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ), document.body) : null}
+                {editingTestId && typeof document !== "undefined" ? createPortal((
+                  <div className="admin-modal-overlay" onClick={cancelEditTest}>
+                    <div
+                      className="admin-modal upload-question-modal edit-modal"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ maxWidth: 560, width: "min(560px, calc(100vw - 28px))" }}
+                    >
+                      <div className="admin-modal-header">
+                        <div className="admin-title">{activeTab === "model" ? "Edit Model Question Set" : "Edit Daily Question Set"}</div>
+                        <button className="admin-modal-close" onClick={cancelEditTest} aria-label="Close">
+                          &times;
+                        </button>
+                      </div>
+                      {editingTestMsg ? <div className="admin-msg" style={{ margin: "0 16px 8px" }}>{editingTestMsg}</div> : null}
+                      <div className="admin-form upload-question-form" style={{ padding: "0 16px 16px" }}>
+                        <div className="field">
+                          <label>Category</label>
+                          <select
+                            value={editingCategorySelect}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setEditingCategorySelect(next);
+                              if (next !== CUSTOM_CATEGORY_OPTION) {
+                                setEditingTestForm((s) => ({ ...s, title: next }));
+                              }
+                            }}
+                          >
+                            {activeTestCategoryOptions.map((category) => (
+                              <option key={`edit-cat-${category.name}`} value={category.name}>
+                                {category.name}
+                              </option>
+                            ))}
+                            <option value={CUSTOM_CATEGORY_OPTION}>Custom...</option>
+                          </select>
+                          {editingCategorySelect === CUSTOM_CATEGORY_OPTION ? (
+                            <input
+                              value={editingTestForm.title}
+                              onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
+                              placeholder="Custom category"
+                              style={{ marginTop: 6 }}
+                            />
+                          ) : null}
+                        </div>
+                        <div className="field">
+                          <label>SetID</label>
+                          <input
+                            value={editingTestForm.version}
+                            onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                            placeholder="Set ID"
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px", borderTop: "1px solid #e5e7eb" }}>
+                        <button className="btn" type="button" onClick={cancelEditTest}>
+                          Cancel
+                        </button>
+                        <button className="btn btn-primary" type="button" onClick={() => saveTestEdits(activeTestCategoryOptions)}>
+                          Save Edits
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ), document.body) : null}
               </div>
             </>
           ) : null}
         </>
       ) : null}
+      {typeof document !== "undefined" && editingSessionId && shouldRenderSharedSessionEditModal ? createPortal((
+        <div className="admin-modal-overlay" onClick={cancelEditSession}>
+          <div
+            className="admin-modal admin-modal-wide edit-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 780, width: "min(780px, calc(100vw - 28px))" }}
+          >
+            <div className="admin-modal-header">
+              <div className="admin-title">{activeTab === "model" ? "Edit Test Session" : "Edit Daily Test Session"}</div>
+              <button className="admin-modal-close" onClick={cancelEditSession} aria-label="Close">
+                &times;
+              </button>
+            </div>
+            {editingSessionMsg ? <div className="admin-msg" style={{ margin: "0 16px 8px" }}>{editingSessionMsg}</div> : null}
+            <div className="admin-form upload-question-form" style={{ padding: "0 16px 16px" }}>
+              <div className="field">
+                <label>Test Title</label>
+                <input
+                  value={editingSessionForm.title}
+                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, title: e.target.value }))}
+                  placeholder="Test Title"
+                />
+              </div>
+              <div className="daily-session-create-split-row">
+                <div className="daily-session-create-field">
+                  <label>Start Date</label>
+                  <input
+                    type="date"
+                    value={editingSessionForm.starts_at_date}
+                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_date: e.target.value }))}
+                  />
+                </div>
+                <div className="daily-session-create-field">
+                  <label>Start Time</label>
+                  <input
+                    type="time"
+                    value={editingSessionForm.starts_at_time}
+                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, starts_at_time: e.target.value }))}
+                    step="300"
+                  />
+                </div>
+              </div>
+              <div className="daily-session-create-split-row">
+                <div className="daily-session-create-field">
+                  <label>End Date</label>
+                  <input
+                    type="date"
+                    value={editingSessionForm.ends_at_date}
+                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_date: e.target.value }))}
+                  />
+                </div>
+                <div className="daily-session-create-field">
+                  <label>End Time</label>
+                  <input
+                    type="time"
+                    value={editingSessionForm.ends_at_time}
+                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, ends_at_time: e.target.value }))}
+                    step="300"
+                  />
+                </div>
+              </div>
+              <div className="daily-session-create-two-col">
+                <div className="daily-session-create-field">
+                  <label>Time Limit (min)</label>
+                  <input
+                    value={editingSessionForm.time_limit_min}
+                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, time_limit_min: e.target.value }))}
+                    placeholder="10"
+                  />
+                </div>
+                <div className="daily-session-create-field">
+                  <label>Pass Rate</label>
+                  <input
+                    value={editingSessionForm.pass_rate}
+                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, pass_rate: e.target.value }))}
+                    placeholder="0.8"
+                  />
+                </div>
+              </div>
+              <div className="daily-session-create-toggle-row">
+                <span>Show Answers After Attempt</span>
+                <label className="daily-session-create-switch" aria-label="Show Answers After Attempt">
+                  <input
+                    type="checkbox"
+                    checked={editingSessionForm.show_answers}
+                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, show_answers: e.target.checked }))}
+                  />
+                  <span className="daily-session-create-switch-slider" />
+                </label>
+              </div>
+              <div className="daily-session-create-toggle-row">
+                <span>Allow Multiple Attempts</span>
+                <label className="daily-session-create-switch" aria-label="Allow Multiple Attempts">
+                  <input
+                    type="checkbox"
+                    checked={editingSessionForm.allow_multiple_attempts}
+                    onChange={(e) => setEditingSessionForm((s) => ({ ...s, allow_multiple_attempts: e.target.checked }))}
+                  />
+                  <span className="daily-session-create-switch-slider" />
+                </label>
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px", borderTop: "1px solid #e5e7eb" }}>
+              <button className="btn" type="button" onClick={cancelEditSession}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" type="button" onClick={saveSessionEdits}>
+                Save Edits
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body) : null}
+      {typeof document !== "undefined" && editingTestId && shouldRenderSharedTestEditModal ? createPortal((
+        <div className="admin-modal-overlay" onClick={cancelEditTest}>
+          <div
+            className="admin-modal upload-question-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ padding: 0, maxWidth: 560, width: "min(560px, calc(100vw - 28px))" }}
+          >
+            <div className="admin-modal-header">
+              <div className="admin-title">{activeTab === "model" ? "Edit Model Question Set" : "Edit Daily Question Set"}</div>
+              <button className="admin-modal-close" onClick={cancelEditTest} aria-label="Close">
+                &times;
+              </button>
+            </div>
+            {editingTestMsg ? <div className="admin-msg" style={{ margin: "0 16px 8px" }}>{editingTestMsg}</div> : null}
+            <div className="admin-form upload-question-form" style={{ padding: "0 16px 16px" }}>
+              <div className="field">
+                <label>Category</label>
+                <select
+                  value={editingCategorySelect}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setEditingCategorySelect(next);
+                    if (next !== CUSTOM_CATEGORY_OPTION) {
+                      setEditingTestForm((s) => ({ ...s, title: next }));
+                    }
+                  }}
+                >
+                  {activeTestCategoryOptions.map((category) => (
+                    <option key={`edit-cat-${category.name}`} value={category.name}>
+                      {category.name}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_CATEGORY_OPTION}>Custom...</option>
+                </select>
+                {editingCategorySelect === CUSTOM_CATEGORY_OPTION ? (
+                  <input
+                    value={editingTestForm.title}
+                    onChange={(e) => setEditingTestForm((s) => ({ ...s, title: e.target.value }))}
+                    placeholder="Custom category"
+                    style={{ marginTop: 6 }}
+                  />
+                ) : null}
+              </div>
+              <div className="field">
+                <label>SetID</label>
+                <input
+                  value={editingTestForm.version}
+                  onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                  placeholder="Set ID"
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px", borderTop: "1px solid #e5e7eb" }}>
+              <button className="btn" type="button" onClick={cancelEditTest}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" type="button" onClick={() => saveTestEdits(activeTestCategoryOptions)}>
+                Save Edits
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body) : null}
     </>
   );
 }
