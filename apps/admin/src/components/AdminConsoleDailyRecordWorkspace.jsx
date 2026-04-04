@@ -151,7 +151,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
   }, [activeSchoolId, students.length]);
 
   useEffect(() => {
-    // Auto-populate announcement fields when tomorrow's sessions change
+    // Auto-populate announcement fields when the upcoming sessions change
     if (!dailyRecordModalOpen || !dailyRecordTomorrowSessions?.targetDate) return;
 
     const regularSessions = dailyRecordTomorrowSessions.regular ?? [];
@@ -159,9 +159,9 @@ export default function AdminConsoleDailyRecordWorkspace() {
 
     if (regularSessions.length === 0 && retakeSessions.length === 0) return;
 
-    const tomorrowDate = dailyRecordTomorrowSessions.targetDate;
-    const formattedDate = formatDateFull(tomorrowDate);
-    const title = `Exam Schedule (${tomorrowDate})`;
+    const targetDate = dailyRecordTomorrowSessions.targetDate;
+    const formattedDate = formatDateFull(targetDate);
+    const title = `Exam Schedule (${targetDate})`;
 
     // Build announcement body with numbered test sessions
     let sessionsList = regularSessions.map((session, idx) => {
@@ -365,11 +365,16 @@ export default function AdminConsoleDailyRecordWorkspace() {
             {scheduleRecordRows.map(({ recordDate, record, draft }) => {
               const display = scheduleRecordDisplayByDate[recordDate] ?? {
                 isConfirmed: false,
+                isFullyLocked: false,
                 isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
                 mini_test_1: draft.mini_test_1,
                 mini_test_2: draft.mini_test_2,
                 special_test_1: draft.special_test_1,
                 special_test_2: draft.special_test_2,
+                lockedMiniTest1: false,
+                lockedMiniTest2: false,
+                lockedSpecialTest1: false,
+                lockedSpecialTest2: false,
               };
               const weekdayLabel = formatWeekday(recordDate);
               return (
@@ -413,7 +418,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                       </td>
                       <td>{record ? summarizeDailyRecordComments(record) : "-"}</td>
                       <td>
-                        {display.isConfirmed ? (
+                        {display.lockedMiniTest1 ? (
                           <span>{display.mini_test_1}</span>
                         ) : (
                           <input
@@ -425,7 +430,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                         )}
                       </td>
                       <td>
-                        {display.isConfirmed ? (
+                        {display.lockedMiniTest2 ? (
                           <span>{display.mini_test_2}</span>
                         ) : (
                           <input
@@ -437,7 +442,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                         )}
                       </td>
                       <td>
-                        {display.isConfirmed ? (
+                        {display.lockedSpecialTest1 ? (
                           <span>{display.special_test_1}</span>
                         ) : (
                           <input
@@ -449,7 +454,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                         )}
                       </td>
                       <td>
-                        {display.isConfirmed ? (
+                        {display.lockedSpecialTest2 ? (
                           <span>{display.special_test_2}</span>
                         ) : (
                           <input
@@ -465,9 +470,9 @@ export default function AdminConsoleDailyRecordWorkspace() {
                           className="btn"
                           type="button"
                           onClick={() => saveDailyRecordPlan(recordDate)}
-                          disabled={display.isConfirmed || dailyRecordPlanSavingDate === recordDate}
+                          disabled={display.isFullyLocked || dailyRecordPlanSavingDate === recordDate}
                         >
-                          {display.isConfirmed ? "Confirmed" : dailyRecordPlanSavingDate === recordDate ? "Saving..." : "Save Plan"}
+                          {display.isFullyLocked ? "Confirmed" : dailyRecordPlanSavingDate === recordDate ? "Saving..." : "Save Plan"}
                         </button>
                       </td>
                     </>
@@ -658,7 +663,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 <section className="daily-record-modal-section">
                   <div className="daily-record-upcoming-grid">
                     <div>
-                      <div className="daily-record-upcoming-label">Tomorrow's Exams</div>
+                      <div className="daily-record-upcoming-label">{dailyRecordTomorrowSessions?.label || "Tomorrow's Exams"}</div>
                       <div className="daily-record-upcoming-list">
                         {(dailyRecordTomorrowSessions.regular ?? []).map((session, idx) => {
                           const startTime = session.starts_at

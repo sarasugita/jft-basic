@@ -316,6 +316,16 @@ function getWeekdayNumber(dateString) {
   return new Date(dateString).getDay();
 }
 
+function getWeekdayLong(dateString) {
+  if (!dateString) return "";
+  const date = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    weekday: "long",
+  });
+}
+
 function getSessionScheduleSource(session) {
   return session?.starts_at || session?.ends_at || session?.created_at || "";
 }
@@ -777,7 +787,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     if (!activeSchoolId || !recordDate) return;
     setDailyRecordPlanSavingDate(recordDate);
     setDailyRecordsMsg("");
-    const scheduledTests = scheduleRecordActualTestsByDate[addDays(recordDate, 1)] ?? getEmptyScheduledTests();
+    const scheduledTests = scheduleRecordActualTestsByDate[recordDate] ?? getEmptyScheduledTests();
     const draft = {
       ...getEmptyDailyRecordPlanDraft(),
       ...(dailyRecordPlanDrafts[recordDate] ?? {}),
@@ -891,6 +901,17 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     return rows;
   }, [dailyRecords, dailyRecordPlanDrafts, dailyRecordForm.record_date]);
 
+  const scheduleRecordDateRange = useMemo(() => {
+    const targetDateStr = dailyRecordForm.record_date || getTodayDateInput();
+    const fromDateStr = addDays(targetDateStr, -60);
+    const toDateStr = addDays(targetDateStr, 60);
+    const dates = [];
+    for (let dt = new Date(fromDateStr); dt <= new Date(toDateStr); dt.setDate(dt.getDate() + 1)) {
+      dates.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`);
+    }
+    return dates;
+  }, [dailyRecordForm.record_date]);
+
   const scheduleRecordActualTestsByDate = useMemo(() => {
     const byDate = {};
     (testSessions ?? []).forEach((session) => {
@@ -928,25 +949,86 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     );
   }, [testSessions, testMetaByVersion, tests]);
 
+  const dailyRecordHolidayByDate = useMemo(() => {
+    return Object.fromEntries(
+      (dailyRecords ?? [])
+        .filter((record) => record?.record_date)
+        .map((record) => [record.record_date, record?.is_holiday])
+    );
+  }, [dailyRecords]);
+
   const scheduleRecordDisplayByDate = useMemo(() => {
     const confirmedSet = new Set(dailyRecordConfirmedDates);
     const recordByDate = Object.fromEntries((dailyRecords ?? []).filter((record) => record?.record_date).map((record) => [record.record_date, record]));
     const displayData = {};
     scheduleRecordRows.forEach(({ recordDate, draft }) => {
       const record = recordByDate[recordDate];
-      const plannedDate = addDays(recordDate, 1);
-      const scheduledTests = scheduleRecordActualTestsByDate[plannedDate] ?? getEmptyScheduledTests();
+      const scheduledTests = scheduleRecordActualTestsByDate[recordDate] ?? getEmptyScheduledTests();
+      const lockedMiniTest1 = Boolean(scheduledTests.dailyTests[0]);
+      const lockedMiniTest2 = Boolean(scheduledTests.dailyTests[1]);
+      const lockedSpecialTest1 = Boolean(scheduledTests.modelTests[0]);
+      const lockedSpecialTest2 = Boolean(scheduledTests.modelTests[1]);
+      const isFullyLocked = lockedMiniTest1 && lockedMiniTest2 && lockedSpecialTest1 && lockedSpecialTest2;
       displayData[recordDate] = {
-        isConfirmed: confirmedSet.has(plannedDate),
+        isConfirmed: confirmedSet.has(recordDate),
+        isFullyLocked,
         isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
         mini_test_1: draft.mini_test_1 || scheduledTests.dailyTests[0] || "",
         mini_test_2: draft.mini_test_2 || scheduledTests.dailyTests[1] || "",
         special_test_1: draft.special_test_1 || scheduledTests.modelTests[0] || "",
         special_test_2: draft.special_test_2 || scheduledTests.modelTests[1] || "",
+        lockedMiniTest1,
+        lockedMiniTest2,
+        lockedSpecialTest1,
+        lockedSpecialTest2,
       };
     });
     return displayData;
   }, [dailyRecordConfirmedDates, dailyRecords, scheduleRecordActualTestsByDate, scheduleRecordRows]);
+
+  useEffect(() => {
+    if (!scheduleRecordDateRange.length) return;
+    setDailyRecordPlanDrafts((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      scheduleRecordDateRange.forEach((recordDate) => {
+        const scheduledTests = scheduleRecordActualTestsByDate[recordDate];
+        if (!scheduledTests) return;
+
+        const currentDraft = next[recordDate] ?? getEmptyDailyRecordPlanDraft();
+        const mergedDraft = {
+          ...getEmptyDailyRecordPlanDraft(),
+          ...currentDraft,
+        };
+
+        let draftChanged = false;
+        if (!(mergedDraft.mini_test_1 || "").trim() && scheduledTests.dailyTests[0]) {
+          mergedDraft.mini_test_1 = scheduledTests.dailyTests[0];
+          draftChanged = true;
+        }
+        if (!(mergedDraft.mini_test_2 || "").trim() && scheduledTests.dailyTests[1]) {
+          mergedDraft.mini_test_2 = scheduledTests.dailyTests[1];
+          draftChanged = true;
+        }
+        if (!(mergedDraft.special_test_1 || "").trim() && scheduledTests.modelTests[0]) {
+          mergedDraft.special_test_1 = scheduledTests.modelTests[0];
+          draftChanged = true;
+        }
+        if (!(mergedDraft.special_test_2 || "").trim() && scheduledTests.modelTests[1]) {
+          mergedDraft.special_test_2 = scheduledTests.modelTests[1];
+          draftChanged = true;
+        }
+
+        if (draftChanged) {
+          next[recordDate] = mergedDraft;
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [scheduleRecordActualTestsByDate, scheduleRecordDateRange]);
 
   const dailyRecordSelectableDates = useMemo(() => {
     return scheduleRecordRows
@@ -1089,17 +1171,25 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
   const dailyRecordTomorrowSessions = useMemo(() => {
     const recordDate = dailyRecordForm.record_date || getTodayDateInput();
-    const targetDate = addDays(recordDate, 1);
-    const sessionsForDate = (testSessions ?? []).filter((session) => {
-      return getBangladeshDateInput(getSessionScheduleSource(session)) === targetDate;
-    });
+    const nextDay = addDays(recordDate, 1);
+    let targetDate = nextDay;
+
+    while (resolveDailyRecordHoliday(targetDate, dailyRecordHolidayByDate[targetDate])) {
+      const nextDate = addDays(targetDate, 1);
+      if (nextDate === targetDate) break;
+      targetDate = nextDate;
+    }
+
+    const sessionsForDate = (testSessions ?? []).filter((session) => getBangladeshDateInput(getSessionScheduleSource(session)) === targetDate);
+    const label = targetDate === nextDay ? "Tomorrow's Exams" : `${getWeekdayLong(targetDate)}'s Exams`;
 
     return {
       targetDate,
+      label,
       regular: sessionsForDate.filter((s) => !s.retake_source_session_id),
       retake: sessionsForDate.filter((s) => s.retake_source_session_id),
     };
-  }, [dailyRecordForm.record_date, testSessions]);
+  }, [dailyRecordForm.record_date, dailyRecordHolidayByDate, testSessions]);
 
   useEffect(() => {
     if (!dailyRecordTodaySessions || (!dailyRecordTodaySessions.dailyTests?.length && !dailyRecordTodaySessions.modelTests?.length)) {
