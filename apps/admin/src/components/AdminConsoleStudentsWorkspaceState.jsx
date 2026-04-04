@@ -142,7 +142,7 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, s
 
   // Fetch student list metrics
   const fetchStudentListMetrics = useCallback(async () => {
-    if (!activeSchoolId) {
+    if (!supabase || !activeSchoolId) {
       setStudentListAttendanceMap({});
       setStudentListAttempts([]);
       setStudentListMetricsLoaded(false);

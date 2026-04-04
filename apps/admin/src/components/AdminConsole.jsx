@@ -19,7 +19,7 @@ export default function AdminConsole(props) {
     homeLabel = "Admin Home",
     managedSession = undefined,
     managedProfile = undefined,
-    initialAdminTab = "announcements",
+    initialAdminTab = "students",
     initialAttendanceSubTab = "sheet",
     initialModelSubTab = "results",
     initialDailySubTab = "results",

@@ -287,13 +287,13 @@ export default function SchoolScopedAdminPage({
           forcedSchoolOptions: schoolOptions,
           managedSession: session,
           managedProfile: profile,
-          initialAdminTab: initialRouteState?.adminTab ?? "announcements",
+          initialAdminTab: initialRouteState?.adminTab ?? "students",
           initialAttendanceSubTab: initialRouteState?.attendanceSubTab ?? "sheet",
           initialModelSubTab: initialRouteState?.modelSubTab ?? "results",
           initialDailySubTab: initialRouteState?.dailySubTab ?? "results",
         }}
         diagnosticsExtra={{
-          adminTab: initialRouteState?.adminTab ?? "announcements",
+          adminTab: initialRouteState?.adminTab ?? "students",
           attendanceSubTab: initialRouteState?.attendanceSubTab ?? "sheet",
           modelSubTab: initialRouteState?.modelSubTab ?? "results",
           dailySubTab: initialRouteState?.dailySubTab ?? "results",

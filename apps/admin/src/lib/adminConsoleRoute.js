@@ -30,7 +30,7 @@ export function isStartupScopedAdminTab(adminTab) {
 }
 
 export function buildScopedAdminPathSegments(routeState = {}) {
-  const adminTab = routeState.adminTab ?? "announcements";
+  const adminTab = routeState.adminTab ?? "students";
   const attendanceSubTab = ATTENDANCE_SUB_TABS.has(routeState.attendanceSubTab)
     ? routeState.attendanceSubTab
     : "sheet";
@@ -43,7 +43,7 @@ export function buildScopedAdminPathSegments(routeState = {}) {
   if (adminTab === "ranking") return ["ranking"];
   if (adminTab === "model") return ["model", modelSubTab];
   if (adminTab === "daily") return ["daily", dailySubTab];
-  return ["announcements"];
+  return ["students"];
 }
 
 export function buildScopedAdminHref(schoolId, routeState = {}, options = {}) {
@@ -59,7 +59,7 @@ export function resolveScopedAdminRouteState(slug = []) {
   const firstSegment = String(segments[0] ?? "").trim().toLowerCase();
   const secondSegment = String(segments[1] ?? "").trim().toLowerCase();
 
-  let adminTab = "announcements";
+  let adminTab = "students";
   let attendanceSubTab = "sheet";
   let modelSubTab = "results";
   let dailySubTab = "results";
@@ -79,8 +79,10 @@ export function resolveScopedAdminRouteState(slug = []) {
   } else if (firstSegment === "daily") {
     adminTab = "daily";
     dailySubTab = normalizeTestingSubTab(secondSegment, "results");
-  } else if (firstSegment === "announcements" || firstSegment === "") {
+  } else if (firstSegment === "announcements") {
     adminTab = "announcements";
+  } else if (firstSegment === "") {
+    adminTab = "students";
   }
 
   const isRootEntry = segments.length === 0;

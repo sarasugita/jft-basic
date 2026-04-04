@@ -6098,10 +6098,11 @@ export default function AdminConsole({
   }
 
   async function fetchStudentWarnings() {
-    if (!activeSchoolId) {
+    if (!supabase || !activeSchoolId) {
       setStudentWarnings([]);
       setStudentWarningsLoading(false);
       setStudentWarningsMsg("");
+      setStudentWarningsLoaded(false);
       return;
     }
     setStudentWarningsLoading(true);

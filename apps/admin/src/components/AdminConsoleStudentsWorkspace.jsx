@@ -211,7 +211,7 @@ export default function AdminConsoleStudentsWorkspace() {
   }, [studentListLoading, fetchStudentListMetrics]);
 
   useEffect(() => {
-    if (!activeSchoolId || !session || !canUseAdminConsole) return;
+    if (!activeSchoolId || !session || !canUseAdminConsole || !supabase) return;
     if (autoLoadSchoolIdRef.current === activeSchoolId) return;
     autoLoadSchoolIdRef.current = activeSchoolId;
     void fetchStudentListMetrics();
@@ -221,6 +221,7 @@ export default function AdminConsoleStudentsWorkspace() {
     canUseAdminConsole,
     fetchStudentListMetrics,
     handleLoadStudentWarnings,
+    supabase,
     session,
   ]);
 
