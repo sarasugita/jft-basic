@@ -1198,24 +1198,29 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
     setDailyRecordForm((prev) => {
       const updated = { ...prev };
+      let changed = false;
 
       // Fill daily test columns (mini_test_1, mini_test_2)
       if (!(updated.mini_test_1 || "").trim() && dailyRecordTodaySessions.dailyTests?.[0]) {
         updated.mini_test_1 = dailyRecordTodaySessions.dailyTests[0];
+        changed = true;
       }
       if (!(updated.mini_test_2 || "").trim() && dailyRecordTodaySessions.dailyTests?.[1]) {
         updated.mini_test_2 = dailyRecordTodaySessions.dailyTests[1];
+        changed = true;
       }
 
       // Fill model test columns (special_test_1, special_test_2)
       if (!(updated.special_test_1 || "").trim() && dailyRecordTodaySessions.modelTests?.[0]) {
         updated.special_test_1 = dailyRecordTodaySessions.modelTests[0];
+        changed = true;
       }
       if (!(updated.special_test_2 || "").trim() && dailyRecordTodaySessions.modelTests?.[1]) {
         updated.special_test_2 = dailyRecordTodaySessions.modelTests[1];
+        changed = true;
       }
 
-      return updated;
+      return changed ? updated : prev;
     });
   }, [dailyRecordTodaySessions, dailyRecordForm.mini_test_1, dailyRecordForm.mini_test_2, dailyRecordForm.special_test_1, dailyRecordForm.special_test_2]);
 

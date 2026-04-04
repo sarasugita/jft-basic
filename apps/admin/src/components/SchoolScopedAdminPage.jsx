@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   createAdminTrace,
@@ -21,12 +21,17 @@ export default function SchoolScopedAdminPage({
   initialRouteState = null,
 }) {
   const router = useRouter();
+  const routerRef = useRef(router);
   const { supabase, session, profile, loading: authLoading, startupError: authStartupError } = useSuperAdmin();
   const [school, setSchool] = useState(null);
   const [schoolOptions, setSchoolOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [startupError, setStartupError] = useState("");
   const [adminConsoleRetryNonce, setAdminConsoleRetryNonce] = useState(0);
+
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
 
   useEffect(() => {
     if (!supabase || !session || !profile) return;
@@ -40,7 +45,7 @@ export default function SchoolScopedAdminPage({
         schoolId,
         ...extra,
       });
-      router.replace(target);
+      routerRef.current?.replace(target);
     }
 
     async function loadSchool() {
@@ -126,7 +131,7 @@ export default function SchoolScopedAdminPage({
       mounted = false;
       loadAbortController.abort();
     };
-  }, [profile, router, schoolId, session, supabase]);
+  }, [profile?.id, profile?.role, schoolId, session?.user?.id, supabase]);
 
   useEffect(() => {
     if (!supabase || !session || !profile || !school) return;
@@ -198,7 +203,7 @@ export default function SchoolScopedAdminPage({
       cancelled = true;
       schoolOptionsAbortController.abort();
     };
-  }, [profile, school, schoolId, session, supabase]);
+  }, [profile?.id, school?.id, schoolId, session?.user?.id, supabase]);
 
   useEffect(() => {
     if (!session || !profile || !school) return;
@@ -208,7 +213,7 @@ export default function SchoolScopedAdminPage({
       role: profile.role,
       schoolOptionsCount: schoolOptions.length,
     });
-  }, [profile, school, schoolId, schoolOptions.length, session]);
+  }, [profile?.id, profile?.role, school?.id, schoolId, schoolOptions.length, session?.user?.id]);
 
   if (startupError) {
     return (
@@ -251,11 +256,11 @@ export default function SchoolScopedAdminPage({
       onRetry={() => {
         setAdminConsoleRetryNonce((value) => value + 1);
       }}
-      onBack={() => router.replace("/super/schools")}
+      onBack={() => routerRef.current?.replace("/super/schools")}
       backLabel="BACK TO SCHOOLS"
     >
       <LoadableAdminModule
-        key={`${adminConsoleRetryNonce}:${initialRouteState?.pathKey ?? "index"}`}
+        key={`${adminConsoleRetryNonce}:${schoolId}:${initialRouteState?.pathKey ?? "index"}`}
         importTarget="AdminConsole"
         loadModule={loadAdminConsole}
         getLoadedModule={getLoadedAdminConsole}

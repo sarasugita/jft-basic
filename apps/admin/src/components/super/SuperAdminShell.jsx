@@ -276,6 +276,7 @@ export default function SuperAdminShell({ children }) {
   const [startupError, setStartupError] = useState("");
   const profileRef = useRef(null);
   const pathnameRef = useRef(pathname);
+  const routerRef = useRef(router);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -283,6 +284,9 @@ export default function SuperAdminShell({ children }) {
   useEffect(() => {
     pathnameRef.current = pathname;
   }, [pathname]);
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
@@ -455,7 +459,7 @@ export default function SuperAdminShell({ children }) {
         pathname: pathnameRef.current,
         ...extra,
       });
-      router.replace("/");
+      routerRef.current?.replace("/");
     }
 
     function redirectToPasswordChange(reason, extra = {}) {
@@ -464,7 +468,7 @@ export default function SuperAdminShell({ children }) {
         pathname: pathnameRef.current,
         ...extra,
       });
-      router.replace("/");
+      routerRef.current?.replace("/");
     }
 
     async function loadProfile(nextSession, reason) {
@@ -726,9 +730,16 @@ export default function SuperAdminShell({ children }) {
       }
       listener.subscription.unsubscribe();
     };
-  }, [router, supabase, supabaseConfigError]);
+  }, [supabase, supabaseConfigError]);
 
-  const contextValue = { supabase, session, profile, invokeWithAuth, loading, startupError };
+  const contextValue = useMemo(() => ({
+    supabase,
+    session,
+    profile,
+    invokeWithAuth,
+    loading,
+    startupError,
+  }), [invokeWithAuth, loading, profile, session, startupError, supabase]);
 
   async function handleStartupRecovery() {
     if (!supabase) {
@@ -748,7 +759,7 @@ export default function SuperAdminShell({ children }) {
       setProfile(null);
       setStartupError("");
       setLoading(false);
-      router.replace("/");
+      routerRef.current?.replace("/");
     }
   }
 

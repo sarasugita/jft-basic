@@ -2967,6 +2967,7 @@ export default function AdminConsole({
   initialDailySubTab = "results",
 }) {
   const router = useRouter();
+  const routerRef = useRef(router);
   const renderTraceLoggedRef = useRef(false);
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
   const forcedSchoolName = forcedSchoolScope?.name ?? forcedSchoolId ?? "";
@@ -3263,6 +3264,10 @@ export default function AdminConsole({
     || schoolAssignments.find((assignment) => assignment.school_id === activeSchoolId)?.school_name
     || activeSchoolId
     || "";
+
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
   const activeSchoolIdRef = useRef(activeSchoolId);
   const supabaseConfigError = ADMIN_SUPABASE_CONFIG_ERROR;
   const [supabase, setSupabase] = useState(null);
@@ -4120,6 +4125,7 @@ export default function AdminConsole({
   }, [dailyResultCategories, dailyResultsCategory]);
 
   useEffect(() => {
+    if (!dailyConductOpen) return;
     if (!pastDailySessionCategories.length) {
       if (dailyRetakeCategory) setDailyRetakeCategory("");
       return;
@@ -4127,9 +4133,10 @@ export default function AdminConsole({
     if (!dailyRetakeCategory || !pastDailySessionCategories.some((category) => category.name === dailyRetakeCategory)) {
       setDailyRetakeCategory(pastDailySessionCategories[0].name);
     }
-  }, [dailyRetakeCategory, pastDailySessionCategories]);
+  }, [dailyConductOpen, dailyRetakeCategory, pastDailySessionCategories]);
 
   useEffect(() => {
+    if (!dailyConductOpen) return;
     if (dailyConductMode !== "retake") return;
     if (!filteredPastDailySessions.length) {
       if (dailyRetakeSourceId) setDailyRetakeSourceId("");
@@ -4139,9 +4146,10 @@ export default function AdminConsole({
     const source = filteredPastDailySessions[0];
     setDailyRetakeSourceId(source?.id ?? "");
     if (source) applyDailyRetakeSourceSession(source);
-  }, [dailyConductMode, dailyRetakeSourceId, filteredPastDailySessions]);
+  }, [dailyConductMode, dailyConductOpen, dailyRetakeSourceId, filteredPastDailySessions]);
 
   useEffect(() => {
+    if (!dailyConductOpen) return;
     if (dailyConductMode === "retake") return;
     if (!generatedDailySessionTitle) return;
     setDailySessionForm((current) => {
@@ -4160,9 +4168,10 @@ export default function AdminConsole({
         title_auto_generated: true,
       };
     });
-  }, [dailyConductMode, generatedDailySessionTitle]);
+  }, [dailyConductMode, dailyConductOpen, generatedDailySessionTitle]);
 
   useEffect(() => {
+    if (!dailyConductOpen) return;
     if (dailyConductMode === "retake") return;
     if (dailySessionForm.selection_mode !== "single") return;
     const selectedSetId = selectedDailyProblemSetIds[0] ?? "";
@@ -4179,6 +4188,7 @@ export default function AdminConsole({
     }
   }, [
     dailyConductMode,
+    dailyConductOpen,
     dailyConductCategory,
     dailySessionForm.selection_mode,
     selectedDailyProblemSetIds,
@@ -4258,13 +4268,15 @@ export default function AdminConsole({
   }
 
   useEffect(() => {
+    if (!dailyConductOpen) return;
     if (!dailyCategories.length) return;
     if (!dailyConductCategory || !dailyCategories.some((c) => c.name === dailyConductCategory)) {
       setDailyConductCategory(dailyCategories[0].name);
     }
-  }, [dailyCategories, dailyConductCategory]);
+  }, [dailyCategories, dailyConductCategory, dailyConductOpen]);
 
   useEffect(() => {
+    if (!dailyConductOpen) return;
     if (!dailyCategories.length) return;
     const validNames = new Set(dailyCategories.map((category) => category.name));
     setDailySessionForm((current) => {
@@ -4282,7 +4294,7 @@ export default function AdminConsole({
         source_categories: nextSourceCategories,
       };
     });
-  }, [dailyCategories, dailyConductCategory]);
+  }, [dailyCategories, dailyConductCategory, dailyConductOpen]);
 
   useEffect(() => {
     if (!activeModelTimePicker) return;
@@ -4360,6 +4372,7 @@ export default function AdminConsole({
   }, [modelConductTests, testSessionForm.problem_set_id]);
 
   useEffect(() => {
+    if (!dailyConductOpen) return;
     if (dailyConductMode === "retake") return;
     if (!dailyConductTests.length) return;
     const availableIds = dailyConductTests.map((t) => t.version).filter(Boolean);
@@ -4383,7 +4396,7 @@ export default function AdminConsole({
         problem_set_ids: normalizedIds,
       };
     });
-  }, [dailyConductMode, dailyConductTests, dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
+  }, [dailyConductMode, dailyConductOpen, dailyConductTests, dailySessionForm.problem_set_id, dailySessionForm.problem_set_ids, dailySessionForm.selection_mode]);
 
   const resultContext = useMemo(() => {
     if (activeTab === "model" && modelSubTab === "results") {
@@ -5259,14 +5272,21 @@ export default function AdminConsole({
     return () => {
       mounted = false;
     };
-  }, [forcedSchoolId, profile, session, supabase]);
+  }, [
+    forcedSchoolId,
+    profile?.id,
+    profile?.role,
+    profile?.school_id,
+    session?.user?.id,
+    supabase,
+  ]);
 
   useEffect(() => {
     if (forcedSchoolId || !profile || profile.role !== "admin" || !schoolScopeId || typeof window === "undefined") {
       return;
     }
     window.localStorage.setItem(ADMIN_SCHOOL_SCOPE_STORAGE_KEY, schoolScopeId);
-  }, [forcedSchoolId, profile, schoolScopeId]);
+  }, [forcedSchoolId, profile?.id, profile?.role, schoolScopeId]);
 
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
@@ -5280,7 +5300,7 @@ export default function AdminConsole({
       forcedSchoolId,
       schoolScopeId,
     });
-  }, [activeSchoolId, forcedSchoolId, isManagedAuth, profile, schoolScopeId, session]);
+  }, [activeSchoolId, forcedSchoolId, isManagedAuth, profile?.id, profile?.role, schoolScopeId, session?.user?.id]);
 
   useEffect(() => {
     if (selectedStudentId) return;
@@ -5319,9 +5339,15 @@ export default function AdminConsole({
       profile.account_status === "active" &&
       !profile.force_password_change
     ) {
-      router.replace("/super/schools");
+      routerRef.current?.replace("/super/schools");
     }
-  }, [forcedSchoolId, profile, router, session]);
+  }, [
+    forcedSchoolId,
+    profile?.account_status,
+    profile?.force_password_change,
+    profile?.role,
+    session?.user?.id,
+  ]);
 
   useEffect(() => {
     setAttempts([]);

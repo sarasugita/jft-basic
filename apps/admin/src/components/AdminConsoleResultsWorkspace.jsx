@@ -1089,6 +1089,10 @@ export default function AdminConsoleResultsWorkspace(props) {
   const [previewChangeSaving, setPreviewChangeSaving] = useState(false);
   const previewBodyRef = useRef(null);
   const previewOpenRef = useRef(previewOpen);
+  const fetchAttemptsRef = useRef(fetchAttempts);
+  const fetchSessionDetailRef = useRef(fetchSessionDetail);
+  const runSearchRef = useRef(runSearch);
+  const selectedSessionDetailRef = useRef(selectedSessionDetail);
   const unscopedSupabaseRef = useRef(null);
   const attemptDetailOpen = canUseExternalAttemptDetail ? Boolean(attemptDetailOpenProp) : attemptDetailOpenState;
   const selectedAttempt = canUseExternalAttemptDetail ? (selectedAttemptProp ?? null) : selectedAttemptObjState;
@@ -1626,6 +1630,13 @@ export default function AdminConsoleResultsWorkspace(props) {
   }, [localAttemptQuestionsByVersion, selectedAttempt, selectedSessionDetail?.id, sessionDetailQuestions]);
 
   useEffect(() => {
+    fetchAttemptsRef.current = fetchAttempts;
+    fetchSessionDetailRef.current = fetchSessionDetail;
+    runSearchRef.current = runSearch;
+    selectedSessionDetailRef.current = selectedSessionDetail;
+  }, [fetchAttempts, fetchSessionDetail, runSearch, selectedSessionDetail]);
+
+  useEffect(() => {
     const wasOpen = previewOpenRef.current;
     previewOpenRef.current = previewOpen;
     if (!previewOpen) {
@@ -1636,16 +1647,20 @@ export default function AdminConsoleResultsWorkspace(props) {
       setPreviewChangeSaving(false);
     }
     if (!wasOpen || previewOpen) return;
-    if (typeof fetchAttempts === "function") {
-      void fetchAttempts();
+    const latestFetchAttempts = fetchAttemptsRef.current;
+    if (typeof latestFetchAttempts === "function") {
+      void latestFetchAttempts();
     }
-    if (selectedSessionDetail?.id && typeof fetchSessionDetail === "function") {
-      void fetchSessionDetail(selectedSessionDetail);
+    const latestSelectedSessionDetail = selectedSessionDetailRef.current;
+    const latestFetchSessionDetail = fetchSessionDetailRef.current;
+    if (latestSelectedSessionDetail?.id && typeof latestFetchSessionDetail === "function") {
+      void latestFetchSessionDetail(latestSelectedSessionDetail);
     }
-    if (typeof runSearch === "function") {
-      void runSearch();
+    const latestRunSearch = runSearchRef.current;
+    if (typeof latestRunSearch === "function") {
+      void latestRunSearch();
     }
-  }, [fetchAttempts, fetchSessionDetail, previewOpen, runSearch, selectedSessionDetail]);
+  }, [previewOpen]);
 
   useEffect(() => {
     if (canUseExternalAttemptDetail) return;
