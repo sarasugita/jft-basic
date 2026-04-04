@@ -1542,7 +1542,7 @@ export default function AdminConsoleTestingTabs({
                             <label>Test Title</label>
                             <input
                               value={dailySessionForm.title}
-                              onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                              onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value, title_auto_generated: false }))}
                               placeholder="Daily Test"
                             />
                           </div>
@@ -1932,11 +1932,16 @@ export default function AdminConsoleTestingTabs({
                               <select
                                 value={dailySessionForm.problem_set_id}
                                 onChange={(e) =>
-                                  setDailySessionForm((s) => ({
-                                    ...s,
-                                    problem_set_id: e.target.value,
-                                    problem_set_ids: e.target.value ? [e.target.value] : [],
-                                  }))
+                                  setDailySessionForm((s) => {
+                                    const nextId = e.target.value;
+                                    const sourceCategory = tests.find((test) => test.version === nextId)?.title?.trim() || "";
+                                    return {
+                                      ...s,
+                                      problem_set_id: nextId,
+                                      problem_set_ids: nextId ? [nextId] : [],
+                                      session_category: sourceCategory || s.session_category,
+                                    };
+                                  })
                                 }
                               >
                                 <option value="">Select Set ID</option>
@@ -2003,7 +2008,7 @@ export default function AdminConsoleTestingTabs({
                             <label>Test Title</label>
                             <input
                               value={dailySessionForm.title}
-                              onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value }))}
+                              onChange={(e) => setDailySessionForm((s) => ({ ...s, title: e.target.value, title_auto_generated: false }))}
                               placeholder="Test Title"
                             />
                           </div>

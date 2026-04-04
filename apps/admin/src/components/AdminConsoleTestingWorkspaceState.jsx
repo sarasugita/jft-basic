@@ -446,6 +446,148 @@ function getProblemSetDisplayId(problemSetId, testsList) {
   return problemSetId || "";
 }
 
+function parseDailySessionSetId(setId) {
+  const raw = String(setId ?? "").trim();
+  if (!raw) return null;
+  let match = raw.match(/^G-Book(\d+)-(\d+)$/i);
+  if (match) {
+    return {
+      kind: "grammar",
+      bookNumber: Number(match[1]),
+      chapterNumber: Number(match[2]),
+      raw,
+    };
+  }
+  match = raw.match(/^Book(\d+)-(\d+)$/i);
+  if (match) {
+    return {
+      kind: "book",
+      bookNumber: Number(match[1]),
+      chapterNumber: Number(match[2]),
+      raw,
+    };
+  }
+  match = raw.match(/^(\d+)-Noun(\d+)$/i);
+  if (match) {
+    return {
+      kind: "vocab",
+      setNumber: Number(match[1]),
+      nounNumber: Number(match[2]),
+      raw,
+    };
+  }
+  return { kind: "raw", raw };
+}
+
+function formatDailySessionNumberRanges(values) {
+  const uniqueValues = Array.from(new Set((values ?? []).filter((value) => Number.isFinite(value)))).sort((left, right) => left - right);
+  if (!uniqueValues.length) return "";
+  const ranges = [];
+  let start = uniqueValues[0];
+  let prev = uniqueValues[0];
+
+  for (let index = 1; index < uniqueValues.length; index += 1) {
+    const current = uniqueValues[index];
+    if (current === prev + 1) {
+      prev = current;
+      continue;
+    }
+    ranges.push(start === prev ? `${start}` : `${start}~${prev}`);
+    start = current;
+    prev = current;
+  }
+  ranges.push(start === prev ? `${start}` : `${start}~${prev}`);
+  return ranges.join(", ");
+}
+
+function buildDailySessionTitleLabel(setIds) {
+  const normalizedSetIds = Array.from(new Set((setIds ?? []).map((setId) => String(setId ?? "").trim()).filter(Boolean)))
+    .sort((left, right) => compareSetIds(left, right));
+  if (!normalizedSetIds.length) return "";
+
+  const grouped = new Map();
+  const rawLabels = [];
+
+  normalizedSetIds.forEach((setId) => {
+    const parsed = parseDailySessionSetId(setId);
+    if (!parsed || parsed.kind === "raw") {
+      rawLabels.push(setId);
+      return;
+    }
+    const key = parsed.kind === "grammar"
+      ? `grammar:${parsed.bookNumber}`
+      : parsed.kind === "book"
+        ? `book:${parsed.bookNumber}`
+        : `vocab:${parsed.setNumber}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        kind: parsed.kind,
+        bookNumber: parsed.bookNumber ?? null,
+        setNumber: parsed.setNumber ?? null,
+        numbers: [],
+      });
+    }
+    grouped.get(key).numbers.push(parsed.kind === "vocab" ? parsed.nounNumber : parsed.chapterNumber);
+  });
+
+  const groupedLabels = Array.from(grouped.values())
+    .sort((left, right) => {
+      const leftLabel = left.kind === "grammar"
+        ? `Grammar Book ${left.bookNumber}`
+        : left.kind === "book"
+          ? `Book ${left.bookNumber}`
+          : `Vocabulary Set ${left.setNumber}`;
+      const rightLabel = right.kind === "grammar"
+        ? `Grammar Book ${right.bookNumber}`
+        : right.kind === "book"
+          ? `Book ${right.bookNumber}`
+          : `Vocabulary Set ${right.setNumber}`;
+      return leftLabel.localeCompare(rightLabel, "en", { numeric: true, sensitivity: "base" });
+    })
+    .map((group) => {
+      const numberRange = formatDailySessionNumberRanges(group.numbers);
+      if (!numberRange) return "";
+      if (group.kind === "vocab") {
+        return `Vocabulary Set ${group.setNumber} (Noun ${numberRange})`;
+      }
+      if (group.kind === "grammar") {
+        return `Grammar Book ${group.bookNumber} Chapter ${numberRange}`;
+      }
+      return `Book ${group.bookNumber} Chapter ${numberRange}`;
+    })
+    .filter(Boolean);
+
+  return [...groupedLabels, ...rawLabels].join(", ");
+}
+
+function buildDailySessionTitle({ category, setIds }) {
+  const normalizedCategory = String(category ?? "").trim() || "Daily Test";
+  const normalizedSetIds = Array.from(new Set((setIds ?? []).map((setId) => String(setId ?? "").trim()).filter(Boolean)))
+    .sort((left, right) => compareSetIds(left, right));
+  if (!normalizedSetIds.length) return normalizedCategory;
+
+  if (normalizedSetIds.length === 1) {
+    const parsed = parseDailySessionSetId(normalizedSetIds[0]);
+    if (!parsed || parsed.kind === "raw") {
+      return `${normalizedCategory} ${normalizedSetIds[0]}`.trim();
+    }
+    if (parsed.kind === "vocab") {
+      return `Vocabulary Set ${parsed.setNumber} (Noun ${parsed.nounNumber})`;
+    }
+    if (parsed.kind === "grammar") {
+      return `Grammar Book ${parsed.bookNumber} Chapter ${parsed.chapterNumber}`;
+    }
+    return `Book ${parsed.bookNumber} Chapter ${parsed.chapterNumber} Review`;
+  }
+
+  const summary = buildDailySessionTitleLabel(normalizedSetIds);
+  if (!summary) return normalizedCategory;
+  if (/^weekly review$/i.test(normalizedCategory)) {
+    return `Week Review (${summary})`;
+  }
+  return `${normalizedCategory} (${summary})`;
+}
+
 function isRetakeSessionTitle(title) {
   return String(title ?? "").trim().startsWith("[Retake]");
 }
@@ -722,6 +864,7 @@ export function useTestingWorkspaceState({
     source_categories: [],
     session_category: "",
     title: "",
+    title_auto_generated: true,
     session_date: "",
     start_time: "",
     close_time: "",
@@ -1211,6 +1354,24 @@ export function useTestingWorkspaceState({
     return questions.reduce((sum, test) => sum + (Number(test.question_count) || 0), 0);
   }, [selectedDailyProblemSetIds, dailyQuestionSets]);
 
+  const generatedDailySessionTitle = useMemo(() => {
+    if (dailyConductMode === "retake" || !selectedDailyProblemSetIds.length) return "";
+    const category = String(dailySessionForm.session_category ?? "").trim()
+      || dailyConductCategory
+      || selectedDailySourceCategoryNames[0]
+      || "Daily Test";
+    return buildDailySessionTitle({
+      category,
+      setIds: selectedDailyProblemSetIds,
+    });
+  }, [
+    dailyConductMode,
+    dailyConductCategory,
+    dailySessionForm.session_category,
+    selectedDailyProblemSetIds,
+    selectedDailySourceCategoryNames,
+  ]);
+
   const dailyCategories = useMemo(() => {
     const categorySet = new Set(
       dailyQuestionSets
@@ -1682,15 +1843,9 @@ export function useTestingWorkspaceState({
     setAttemptsMsg("");
   }, [supabase, activeSchoolId]);
 
-  const buildGeneratedDailySessionTitle = useCallback(({ category, setIds, sessionDate, startTime }) => {
-    const normalizedCategory = String(category ?? "").trim() || "Daily Test";
-    const normalizedDate = String(sessionDate ?? "").trim() || new Date().toISOString().slice(0, 10);
-    const normalizedTime = String(startTime ?? "").trim() || "00:00";
-    if ((setIds ?? []).length <= 1) {
-      return `${normalizedCategory} ${setIds[0] ?? "Session"} ${normalizedDate} ${normalizedTime}`;
-    }
-    return `${normalizedCategory} ${setIds.length} Sets ${normalizedDate} ${normalizedTime}`;
-  }, []);
+  const buildGeneratedDailySessionTitle = useCallback(({ category, setIds }) => (
+    buildDailySessionTitle({ category, setIds })
+  ), []);
 
   const materializeDailyProblemSet = useCallback(async ({
     sourceSetIds,
@@ -2061,19 +2216,19 @@ export function useTestingWorkspaceState({
       || (dailyConductMode === "retake" ? dailySessionForm.ends_at : "");
     const startsAtIso = startsAtInput ? fromBangladeshInput(startsAtInput) : "";
     const endsAtIso = endsAtInput ? fromBangladeshInput(endsAtInput) : "";
-    const title = dailySessionForm.title.trim();
     const sessionCategory = String(dailySessionForm.session_category ?? "").trim()
       || dailyConductCategory
       || selectedDailySourceCategoryNames[0]
       || "Daily Test";
+    const generatedTitle = buildGeneratedDailySessionTitle({
+      category: sessionCategory,
+      setIds: selectedSetIds,
+    });
+    const title = String(dailySessionForm.title ?? "").trim() || generatedTitle;
     const endsAt = endsAtInput;
     const passRate = Number(dailySessionForm.pass_rate);
     if (!selectedSetIds.length) {
       setDailyConductError(isMultipleSelection ? "Choose one or more SetID values." : "SetID is required.");
-      return;
-    }
-    if (!title) {
-      setDailyConductError("Test Title is required.");
       return;
     }
     if (!sessionDate) {
@@ -2183,6 +2338,7 @@ export function useTestingWorkspaceState({
       source_categories: [],
       session_category: dailyConductCategory || "",
       title: "",
+      title_auto_generated: true,
       session_date: "",
       start_time: "",
       close_time: "",
@@ -3567,6 +3723,7 @@ export function useTestingWorkspaceState({
       source_categories: [],
       session_category: sourceCategory || current.session_category || "",
       title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
+      title_auto_generated: false,
       session_date: session.ends_at
         ? getBangladeshDateInput(session.ends_at)
         : session.starts_at
@@ -3716,6 +3873,50 @@ export function useTestingWorkspaceState({
     });
   }, []);
 
+  useEffect(() => {
+    if (dailyConductMode === "retake") return;
+    if (!generatedDailySessionTitle) return;
+    setDailySessionForm((current) => {
+      const shouldAutoGenerate = Boolean(current.title_auto_generated) || !String(current.title ?? "").trim();
+      if (!shouldAutoGenerate) return current;
+      if (current.title === generatedDailySessionTitle && current.title_auto_generated) return current;
+      if (current.title === generatedDailySessionTitle) {
+        return {
+          ...current,
+          title_auto_generated: true,
+        };
+      }
+      return {
+        ...current,
+        title: generatedDailySessionTitle,
+        title_auto_generated: true,
+      };
+    });
+  }, [dailyConductMode, generatedDailySessionTitle]);
+
+  useEffect(() => {
+    if (dailyConductMode === "retake") return;
+    if (dailySessionForm.selection_mode !== "single") return;
+    const selectedSetId = selectedDailyProblemSetIds[0] ?? "";
+    if (!selectedSetId) return;
+    const sourceCategory = String(testMetaByVersion[selectedSetId]?.category ?? "").trim();
+    if (!sourceCategory) return;
+    setDailySessionForm((current) => (
+      current.session_category === sourceCategory
+        ? current
+        : { ...current, session_category: sourceCategory }
+    ));
+    if (dailyConductCategory !== sourceCategory) {
+      setDailyConductCategory(sourceCategory);
+    }
+  }, [
+    dailyConductMode,
+    dailyConductCategory,
+    dailySessionForm.selection_mode,
+    selectedDailyProblemSetIds,
+    testMetaByVersion,
+  ]);
+
   const openModelConductModal = useCallback((mode = "normal") => {
     setModelConductMode(mode);
     setModelConductOpen(true);
@@ -3762,6 +3963,7 @@ export function useTestingWorkspaceState({
         source_categories: [],
         session_category: "",
         title: "",
+        title_auto_generated: true,
         session_date: "",
         start_time: "",
         close_time: "",
