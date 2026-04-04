@@ -6,6 +6,7 @@ import { recordAdminAuditEvent } from "../lib/adminAudit";
 const ATTENDANCE_COUNTED_STATUSES = ["P", "L", "E", "A"];
 const ATTENDANCE_SUPPORTED_STATUSES = [...ATTENDANCE_COUNTED_STATUSES, "N/A", "W"];
 const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
+const ATTENDANCE_DAYS_PAGE_SIZE = 1000;
 const ATTENDANCE_ENTRIES_PAGE_SIZE = 1000;
 
 
@@ -368,21 +369,34 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       return;
     }
     setAttendanceMsg("Loading attendance...");
-    const { data, error } = await supabase
-      .from("attendance_days")
-      .select("id, day_date, created_at")
-      .eq("school_id", schoolIdSnapshot)
-      .order("day_date", { ascending: true })
-      .limit(60);
-    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
-    if (error) {
-      console.error("attendance_days fetch error:", error);
-      setAttendanceDays([]);
-      setAttendanceEntries({});
-      setAttendanceMsg(`Load failed: ${error.message}`);
-      return;
+    const rows = [];
+    let offset = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("attendance_days")
+        .select("id, day_date, created_at")
+        .eq("school_id", schoolIdSnapshot)
+        .order("day_date", { ascending: true })
+        .range(offset, offset + ATTENDANCE_DAYS_PAGE_SIZE - 1);
+
+      if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+      if (error) {
+        console.error("attendance_days fetch error:", error);
+        setAttendanceDays([]);
+        setAttendanceEntries({});
+        setAttendanceMsg(`Load failed: ${error.message}`);
+        return;
+      }
+
+      const page = data ?? [];
+      rows.push(...page);
+      if (page.length < ATTENDANCE_DAYS_PAGE_SIZE) break;
+      offset += ATTENDANCE_DAYS_PAGE_SIZE;
     }
-    const list = data ?? [];
+
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+    const list = rows;
     setAttendanceDays(list);
     setAttendanceMsg(list.length ? "" : "No attendance days yet.");
     if (list.length) {

@@ -952,6 +952,8 @@ const ATTENDANCE_SUPPORTED_STATUSES = [...ATTENDANCE_COUNTED_STATUSES, "N/A", "W
 const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
 const IMPORTED_ATTEMPT_QUERY_BATCH_SIZE = 50;
 const ATTENDANCE_IMPORT_BATCH_SIZE = 250;
+const ATTENDANCE_DAYS_PAGE_SIZE = 1000;
+const ATTENDANCE_ENTRIES_PAGE_SIZE = 1000;
 
 function padCsvRow(row, length) {
   const next = [...(row ?? [])];
@@ -7439,21 +7441,34 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
     setAttendanceMsg("Loading attendance...");
-    const { data, error } = await supabase
-      .from("attendance_days")
-      .select("id, day_date, created_at")
-      .eq("school_id", schoolIdSnapshot)
-      .order("day_date", { ascending: true })
-      .limit(60);
-    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
-    if (error) {
-      console.error("attendance_days fetch error:", error);
-      setAttendanceDays([]);
-      setAttendanceEntries({});
-      setAttendanceMsg(`Load failed: ${error.message}`);
-      return;
+    const rows = [];
+    let offset = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("attendance_days")
+        .select("id, day_date, created_at")
+        .eq("school_id", schoolIdSnapshot)
+        .order("day_date", { ascending: true })
+        .range(offset, offset + ATTENDANCE_DAYS_PAGE_SIZE - 1);
+
+      if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+      if (error) {
+        console.error("attendance_days fetch error:", error);
+        setAttendanceDays([]);
+        setAttendanceEntries({});
+        setAttendanceMsg(`Load failed: ${error.message}`);
+        return;
+      }
+
+      const page = data ?? [];
+      rows.push(...page);
+      if (page.length < ATTENDANCE_DAYS_PAGE_SIZE) break;
+      offset += ATTENDANCE_DAYS_PAGE_SIZE;
     }
-    const list = data ?? [];
+
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+    const list = rows;
     setAttendanceDays(list);
     setAttendanceMsg(list.length ? "" : "No attendance days yet.");
     if (list.length) {
@@ -7468,19 +7483,37 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setAttendanceEntries({});
       return;
     }
-    const { data, error } = await supabase
-      .from("attendance_entries")
-      .select("day_id, student_id, status, comment")
-      .in("day_id", dayIds);
-    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
-    if (error) {
-      console.error("attendance_entries fetch error:", error);
-      setAttendanceEntries({});
-      setAttendanceMsg(`Load failed: ${error.message}`);
-      return;
+
+    const rows = [];
+    let offset = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("attendance_entries")
+        .select("day_id, student_id, status, comment")
+        .eq("school_id", schoolIdSnapshot)
+        .in("day_id", dayIds)
+        .order("day_id", { ascending: true })
+        .order("student_id", { ascending: true })
+        .range(offset, offset + ATTENDANCE_ENTRIES_PAGE_SIZE - 1);
+
+      if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+      if (error) {
+        console.error("attendance_entries fetch error:", error);
+        setAttendanceEntries({});
+        setAttendanceMsg(`Load failed: ${error.message}`);
+        return;
+      }
+
+      const page = data ?? [];
+      rows.push(...page);
+      if (page.length < ATTENDANCE_ENTRIES_PAGE_SIZE) break;
+      offset += ATTENDANCE_ENTRIES_PAGE_SIZE;
     }
+
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
     const map = {};
-    (data ?? []).forEach((row) => {
+    rows.forEach((row) => {
       if (!row?.day_id || !row?.student_id) return;
       if (!map[row.day_id]) map[row.day_id] = {};
       map[row.day_id][row.student_id] = {
