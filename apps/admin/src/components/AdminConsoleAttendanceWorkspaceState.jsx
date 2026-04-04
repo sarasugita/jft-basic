@@ -2,13 +2,19 @@
 
 import { useEffect, useRef, useState, useMemo } from "react";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
+import {
+  clearAttendanceSheetCache,
+  hasAttendanceSheetAutoRefreshed,
+  markAttendanceSheetAutoRefreshed,
+  readAttendanceSheetCache,
+  writeAttendanceSheetCache
+} from "./adminAttendanceSheetCache";
 
 const ATTENDANCE_COUNTED_STATUSES = ["P", "L", "E", "A"];
 const ATTENDANCE_SUPPORTED_STATUSES = [...ATTENDANCE_COUNTED_STATUSES, "N/A", "W"];
 const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
 const ATTENDANCE_DAYS_PAGE_SIZE = 500;
 const ATTENDANCE_ENTRIES_PAGE_SIZE = 500;
-const attendanceSheetCache = new Map();
 
 async function fetchAllPages(buildPageQuery, pageSize) {
   const rows = [];
@@ -28,47 +34,6 @@ async function fetchAllPages(buildPageQuery, pageSize) {
     offset += pageSize;
   }
 }
-
-function cloneAttendanceDays(days) {
-  return Array.isArray(days) ? days.map((day) => ({ ...day })) : [];
-}
-
-function cloneAttendanceEntries(entries) {
-  const cloned = {};
-  Object.entries(entries ?? {}).forEach(([dayId, dayEntries]) => {
-    cloned[dayId] = {};
-    Object.entries(dayEntries ?? {}).forEach(([studentId, entry]) => {
-      cloned[dayId][studentId] = entry ? { ...entry } : entry;
-    });
-  });
-  return cloned;
-}
-
-function readAttendanceSheetCache(schoolId) {
-  if (!schoolId) return null;
-  const cached = attendanceSheetCache.get(String(schoolId));
-  if (!cached) return null;
-  return {
-    attendanceDays: cloneAttendanceDays(cached.attendanceDays),
-    attendanceEntries: cloneAttendanceEntries(cached.attendanceEntries),
-    attendanceMsg: cached.attendanceMsg ?? "",
-  };
-}
-
-function writeAttendanceSheetCache(schoolId, attendanceDays, attendanceEntries, attendanceMsg = "") {
-  if (!schoolId) return;
-  attendanceSheetCache.set(String(schoolId), {
-    attendanceDays: cloneAttendanceDays(attendanceDays),
-    attendanceEntries: cloneAttendanceEntries(attendanceEntries),
-    attendanceMsg,
-  });
-}
-
-function clearAttendanceSheetCache(schoolId) {
-  if (!schoolId) return;
-  attendanceSheetCache.delete(String(schoolId));
-}
-
 
 // Helper functions
 function buildAttendancePieData(stats) {
@@ -271,6 +236,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
   const [attendanceMsg, setAttendanceMsg] = useState(() => initialAttendanceSheet?.attendanceMsg ?? "");
   const [attendanceSheetLoaded, setAttendanceSheetLoaded] = useState(() => Boolean(initialAttendanceSheet));
   const [attendanceSheetRefreshing, setAttendanceSheetRefreshing] = useState(false);
+  const [attendanceSheetNeedsInitialRefresh, setAttendanceSheetNeedsInitialRefresh] = useState(() => !hasAttendanceSheetAutoRefreshed(activeSchoolId));
   const [attendanceDate, setAttendanceDate] = useState(() => {
     const today = new Date();
     if (Number.isNaN(today.getTime())) return "";
@@ -301,9 +267,26 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceDays(cached?.attendanceDays ?? []);
     setAttendanceEntries(cached?.attendanceEntries ?? {});
     setAttendanceMsg(cached?.attendanceMsg ?? "");
+    setAttendanceFilter(cached?.attendanceFilter ?? {
+      minRate: "",
+      minAbsences: "",
+      startDate: "",
+      endDate: ""
+    });
     setAttendanceSheetLoaded(Boolean(cached));
     setAttendanceSheetRefreshing(false);
+    setAttendanceSheetNeedsInitialRefresh(!hasAttendanceSheetAutoRefreshed(activeSchoolId));
   }, [activeSchoolId]);
+
+  useEffect(() => {
+    if (!activeSchoolId) return;
+    writeAttendanceSheetCache(activeSchoolId, {
+      attendanceDays,
+      attendanceEntries,
+      attendanceMsg,
+      attendanceFilter,
+    });
+  }, [activeSchoolId, attendanceDays, attendanceEntries, attendanceMsg, attendanceFilter]);
 
   // Memos - derived attendance data
   const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
@@ -441,11 +424,16 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceMsg(nextAttendanceMsg);
     setAttendanceSheetLoaded(true);
     setAttendanceSheetRefreshing(false);
-    writeAttendanceSheetCache(schoolIdSnapshot, nextAttendanceDays, nextAttendanceEntries, nextAttendanceMsg);
+    writeAttendanceSheetCache(schoolIdSnapshot, {
+      attendanceDays: nextAttendanceDays,
+      attendanceEntries: nextAttendanceEntries,
+      attendanceMsg: nextAttendanceMsg,
+      attendanceFilter,
+    });
   }
 
   async function fetchAttendanceDays(options = {}) {
-    const { force = false } = options;
+    const { force = false, initialRefresh = false } = options;
     const schoolIdSnapshot = activeSchoolIdRef.current;
     if (!schoolIdSnapshot || !supabase) {
       setAttendanceDays([]);
@@ -511,6 +499,10 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       nextEntries,
       list.length ? "" : "No attendance days yet."
     );
+    if (initialRefresh) {
+      markAttendanceSheetAutoRefreshed(schoolIdSnapshot);
+      setAttendanceSheetNeedsInitialRefresh(false);
+    }
   }
 
   async function fetchAttendanceEntries(dayIds, schoolIdSnapshot = activeSchoolIdRef.current, options = {}) {
@@ -877,6 +869,8 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceMsg,
     attendanceSheetLoaded,
     attendanceSheetRefreshing,
+    attendanceSheetNeedsInitialRefresh,
+    setAttendanceSheetNeedsInitialRefresh,
     attendanceDate,
     setAttendanceDate,
     attendanceModalOpen,

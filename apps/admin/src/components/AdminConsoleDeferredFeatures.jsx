@@ -42,6 +42,20 @@ export default function AdminConsoleDeferredFeatures({
   openResultsImportStatus,
   dailyManualEntryMode,
   setDailyManualEntryMode,
+  dailyManualEntryModal,
+  setDailyManualEntryModal,
+  dailyManualEntryStudent,
+  dailyManualEntrySession,
+  openDailyManualEntryModal,
+  closeDailyManualEntryModal,
+  saveDailyManualEntry,
+  clearDailyManualEntry,
+  dailyManualColumnModal,
+  setDailyManualColumnModal,
+  openDailyManualColumnModal,
+  closeDailyManualColumnModal,
+  updateDailyManualColumnRateInput,
+  saveDailyManualColumn,
   clearDailyResultsForCategory,
   resultsImportInputRef,
   resultsImportStatus,
@@ -58,7 +72,6 @@ export default function AdminConsoleDeferredFeatures({
   modelResultsSessionDetailAvailability,
   openSessionDetailView,
   isImportedSummaryAttempt,
-  openDailyManualEntryModal,
   getSessionEffectivePassRate,
   expandedResultCells,
   setExpandedResultCells,
@@ -202,9 +215,13 @@ export default function AdminConsoleDeferredFeatures({
                   <div className="results-page-actions">
                     <button
                       className="btn admin-icon-action-btn"
+                      type="button"
                       aria-label="Refresh results"
                       title="Refresh results"
-                      onClick={() => runSearch(resultContext.type)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        runSearch(resultContext.type);
+                      }}
                     >
                       <svg viewBox="0 0 20 20" aria-hidden="true">
                         <path
@@ -226,7 +243,15 @@ export default function AdminConsoleDeferredFeatures({
                     </button>
                     <button
                       className="btn results-page-action-btn"
-                      onClick={() => (resultContext.type === "daily" ? exportDailyGoogleSheetsCsv() : exportModelGoogleSheetsCsv())}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (resultContext.type === "daily") {
+                          exportDailyGoogleSheetsCsv();
+                        } else {
+                          exportModelGoogleSheetsCsv();
+                        }
+                      }}
                     >
                       <span className="results-page-action-icon" aria-hidden="true">↓</span>
                       <span>Export CSV</span>
@@ -249,6 +274,17 @@ export default function AdminConsoleDeferredFeatures({
                       >
                         <span className="results-page-action-icon" aria-hidden="true">M</span>
                         <span>{dailyManualEntryMode ? "Manual Entry On" : "Manual Entry"}</span>
+                      </button>
+                    ) : null}
+                    {resultContext.type === "daily" ? (
+                      <button
+                        className="btn results-page-action-btn"
+                        type="button"
+                        onClick={() => openDailyManualColumnModal?.()}
+                        disabled={!selectedDailyCategory || !openDailyManualColumnModal}
+                      >
+                        <span className="results-page-action-icon" aria-hidden="true">+</span>
+                        <span>New Manual Column</span>
                       </button>
                     ) : null}
                     {resultContext.type === "daily" ? (
@@ -285,6 +321,11 @@ export default function AdminConsoleDeferredFeatures({
                     Manual entry mode is on. Click an empty cell to add a score, or click an imported summary cell to update it. Cells with real submitted attempts stay read-only.
                   </div>
                 ) : null}
+                {resultContext.type === "daily" ? (
+                  <div className="admin-help" style={{ marginTop: 6 }}>
+                    Use “New Manual Column” to create a new test session column from scores you enter here.
+                  </div>
+                ) : null}
               </div>
 
               {resultContext.type === "daily" || resultContext.type === "mock" ? (
@@ -298,10 +339,10 @@ export default function AdminConsoleDeferredFeatures({
                       className={`admin-table daily-results-table ${resultContext.type === "mock" ? "model-results-matrix-table" : ""}`}
                       style={{
                         minWidth: Math.max(
-                          860,
-                          360 + ((resultContext.type === "daily"
+                          760,
+                          320 + ((resultContext.type === "daily"
                             ? dailyResultsMatrix.sessions.length
-                            : modelResultsMatrix.sessions.length) || 0) * 140
+                            : modelResultsMatrix.sessions.length) || 0) * 110
                         )
                       }}
                     >
@@ -324,7 +365,10 @@ export default function AdminConsoleDeferredFeatures({
                                 }
                               : precomputedSessionAverage;
                             return (
-                              <th key={`daily-col-${sessionItem.id}`}>
+                              <th
+                                key={`daily-col-${sessionItem.id}`}
+                                style={{ width: 110, minWidth: 110, maxWidth: 110 }}
+                              >
                                 {((resultContext.type === "daily"
                                   ? dailyResultsSessionDetailAvailability
                                   : modelResultsSessionDetailAvailability)[sessionItem.id]) ? (
@@ -480,6 +524,214 @@ export default function AdminConsoleDeferredFeatures({
                     </table>
                   </div>
                   <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+                  {dailyManualEntryModal?.open && typeof document !== "undefined" ? createPortal((
+                    <div
+                      className="admin-modal-overlay"
+                      onClick={() => {
+                        if (!dailyManualEntryModal.saving) closeDailyManualEntryModal?.();
+                      }}
+                    >
+                      <div className="admin-modal attendance-import-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="admin-modal-header">
+                          <div className="admin-title">
+                            {dailyManualEntryModal.hasImportedAttempt ? "Edit Manual Daily Result" : "Add Manual Daily Result"}
+                          </div>
+                          {!dailyManualEntryModal.saving ? (
+                            <button
+                              className="admin-modal-close"
+                              aria-label="Close"
+                              type="button"
+                              onClick={closeDailyManualEntryModal}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+
+                        <div className="attendance-import-modal-body">
+                          <div className="admin-form" style={{ gridTemplateColumns: "1fr", gap: 12 }}>
+                            <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                              <label>Student</label>
+                              <div className="form-input readonly">
+                                {dailyManualEntryStudent?.display_name ?? dailyManualEntryStudent?.email ?? dailyManualEntryStudent?.id ?? "-"}
+                                {dailyManualEntryStudent?.student_code ? ` (${dailyManualEntryStudent.student_code})` : ""}
+                              </div>
+                            </div>
+                            <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                              <label>Test Session</label>
+                              <div className="form-input readonly">
+                                {dailyManualEntrySession?.title ?? dailyManualEntrySession?.problem_set_id ?? "-"}
+                              </div>
+                            </div>
+                            <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                              <label>Score (%)</label>
+                              <input
+                                value={dailyManualEntryModal.rateInput}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setDailyManualEntryModal((current) => ({
+                                    ...current,
+                                    rateInput: nextValue,
+                                    msg: "",
+                                  }));
+                                }}
+                                placeholder="e.g. 82.5"
+                                inputMode="decimal"
+                                disabled={dailyManualEntryModal.saving}
+                              />
+                            </div>
+                          </div>
+                          <div className="attendance-import-modal-note">
+                            This saves a summary result for the selected daily test session. Real submitted attempts are not modified.
+                          </div>
+                          {dailyManualEntryModal.msg ? (
+                            <div className="admin-msg" style={{ marginTop: 10 }}>{dailyManualEntryModal.msg}</div>
+                          ) : null}
+                        </div>
+
+                        <div className="attendance-import-modal-actions">
+                          {dailyManualEntryModal.hasImportedAttempt ? (
+                            <button
+                              className="btn btn-danger"
+                              type="button"
+                              onClick={clearDailyManualEntry}
+                              disabled={dailyManualEntryModal.saving}
+                            >
+                              Clear Manual Result
+                            </button>
+                          ) : null}
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={closeDailyManualEntryModal}
+                            disabled={dailyManualEntryModal.saving}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className="btn btn-primary"
+                            type="button"
+                            onClick={saveDailyManualEntry}
+                            disabled={dailyManualEntryModal.saving}
+                          >
+                            {dailyManualEntryModal.saving ? "Saving..." : "Save Result"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ), document.body) : null}
+                  {dailyManualColumnModal?.open && typeof document !== "undefined" ? createPortal((
+                    <div
+                      className="admin-modal-overlay"
+                      onClick={() => {
+                        if (!dailyManualColumnModal.saving) closeDailyManualColumnModal?.();
+                      }}
+                    >
+                      <div className="admin-modal attendance-import-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="admin-modal-header">
+                          <div className="admin-title">New Manual Daily Results Column</div>
+                          {!dailyManualColumnModal.saving ? (
+                            <button
+                              className="admin-modal-close"
+                              aria-label="Close"
+                              type="button"
+                              onClick={closeDailyManualColumnModal}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+
+                        <div className="attendance-import-modal-body">
+                          <div className="admin-form" style={{ gridTemplateColumns: "1fr", gap: 12 }}>
+                            <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                              <label>SetID</label>
+                              <div className="form-input readonly">
+                                {dailyManualColumnModal.testVersion || "-"}
+                              </div>
+                            </div>
+                            <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                              <label>Test Title</label>
+                              <input
+                                value={dailyManualColumnModal.title}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setDailyManualColumnModal((current) => ({
+                                    ...current,
+                                    title: nextValue,
+                                    msg: "",
+                                  }));
+                                }}
+                                placeholder="Enter a test title"
+                                disabled={dailyManualColumnModal.saving}
+                              />
+                            </div>
+                            <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
+                              <label>Date</label>
+                              <input
+                                type="date"
+                                value={dailyManualColumnModal.sessionDate}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setDailyManualColumnModal((current) => ({
+                                    ...current,
+                                    sessionDate: nextValue,
+                                    msg: "",
+                                  }));
+                                }}
+                                disabled={dailyManualColumnModal.saving}
+                              />
+                            </div>
+                          </div>
+                          <div className="attendance-import-modal-note" style={{ marginBottom: 12 }}>
+                            Enter a score for each student. Leave a field blank to keep it as N/A.
+                          </div>
+                          <div style={{ maxHeight: 320, overflow: "auto", border: "1px solid var(--admin-control-border)", borderRadius: 8, padding: 12, display: "grid", gap: 10 }}>
+                            {(dailyManualColumnModal.rows ?? []).map((row) => (
+                              <label
+                                key={`manual-column-${row.studentId}`}
+                                style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 120px", gap: 12, alignItems: "center" }}
+                              >
+                                <span style={{ minWidth: 0 }}>
+                                  <strong>{row.displayName}</strong>
+                                  {row.studentCode ? <span style={{ marginLeft: 8, color: "#475569" }}>({row.studentCode})</span> : null}
+                                </span>
+                                <input
+                                  value={row.rateInput}
+                                  onChange={(event) => updateDailyManualColumnRateInput?.(row.studentId, event.target.value)}
+                                  placeholder="%"
+                                  inputMode="decimal"
+                                  disabled={dailyManualColumnModal.saving}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                          {dailyManualColumnModal.msg ? (
+                            <div className="admin-msg" style={{ marginTop: 10 }}>{dailyManualColumnModal.msg}</div>
+                          ) : null}
+                        </div>
+
+                        <div className="attendance-import-modal-actions">
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={closeDailyManualColumnModal}
+                            disabled={dailyManualColumnModal.saving}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className="btn btn-primary"
+                            type="button"
+                            onClick={saveDailyManualColumn}
+                            disabled={dailyManualColumnModal.saving}
+                          >
+                            {dailyManualColumnModal.saving ? "Saving..." : "Save Column"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ), document.body) : null}
                 </>
               ) : (
                 <>

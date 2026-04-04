@@ -11,6 +11,7 @@ import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailu
 import { recordAdminAuditEvent } from "../lib/adminAudit";
 import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
 import { AdminConsoleWorkspaceProvider } from "./AdminConsoleWorkspaceContext";
+import { readAttendanceSheetCache } from "./adminAttendanceSheetCache";
 import {
   getLoadedAdminConsoleAnnouncementsWorkspace,
   getLoadedAdminConsoleAttendanceWorkspace,
@@ -167,10 +168,13 @@ function downloadText(filename, text, mime = "text/plain") {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.rel = "noopener noreferrer";
   document.body.appendChild(a);
   a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 
 function calculateAge(dateOfBirth) {
@@ -10160,20 +10164,33 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   function exportAttendanceGoogleSheetsCsv() {
     setAttendanceMsg("");
-    if (!sortedStudents.length && !attendanceDayColumns.length) {
+    const cachedAttendanceSheet = readAttendanceSheetCache(activeSchoolId);
+    const exportAttendanceDays = (cachedAttendanceSheet?.attendanceDays?.length ? cachedAttendanceSheet.attendanceDays : attendanceDayColumns) ?? [];
+    const exportAttendanceEntriesByDay = Object.keys(cachedAttendanceSheet?.attendanceEntries ?? {}).length
+      ? cachedAttendanceSheet.attendanceEntries
+      : attendanceEntriesByDay;
+    const exportAttendanceFilter = cachedAttendanceSheet?.attendanceFilter ?? attendanceFilter;
+    if (!sortedStudents.length && !exportAttendanceDays.length) {
       setAttendanceMsg("No attendance data to export.");
       return;
     }
 
-    const exportColumns = attendanceRangeColumns;
-    const allColumns = attendanceDayColumns;
-    const totalColumns = 10 + exportColumns.length;
-    const rangeHeaderLabel = attendanceFilter.startDate && attendanceFilter.endDate
-      ? `Attendance Rate from ${formatMonthDayCompact(attendanceFilter.startDate)} to ${formatMonthDayCompact(attendanceFilter.endDate)}`
-      : attendanceFilter.startDate
-        ? `Attendance Rate from ${formatMonthDayCompact(attendanceFilter.startDate)}`
-        : attendanceFilter.endDate
-          ? `Attendance Rate until ${formatMonthDayCompact(attendanceFilter.endDate)}`
+    const exportColumns = exportAttendanceFilter.startDate || exportAttendanceFilter.endDate
+      ? exportAttendanceDays.filter((day) => {
+        const dayDate = day.day_date;
+        if (exportAttendanceFilter.startDate && dayDate < exportAttendanceFilter.startDate) return false;
+        if (exportAttendanceFilter.endDate && dayDate > exportAttendanceFilter.endDate) return false;
+        return true;
+      })
+      : exportAttendanceDays;
+    const allColumns = exportAttendanceDays;
+    const totalColumns = 10 + allColumns.length;
+    const rangeHeaderLabel = exportAttendanceFilter.startDate && exportAttendanceFilter.endDate
+      ? `Attendance Rate from ${formatMonthDayCompact(exportAttendanceFilter.startDate)} to ${formatMonthDayCompact(exportAttendanceFilter.endDate)}`
+      : exportAttendanceFilter.startDate
+        ? `Attendance Rate from ${formatMonthDayCompact(exportAttendanceFilter.startDate)}`
+        : exportAttendanceFilter.endDate
+          ? `Attendance Rate until ${formatMonthDayCompact(exportAttendanceFilter.endDate)}`
           : "Attendance Rate (Selected Range)";
 
     const csvRows = [
@@ -10189,7 +10206,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           rangeHeaderLabel,
           "Unexcused Absence",
           "Withdrawn",
-          ...exportColumns.map((day) => formatSlashDateShortYear(day.day_date)),
+          ...allColumns.map((day) => formatSlashDateShortYear(day.day_date)),
         ],
         totalColumns
       ),
@@ -10205,7 +10222,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           "",
           "",
           "",
-          ...exportColumns.map((day) => formatWeekday(day.day_date)),
+          ...allColumns.map((day) => formatWeekday(day.day_date)),
         ],
         totalColumns
       ),
@@ -10221,10 +10238,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
           "",
           "",
           "",
-          ...exportColumns.map((day) => {
+          ...allColumns.map((day) => {
             const statuses = sortedStudents
               .filter((student) => !isAnalyticsExcludedStudent(student))
-              .map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "")
+              .map((student) => exportAttendanceEntriesByDay?.[day.id]?.[student.id]?.status || "")
               .filter((status) => status && status !== "W");
             const stats = buildAttendanceStats(statuses);
             return stats.rate == null ? "N/A" : formatRatePercent(stats.rate);
@@ -10236,11 +10253,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
     sortedStudents.forEach((student, index) => {
       const allStatuses = allColumns.map((day) => {
-        const status = attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
+        const status = exportAttendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
         return status || (student.is_withdrawn ? "W" : "");
       });
       const rangeStatuses = exportColumns.map((day) => {
-        const status = attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
+        const status = exportAttendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
         return status || (student.is_withdrawn ? "W" : "");
       });
       const overallStats = buildAttendanceStats(allStatuses);

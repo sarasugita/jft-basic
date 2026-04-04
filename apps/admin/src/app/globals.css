@@ -4332,6 +4332,10 @@ body { padding: 0; }
 .daily-col-date { font-size: 12px; color: #333333; }
 
 .session-column-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
   border: 0;
   background: transparent;
   padding: 0;
@@ -4346,6 +4350,13 @@ body { padding: 0; }
 .session-column-link:hover .daily-col-title,
 .session-column-link:focus-visible .daily-col-title {
   text-decoration: underline;
+}
+
+.session-column-link .daily-col-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.2;
 }
 
 .daily-name { font-weight: 800; }

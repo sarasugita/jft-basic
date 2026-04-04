@@ -25,6 +25,7 @@ const QUESTION_SELECT_BASE = "id, test_version, question_id, section_key, type, 
 const QUESTION_SELECT_WITH_MEDIA = QUESTION_SELECT_BASE;
 const SET_ID_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const SUPABASE_SAFE_PAGE_SIZE = 500;
+const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -169,6 +170,217 @@ function mapQuestion(row) {
   };
 }
 
+function formatBooleanCsv(value) {
+  return value ? "TRUE" : "FALSE";
+}
+
+function toCsv(rows) {
+  const escapeCell = (value) => {
+    const text = String(value ?? "");
+    if (/[,"\n]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
+    return text;
+  };
+  return (rows ?? []).map((row) => (row ?? []).map(escapeCell).join(",")).join("\n");
+}
+
+function padCsvRow(row, length) {
+  const next = [...(row ?? [])];
+  while (next.length < length) next.push("");
+  return next;
+}
+
+function formatSlashDateShortYear(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) return `${match[2]}/${match[3]}/${match[1].slice(-2)}`;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit",
+  });
+}
+
+function getStudentSectionValue(student) {
+  return String(
+    student?.section
+      ?? student?.class_section
+      ?? student?.group
+      ?? student?.batch
+      ?? ""
+  ).trim();
+}
+
+function getStudentDisplayName(student) {
+  return student?.display_name ?? student?.email ?? student?.id ?? "";
+}
+
+function formatNumberForCsv(value, digits = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  if (digits > 0) return number.toFixed(digits);
+  return Number.isInteger(number) ? `${number}` : number.toFixed(2);
+}
+
+function formatScoreFraction(correct, total, digits = 0) {
+  const totalNumber = Number(total);
+  const correctNumber = Number(correct);
+  if (!Number.isFinite(correctNumber) || !Number.isFinite(totalNumber) || totalNumber <= 0) return "-";
+  return `${formatNumberForCsv(correctNumber, digits)} / ${formatNumberForCsv(totalNumber, 0)}`;
+}
+
+function formatOrdinalRank(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "";
+  const mod100 = number % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${number}th`;
+  const mod10 = number % 10;
+  if (mod10 === 1) return `${number}st`;
+  if (mod10 === 2) return `${number}nd`;
+  if (mod10 === 3) return `${number}rd`;
+  return `${number}th`;
+}
+
+function getEffectiveAnswerIndices(question) {
+  const fromArray = Array.isArray(question?.answerIndices)
+    ? question.answerIndices
+    : Array.isArray(question?.data?.answer_indices)
+      ? question.data.answer_indices
+      : [];
+  const normalized = fromArray
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  if (normalized.length) return Array.from(new Set(normalized));
+  const single = Number(question?.answerIndex);
+  return Number.isFinite(single) ? [single] : [];
+}
+
+function isChoiceCorrect(choiceIndex, answerIndices) {
+  const chosen = Number(choiceIndex);
+  if (!Number.isFinite(chosen)) return false;
+  return (answerIndices ?? []).includes(chosen);
+}
+
+function normalizeImportedModelSectionTitle(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const normalizedRaw = raw.toLowerCase();
+  const matchedSection = sections.find((section) => {
+    const sectionTitle = String(section?.title ?? "").trim().toLowerCase();
+    const sectionKey = String(section?.key ?? "").trim().toLowerCase();
+    return section.key !== "DAILY" && (sectionTitle === normalizedRaw || sectionKey === normalizedRaw);
+  });
+  return matchedSection?.title || raw;
+}
+
+function isImportedModelResultsSummaryAttempt(attempt) {
+  return Boolean(attempt?.answers_json?.__meta?.imported_summary)
+    && String(attempt?.answers_json?.__meta?.imported_source ?? "") === "model_results_csv";
+}
+
+function getImportedModelSectionSummaries(attempt) {
+  const rows = Array.isArray(attempt?.answers_json?.__meta?.main_section_summary)
+    ? attempt.answers_json.__meta.main_section_summary
+    : [];
+  const orderMap = new Map(
+    sections
+      .filter((section) => section.key !== "DAILY")
+      .map((section, index) => [section.title, index])
+  );
+  return rows
+    .map((row) => {
+      const section = normalizeImportedModelSectionTitle(row?.section);
+      const correct = Number(row?.correct ?? 0);
+      const total = Number(row?.total ?? 0);
+      const rawRate = Number(row?.rate);
+      const rate = Number.isFinite(rawRate) ? rawRate : (total > 0 ? correct / total : 0);
+      return {
+        section,
+        correct: Number.isFinite(correct) ? correct : 0,
+        total: Number.isFinite(total) ? total : 0,
+        rate: Number.isFinite(rate) ? rate : 0,
+      };
+    })
+    .filter((row) => row.section)
+    .sort((left, right) => {
+      const leftOrder = orderMap.has(left.section) ? orderMap.get(left.section) : 999;
+      const rightOrder = orderMap.has(right.section) ? orderMap.get(right.section) : 999;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return left.section.localeCompare(right.section);
+    });
+}
+
+function buildAttemptDetailRowsFromListForExport(answersJson, questionsList) {
+  const answers = answersJson ?? {};
+  const rows = [];
+  for (const question of questionsList ?? []) {
+    const answerKey = question.questionId ?? question.id;
+    const section = getQuestionSectionLabel(question);
+    if (Array.isArray(question.parts) && question.parts.length) {
+      const answer = answers[answerKey];
+      question.parts.forEach((part, index) => {
+        const chosenIdx = answer?.partAnswers?.[index];
+        const correctIndices = getEffectiveAnswerIndices(part);
+        rows.push({
+          qid: `${answerKey}-${index + 1}`,
+          sectionKey: question.sectionKey || "",
+          section,
+          isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
+        });
+      });
+      continue;
+    }
+    const chosenIdx = answers[answerKey];
+    const correctIndices = getEffectiveAnswerIndices(question);
+    rows.push({
+      qid: String(answerKey),
+      sectionKey: question.sectionKey || "",
+      section,
+      isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
+    });
+  }
+  return rows;
+}
+
+function buildMainSectionSummaryForExport(rows) {
+  const summaryMap = new Map();
+  for (const row of rows ?? []) {
+    const key = row.sectionKey ? getSectionTitle(row.sectionKey) : (row.section || "Unknown");
+    const current = summaryMap.get(key) || { section: key, total: 0, correct: 0 };
+    current.total += 1;
+    if (row.isCorrect) current.correct += 1;
+    summaryMap.set(key, current);
+  }
+  return sections
+    .filter((section) => section.key !== "DAILY")
+    .map((section) => getSectionTitle(section.key))
+    .map((label) => summaryMap.get(label))
+    .filter(Boolean)
+    .map((row) => ({
+      ...row,
+      rate: row.total ? row.correct / row.total : 0,
+    }));
+}
+
+function downloadText(filename, text, mime = "text/plain") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  window.setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
 function isMissingTabLeftCountError(error) {
   const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
   return /tab_left_count/i.test(text) && /does not exist/i.test(text);
@@ -177,6 +389,106 @@ function isMissingTabLeftCountError(error) {
 function isMissingSessionAttemptOverrideTableError(error) {
   const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
   return /test_session_attempt_overrides/i.test(text) && /does not exist/i.test(text);
+}
+
+function parsePercentCell(value) {
+  const raw = String(value ?? "").trim().replace(/%$/u, "");
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  const rate = parsed > 1 ? parsed / 100 : parsed;
+  if (!Number.isFinite(rate)) return null;
+  return Math.max(0, Math.min(1, rate));
+}
+
+function formatPercentInputValue(rate) {
+  const value = Number(rate);
+  if (!Number.isFinite(value)) return "";
+  return String(Number((Math.max(0, Math.min(1, value)) * 100).toFixed(1)));
+}
+
+function buildImportedSummaryAnswersJson(source, extraMeta = {}) {
+  return {
+    __meta: {
+      imported_summary: true,
+      imported_source: source,
+      tab_left_count: 0,
+      ...extraMeta,
+    },
+  };
+}
+
+function extractIsoDatePart(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : "";
+}
+
+function toManualSessionIso(dateValue) {
+  const raw = String(dateValue ?? "").trim();
+  if (!raw) return "";
+  if (/T/.test(raw)) {
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+  }
+  const date = new Date(`${raw}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function isGeneratedScoreRateInsertError(error) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return /score_rate/i.test(text) && /does not exist/i.test(text);
+}
+
+async function removeImportedSummaryAttemptsForPair(supabaseClient, studentId, sessionId) {
+  if (!supabaseClient || !studentId || !sessionId) {
+    return { ok: true, deleted: 0 };
+  }
+  const { data, error } = await supabaseClient
+    .from("attempts")
+    .select("id, answers_json")
+    .eq("student_id", studentId)
+    .eq("test_session_id", sessionId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  const deleteIds = (data ?? [])
+    .filter((attempt) => isImportedSummaryAttempt(attempt))
+    .map((attempt) => attempt.id)
+    .filter(Boolean);
+  if (!deleteIds.length) {
+    return { ok: true, deleted: 0 };
+  }
+  const { error: deleteError } = await supabaseClient.from("attempts").delete().in("id", deleteIds);
+  if (deleteError) {
+    return { ok: false, message: deleteError.message };
+  }
+  return { ok: true, deleted: deleteIds.length };
+}
+
+async function insertImportedSummaryAttempts(supabaseClient, payloads) {
+  const entries = Array.isArray(payloads) ? payloads.filter(Boolean) : [];
+  if (!entries.length) {
+    return { ok: true, inserted: 0 };
+  }
+
+  for (let index = 0; index < entries.length; index += IMPORTED_ATTEMPT_BATCH_SIZE) {
+    let payloadChunk = entries.slice(index, index + IMPORTED_ATTEMPT_BATCH_SIZE);
+    let { error } = await supabaseClient.from("attempts").insert(payloadChunk);
+    if (error && isMissingTabLeftCountError(error)) {
+      payloadChunk = payloadChunk.map(({ tab_left_count, ...payload }) => payload);
+      ({ error } = await supabaseClient.from("attempts").insert(payloadChunk));
+    }
+    if (error && isGeneratedScoreRateInsertError(error)) {
+      payloadChunk = payloadChunk.map(({ score_rate, ...payload }) => payload);
+      ({ error } = await supabaseClient.from("attempts").insert(payloadChunk));
+    }
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+  }
+
+  return { ok: true, inserted: entries.length };
 }
 
 function getAssetTypeByExt(filename) {
@@ -782,8 +1094,6 @@ export function useTestingWorkspaceState({
   const parseQuestionCsv = externalParseQuestionCsv || ((text, version) => ({ questions: [], choices: [], errors: ["parseQuestionCsv not provided"] }));
   const parseDailyCsv = externalParseDailyCsv || ((text, version) => ({ questions: [], choices: [], errors: ["parseDailyCsv not provided"] }));
   const runSearch = externalRunSearch;
-  const exportDailyGoogleSheetsCsv = externalExportDailyGoogleSheetsCsv;
-  const exportModelGoogleSheetsCsv = externalExportModelGoogleSheetsCsv;
   const fetchStudents = externalFetchStudents;
   const isAnalyticsExcludedStudent = externalIsAnalyticsExcludedStudent;
   const getScoreRate = externalGetScoreRate;
@@ -973,6 +1283,26 @@ export function useTestingWorkspaceState({
 
   // Results display state
   const [expandedResultCells, setExpandedResultCells] = useState({});
+  const [dailyManualEntryMode, setDailyManualEntryMode] = useState(false);
+  const [dailyManualEntryModal, setDailyManualEntryModal] = useState({
+    open: false,
+    studentId: "",
+    sessionId: "",
+    rateInput: "",
+    hasImportedAttempt: false,
+    importedAttemptId: "",
+    saving: false,
+    msg: "",
+  });
+  const [dailyManualColumnModal, setDailyManualColumnModal] = useState({
+    open: false,
+    testVersion: "",
+    title: "",
+    sessionDate: "",
+    rows: [],
+    saving: false,
+    msg: "",
+  });
 
   // ========================================================================
   // useRef declarations (9 refs)
@@ -1720,6 +2050,629 @@ export function useTestingWorkspaceState({
     () => buildSessionDetailAvailability(modelResultsMatrix),
     [modelResultsMatrix]
   );
+
+  const dailyManualEntryStudent = useMemo(
+    () => students.find((student) => student.id === dailyManualEntryModal.studentId) ?? null,
+    [dailyManualEntryModal.studentId, students]
+  );
+
+  const dailyManualEntrySession = useMemo(
+    () => dailyResultsMatrix.sessions.find((session) => session.id === dailyManualEntryModal.sessionId) ?? null,
+    [dailyManualEntryModal.sessionId, dailyResultsMatrix.sessions]
+  );
+
+  const closeDailyManualEntryModal = useCallback(() => {
+    setDailyManualEntryModal((current) => (current?.saving ? current : {
+      open: false,
+      studentId: "",
+      sessionId: "",
+      rateInput: "",
+      hasImportedAttempt: false,
+      importedAttemptId: "",
+      saving: false,
+      msg: "",
+    }));
+  }, []);
+
+  const openDailyManualEntryModal = useCallback((student, session, attemptList = []) => {
+    if (!student?.id || !session?.id) return;
+    const importedAttempt = (attemptList ?? []).find((attempt) => isImportedSummaryAttempt(attempt)) ?? null;
+    setDailyManualEntryModal({
+      open: true,
+      studentId: student.id,
+      sessionId: session.id,
+      rateInput: importedAttempt ? formatPercentInputValue(getScoreRate(importedAttempt)) : "",
+      hasImportedAttempt: Boolean(importedAttempt?.id),
+      importedAttemptId: importedAttempt?.id ?? "",
+      saving: false,
+      msg: "",
+    });
+  }, [getScoreRate]);
+
+  const saveDailyManualEntry = useCallback(async () => {
+    if (!supabase) {
+      setDailyManualEntryModal((current) => ({ ...current, msg: "Supabase not initialized." }));
+      return;
+    }
+    const student = students.find((item) => item.id === dailyManualEntryModal.studentId) ?? null;
+    const session = dailyResultsMatrix.sessions.find((item) => item.id === dailyManualEntryModal.sessionId) ?? null;
+    if (!student || !session) {
+      setDailyManualEntryModal((current) => ({ ...current, msg: "Student or test session was not found." }));
+      return;
+    }
+
+    const rate = parsePercentCell(dailyManualEntryModal.rateInput);
+    if (rate == null || rate < 0 || rate > 1) {
+      setDailyManualEntryModal((current) => ({ ...current, msg: "Enter a score between 0 and 100." }));
+      return;
+    }
+
+    const payload = {
+      student_id: student.id,
+      display_name: student.display_name ?? null,
+      student_code: student.student_code ?? null,
+      test_version: session.problem_set_id,
+      test_session_id: session.id,
+      correct: 0,
+      total: 0,
+      score_rate: rate,
+      started_at: session.starts_at ?? null,
+      ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
+      answers_json: buildImportedSummaryAnswersJson("daily_results_csv", {
+        imported_test_title: session.title ?? session.problem_set_id ?? "",
+        imported_test_date: extractIsoDatePart(session.starts_at || session.created_at) || null,
+        imported_rate: rate,
+        imported_entry_mode: "manual",
+      }),
+      tab_left_count: 0,
+    };
+
+    setDailyManualEntryModal((current) => ({ ...current, saving: true, msg: "" }));
+    const removeResult = await removeImportedSummaryAttemptsForPair(supabase, student.id, session.id);
+    if (!removeResult.ok) {
+      setDailyManualEntryModal((current) => ({
+        ...current,
+        saving: false,
+        msg: removeResult.message || "Failed to clear the existing manual result.",
+      }));
+      return;
+    }
+
+    const insertResult = await insertImportedSummaryAttempts(supabase, [payload]);
+    if (!insertResult.ok) {
+      setDailyManualEntryModal((current) => ({
+        ...current,
+        saving: false,
+        msg: insertResult.message || "Failed to save manual result.",
+      }));
+      return;
+    }
+
+    await fetchAttempts();
+    await fetchTestSessions();
+    await recordAuditEvent({
+      actionType: dailyManualEntryModal.hasImportedAttempt ? "update" : "create",
+      entityType: "daily_results",
+      entityId: `${session.id}:${student.id}`,
+      summary: `${dailyManualEntryModal.hasImportedAttempt ? "Updated" : "Saved"} manual daily result for ${student.display_name ?? student.id}.`,
+      metadata: {
+        source: "manual",
+        session_id: session.id,
+        student_id: student.id,
+        rate,
+      },
+    });
+    closeDailyManualEntryModal();
+    setQuizMsg(`Saved manual result for ${student.display_name ?? student.id} in ${session.title ?? session.problem_set_id}.`);
+  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, fetchAttempts, fetchTestSessions, recordAuditEvent, setQuizMsg, students, supabase]);
+
+  const clearDailyManualEntry = useCallback(async () => {
+    if (!supabase) {
+      setDailyManualEntryModal((current) => ({ ...current, msg: "Supabase not initialized." }));
+      return;
+    }
+    const student = students.find((item) => item.id === dailyManualEntryModal.studentId) ?? null;
+    const session = dailyResultsMatrix.sessions.find((item) => item.id === dailyManualEntryModal.sessionId) ?? null;
+    if (!student || !session) {
+      setDailyManualEntryModal((current) => ({ ...current, msg: "Student or test session was not found." }));
+      return;
+    }
+    setDailyManualEntryModal((current) => ({ ...current, saving: true, msg: "" }));
+    const result = await removeImportedSummaryAttemptsForPair(supabase, student.id, session.id);
+    if (!result.ok) {
+      setDailyManualEntryModal((current) => ({
+        ...current,
+        saving: false,
+        msg: result.message || "Failed to clear manual result.",
+      }));
+      return;
+    }
+    await fetchAttempts();
+    await fetchTestSessions();
+    await recordAuditEvent({
+      actionType: "delete",
+      entityType: "daily_results",
+      entityId: `${session.id}:${student.id}`,
+      summary: `Cleared manual daily result for ${student.display_name ?? student.id}.`,
+      metadata: {
+        source: "manual",
+        session_id: session.id,
+        student_id: student.id,
+      },
+    });
+    closeDailyManualEntryModal();
+    setQuizMsg(`Cleared manual result for ${student.display_name ?? student.id} in ${session.title ?? session.problem_set_id}.`);
+  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, fetchAttempts, fetchTestSessions, recordAuditEvent, setQuizMsg, students, supabase]);
+
+  const closeDailyManualColumnModal = useCallback(() => {
+    setDailyManualColumnModal((current) => (current?.saving ? current : {
+      open: false,
+      testVersion: "",
+      title: "",
+      sessionDate: "",
+      rows: [],
+      saving: false,
+      msg: "",
+    }));
+  }, []);
+
+  const openDailyManualColumnModal = useCallback(() => {
+    const defaultTestVersion = String(selectedDailyCategory?.tests?.[0]?.version ?? "").trim();
+    const rows = (dailyResultsMatrix.rows ?? [])
+      .filter((row) => !row?.student?.is_withdrawn)
+      .map((row) => ({
+        studentId: row.student.id,
+        displayName: row.student.display_name ?? row.student.email ?? row.student.id,
+        studentCode: row.student.student_code ?? "",
+        rateInput: "",
+      }));
+    setDailyManualColumnModal({
+      open: true,
+      testVersion: defaultTestVersion,
+      title: "",
+      sessionDate: new Date().toISOString().slice(0, 10),
+      rows,
+      saving: false,
+      msg: "",
+    });
+  }, [dailyResultsMatrix.rows, selectedDailyCategory]);
+
+  const updateDailyManualColumnRateInput = useCallback((studentId, value) => {
+    setDailyManualColumnModal((current) => ({
+      ...current,
+      rows: (current.rows ?? []).map((row) => (
+        row.studentId === studentId
+          ? { ...row, rateInput: value, msg: "" }
+          : row
+      )),
+      msg: "",
+    }));
+  }, []);
+
+  const saveDailyManualColumn = useCallback(async () => {
+    if (!supabase) {
+      setDailyManualColumnModal((current) => ({ ...current, msg: "Supabase not initialized." }));
+      return;
+    }
+    if (!activeSchoolId) {
+      setDailyManualColumnModal((current) => ({ ...current, msg: "School context is required." }));
+      return;
+    }
+    const testVersion = String(dailyManualColumnModal.testVersion ?? "").trim();
+    const title = String(dailyManualColumnModal.title ?? "").trim();
+    const sessionDate = String(dailyManualColumnModal.sessionDate ?? "").trim();
+    if (!testVersion) {
+      setDailyManualColumnModal((current) => ({ ...current, msg: "SetID is required." }));
+      return;
+    }
+    if (!title) {
+      setDailyManualColumnModal((current) => ({ ...current, msg: "Test Title is required." }));
+      return;
+    }
+    if (!sessionDate) {
+      setDailyManualColumnModal((current) => ({ ...current, msg: "Date is required." }));
+      return;
+    }
+    const startedAt = toManualSessionIso(sessionDate);
+    if (!startedAt) {
+      setDailyManualColumnModal((current) => ({ ...current, msg: "Enter a valid date." }));
+      return;
+    }
+    try {
+      if (await hasDuplicateSessionTitle(title)) {
+        setDailyManualColumnModal((current) => ({ ...current, msg: "That Test Title already exists." }));
+        return;
+      }
+    } catch (error) {
+      setDailyManualColumnModal((current) => ({ ...current, msg: `Check failed: ${error.message}` }));
+      return;
+    }
+
+    const validRows = (dailyManualColumnModal.rows ?? [])
+      .map((row) => ({
+        ...row,
+        rate: parsePercentCell(row.rateInput),
+      }))
+      .filter((row) => row.rate != null);
+    if (!validRows.length) {
+      setDailyManualColumnModal((current) => ({ ...current, msg: "Enter at least one score to save the column." }));
+      return;
+    }
+
+    const passRate = Number(selectedDailyCategory?.tests?.[0]?.pass_rate ?? 0.8);
+    const sessionPayload = {
+      school_id: activeSchoolId,
+      problem_set_id: testVersion,
+      title,
+      starts_at: startedAt,
+      ends_at: startedAt,
+      time_limit_min: null,
+      is_published: true,
+      show_answers: false,
+      allow_multiple_attempts: false,
+      pass_rate: Number.isFinite(passRate) && passRate > 0 && passRate <= 1 ? passRate : 0.8,
+      retake_source_session_id: null,
+      retake_release_scope: "all",
+    };
+
+    setDailyManualColumnModal((current) => ({ ...current, saving: true, msg: "" }));
+    const { data: created, error } = await supabase.from("test_sessions").insert(sessionPayload).select().single();
+    if (error || !created?.id) {
+      setDailyManualColumnModal((current) => ({
+        ...current,
+        saving: false,
+        msg: error?.message || "Failed to create test session.",
+      }));
+      return;
+    }
+
+    const { error: linkError } = await supabase.from("exam_links").insert({
+      test_session_id: created.id,
+      test_version: testVersion,
+      expires_at: startedAt,
+    });
+    if (linkError) {
+      await supabase.from("test_sessions").delete().eq("id", created.id);
+      setDailyManualColumnModal((current) => ({
+        ...current,
+        saving: false,
+        msg: `Session created but link failed: ${linkError.message}`,
+      }));
+      return;
+    }
+
+    const payloads = validRows.map((row) => ({
+      student_id: row.studentId,
+      display_name: row.displayName ?? null,
+      student_code: row.studentCode ?? null,
+      test_version: testVersion,
+      test_session_id: created.id,
+      correct: 0,
+      total: 0,
+      score_rate: row.rate,
+      started_at: startedAt,
+      ended_at: startedAt,
+      answers_json: buildImportedSummaryAnswersJson("daily_results_csv", {
+        imported_test_title: title,
+        imported_test_date: sessionDate,
+        imported_rate: row.rate,
+        imported_entry_mode: "manual_column",
+      }),
+      tab_left_count: 0,
+    }));
+    const insertResult = await insertImportedSummaryAttempts(supabase, payloads);
+    if (!insertResult.ok) {
+      await supabase.from("attempts").delete().eq("test_session_id", created.id);
+      await supabase.from("exam_links").delete().eq("test_session_id", created.id);
+      await supabase.from("test_sessions").delete().eq("id", created.id);
+      setDailyManualColumnModal((current) => ({
+        ...current,
+        saving: false,
+        msg: insertResult.message || "Failed to save the manual column.",
+      }));
+      return;
+    }
+
+    await fetchTestSessions();
+    await fetchAttempts();
+    setDailyResultsCategory(selectedDailyCategory?.name ?? dailyResultsCategory);
+    await recordAuditEvent({
+      actionType: "create_session",
+      entityType: "test_session",
+      entityId: created.id,
+      summary: `Created manual daily results column "${title}".`,
+      metadata: {
+        test_type: "daily",
+        title,
+        problem_set_id: testVersion,
+        starts_at: startedAt,
+        manual_entry: true,
+      },
+    });
+    closeDailyManualColumnModal();
+    setQuizMsg(`Saved manual daily results column "${title}".`);
+  }, [
+    activeSchoolId,
+    closeDailyManualColumnModal,
+    dailyManualColumnModal.rows,
+    dailyManualColumnModal.sessionDate,
+    dailyManualColumnModal.testVersion,
+    dailyManualColumnModal.title,
+    dailyResultsCategory,
+    fetchAttempts,
+    fetchTestSessions,
+    hasDuplicateSessionTitle,
+    recordAuditEvent,
+    selectedDailyCategory,
+    setDailyResultsCategory,
+    setQuizMsg,
+    supabase,
+  ]);
+
+  const exportDailyGoogleSheetsCsv = useCallback(() => {
+    try {
+      setQuizMsg("");
+      const sessions = dailyResultsMatrix.sessions ?? [];
+      const matrixRows = dailyResultsMatrix.rows ?? [];
+      if (!sessions.length) {
+        setQuizMsg("No daily test sessions to export.");
+        return;
+      }
+
+      const totalColumns = 5 + sessions.length;
+      const visibleAttemptAt = (row, index) => row?.cells?.[index]?.[0] ?? null;
+      const exportRows = [
+        padCsvRow(
+          ["", "No.", "Student Name", "Section", "Withdrawn", ...sessions.map((session) => session.title ?? session.problem_set_id ?? "")],
+          totalColumns
+        ),
+        padCsvRow(
+          ["", "", "", "", "", ...sessions.map((session) => formatSlashDateShortYear(session.starts_at || session.created_at))],
+          totalColumns
+        ),
+        padCsvRow(
+          [
+            "",
+            "",
+            "",
+            "",
+            "",
+            ...sessions.map((session, index) => {
+              const attemptsForSession = matrixRows
+                .filter((row) => row?.student && !isAnalyticsExcludedStudent(row.student))
+                .map((row) => visibleAttemptAt(row, index))
+                .filter(Boolean);
+              if (!attemptsForSession.length) return "-";
+              const averageRate = attemptsForSession.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / attemptsForSession.length;
+              return formatRatePercent(averageRate);
+            }),
+          ],
+          totalColumns
+        ),
+      ];
+
+      matrixRows.forEach((row, index) => {
+        exportRows.push(
+          padCsvRow(
+            [
+              "",
+              index + 1,
+              getStudentDisplayName(row.student),
+              getStudentSectionValue(row.student),
+              formatBooleanCsv(row.student?.is_withdrawn),
+              ...sessions.map((session, sessionIndex) => {
+                const attempt = visibleAttemptAt(row, sessionIndex);
+                return attempt ? formatRatePercent(getScoreRate(attempt)) : "-";
+              }),
+            ],
+            totalColumns
+          )
+        );
+      });
+
+      downloadText(`daily_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
+    } catch (error) {
+      console.error("daily export failed:", error);
+      setQuizMsg(`Export failed: ${error?.message || error}`);
+    }
+  }, [dailyResultsMatrix, formatRatePercent, getScoreRate, isAnalyticsExcludedStudent, setQuizMsg]);
+
+  const exportModelGoogleSheetsCsv = useCallback(async () => {
+    try {
+      setQuizMsg("");
+      const sessions = modelResultsMatrix.sessions ?? [];
+      const matrixRows = modelResultsMatrix.rows ?? [];
+      if (!sessions.length) {
+        setQuizMsg("No model test sessions to export.");
+        return;
+      }
+
+      const versions = Array.from(new Set(sessions.map((session) => session.problem_set_id).filter(Boolean)));
+      const questionsByVersion = {};
+      if (versions.length) {
+        const { data, error } = await fetchQuestionsForVersionsWithFallback(supabase, versions);
+        if (error) {
+          console.error("model export questions fetch error:", error);
+          setQuizMsg(`Export failed: ${error.message}`);
+          return;
+        }
+        for (const row of data ?? []) {
+          const version = row.test_version;
+          if (!version) continue;
+          if (!questionsByVersion[version]) questionsByVersion[version] = [];
+          questionsByVersion[version].push(mapQuestion(row));
+        }
+      }
+
+      const visibleAttemptAt = (row, index) => row?.cells?.[index]?.[0] ?? null;
+      const activeMatrixRows = matrixRows.filter((row) => row?.student && !isAnalyticsExcludedStudent(row.student));
+      const resolveMainSectionSummary = (attempt, questionsList) => {
+        if (!attempt) return [];
+        if (isImportedModelResultsSummaryAttempt(attempt)) {
+          return getImportedModelSectionSummaries(attempt);
+        }
+        return buildMainSectionSummaryForExport(buildAttemptDetailRowsFromListForExport(attempt.answers_json, questionsList));
+      };
+
+      const sessionBlocks = sessions.map((session, sessionIndex) => {
+        const title = String(session?.title ?? session?.problem_set_id ?? "").trim() || session?.problem_set_id || "";
+        const questionsList = questionsByVersion[session.problem_set_id] ?? [];
+        const baseRows = buildAttemptDetailRowsFromListForExport({}, questionsList);
+        const baseSummary = buildMainSectionSummaryForExport(baseRows);
+        const importedSectionRows = activeMatrixRows
+          .map((row) => visibleAttemptAt(row, sessionIndex))
+          .filter((attempt) => isImportedModelResultsSummaryAttempt(attempt))
+          .flatMap((attempt) => getImportedModelSectionSummaries(attempt));
+        const blockSectionTitles = Array.from(new Set([
+          ...sections
+            .filter((section) => section.key !== "DAILY")
+            .map((section) => getSectionTitle(section.key))
+            .filter((sectionTitle) => baseSummary.some((row) => row.section === sectionTitle)),
+          ...importedSectionRows.map((row) => row.section).filter(Boolean),
+        ]));
+        const sectionTotals = Object.fromEntries(
+          blockSectionTitles.map((sectionTitle) => [
+            sectionTitle,
+            Math.max(
+              Number(baseSummary.find((row) => row.section === sectionTitle)?.total ?? 0),
+              ...importedSectionRows
+                .filter((row) => row.section === sectionTitle)
+                .map((row) => Number(row.total ?? 0)),
+              0
+            ),
+          ])
+        );
+        const rankingRows = activeMatrixRows
+          .map((row) => {
+            const attempt = visibleAttemptAt(row, sessionIndex);
+            if (!attempt) return null;
+            return {
+              studentId: row.student.id,
+              displayName: getStudentDisplayName(row.student),
+              studentCode: row.student.student_code ?? "",
+              rate: getScoreRate(attempt),
+              correct: Number(attempt.correct ?? 0),
+            };
+          })
+          .filter(Boolean)
+          .sort((left, right) => {
+            if (right.rate !== left.rate) return right.rate - left.rate;
+            if (right.correct !== left.correct) return right.correct - left.correct;
+            const nameCompare = left.displayName.localeCompare(right.displayName);
+            if (nameCompare !== 0) return nameCompare;
+            return String(left.studentCode).localeCompare(String(right.studentCode));
+          });
+        const rankingByStudentId = Object.fromEntries(
+          rankingRows.map((row, index) => [row.studentId, { rank: index + 1, total: rankingRows.length }])
+        );
+        return {
+          title,
+          session,
+          sessionIndex,
+          questionsList,
+          sectionTitles: blockSectionTitles,
+          sectionTotals,
+          rankingByStudentId,
+        };
+      });
+
+      const totalColumns = 5 + sessionBlocks.reduce(
+        (sum, block) => sum + (block.sectionTitles.length * 2) + 3,
+        0
+      );
+      const row1 = ["", "No.", "Student Name", "Section", "Withdrawn"];
+      const row2 = ["", "", "", "", ""];
+      const row3 = ["", "", "", "", ""];
+      const row4 = ["", "", "", "", ""];
+
+      sessionBlocks.forEach((block) => {
+        const attemptsForBlock = activeMatrixRows
+          .map((row) => visibleAttemptAt(row, block.sessionIndex))
+          .filter(Boolean);
+        const span = (block.sectionTitles.length * 2) + 3;
+        row1.push(block.title, ...Array.from({ length: span - 1 }, () => ""));
+        block.sectionTitles.forEach((sectionTitle) => {
+          const sectionSummaries = attemptsForBlock
+            .map((attempt) => resolveMainSectionSummary(attempt, block.questionsList).find((item) => item.section === sectionTitle) ?? null)
+            .filter(Boolean);
+          const averageRate = sectionSummaries.length
+            ? sectionSummaries.reduce((sum, item) => sum + Number(item.rate ?? 0), 0) / sectionSummaries.length
+            : null;
+          const averageCorrect = sectionSummaries.length
+            ? sectionSummaries.reduce((sum, item) => sum + Number(item.correct ?? 0), 0) / sectionSummaries.length
+            : null;
+          const sectionTotal = Number(block.sectionTotals[sectionTitle] ?? 0);
+          row2.push(sectionTitle, "");
+          row3.push(formatSlashDateShortYear(block.session.starts_at || block.session.created_at), "");
+          row4.push(
+            averageRate == null ? "-" : formatRatePercent(averageRate),
+            averageCorrect == null || sectionTotal <= 0 ? "-" : formatScoreFraction(averageCorrect, sectionTotal, 2)
+          );
+        });
+        const averageTotalRate = attemptsForBlock.length
+          ? attemptsForBlock.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / attemptsForBlock.length
+          : null;
+        const averageTotalCorrect = attemptsForBlock.length
+          ? attemptsForBlock.reduce((sum, attempt) => sum + Number(attempt.correct ?? 0), 0) / attemptsForBlock.length
+          : null;
+        const totalQuestionCount = Math.max(
+          Number(block.questionsList?.length ?? 0),
+          ...attemptsForBlock.map((attempt) => Number(attempt?.total ?? 0)),
+          0
+        );
+        row2.push("Total", "", "Ranking");
+        row3.push(formatSlashDateShortYear(block.session.starts_at || block.session.created_at), "", "");
+        row4.push(
+          averageTotalRate == null ? "-" : formatRatePercent(averageTotalRate),
+          averageTotalCorrect == null || totalQuestionCount <= 0 ? "-" : formatScoreFraction(averageTotalCorrect, totalQuestionCount, 2),
+          ""
+        );
+      });
+
+      const exportRows = [
+        padCsvRow(row1, totalColumns),
+        padCsvRow(row2, totalColumns),
+        padCsvRow(row3, totalColumns),
+        padCsvRow(row4, totalColumns),
+      ];
+
+      matrixRows.forEach((row, index) => {
+        const dataRow = [
+          "",
+          index + 1,
+          getStudentDisplayName(row.student),
+          getStudentSectionValue(row.student),
+          formatBooleanCsv(row.student?.is_withdrawn),
+        ];
+
+        sessionBlocks.forEach((block) => {
+          const attempt = visibleAttemptAt(row, block.sessionIndex);
+          const sectionSummary = attempt ? resolveMainSectionSummary(attempt, block.questionsList) : [];
+          block.sectionTitles.forEach((sectionTitle) => {
+            const summaryRow = sectionSummary.find((item) => item.section === sectionTitle);
+            const sectionTotal = Number(block.sectionTotals[sectionTitle] ?? 0);
+            dataRow.push(
+              summaryRow ? formatRatePercent(summaryRow.rate) : "-",
+              summaryRow && sectionTotal > 0 ? formatScoreFraction(summaryRow.correct, sectionTotal, 0) : "-"
+            );
+          });
+          const ranking = block.rankingByStudentId[row.student.id] ?? null;
+          dataRow.push(
+            attempt ? formatRatePercent(getScoreRate(attempt)) : "-",
+            attempt && Number(attempt.total ?? 0) > 0 ? formatScoreFraction(Number(attempt.correct ?? 0), Number(attempt.total ?? 0), 0) : "-",
+            attempt && ranking ? `${formatOrdinalRank(ranking.rank)} / ${ranking.total}` : "-"
+          );
+        });
+
+        exportRows.push(padCsvRow(dataRow, totalColumns));
+      });
+
+      downloadText(`model_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
+    } catch (error) {
+      console.error("model export failed:", error);
+      setQuizMsg(`Export failed: ${error?.message || error}`);
+    }
+  }, [attemptQuestionsByVersion, dailyResultsMatrix, formatRatePercent, getScoreRate, getSectionTitle, isAnalyticsExcludedStudent, modelResultsMatrix, sections, setQuizMsg, supabase]);
 
   // ========================================================================
   // useCallback functions (39+ callbacks)
@@ -4489,6 +5442,14 @@ export function useTestingWorkspaceState({
     setModelResultsCategory,
     expandedResultCells,
     setExpandedResultCells,
+    dailyManualEntryMode,
+    setDailyManualEntryMode,
+    dailyManualEntryModal,
+    setDailyManualEntryModal,
+    dailyManualEntryStudent,
+    dailyManualEntrySession,
+    dailyManualColumnModal,
+    setDailyManualColumnModal,
     filteredModelUploadTests,
     groupedModelUploadTests,
     filteredDailyUploadTests,
@@ -4565,6 +5526,14 @@ export function useTestingWorkspaceState({
     runSearch,
     exportDailyGoogleSheetsCsv,
     exportModelGoogleSheetsCsv,
+    openDailyManualEntryModal,
+    closeDailyManualEntryModal,
+    saveDailyManualEntry,
+    clearDailyManualEntry,
+    openDailyManualColumnModal,
+    closeDailyManualColumnModal,
+    updateDailyManualColumnRateInput,
+    saveDailyManualColumn,
     getSectionTitle,
     getQuestionSectionLabel,
     getProblemSetDisplayId,

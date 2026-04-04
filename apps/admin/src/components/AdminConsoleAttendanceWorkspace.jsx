@@ -40,8 +40,9 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceFilter,
     setAttendanceFilter,
     fetchAttendanceDays,
-    attendanceSheetLoaded,
     attendanceSheetRefreshing,
+    attendanceSheetNeedsInitialRefresh,
+    setAttendanceSheetNeedsInitialRefresh,
     fetchAbsenceApplications,
     absenceApplications,
     decideAbsenceApplication,
@@ -64,13 +65,14 @@ export default function AdminConsoleAttendanceWorkspace() {
       if (!students.length) {
         fetchStudents();
       }
-      if (!attendanceSheetLoaded && !attendanceSheetRefreshing) {
-        fetchAttendanceDays();
+      if (attendanceSheetNeedsInitialRefresh && !attendanceSheetRefreshing) {
+        setAttendanceSheetNeedsInitialRefresh(false);
+        fetchAttendanceDays({ force: true, initialRefresh: true });
       }
       return;
     }
     fetchAbsenceApplications();
-  }, [activeSchoolId, attendanceSubTab, students.length, attendanceSheetLoaded, attendanceSheetRefreshing]);
+  }, [activeSchoolId, attendanceSubTab, students.length, attendanceSheetNeedsInitialRefresh, attendanceSheetRefreshing]);
 
   if (attendanceSubTab === "absence") {
     return (
@@ -265,6 +267,8 @@ export default function AdminConsoleAttendanceWorkspace() {
         </div>
       </div>
 
+      {attendanceMsg ? <div className="admin-msg" style={{ marginTop: 12, marginBottom: 12 }}>{attendanceMsg}</div> : null}
+
       <div style={{ marginTop: 18 }}>
         <div className="admin-form attendance-filter-box">
           <div className="field small">
@@ -381,7 +385,6 @@ export default function AdminConsoleAttendanceWorkspace() {
           </tbody>
         </table>
       </div>
-      <div className="admin-msg">{attendanceMsg}</div>
     </div>
   );
 }
