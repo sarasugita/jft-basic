@@ -10256,47 +10256,30 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setQuizMsg("Export functionality has been moved to the testing workspace");
   }
 
-  async function fetchExistingImportedAttemptIdsForPairs(pairs) {
+  async function deleteImportedSummaryAttemptsForPairs(pairs) {
     const normalizedPairs = (pairs ?? []).filter((pair) => pair?.student_id && pair?.test_session_id);
     if (!normalizedPairs.length) {
-      return { ids: [], error: null };
+      return { ok: true };
     }
+
     const sessionIds = Array.from(new Set(normalizedPairs.map((pair) => pair.test_session_id)));
     const studentIds = Array.from(new Set(normalizedPairs.map((pair) => pair.student_id)));
-    const pairKeys = new Set(normalizedPairs.map((pair) => `${pair.student_id}::${pair.test_session_id}`));
 
-    const deleteIds = [];
     for (const sessionIdChunk of chunkItems(sessionIds, IMPORTED_ATTEMPT_QUERY_BATCH_SIZE)) {
       for (const studentIdChunk of chunkItems(studentIds, IMPORTED_ATTEMPT_QUERY_BATCH_SIZE)) {
-        const { data: existingRows, error: existingError } = await supabase
+        const { error } = await supabase
           .from("attempts")
-          .select("id, answers_json, student_id, test_session_id")
+          .delete()
           .in("test_session_id", sessionIdChunk)
-          .in("student_id", studentIdChunk);
-        if (existingError) {
-          return { ids: [], error: existingError };
+          .in("student_id", studentIdChunk)
+          .eq("answers_json->__meta->>imported_summary", "true");
+        if (error) {
+          return { ok: false, message: error.message };
         }
-        deleteIds.push(
-          ...(existingRows ?? [])
-            .filter((row) => pairKeys.has(`${row.student_id}::${row.test_session_id}`))
-            .filter((row) => isImportedSummaryAttempt(row))
-            .map((row) => row.id)
-        );
       }
     }
 
-    return {
-      ids: Array.from(new Set(deleteIds)),
-      error: null,
-    };
-  }
-
-  async function deleteAttemptIdsInChunks(attemptIds) {
-    for (const attemptIdChunk of chunkItems(attemptIds, IMPORTED_ATTEMPT_BATCH_SIZE)) {
-      const { error } = await supabase.from("attempts").delete().in("id", attemptIdChunk);
-      if (error) return error;
-    }
-    return null;
+    return { ok: true };
   }
 
   async function insertImportedAttemptPayloadChunk(payloadChunk) {
@@ -10314,20 +10297,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   async function removeImportedSummaryAttemptsForPairs(pairs) {
-    const normalizedPairs = (pairs ?? []).filter((pair) => pair?.student_id && pair?.test_session_id);
-    if (!normalizedPairs.length) return { ok: true, deleted: 0 };
-    const { ids: deleteIds, error } = await fetchExistingImportedAttemptIdsForPairs(normalizedPairs);
-    if (error) {
-      return { ok: false, message: error.message };
-    }
-    if (!deleteIds.length) {
-      return { ok: true, deleted: 0 };
-    }
-    const deleteError = await deleteAttemptIdsInChunks(deleteIds);
-    if (deleteError) {
-      return { ok: false, message: deleteError.message };
-    }
-    return { ok: true, deleted: deleteIds.length };
+    return deleteImportedSummaryAttemptsForPairs(pairs);
   }
 
   async function replaceImportedSummaryAttempts(payloads, options = {}) {
@@ -10351,15 +10321,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
         test_session_id: payload.test_session_id,
       }));
 
-    const { ids: deleteIds, error: existingError } = await fetchExistingImportedAttemptIdsForPairs(replacementPairs);
-    if (existingError) {
-      return { ok: false, message: existingError.message };
-    }
-    if (deleteIds.length) {
-      const deleteError = await deleteAttemptIdsInChunks(deleteIds);
-      if (deleteError) {
-        return { ok: false, message: deleteError.message };
-      }
+    const { ok: deleteOk, message: deleteMessage } = await deleteImportedSummaryAttemptsForPairs(replacementPairs);
+    if (!deleteOk) {
+      return { ok: false, message: deleteMessage };
     }
 
     for (const payloadChunk of chunkItems(payloads, IMPORTED_ATTEMPT_BATCH_SIZE)) {
