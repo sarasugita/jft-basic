@@ -1389,7 +1389,10 @@ function buildSessionDetailAvailability(matrix) {
 function dedupeImportedAttemptPayloads(payloads) {
   const payloadMap = new Map();
   (payloads ?? []).forEach((payload) => {
-    const key = `${payload.student_id}::${payload.test_session_id}`;
+    // Use student_id + test_session_id + imported test title as key to preserve
+    // multiple results for same student across different test columns
+    const importedTitle = String(payload?.answers_json?.__meta?.imported_test_title ?? "");
+    const key = `${payload.student_id}::${payload.test_session_id}::${importedTitle}`;
     payloadMap.set(key, payload);
   });
   return Array.from(payloadMap.values());
