@@ -23,6 +23,7 @@ const FIVE_MINUTE_MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => Stri
 const MERIDIEM_OPTIONS = ["AM", "PM"];
 const QUESTION_SELECT_BASE = "id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
 const QUESTION_SELECT_WITH_MEDIA = QUESTION_SELECT_BASE;
+const SET_ID_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -72,6 +73,10 @@ function normalizePassRate(value, fallback = 0.8) {
   return Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate : fallback;
 }
 
+function compareSetIds(left, right) {
+  return SET_ID_COLLATOR.compare(String(left ?? "").trim(), String(right ?? "").trim());
+}
+
 function normalizeLegacyTestErrorMessage(error, action = "update") {
   const text = String(error?.message ?? "").trim();
   if (
@@ -91,6 +96,15 @@ function isImportedResultsSummaryAttempt(attempt) {
 
 function isGeneratedDailySessionVersion(version) {
   return String(version ?? "").startsWith("daily_session_");
+}
+
+function shuffleCopy(items) {
+  const next = [...(items ?? [])];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
 }
 
 // Alias for readability in daily tests filtering
@@ -402,6 +416,17 @@ function buildTwentyFourHourTime(parts) {
   return `${String(normalizedHour).padStart(2, "0")}:${minuteText}`;
 }
 
+function addMinutesToTimeInput(value, minutesToAdd) {
+  const normalized = normalizeTimeToFiveMinuteStep(value);
+  const match = normalized.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return "";
+  const totalMinutes = (Number(match[1]) * 60) + Number(match[2]) + Number(minutesToAdd || 0);
+  const wrappedMinutes = ((totalMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const nextHours = Math.floor(wrappedMinutes / 60);
+  const nextMinutes = wrappedMinutes % 60;
+  return `${String(nextHours).padStart(2, "0")}:${String(nextMinutes).padStart(2, "0")}`;
+}
+
 function formatTwelveHourTimeDisplay(value) {
   const parts = getTwelveHourTimeParts(value);
   if (!parts.hour) return "--:-- --";
@@ -679,6 +704,7 @@ export function useTestingWorkspaceState({
     session_date: "",
     start_time: "",
     close_time: "",
+    close_time_auto_filled: false,
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
@@ -699,6 +725,7 @@ export function useTestingWorkspaceState({
     session_date: "",
     start_time: "",
     close_time: "",
+    close_time_auto_filled: false,
     question_count_mode: "all",
     question_count: "",
     starts_at: "",
@@ -772,6 +799,8 @@ export function useTestingWorkspaceState({
   const [modelConductCategory, setModelConductCategory] = useState("");
   const [modelUploadCategory, setModelUploadCategory] = useState("");
   const [dailyUploadCategory, setDailyUploadCategory] = useState("");
+  const [modelSessionCategory, setModelSessionCategory] = useState("");
+  const [dailySessionCategory, setDailySessionCategory] = useState("");
   const [dailyResultsCategory, setDailyResultsCategory] = useState("");
   const [modelResultsCategory, setModelResultsCategory] = useState("");
 
@@ -922,7 +951,7 @@ export function useTestingWorkspaceState({
   // useMemo declarations (25+ memos)
   // ========================================================================
 
-  const buildCategories = (list, fallbackLabel = "Uncategorized") => {
+  const buildCategories = (list, fallbackLabel = "Uncategorized", sortMode = "created_at") => {
     const map = new Map();
     (list ?? []).forEach((t) => {
       const name = String(t.title ?? "").trim() || fallbackLabel;
@@ -930,7 +959,15 @@ export function useTestingWorkspaceState({
       map.get(name).push(t);
     });
     const categories = Array.from(map.entries()).map(([name, items]) => {
-      const ordered = [...items].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
+      const ordered = [...items].sort((a, b) => {
+        if (sortMode === "version") {
+          const versionCompare = compareSetIds(a.version, b.version);
+          if (versionCompare !== 0) return versionCompare;
+        }
+        const createdAtCompare = String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""));
+        if (createdAtCompare !== 0) return createdAtCompare;
+        return compareSetIds(a.version, b.version);
+      });
       return { name, tests: ordered };
     });
     categories.sort((a, b) => a.name.localeCompare(b.name));
@@ -1137,11 +1174,18 @@ export function useTestingWorkspaceState({
   }, [dailyConductCategory, dailySessionForm.source_categories]);
 
   const dailyConductTests = useMemo(() => {
-    const allSelected = selectedDailySourceCategoryNames;
-    return dailyQuestionSets.filter((test) => {
+    if (!selectedDailySourceCategoryNames.length) return [];
+    const selectedSet = new Set(selectedDailySourceCategoryNames);
+    const byCategory = new Map();
+    dailyQuestionSets.forEach((test) => {
       const testCategory = String(test.title ?? "").trim() || "Uncategorized";
-      return allSelected.includes(testCategory);
+      if (!selectedSet.has(testCategory)) return;
+      if (!byCategory.has(testCategory)) byCategory.set(testCategory, []);
+      byCategory.get(testCategory).push(test);
     });
+    return selectedDailySourceCategoryNames.flatMap((categoryName) => (
+      [...(byCategory.get(categoryName) ?? [])].sort((left, right) => compareSetIds(left.version, right.version))
+    ));
   }, [dailyQuestionSets, selectedDailySourceCategoryNames]);
 
   // For single mode, get tests for the currently selected category
@@ -1149,15 +1193,10 @@ export function useTestingWorkspaceState({
     if (dailySessionForm.selection_mode !== "single" || !dailyConductCategory) {
       return [];
     }
-    // Filter tests by category - use dailyQuestionSets if available
-    const sourceTests = dailyQuestionSets.length > 0
-      ? dailyQuestionSets
-      : dailyTests.filter((t) => !String(t.version ?? "").startsWith("daily_session_"));
-    return sourceTests.filter((test) => {
-      const testCategory = String(test.title ?? "").trim() || "Uncategorized";
-      return testCategory === dailyConductCategory;
-    });
-  }, [dailyQuestionSets, dailyTests, dailyConductCategory, dailySessionForm.selection_mode]);
+    return dailyQuestionSets
+      .filter((test) => (String(test.title ?? "").trim() || "Uncategorized") === dailyConductCategory)
+      .sort((left, right) => compareSetIds(left.version, right.version));
+  }, [dailyQuestionSets, dailyConductCategory, dailySessionForm.selection_mode]);
 
   const selectedDailyProblemSetIds = useMemo(() => {
     if (dailySessionForm.selection_mode === "multiple") {
@@ -1206,7 +1245,7 @@ export function useTestingWorkspaceState({
     const testsToShow = modelTests.filter(
       (t) => publishedSessionVersions.has(t.version) || !t.version.startsWith("daily_session_")
     );
-    return buildCategories(testsToShow, DEFAULT_MODEL_CATEGORY);
+    return buildCategories(testsToShow, DEFAULT_MODEL_CATEGORY, "version");
   }, [modelTests, modelSessions]);
 
   const dailyConductCategories = useMemo(() => {
@@ -1217,7 +1256,7 @@ export function useTestingWorkspaceState({
     const testsToShow = dailyQuestionSets.filter(
       (t) => publishedSessionVersions.has(t.version) || !t.version.startsWith("daily_session_")
     );
-    return buildCategories(testsToShow);
+    return buildCategories(testsToShow, "Uncategorized", "version");
   }, [dailyQuestionSets, dailySessions]);
 
   const filteredModelUploadTests = useMemo(() => {
@@ -1226,7 +1265,7 @@ export function useTestingWorkspaceState({
   }, [modelTests, modelUploadCategory]);
 
   const groupedModelUploadTests = useMemo(
-    () => buildCategories(filteredModelUploadTests, DEFAULT_MODEL_CATEGORY),
+    () => buildCategories(filteredModelUploadTests, DEFAULT_MODEL_CATEGORY, "version"),
     [filteredModelUploadTests],
   );
 
@@ -1236,7 +1275,7 @@ export function useTestingWorkspaceState({
   }, [dailyQuestionSets, dailyUploadCategory]);
 
   const groupedDailyUploadTests = useMemo(
-    () => buildCategories(filteredDailyUploadTests),
+    () => buildCategories(filteredDailyUploadTests, "Uncategorized", "version"),
     [filteredDailyUploadTests],
   );
 
@@ -1255,7 +1294,7 @@ export function useTestingWorkspaceState({
     return buildCategories((modelTests ?? []).filter((test) => sessionVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
   }, [modelTests, allModelSessions]);
 
-  const dailySessionCategories = useMemo(() => buildCategories(dailyTests), [dailyTests]);
+  const dailySessionCategories = useMemo(() => buildCategories(dailyTests, "Uncategorized", "version"), [dailyTests]);
 
   const dailySessionCategorySelectValue = useMemo(() => {
     if (!dailySessionCategories.length) return CUSTOM_CATEGORY_OPTION;
@@ -1263,6 +1302,64 @@ export function useTestingWorkspaceState({
       ? dailySessionForm.session_category
       : CUSTOM_CATEGORY_OPTION;
   }, [dailySessionCategories, dailySessionForm.session_category]);
+
+  const selectedModelSessionCategory = useMemo(() => {
+    if (!modelCategories.length) return null;
+    return modelCategories.find((category) => category.name === modelSessionCategory) ?? modelCategories[0];
+  }, [modelCategories, modelSessionCategory]);
+
+  const filteredModelSessions = useMemo(() => {
+    const list = !selectedModelSessionCategory
+      ? modelSessions
+      : modelSessions.filter((session) => {
+      const category = String(testMetaByVersion[session.problem_set_id]?.category ?? "").trim() || DEFAULT_MODEL_CATEGORY;
+      return category === selectedModelSessionCategory.name;
+    });
+    return [...list].sort((left, right) => {
+      const versionCompare = compareSetIds(left.problem_set_id, right.problem_set_id);
+      if (versionCompare !== 0) return versionCompare;
+      return String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""));
+    });
+  }, [modelSessions, selectedModelSessionCategory, testMetaByVersion]);
+
+  const selectedDailySessionCategory = useMemo(() => {
+    if (!dailySessionCategories.length) return null;
+    return dailySessionCategories.find((category) => category.name === dailySessionCategory) ?? dailySessionCategories[0];
+  }, [dailySessionCategories, dailySessionCategory]);
+
+  const filteredDailySessions = useMemo(() => {
+    const list = !selectedDailySessionCategory
+      ? dailySessions
+      : dailySessions.filter((session) => {
+      const category = String(testMetaByVersion[session.problem_set_id]?.category ?? "").trim() || "Uncategorized";
+      return category === selectedDailySessionCategory.name;
+    });
+    return [...list].sort((left, right) => {
+      const versionCompare = compareSetIds(left.problem_set_id, right.problem_set_id);
+      if (versionCompare !== 0) return versionCompare;
+      return String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""));
+    });
+  }, [dailySessions, selectedDailySessionCategory, testMetaByVersion]);
+
+  useEffect(() => {
+    if (!modelCategories.length) {
+      if (modelSessionCategory) setModelSessionCategory("");
+      return;
+    }
+    if (!modelSessionCategory || !modelCategories.some((category) => category.name === modelSessionCategory)) {
+      setModelSessionCategory(modelCategories[0].name);
+    }
+  }, [modelCategories, modelSessionCategory]);
+
+  useEffect(() => {
+    if (!dailySessionCategories.length) {
+      if (dailySessionCategory) setDailySessionCategory("");
+      return;
+    }
+    if (!dailySessionCategory || !dailySessionCategories.some((category) => category.name === dailySessionCategory)) {
+      setDailySessionCategory(dailySessionCategories[0].name);
+    }
+  }, [dailySessionCategories, dailySessionCategory]);
 
   const selectedDailyCategory = useMemo(() => {
     if (!dailyResultCategories.length) return null;
@@ -1630,7 +1727,7 @@ export function useTestingWorkspaceState({
       (sourceQuestions ?? []).filter((row) => row.test_version === version)
     );
     if (!orderedQuestions.length) {
-      throw new Error("No questions found for the selected SetID.");
+      throw new Error("No questions found for the selected SetID values.");
     }
 
     const requestedQuestionCount =
@@ -1641,10 +1738,10 @@ export function useTestingWorkspaceState({
       throw new Error("Specify a valid number of questions.");
     }
     if (requestedQuestionCount > orderedQuestions.length) {
-      throw new Error(`Only ${orderedQuestions.length} questions are available for the selected SetID.`);
+      throw new Error(`Only ${orderedQuestions.length} questions are available for the selected SetID values.`);
     }
 
-    const selectedQuestions = orderedQuestions.slice(0, requestedQuestionCount);
+    const selectedQuestions = shuffleCopy(orderedQuestions).slice(0, requestedQuestionCount);
     const sourceQuestionIds = selectedQuestions.map((row) => row.id).filter(Boolean);
     const { data: sourceChoices, error: sourceChoicesError } = sourceQuestionIds.length
       ? await supabase
@@ -1822,6 +1919,8 @@ export function useTestingWorkspaceState({
       || (modelConductMode === "retake" ? testSessionForm.starts_at : "");
     const endsAt = combineBangladeshDateTime(sessionDate, closeTime)
       || (modelConductMode === "retake" ? testSessionForm.ends_at : "");
+    const startsAtIso = startsAtInput ? fromBangladeshInput(startsAtInput) : "";
+    const endsAtIso = endsAt ? fromBangladeshInput(endsAt) : "";
     const passRate = Number(testSessionForm.pass_rate);
     if (!problemSetId) {
       setModelConductError("SetID is required.");
@@ -1845,6 +1944,10 @@ export function useTestingWorkspaceState({
     }
     if (!endsAt) {
       setModelConductError("End time is required.");
+      return;
+    }
+    if (startsAtIso && endsAtIso && new Date(endsAtIso).getTime() <= new Date(startsAtIso).getTime()) {
+      setModelConductError("Close time must be after start time.");
       return;
     }
     if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
@@ -1908,6 +2011,7 @@ export function useTestingWorkspaceState({
       session_date: "",
       start_time: "",
       close_time: "",
+      close_time_auto_filled: false,
       show_answers: false,
       allow_multiple_attempts: false,
       pass_rate: "0.8",
@@ -1955,6 +2059,8 @@ export function useTestingWorkspaceState({
       || (dailyConductMode === "retake" ? dailySessionForm.starts_at : "");
     const endsAtInput = combineBangladeshDateTime(sessionDate, closeTime)
       || (dailyConductMode === "retake" ? dailySessionForm.ends_at : "");
+    const startsAtIso = startsAtInput ? fromBangladeshInput(startsAtInput) : "";
+    const endsAtIso = endsAtInput ? fromBangladeshInput(endsAtInput) : "";
     const title = dailySessionForm.title.trim();
     const sessionCategory = String(dailySessionForm.session_category ?? "").trim()
       || dailyConductCategory
@@ -1984,6 +2090,10 @@ export function useTestingWorkspaceState({
     }
     if (!closeTime) {
       setDailyConductError("Close time is required.");
+      return;
+    }
+    if (startsAtIso && endsAtIso && new Date(endsAtIso).getTime() <= new Date(startsAtIso).getTime()) {
+      setDailyConductError("Close time must be after start time.");
       return;
     }
     if (dailySessionForm.question_count_mode === "specify") {
@@ -2073,6 +2183,10 @@ export function useTestingWorkspaceState({
       source_categories: [],
       session_category: dailyConductCategory || "",
       title: "",
+      session_date: "",
+      start_time: "",
+      close_time: "",
+      close_time_auto_filled: false,
       question_count_mode: "all",
       question_count: "",
       problem_set_ids: s.problem_set_id ? [s.problem_set_id] : [],
@@ -2169,6 +2283,14 @@ export function useTestingWorkspaceState({
     if (!endsAtInput) {
       setEditingSessionMsg("End time is required.");
       return;
+    }
+    if (startsAtInput) {
+      const startsAtIso = fromBangladeshInput(startsAtInput);
+      const endsAtIso = fromBangladeshInput(endsAtInput);
+      if (startsAtIso && endsAtIso && new Date(endsAtIso).getTime() <= new Date(startsAtIso).getTime()) {
+        setEditingSessionMsg("End time must be after start time.");
+        return;
+      }
     }
     const passRateValue = Number(pass_rate);
     if (!Number.isFinite(passRateValue) || passRateValue <= 0 || passRateValue > 1) {
@@ -3419,6 +3541,7 @@ export function useTestingWorkspaceState({
           : current.session_date,
       start_time: "",
       close_time: "",
+      close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
       time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
@@ -3451,6 +3574,7 @@ export function useTestingWorkspaceState({
           : current.session_date,
       start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
       close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
+      close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
       question_count_mode: "all",
@@ -3484,9 +3608,26 @@ export function useTestingWorkspaceState({
         ...getTwelveHourTimeParts(current[field]),
         [part]: value,
       };
+      const nextValue = buildTwentyFourHourTime(nextParts);
+      if (field === "close_time") {
+        return {
+          ...current,
+          close_time_auto_filled: false,
+          [field]: nextValue,
+        };
+      }
+      if (field === "start_time") {
+        const shouldAutoFillCloseTime = current.close_time_auto_filled || !String(current.close_time ?? "").trim();
+        return {
+          ...current,
+          [field]: nextValue,
+          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 30) : current.close_time,
+          close_time_auto_filled: shouldAutoFillCloseTime,
+        };
+      }
       return {
         ...current,
-        [field]: buildTwentyFourHourTime(nextParts),
+        [field]: nextValue,
       };
     });
   }, []);
@@ -3497,9 +3638,26 @@ export function useTestingWorkspaceState({
         ...getTwelveHourTimeParts(current[field]),
         [part]: value,
       };
+      const nextValue = buildTwentyFourHourTime(nextParts);
+      if (field === "close_time") {
+        return {
+          ...current,
+          close_time_auto_filled: false,
+          [field]: nextValue,
+        };
+      }
+      if (field === "start_time") {
+        const shouldAutoFillCloseTime = current.close_time_auto_filled || !String(current.close_time ?? "").trim();
+        return {
+          ...current,
+          [field]: nextValue,
+          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 30) : current.close_time,
+          close_time_auto_filled: shouldAutoFillCloseTime,
+        };
+      }
       return {
         ...current,
-        [field]: buildTwentyFourHourTime(nextParts),
+        [field]: nextValue,
       };
     });
   }, []);
@@ -3571,6 +3729,7 @@ export function useTestingWorkspaceState({
         session_date: "",
         start_time: "",
         close_time: "",
+        close_time_auto_filled: false,
         show_answers: false,
         allow_multiple_attempts: false,
         time_limit_min: "",
@@ -3606,6 +3765,7 @@ export function useTestingWorkspaceState({
         session_date: "",
         start_time: "",
         close_time: "",
+        close_time_auto_filled: false,
         question_count_mode: "all",
         question_count: "",
         time_limit_min: "",
@@ -4037,6 +4197,10 @@ export function useTestingWorkspaceState({
     setModelUploadCategory,
     dailyUploadCategory,
     setDailyUploadCategory,
+    modelSessionCategory,
+    setModelSessionCategory,
+    dailySessionCategory,
+    setDailySessionCategory,
 
     // Computed/Memos
     modelTests,
@@ -4044,6 +4208,8 @@ export function useTestingWorkspaceState({
     dailyQuestionSets,
     modelSessions,
     dailySessions,
+    filteredModelSessions,
+    filteredDailySessions,
     linkBySession,
     selectedSessionDetail,
     pastModelSessions,

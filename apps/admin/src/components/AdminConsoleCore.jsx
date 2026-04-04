@@ -2440,6 +2440,17 @@ function buildTwentyFourHourTime(parts) {
   return `${String(normalizedHour).padStart(2, "0")}:${minuteText}`;
 }
 
+function addMinutesToTimeInput(value, minutesToAdd) {
+  const normalized = normalizeTimeToFiveMinuteStep(value);
+  const match = normalized.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return "";
+  const totalMinutes = (Number(match[1]) * 60) + Number(match[2]) + Number(minutesToAdd || 0);
+  const wrappedMinutes = ((totalMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const nextHours = Math.floor(wrappedMinutes / 60);
+  const nextMinutes = wrappedMinutes % 60;
+  return `${String(nextHours).padStart(2, "0")}:${String(nextMinutes).padStart(2, "0")}`;
+}
+
 function formatTwelveHourTimeDisplay(value) {
   const parts = getTwelveHourTimeParts(value);
   if (!parts.hour) return "--:-- --";
@@ -2977,6 +2988,7 @@ export default function AdminConsole({
     session_date: "",
     start_time: "",
     close_time: "",
+    close_time_auto_filled: false,
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
@@ -3041,6 +3053,7 @@ export default function AdminConsole({
     session_date: "",
     start_time: "",
     close_time: "",
+    close_time_auto_filled: false,
     question_count_mode: "all",
     question_count: "",
     starts_at: "",
@@ -7516,6 +7529,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           : current.session_date,
       start_time: "",
       close_time: "",
+      close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
       time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
@@ -7548,6 +7562,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           : current.session_date,
       start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
       close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
+      close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
       question_count_mode: "all",
@@ -7573,6 +7588,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
         start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
         close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
+        close_time_auto_filled: false,
         show_answers: false,
         allow_multiple_attempts: false,
         pass_rate: "0.8",
@@ -7605,6 +7621,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
         start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
         close_time: current.ends_at ? getBangladeshTimeInput(current.ends_at) : "",
+        close_time_auto_filled: false,
         question_count_mode: "all",
         question_count: "",
         show_answers: false,
@@ -7688,9 +7705,26 @@ function openDailyRecordModal(record = null, recordDate = "") {
         ...getTwelveHourTimeParts(current[field]),
         [part]: value,
       };
+      const nextValue = buildTwentyFourHourTime(nextParts);
+      if (field === "close_time") {
+        return {
+          ...current,
+          close_time_auto_filled: false,
+          [field]: nextValue,
+        };
+      }
+      if (field === "start_time") {
+        const shouldAutoFillCloseTime = current.close_time_auto_filled || !String(current.close_time ?? "").trim();
+        return {
+          ...current,
+          [field]: nextValue,
+          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 30) : current.close_time,
+          close_time_auto_filled: shouldAutoFillCloseTime,
+        };
+      }
       return {
         ...current,
-        [field]: buildTwentyFourHourTime(nextParts),
+        [field]: nextValue,
       };
     });
   }
@@ -7701,9 +7735,26 @@ function openDailyRecordModal(record = null, recordDate = "") {
         ...getTwelveHourTimeParts(current[field]),
         [part]: value,
       };
+      const nextValue = buildTwentyFourHourTime(nextParts);
+      if (field === "close_time") {
+        return {
+          ...current,
+          close_time_auto_filled: false,
+          [field]: nextValue,
+        };
+      }
+      if (field === "start_time") {
+        const shouldAutoFillCloseTime = current.close_time_auto_filled || !String(current.close_time ?? "").trim();
+        return {
+          ...current,
+          [field]: nextValue,
+          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 30) : current.close_time,
+          close_time_auto_filled: shouldAutoFillCloseTime,
+        };
+      }
       return {
         ...current,
-        [field]: buildTwentyFourHourTime(nextParts),
+        [field]: nextValue,
       };
     });
   }
@@ -7871,6 +7922,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
       || (modelConductMode === "retake" ? testSessionForm.starts_at : "");
     const endsAt = combineBangladeshDateTime(sessionDate, closeTime)
       || (modelConductMode === "retake" ? testSessionForm.ends_at : "");
+    const startsAtIso = startsAtInput ? fromBangladeshInput(startsAtInput) : "";
+    const endsAtIso = endsAt ? fromBangladeshInput(endsAt) : "";
     const passRate = Number(testSessionForm.pass_rate);
     if (!problemSetId) {
       setTestSessionsMsg("SetID is required.");
@@ -7894,6 +7947,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     if (!endsAt) {
       setTestSessionsMsg("End time is required.");
+      return;
+    }
+    if (startsAtIso && endsAtIso && new Date(endsAtIso).getTime() <= new Date(startsAtIso).getTime()) {
+      setTestSessionsMsg("Close time must be after start time.");
       return;
     }
     if (!Number.isFinite(passRate) || passRate <= 0 || passRate > 1) {
@@ -7956,6 +8013,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       session_date: "",
       start_time: "",
       close_time: "",
+      close_time_auto_filled: false,
       show_answers: false,
       allow_multiple_attempts: false,
       pass_rate: "0.8",
@@ -8003,6 +8061,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
       || (dailyConductMode === "retake" ? dailySessionForm.starts_at : "");
     const endsAtInput = combineBangladeshDateTime(sessionDate, closeTime)
       || (dailyConductMode === "retake" ? dailySessionForm.ends_at : "");
+    const startsAtIso = startsAtInput ? fromBangladeshInput(startsAtInput) : "";
+    const endsAtIso = endsAtInput ? fromBangladeshInput(endsAtInput) : "";
     const title = dailySessionForm.title.trim();
     const sessionCategory = String(dailySessionForm.session_category ?? "").trim()
       || dailyConductCategory
@@ -8032,6 +8092,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     if (!closeTime) {
       setDailySessionsMsg("Close time is required.");
+      return;
+    }
+    if (startsAtIso && endsAtIso && new Date(endsAtIso).getTime() <= new Date(startsAtIso).getTime()) {
+      setDailySessionsMsg("Close time must be after start time.");
       return;
     }
     if (dailySessionForm.question_count_mode === "specify") {
@@ -8120,6 +8184,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
       source_categories: [],
       session_category: dailyConductCategory || "",
       title: "",
+      session_date: "",
+      start_time: "",
+      close_time: "",
+      close_time_auto_filled: false,
       question_count_mode: "all",
       question_count: "",
       problem_set_ids: s.problem_set_id ? [s.problem_set_id] : [],
@@ -8207,6 +8275,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
     if (!ends_at) {
       setEditingSessionMsg("End time is required.");
       return;
+    }
+    if (starts_at) {
+      const startsAtIso = fromBangladeshInput(starts_at);
+      const endsAtIso = fromBangladeshInput(ends_at);
+      if (startsAtIso && endsAtIso && new Date(endsAtIso).getTime() <= new Date(startsAtIso).getTime()) {
+        setEditingSessionMsg("End time must be after start time.");
+        return;
+      }
     }
     const passRateValue = Number(pass_rate);
     if (!Number.isFinite(passRateValue) || passRateValue <= 0 || passRateValue > 1) {

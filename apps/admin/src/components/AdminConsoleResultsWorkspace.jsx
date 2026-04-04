@@ -137,6 +137,20 @@ function buildSourceQuestionKey(sourceVersion, sourceQuestionId) {
   return `${String(sourceVersion ?? "").trim()}::${String(sourceQuestionId ?? "").trim()}`;
 }
 
+function getSourceQuestionNumber(sourceQuestionId) {
+  const raw = String(sourceQuestionId ?? "").trim();
+  if (!raw) return "";
+  const match = raw.match(/(\d+)(?!.*\d)/);
+  return match ? match[1] : raw;
+}
+
+function formatSourceQuestionLabel(sourceVersion, sourceQuestionId) {
+  const version = String(sourceVersion ?? "").trim();
+  const questionNumber = getSourceQuestionNumber(sourceQuestionId);
+  if (version && questionNumber) return `${version}-${questionNumber}`;
+  return version || questionNumber || "";
+}
+
 function isGeneratedDailySessionVersion(version) {
   return String(version ?? "").startsWith("daily_session_");
 }
@@ -2061,9 +2075,15 @@ export default function AdminConsoleResultsWorkspace(props) {
     const stemLines = splitStemLines(stemExtra);
     const textBoxLines = splitTextBoxStemLines(stemExtra || stemText);
     const sectionLabel = getQuestionSectionLabel(question) || question.sectionKey;
-    const displayQuestionId = String(question.sourceQuestionId ?? "").trim()
+    const displayQuestionId = formatSourceQuestionLabel(
+      question.sourceVersion || question.testVersion,
+      question.sourceQuestionId || question.questionId
+    ) || String(question.sourceQuestionId ?? "").trim()
       || String(question.id ?? "").split("__").filter(Boolean)[1]
       || String(question.id ?? "").trim();
+    const sourceCategory = String(
+      testMetaByVersion[question.sourceVersion || question.testVersion]?.category ?? ""
+    ).trim();
 
     const effectiveAnswers = pendingAnswer !== null
       ? pendingAnswer
@@ -2124,8 +2144,15 @@ export default function AdminConsoleResultsWorkspace(props) {
     return (
       <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontWeight: 700 }}>
-            {displayQuestionId} {sectionLabel ? `(${sectionLabel})` : ""} {index != null ? `#${index + 1}` : ""}
+          <div style={{ fontWeight: 700, display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 6 }}>
+            <span>{displayQuestionId}</span>
+            {sourceCategory ? (
+              <span style={{ fontWeight: 400, fontSize: 12, color: "#6b7280" }}>
+                {sourceCategory}
+              </span>
+            ) : null}
+            {sectionLabel ? <span>{`(${sectionLabel})`}</span> : null}
+            {index != null ? <span>{`#${index + 1}`}</span> : null}
           </div>
           {isEditMode || children ? (
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -2305,9 +2332,15 @@ export default function AdminConsoleResultsWorkspace(props) {
                   candidate.sourceVersion || candidate.testVersion,
                   candidate.sourceQuestionId || candidate.questionId
                 );
+                const candidateCategory = String(
+                  testMetaByVersion[candidate.sourceVersion || candidate.testVersion]?.category ?? ""
+                ).trim();
                 return (
                   <option key={`${question.dbId}-${candidateKey}`} value={candidateKey}>
-                    {(candidate.sourceVersion || candidate.testVersion)} / {(candidate.sourceQuestionId || candidate.questionId)}
+                    {`${formatSourceQuestionLabel(
+                      candidate.sourceVersion || candidate.testVersion,
+                      candidate.sourceQuestionId || candidate.questionId
+                    )}${candidateCategory ? ` - ${candidateCategory}` : ""}`}
                   </option>
                 );
               })}

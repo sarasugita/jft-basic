@@ -62,6 +62,9 @@ export default function AdminConsoleTestingTabs({
   setModelUploadOpen,
   modelUploadCategory,
   setModelUploadCategory,
+  modelSessionCategory,
+  setModelSessionCategory,
+  filteredModelSessions,
   groupedModelUploadTests,
   editingTestId,
   openPreview,
@@ -135,6 +138,9 @@ export default function AdminConsoleTestingTabs({
   setDailyUploadOpen,
   dailyUploadCategory,
   setDailyUploadCategory,
+  dailySessionCategory,
+  setDailySessionCategory,
+  filteredDailySessions,
   groupedDailyUploadTests,
   dailyUploadMsg,
   setDailyUploadMsg,
@@ -281,6 +287,18 @@ export default function AdminConsoleTestingTabs({
 
               {sessionDetail.type === "mock" && sessionDetail.sessionId ? null : (
                 <>
+                  <div className="admin-mini-tabs results-category-tabs" style={{ marginTop: 22 }}>
+                    {modelCategories.map((category) => (
+                      <button
+                        key={`model-session-cat-${category.name}`}
+                        type="button"
+                        className={`admin-mini-tab results-category-tab ${modelSessionCategory === category.name ? "active" : ""}`}
+                        onClick={() => setModelSessionCategory(category.name)}
+                      >
+                        {category.name}
+                      </button>
+                    ))}
+                  </div>
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                     <table className="admin-table" style={{ minWidth: 860 }}>
                       <thead>
@@ -301,7 +319,7 @@ export default function AdminConsoleTestingTabs({
                         </tr>
                       </thead>
                       <tbody>
-                        {modelSessions.map((t) => (
+                        {filteredModelSessions.map((t) => (
                           <tr key={t.id} {...getSessionRowProps(t, "mock")}>
                             <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                             <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
@@ -1023,20 +1041,24 @@ export default function AdminConsoleTestingTabs({
                     </div>
                   </div>
                 </div>
-                <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <select
-                      value={modelUploadCategory}
-                      onChange={(e) => setModelUploadCategory(e.target.value)}
+                <div className="admin-mini-tabs results-category-tabs" style={{ marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className={`admin-mini-tab results-category-tab ${!modelUploadCategory ? "active" : ""}`}
+                    onClick={() => setModelUploadCategory("")}
+                  >
+                    All
+                  </button>
+                  {modelCategories.map((category) => (
+                    <button
+                      key={`model-upload-cat-${category.name}`}
+                      type="button"
+                      className={`admin-mini-tab results-category-tab ${modelUploadCategory === category.name ? "active" : ""}`}
+                      onClick={() => setModelUploadCategory(category.name)}
                     >
-                      <option value="">All Categories</option>
-                      {modelCategories.map((c) => (
-                        <option key={`model-upload-cat-${c.name}`} value={c.name}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      {category.name}
+                    </button>
+                  ))}
                 </div>
 
                 <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
@@ -1049,9 +1071,9 @@ export default function AdminConsoleTestingTabs({
                         <table className="admin-table" style={{ minWidth: 860 }}>
                           <thead>
                             <tr>
-                              <th style={compactDateColumnStyle}>Created</th>
-                              <th>SetID</th>
                               <th>Category</th>
+                              <th>SetID</th>
+                              <th style={compactDateColumnStyle}>Created</th>
                               <th>Questions</th>
                               <th>Preview</th>
                               <th>Edit</th>
@@ -1064,17 +1086,6 @@ export default function AdminConsoleTestingTabs({
                                 key={t.id}
                                 onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                               >
-                                <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                                <td>
-                                  {editingTestId === t.id ? (
-                                    <input
-                                      value={editingTestForm.version}
-                                      onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
-                                    />
-                                  ) : (
-                                    t.version ?? ""
-                                  )}
-                                </td>
                                 <td>
                                   {editingTestId === t.id ? (
                                     <>
@@ -1106,6 +1117,17 @@ export default function AdminConsoleTestingTabs({
                                     t.title ?? ""
                                   )}
                                 </td>
+                                <td>
+                                  {editingTestId === t.id ? (
+                                    <input
+                                      value={editingTestForm.version}
+                                      onChange={(e) => setEditingTestForm((s) => ({ ...s, version: e.target.value }))}
+                                    />
+                                  ) : (
+                                    t.version ?? ""
+                                  )}
+                                </td>
+                                <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
                                 <td>
                                   <button
@@ -1419,6 +1441,18 @@ export default function AdminConsoleTestingTabs({
 
               {sessionDetail.type === "daily" && sessionDetail.sessionId ? null : (
                 <>
+                <div className="admin-mini-tabs results-category-tabs" style={{ marginTop: 22 }}>
+                    {dailySessionCategories.map((category) => (
+                      <button
+                        key={`daily-session-cat-${category.name}`}
+                        type="button"
+                        className={`admin-mini-tab results-category-tab ${dailySessionCategory === category.name ? "active" : ""}`}
+                        onClick={() => setDailySessionCategory(category.name)}
+                      >
+                        {category.name}
+                      </button>
+                    ))}
+                  </div>
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                     <table className="admin-table daily-sessions-table" style={{ minWidth: 860 }}>
                       <colgroup>
@@ -1454,7 +1488,7 @@ export default function AdminConsoleTestingTabs({
                         </tr>
                       </thead>
                       <tbody>
-                        {dailySessions.map((t) => (
+                        {filteredDailySessions.map((t) => (
                           <tr key={t.id} {...getSessionRowProps(t, "daily")}>
                             <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                             <td style={editingSessionId === t.id ? undefined : compactDateColumnStyle}>
@@ -2042,28 +2076,42 @@ export default function AdminConsoleTestingTabs({
                                   <span className={`daily-session-create-multi-arrow ${dailySetDropdownOpen ? "open" : ""}`}>▾</span>
                                 </button>
                                 {dailySetDropdownOpen ? (
-                                  <div className="daily-session-create-set-list">
-                                    {dailyConductTests.length ? (
-                                      dailyConductTests.map((test) => {
-                                        const checked = selectedDailyProblemSetIds.includes(test.version);
-                                        return (
-                                          <label
-                                            key={`daily-ps-multi-${test.version}`}
-                                            className="daily-session-create-set-option"
-                                          >
-                                            <span className="daily-session-create-set-option-main">
-                                              <input
-                                                className="daily-session-create-set-option-check"
-                                                type="checkbox"
-                                                checked={checked}
-                                                onChange={() => toggleDailyProblemSetSelection(test.version)}
-                                              />
-                                              <span className="daily-session-create-set-option-id">{test.version}</span>
-                                            </span>
-                                            <span className="daily-session-create-set-meta">{Number(test.question_count ?? 0)}Q</span>
-                                          </label>
-                                        );
-                                      })
+                                    <div className="daily-session-create-set-list">
+                                      {dailyConductTests.length ? (
+                                        selectedDailySourceCategoryNames.map((categoryName) => {
+                                          const category = dailyConductCategories.find((item) => item.name === categoryName);
+                                          if (!category) return null;
+                                          return (
+                                            <div key={`daily-ps-group-${category.name}`} style={{ display: "grid", gap: 4 }}>
+                                              <div className="admin-help" style={{ fontWeight: 700, margin: "2px 0 0" }}>
+                                                {category.name}
+                                              </div>
+                                              {category.tests.map((test) => {
+                                                const checked = selectedDailyProblemSetIds.includes(test.version);
+                                                return (
+                                                  <label
+                                                    key={`daily-ps-multi-${category.name}-${test.version}`}
+                                                    className="daily-session-create-set-option"
+                                                  >
+                                                    <span className="daily-session-create-set-option-main">
+                                                      <input
+                                                        className="daily-session-create-set-option-check"
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={() => toggleDailyProblemSetSelection(test.version)}
+                                                      />
+                                                      <span className="daily-session-create-set-option-id">{test.version}</span>
+                                                      <span className="daily-session-create-set-option-category" style={{ fontSize: 12, fontWeight: 400, color: "#6b7280" }}>
+                                                        {category.name}
+                                                      </span>
+                                                    </span>
+                                                    <span className="daily-session-create-set-meta">{Number(test.question_count ?? 0)}Q</span>
+                                                  </label>
+                                                );
+                                              })}
+                                            </div>
+                                          );
+                                        })
                                     ) : (
                                       <div className="daily-session-create-help">No daily tests in the selected categories.</div>
                                     )}
@@ -2440,20 +2488,24 @@ export default function AdminConsoleTestingTabs({
                     </div>
                   </div>
                 </div>
-                <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <select
-                      value={dailyUploadCategory}
-                      onChange={(e) => setDailyUploadCategory(e.target.value)}
+                <div className="admin-mini-tabs results-category-tabs" style={{ marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className={`admin-mini-tab results-category-tab ${!dailyUploadCategory ? "active" : ""}`}
+                    onClick={() => setDailyUploadCategory("")}
+                  >
+                    All
+                  </button>
+                  {dailyCategories.map((category) => (
+                    <button
+                      key={`daily-upload-cat-${category.name}`}
+                      type="button"
+                      className={`admin-mini-tab results-category-tab ${dailyUploadCategory === category.name ? "active" : ""}`}
+                      onClick={() => setDailyUploadCategory(category.name)}
                     >
-                      <option value="">All Categories</option>
-                      {dailyCategories.map((c) => (
-                        <option key={`daily-upload-cat-${c.name}`} value={c.name}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      {category.name}
+                    </button>
+                  ))}
                 </div>
 
                 <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
@@ -2466,9 +2518,9 @@ export default function AdminConsoleTestingTabs({
                         <table className="admin-table" style={{ minWidth: 860 }}>
                           <thead>
                             <tr>
-                              <th style={compactDateColumnStyle}>Created</th>
                               <th>Category</th>
                               <th>SetID</th>
+                              <th style={compactDateColumnStyle}>Created</th>
                               <th>Questions</th>
                               <th>Preview</th>
                               <th>Edit</th>
@@ -2481,7 +2533,6 @@ export default function AdminConsoleTestingTabs({
                                 key={t.id}
                                 onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
                               >
-                                <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td>
                                   {editingTestId === t.id ? (
                                     <>
@@ -2523,6 +2574,7 @@ export default function AdminConsoleTestingTabs({
                                     t.version ?? ""
                                   )}
                                 </td>
+                                <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td style={{ textAlign: "right" }}>{t.question_count ?? 0}</td>
                                 <td>
                                   <button
