@@ -4595,10 +4595,12 @@ export default function AdminConsole({
 
 
   const attendanceDayColumns = useMemo(() => {
-    return attendanceDays.map((d) => ({
-      ...d,
-      label: `${formatDateShort(d.day_date)} (${formatWeekday(d.day_date)})`,
-    }));
+    return [...attendanceDays]
+      .sort((left, right) => String(right.day_date ?? "").localeCompare(String(left.day_date ?? "")))
+      .map((d) => ({
+        ...d,
+        label: `${formatDateShort(d.day_date)} (${formatWeekday(d.day_date)})`,
+      }));
   }, [attendanceDays]);
 
   const attendanceRangeColumns = useMemo(() => {
@@ -10422,6 +10424,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
         dayColumns.forEach(({ colIndex, dayDate }) => {
           const status = normalizeAttendanceImportStatus(row[colIndex]);
+          if (status === "W") return;
           if (ATTENDANCE_SUPPORTED_STATUSES.includes(status)) {
             if (!importedByDay.has(dayDate)) {
               importedByDay.set(dayDate, new Map());

@@ -237,10 +237,12 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
   const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
 
   const attendanceDayColumns = useMemo(() => {
-    return attendanceDays.map((d) => ({
-      ...d,
-      label: `${formatDateShort(d.day_date)} (${formatWeekday(d.day_date)})`
-    }));
+    return [...attendanceDays]
+      .sort((left, right) => String(right.day_date ?? "").localeCompare(String(left.day_date ?? "")))
+      .map((d) => ({
+        ...d,
+        label: `${formatDateShort(d.day_date)} (${formatWeekday(d.day_date)})`
+      }));
   }, [attendanceDays]);
 
   const attendanceRangeColumns = useMemo(() => {
