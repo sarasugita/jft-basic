@@ -2665,8 +2665,14 @@ export default function AdminConsoleResultsWorkspace(props) {
                         <tr>
                           <th>Average score</th>
                           <td>
-                            <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.averageCorrect.toFixed(2)}</span>
-                            <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.totalQuestions || 0}</span>
+                            {sessionDetailUsesImportedResultsSummaryRaw ? (
+                              <span className="session-analysis-score-main">—</span>
+                            ) : (
+                              <>
+                                <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.averageCorrect.toFixed(2)}</span>
+                                <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.totalQuestions || 0}</span>
+                              </>
+                            )}
                           </td>
                         </tr>
                         <tr>
