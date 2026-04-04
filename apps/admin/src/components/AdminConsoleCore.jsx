@@ -6019,7 +6019,7 @@ export default function AdminConsole({
       setStudentAttendance([]);
       setStudentAttemptsMsg("");
       setStudentAttendanceMsg("");
-      return;
+      return list;
     }
     const exists = selectedStudentId && list.some((s) => s.id === selectedStudentId);
     if (!exists) {
@@ -6031,6 +6031,7 @@ export default function AdminConsole({
       setSelectedStudentTab("information");
       setStudentAttendanceRange({ from: "", to: "" });
     }
+    return list;
   }
 
   async function fetchStudentListMetrics() {

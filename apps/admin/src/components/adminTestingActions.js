@@ -562,11 +562,10 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
     // Auto-load students if roster is empty
     if (!studentRoster.length && fetchStudents) {
       showResultsImportLoadingStatus("daily", "Loading student roster...");
-      await fetchStudents();
-      // Fetch again after loading
-      studentRoster = Array.isArray(sortedStudents) && sortedStudents.length
-        ? sortedStudents
-        : (Array.isArray(students) ? students : []);
+      const fetchedStudents = await fetchStudents();
+      studentRoster = Array.isArray(fetchedStudents) && fetchedStudents.length
+        ? fetchedStudents
+        : studentRoster;
     }
 
     logImportStudentRoster("daily-results", studentRoster);
@@ -983,11 +982,10 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
     // Auto-load students if roster is empty
     if (!studentRoster.length && fetchStudents) {
       showResultsImportLoadingStatus("mock", "Loading student roster...");
-      await fetchStudents();
-      // Fetch again after loading
-      studentRoster = Array.isArray(sortedStudents) && sortedStudents.length
-        ? sortedStudents
-        : (Array.isArray(students) ? students : []);
+      const fetchedStudents = await fetchStudents();
+      studentRoster = Array.isArray(fetchedStudents) && fetchedStudents.length
+        ? fetchedStudents
+        : studentRoster;
     }
 
     logImportStudentRoster("model-results", studentRoster);
