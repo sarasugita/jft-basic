@@ -1,3 +1,58 @@
+const TEST_SESSION_IMPORT_BATCH_SIZE = 250;
+
+function chunkItems(items, size) {
+  const list = Array.isArray(items) ? items : [];
+  const batchSize = Math.max(1, Number(size) || 1);
+  const chunks = [];
+  for (let index = 0; index < list.length; index += batchSize) {
+    chunks.push(list.slice(index, index + batchSize));
+  }
+  return chunks;
+}
+
+function formatUnmatchedImportRow(rowInfo) {
+  const parts = [`#${rowInfo?.rowNumber ?? "?"}`];
+  if (rowInfo?.rowNumberValue) parts.push(`No.${rowInfo.rowNumberValue}`);
+  if (rowInfo?.name) parts.push(`name="${rowInfo.name}"`);
+  if (rowInfo?.section) parts.push(`section="${rowInfo.section}"`);
+  if (rowInfo?.email) parts.push(`email="${rowInfo.email}"`);
+  return parts.join(" ");
+}
+
+function logUnmatchedImportRows(label, rows, sampleSize = 10) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return "";
+  const sample = list.slice(0, sampleSize).map(formatUnmatchedImportRow).join("; ");
+  console.warn(`[${label}] Unmatched import rows`, {
+    count: list.length,
+    sampleRows: list.slice(0, sampleSize),
+  });
+  return sample;
+}
+
+function logImportStudentRoster(label, students, sampleSize = 10) {
+  const roster = Array.isArray(students) ? students : [];
+  const sample = roster.slice(0, sampleSize).map((student, index) => ({
+    index: index + 1,
+    id: student?.id ?? "",
+    name: String(student?.display_name ?? "").trim(),
+    email: String(student?.email ?? "").trim(),
+    section: String(
+      student?.section
+      ?? student?.class_section
+      ?? student?.group
+      ?? student?.batch
+      ?? ""
+    ).trim(),
+    student_code: String(student?.student_code ?? "").trim(),
+  }));
+  console.warn(`[${label}] Import student roster`, {
+    count: roster.length,
+    sampleRows: sample,
+  });
+  return sample;
+}
+
 export async function runSearchAction(context, testType = "") {
   const {
     setLoading,
@@ -82,6 +137,8 @@ export async function clearDailyResultsForCategoryAction(context, category) {
     supabase,
     sessionDetail,
     closeSessionDetail,
+    fetchTestSessions,
+    fetchTests,
     runSearch,
     recordAuditEvent,
   } = context;
@@ -92,10 +149,11 @@ export async function clearDailyResultsForCategoryAction(context, category) {
     return;
   }
   const testVersions = (category?.tests ?? []).map((test) => test?.version).filter(Boolean);
-  const sessionIds = (dailySessions ?? [])
+  const sessionsToDelete = (dailySessions ?? [])
     .filter((session) => testVersions.includes(session.problem_set_id))
-    .map((session) => session.id)
-    .filter(Boolean);
+    .filter((session) => session?.id)
+    .filter((session, index, list) => list.findIndex((item) => item.id === session.id) === index);
+  const sessionIds = sessionsToDelete.map((session) => session.id);
   if (!sessionIds.length) {
     setQuizMsg(`No daily result sessions found in ${categoryName}.`);
     return;
@@ -132,8 +190,24 @@ export async function clearDailyResultsForCategoryAction(context, category) {
     }
   }
 
+  for (let index = 0; index < sessionIds.length; index += 100) {
+    const deleteSessionIds = sessionIds.slice(index, index + 100);
+    const { error } = await supabase.from("test_sessions").delete().in("id", deleteSessionIds);
+    if (error) {
+      console.error("clear daily sessions delete error:", error);
+      setQuizMsg(`Clear failed: ${error.message}`);
+      return;
+    }
+  }
+
   if (sessionDetail.type === "daily" && sessionDetail.sessionId && sessionIds.includes(sessionDetail.sessionId)) {
     closeSessionDetail();
+  }
+  if (typeof fetchTestSessions === "function") {
+    await fetchTestSessions();
+  }
+  if (typeof fetchTests === "function") {
+    await fetchTests();
   }
   await runSearch("daily");
   await recordAuditEvent({
@@ -145,9 +219,10 @@ export async function clearDailyResultsForCategoryAction(context, category) {
       category: categoryName,
       deleted_result_count: attemptCount,
       session_count: sessionIds.length,
+      deleted_session_count: sessionIds.length,
     },
   });
-  setQuizMsg(`Cleared ${attemptCount} daily result record${attemptCount === 1 ? "" : "s"} from ${categoryName}.`);
+  setQuizMsg(`Cleared ${attemptCount} daily result record${attemptCount === 1 ? "" : "s"} and ${sessionIds.length} result session${sessionIds.length === 1 ? "" : "s"} from ${categoryName}.`);
 }
 
 export async function openPreviewAction(context, testVersion) {
@@ -281,6 +356,7 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
     supabase,
     createImportedStudentMatcher,
     sortedStudents,
+    students,
     rowHasCsvValues,
     normalizeCsvValue,
     parsePercentCell,
@@ -289,6 +365,7 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
     replaceImportedSummaryAttempts,
     fetchTestSessions,
     fetchTests,
+    fetchStudents,
     setDailyResultsCategory,
     runSearch,
     recordAuditEvent,
@@ -452,18 +529,23 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
           allow_multiple_attempts: false,
         };
       });
-      const { data: createdSessions, error: createError } = await supabase
-        .from("test_sessions")
-        .insert(createPayloads)
-        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at");
-      if (createError) {
-        const message = `Import failed: ${createError.message}`;
-        setQuizMsg(message);
-        showResultsImportResultStatus("daily", message, "error");
-        return;
+      const createdSessions = [];
+      for (const payloadChunk of chunkItems(createPayloads, TEST_SESSION_IMPORT_BATCH_SIZE)) {
+        const { data: chunkSessions, error: createError } = await supabase
+          .from("test_sessions")
+          .insert(payloadChunk)
+          .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at");
+        if (createError) {
+          const message = `Import failed: ${createError.message}`;
+          setQuizMsg(message);
+          showResultsImportResultStatus("daily", message, "error");
+          return;
+        }
+        createdSessions.push(...(chunkSessions ?? []));
       }
-      createdSessions?.forEach((sessionRow, index) => {
+      createdSessions.forEach((sessionRow, index) => {
         const column = columnsToCreate[index];
+        if (!column) return;
         column.session = {
           retake_source_session_id: null,
           retake_release_scope: "all",
@@ -473,7 +555,22 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
       });
     }
 
-    const matchStudent = createImportedStudentMatcher(sortedStudents);
+    let studentRoster = Array.isArray(sortedStudents) && sortedStudents.length
+      ? sortedStudents
+      : (Array.isArray(students) ? students : []);
+
+    // Auto-load students if roster is empty
+    if (!studentRoster.length && fetchStudents) {
+      showResultsImportLoadingStatus("daily", "Loading student roster...");
+      await fetchStudents();
+      // Fetch again after loading
+      studentRoster = Array.isArray(sortedStudents) && sortedStudents.length
+        ? sortedStudents
+        : (Array.isArray(students) ? students : []);
+    }
+
+    logImportStudentRoster("daily-results", studentRoster);
+    const matchStudent = createImportedStudentMatcher(studentRoster);
     const payloads = [];
     const unmatchedRows = [];
     showResultsImportLoadingStatus("daily", `Matching students and saving imported results into ${categoryName}...`);
@@ -484,14 +581,21 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
       const sectionMarker = normalizeLookupValue(row[3]);
       if (sectionMarker.startsWith("failed students") || sectionMarker.startsWith("absent students")) break;
 
+      const rowNumberValue = normalizeCsvValue(row[1]);
       const student = matchStudent({
-        rowNumber: Number(normalizeCsvValue(row[1])),
+        rowNumber: Number(rowNumberValue),
         name: row[2],
         section: row[3],
         email: "",
       });
       if (!student?.id) {
-        unmatchedRows.push(rowIndex + 1);
+        unmatchedRows.push({
+          rowNumber: rowIndex + 1,
+          rowNumberValue,
+          name: String(row[2] ?? "").trim(),
+          section: String(row[3] ?? "").trim(),
+          email: "",
+        });
         continue;
       }
 
@@ -523,10 +627,17 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
 
     const dedupedPayloads = dedupeImportedAttemptPayloads(payloads);
     if (!dedupedPayloads.length) {
-      const message = "Import failed: no daily result rows were recognized.";
+      const unmatchedLog = logUnmatchedImportRows("daily-results", unmatchedRows);
+      const message = unmatchedLog
+        ? `Import failed: no daily result rows were recognized. Unmatched rows: ${unmatchedLog}`
+        : "Import failed: no daily result rows were recognized.";
       setQuizMsg(message);
       showResultsImportResultStatus("daily", message, "error");
       return;
+    }
+
+    if (unmatchedRows.length) {
+      logUnmatchedImportRows("daily-results", unmatchedRows);
     }
 
     const result = await replaceImportedSummaryAttempts(dedupedPayloads, {
@@ -599,6 +710,7 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
     supabase,
     createImportedStudentMatcher,
     sortedStudents,
+    students,
     rowHasCsvValues,
     normalizeCsvValue,
     buildImportedSummaryAnswersJson,
@@ -607,6 +719,7 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
     replaceImportedSummaryAttempts,
     fetchTestSessions,
     fetchTests,
+    fetchStudents,
     setModelResultsCategory,
     runSearch,
     recordAuditEvent,
@@ -828,18 +941,23 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
           allow_multiple_attempts: false,
         };
       });
-      const { data: createdSessions, error: createError } = await supabase
-        .from("test_sessions")
-        .insert(createPayloads)
-        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at");
-      if (createError) {
-        const message = `Import failed: ${createError.message}`;
-        setQuizMsg(message);
-        showResultsImportResultStatus("mock", message, "error");
-        return;
+      const createdSessions = [];
+      for (const payloadChunk of chunkItems(createPayloads, TEST_SESSION_IMPORT_BATCH_SIZE)) {
+        const { data: chunkSessions, error: createError } = await supabase
+          .from("test_sessions")
+          .insert(payloadChunk)
+          .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at");
+        if (createError) {
+          const message = `Import failed: ${createError.message}`;
+          setQuizMsg(message);
+          showResultsImportResultStatus("mock", message, "error");
+          return;
+        }
+        createdSessions.push(...(chunkSessions ?? []));
       }
-      createdSessions?.forEach((sessionRow, index) => {
+      createdSessions.forEach((sessionRow, index) => {
         const block = blocksToCreate[index];
+        if (!block) return;
         block.session = {
           retake_source_session_id: null,
           retake_release_scope: "all",
@@ -858,7 +976,22 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
       )
     );
 
-    const matchStudent = createImportedStudentMatcher(sortedStudents);
+    let studentRoster = Array.isArray(sortedStudents) && sortedStudents.length
+      ? sortedStudents
+      : (Array.isArray(students) ? students : []);
+
+    // Auto-load students if roster is empty
+    if (!studentRoster.length && fetchStudents) {
+      showResultsImportLoadingStatus("mock", "Loading student roster...");
+      await fetchStudents();
+      // Fetch again after loading
+      studentRoster = Array.isArray(sortedStudents) && sortedStudents.length
+        ? sortedStudents
+        : (Array.isArray(students) ? students : []);
+    }
+
+    logImportStudentRoster("model-results", studentRoster);
+    const matchStudent = createImportedStudentMatcher(studentRoster);
     const payloads = [];
     const unmatchedRows = [];
     showResultsImportLoadingStatus("mock", `Matching students and saving imported results into ${categoryName}...`);
@@ -869,14 +1002,21 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
       const sectionMarker = normalizeLookupValue(row[3]);
       if (sectionMarker.startsWith("failed students") || sectionMarker.startsWith("absent students")) break;
 
+      const rowNumberValue = normalizeCsvValue(row[1]);
       const student = matchStudent({
-        rowNumber: Number(normalizeCsvValue(row[1])),
+        rowNumber: Number(rowNumberValue),
         name: row[2],
         section: row[3],
         email: "",
       });
       if (!student?.id) {
-        unmatchedRows.push(rowIndex + 1);
+        unmatchedRows.push({
+          rowNumber: rowIndex + 1,
+          rowNumberValue,
+          name: String(row[2] ?? "").trim(),
+          section: String(row[3] ?? "").trim(),
+          email: "",
+        });
         continue;
       }
 
@@ -929,10 +1069,17 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
 
     const dedupedPayloads = dedupeImportedAttemptPayloads(payloads);
     if (!dedupedPayloads.length) {
-      const message = "Import failed: no model result rows were recognized.";
+      const unmatchedLog = logUnmatchedImportRows("model-results", unmatchedRows);
+      const message = unmatchedLog
+        ? `Import failed: no model result rows were recognized. Unmatched rows: ${unmatchedLog}`
+        : "Import failed: no model result rows were recognized.";
       setQuizMsg(message);
       showResultsImportResultStatus("mock", message, "error");
       return;
+    }
+
+    if (unmatchedRows.length) {
+      logUnmatchedImportRows("model-results", unmatchedRows);
     }
 
     const result = await replaceImportedSummaryAttempts(dedupedPayloads, {
