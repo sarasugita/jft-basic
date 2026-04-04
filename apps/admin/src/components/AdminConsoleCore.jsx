@@ -949,7 +949,7 @@ const ATTENDANCE_EXPORT_RULES = [
 ];
 const ATTENDANCE_COUNTED_STATUSES = ["P", "L", "E", "A"];
 const ATTENDANCE_SUPPORTED_STATUSES = [...ATTENDANCE_COUNTED_STATUSES, "N/A", "W"];
-const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
+const IMPORTED_ATTEMPT_BATCH_SIZE = 50;
 const IMPORTED_ATTEMPT_QUERY_BATCH_SIZE = 50;
 const ATTENDANCE_IMPORT_BATCH_SIZE = 250;
 const ATTENDANCE_DAYS_PAGE_SIZE = 1000;
@@ -1273,12 +1273,20 @@ function normalizeAttemptDateKey(value) {
 function createImportedStudentMatcher(studentsList) {
   const students = Array.isArray(studentsList) ? studentsList : [];
   const emailMap = new Map();
+  const nameMap = new Map();
   const nameSectionMap = new Map();
 
   students.forEach((student) => {
     const emailKey = normalizeLookupValue(student?.email);
     if (emailKey) emailMap.set(emailKey, student);
-    const nameSectionKey = `${normalizeLookupValue(student?.display_name)}::${normalizeLookupValue(getStudentSectionValue(student))}`;
+    const nameKey = normalizeLookupValue(student?.display_name);
+    if (nameKey) {
+      if (!nameMap.has(nameKey)) {
+        nameMap.set(nameKey, []);
+      }
+      nameMap.get(nameKey).push(student);
+    }
+    const nameSectionKey = `${nameKey}::${normalizeLookupValue(getStudentSectionValue(student))}`;
     if (!nameSectionMap.has(nameSectionKey)) {
       nameSectionMap.set(nameSectionKey, []);
     }
@@ -1291,6 +1299,17 @@ function createImportedStudentMatcher(studentsList) {
 
     const normalizedName = normalizeLookupValue(name);
     const normalizedSection = normalizeLookupValue(section);
+    const nameMatches = normalizedName ? (nameMap.get(normalizedName) ?? []) : [];
+    if (nameMatches.length === 1) return nameMatches[0];
+
+    if (nameMatches.length > 1 && normalizedSection) {
+      const nameSectionMatches = nameMatches.filter(
+        (student) => normalizeLookupValue(getStudentSectionValue(student)) === normalizedSection
+      );
+      if (nameSectionMatches.length === 1) return nameSectionMatches[0];
+      if (nameSectionMatches.length > 1) return nameSectionMatches[0];
+    }
+
     const indexedStudent = Number.isFinite(rowNumber) && rowNumber > 0 ? students[rowNumber - 1] ?? null : null;
     if (indexedStudent) {
       const indexedName = normalizeLookupValue(indexedStudent.display_name);
@@ -1303,13 +1322,7 @@ function createImportedStudentMatcher(studentsList) {
     const byNameSection = nameSectionMap.get(`${normalizedName}::${normalizedSection}`) ?? [];
     if (byNameSection.length === 1) return byNameSection[0];
     if (byNameSection.length > 1 && indexedStudent) return indexedStudent;
-
-    if (normalizedName) {
-      const byNameOnly = students.filter((student) => normalizeLookupValue(student?.display_name) === normalizedName);
-      if (byNameOnly.length === 1) return byNameOnly[0];
-      if (byNameOnly.length > 1 && indexedStudent) return indexedStudent;
-    }
-
+    if (nameMatches.length > 1 && indexedStudent) return indexedStudent;
     return indexedStudent;
   };
 }
@@ -5483,6 +5496,8 @@ export default function AdminConsole({
       supabase,
       sessionDetail,
       closeSessionDetail,
+      fetchTestSessions,
+      fetchTests,
       runSearch,
       recordAuditEvent,
     }, category);
@@ -10251,20 +10266,22 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
     const deleteIds = [];
     for (const sessionIdChunk of chunkItems(sessionIds, IMPORTED_ATTEMPT_QUERY_BATCH_SIZE)) {
-      const { data: existingRows, error: existingError } = await supabase
-        .from("attempts")
-        .select("id, answers_json, student_id, test_session_id")
-        .in("test_session_id", sessionIdChunk)
-        .in("student_id", studentIds);
-      if (existingError) {
-        return { ids: [], error: existingError };
+      for (const studentIdChunk of chunkItems(studentIds, IMPORTED_ATTEMPT_QUERY_BATCH_SIZE)) {
+        const { data: existingRows, error: existingError } = await supabase
+          .from("attempts")
+          .select("id, answers_json, student_id, test_session_id")
+          .in("test_session_id", sessionIdChunk)
+          .in("student_id", studentIdChunk);
+        if (existingError) {
+          return { ids: [], error: existingError };
+        }
+        deleteIds.push(
+          ...(existingRows ?? [])
+            .filter((row) => pairKeys.has(`${row.student_id}::${row.test_session_id}`))
+            .filter((row) => isImportedSummaryAttempt(row))
+            .map((row) => row.id)
+        );
       }
-      deleteIds.push(
-        ...(existingRows ?? [])
-          .filter((row) => pairKeys.has(`${row.student_id}::${row.test_session_id}`))
-          .filter((row) => isImportedSummaryAttempt(row))
-          .map((row) => row.id)
-      );
     }
 
     return {
@@ -11380,6 +11397,16 @@ function openDailyRecordModal(record = null, recordDate = "") {
     buildAttendanceStats,
     getAttendanceStatusClassName,
     isAnalyticsExcludedStudent,
+    clearDailyResultsForCategory,
+    openResultsImportStatus,
+    resultsImportStatus,
+    resultsImportInputRef,
+    getResultsImportTargetCategoryName,
+    showResultsImportLoadingStatus,
+    showResultsImportResultStatus,
+    closeResultsImportStatus,
+    importDailyResultsGoogleSheetsCsv,
+    importModelResultsGoogleSheetsCsv,
     openAttendanceDay,
     saveAttendanceDay,
     deleteAttendanceDay,
