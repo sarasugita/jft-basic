@@ -235,10 +235,27 @@ export default function SuperSchoolsPage() {
   }, [refreshNonce, supabase]);
 
   const filteredSchools = useMemo(() => {
-    return schools.filter((school) => {
+    const filtered = schools.filter((school) => {
       const matchesSearch = school.name.toLowerCase().includes(search.trim().toLowerCase());
       const matchesStatus = statusFilter === "all" || school.status === statusFilter;
       return matchesSearch && matchesStatus;
+    });
+
+    return [...filtered].sort((left, right) => {
+      const leftDate = String(left.start_date ?? "").trim();
+      const rightDate = String(right.start_date ?? "").trim();
+      const leftMissing = !leftDate;
+      const rightMissing = !rightDate;
+
+      if (leftMissing !== rightMissing) {
+        return leftMissing ? 1 : -1;
+      }
+
+      if (!leftMissing && leftDate !== rightDate) {
+        return leftDate.localeCompare(rightDate);
+      }
+
+      return String(left.name ?? "").localeCompare(String(right.name ?? ""));
     });
   }, [schools, search, statusFilter]);
 
