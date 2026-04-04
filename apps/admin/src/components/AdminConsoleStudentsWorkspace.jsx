@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useStudentsWorkspaceState } from "./AdminConsoleStudentsWorkspaceState";
 
@@ -202,11 +202,27 @@ export default function AdminConsoleStudentsWorkspace() {
     return selectedStudentSummary;
   }, [contextSelectedStudent, selectedStudentDetail, selectedStudentId, students]);
 
+  const autoLoadSchoolIdRef = useRef("");
+
   // Wrapper for loading metrics (since handleLoadStudentMetrics from context references old fetchStudentListMetrics)
   const loadMetrics = useCallback(() => {
     if (studentListLoading) return;
     fetchStudentListMetrics();
   }, [studentListLoading, fetchStudentListMetrics]);
+
+  useEffect(() => {
+    if (!activeSchoolId || !session || !canUseAdminConsole) return;
+    if (autoLoadSchoolIdRef.current === activeSchoolId) return;
+    autoLoadSchoolIdRef.current = activeSchoolId;
+    void fetchStudentListMetrics();
+    void handleLoadStudentWarnings();
+  }, [
+    activeSchoolId,
+    canUseAdminConsole,
+    fetchStudentListMetrics,
+    handleLoadStudentWarnings,
+    session,
+  ]);
 
   useEffect(() => {
     if (!activeSchoolId || !session || !canUseAdminConsole) return;

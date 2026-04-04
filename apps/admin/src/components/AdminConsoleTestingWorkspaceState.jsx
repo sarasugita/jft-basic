@@ -77,6 +77,10 @@ function compareSetIds(left, right) {
   return SET_ID_COLLATOR.compare(String(left ?? "").trim(), String(right ?? "").trim());
 }
 
+function getSessionSortTime(session) {
+  return new Date(session?.starts_at || session?.created_at || 0).getTime();
+}
+
 function normalizeLegacyTestErrorMessage(error, action = "update") {
   const text = String(error?.message ?? "").trim();
   if (
@@ -1477,9 +1481,9 @@ export function useTestingWorkspaceState({
       return category === selectedModelSessionCategory.name;
     });
     return [...list].sort((left, right) => {
-      const versionCompare = compareSetIds(left.problem_set_id, right.problem_set_id);
-      if (versionCompare !== 0) return versionCompare;
-      return String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""));
+      const timeCompare = getSessionSortTime(right) - getSessionSortTime(left);
+      if (timeCompare !== 0) return timeCompare;
+      return compareSetIds(left.problem_set_id, right.problem_set_id);
     });
   }, [modelSessions, selectedModelSessionCategory, testMetaByVersion]);
 
@@ -1496,9 +1500,9 @@ export function useTestingWorkspaceState({
       return category === selectedDailySessionCategory.name;
     });
     return [...list].sort((left, right) => {
-      const versionCompare = compareSetIds(left.problem_set_id, right.problem_set_id);
-      if (versionCompare !== 0) return versionCompare;
-      return String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""));
+      const timeCompare = getSessionSortTime(right) - getSessionSortTime(left);
+      if (timeCompare !== 0) return timeCompare;
+      return compareSetIds(left.problem_set_id, right.problem_set_id);
     });
   }, [dailySessions, selectedDailySessionCategory, testMetaByVersion]);
 

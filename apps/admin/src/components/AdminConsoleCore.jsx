@@ -6118,6 +6118,7 @@ export default function AdminConsole({
         setStudentWarningsMsg(`Warnings load failed: ${warningError.message}`);
       }
       setStudentWarnings([]);
+      setStudentWarningsLoaded(true);
       setStudentWarningsLoading(false);
       return;
     }
@@ -6139,6 +6140,7 @@ export default function AdminConsole({
         setStudentWarningsMsg(`Warnings load failed: ${recipientError.message}`);
       }
       setStudentWarnings([]);
+      setStudentWarningsLoaded(true);
       setStudentWarningsLoading(false);
       return;
     }
@@ -6174,6 +6176,7 @@ export default function AdminConsole({
     } catch (error) {
       console.error("student warnings hydrate error:", error);
       setStudentWarnings([]);
+      setStudentWarningsLoaded(true);
       setStudentWarningsLoading(false);
       setStudentWarningsMsg(`Warnings load failed: ${error.message || error}`);
     }

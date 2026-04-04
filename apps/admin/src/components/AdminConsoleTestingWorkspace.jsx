@@ -43,8 +43,11 @@ export default function AdminConsoleTestingWorkspace() {
 
   // Memoize recordAuditEvent to prevent unnecessary re-renders in the hook
   const memoizedRecordAuditEvent = useCallback(
-    (eventObj) => recordAdminAuditEvent(supabase, eventObj),
-    [supabase, recordAdminAuditEvent]
+    (eventObj) => recordAdminAuditEvent(supabase, {
+      ...eventObj,
+      schoolId: eventObj?.schoolId ?? activeSchoolId,
+    }),
+    [activeSchoolId, supabase, recordAdminAuditEvent]
   );
 
   // Initialize testing workspace state hook

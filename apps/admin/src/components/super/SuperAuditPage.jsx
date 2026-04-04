@@ -40,6 +40,22 @@ function buildAuditSummary(row) {
   return `${actionLabel} ${entityLabel}${targetLabel ? `: ${targetLabel}` : ""}`;
 }
 
+function formatAuditDateTime(value) {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "N/A";
+  return date.toLocaleString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
 export default function SuperAuditPage() {
   const { supabase } = useSuperAdmin();
   const [filters, setFilters] = useState({
@@ -183,7 +199,7 @@ export default function SuperAuditPage() {
             <tbody>
               {logs.map((row) => (
                 <tr key={row.id}>
-                  <td>{row.created_at ? new Date(row.created_at).toLocaleString() : "N/A"}</td>
+                  <td>{formatAuditDateTime(row.created_at)}</td>
                   <td>
                     <div>{row.actor_email || row.actor_user_id || "N/A"}</div>
                     <div className="daily-code">{row.actor_role || "N/A"}</div>
@@ -191,7 +207,7 @@ export default function SuperAuditPage() {
                   <td>
                     <div>{buildAuditSummary(row)}</div>
                   </td>
-                  <td>{row.school_id ? schoolMap[row.school_id] ?? row.school_id : "N/A"}</td>
+                  <td>{row.school_id ? schoolMap[row.school_id] ?? row.school_id : "Global"}</td>
                 </tr>
               ))}
               {!loading && logs.length === 0 ? (
