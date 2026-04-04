@@ -32,7 +32,14 @@ export default function AdminConsoleTestingWorkspace() {
     formatRatePercent,
     exportDailyGoogleSheetsCsv,
     exportModelGoogleSheetsCsv,
+    clearDailyResultsForCategory,
     recordAdminAuditEvent,
+    openResultsImportStatus,
+    resultsImportStatus,
+    resultsImportInputRef,
+    getResultsImportTargetCategoryName,
+    importDailyResultsGoogleSheetsCsv,
+    importModelResultsGoogleSheetsCsv,
   } = context;
 
   // Get CSV parsers from context
@@ -120,8 +127,15 @@ export default function AdminConsoleTestingWorkspace() {
     runSearch,
     exportDailyGoogleSheetsCsv,
     exportModelGoogleSheetsCsv,
+    clearDailyResultsForCategory,
     // Include all hook state properties needed by AdminConsoleResultsWorkspace
     ...hookState,
+    openResultsImportStatus,
+    resultsImportStatus,
+    resultsImportInputRef,
+    getResultsImportTargetCategoryName,
+    importDailyResultsGoogleSheetsCsv,
+    importModelResultsGoogleSheetsCsv,
   };
 
   const resultsWorkspaceActive = Boolean(

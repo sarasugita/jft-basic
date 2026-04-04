@@ -1831,19 +1831,41 @@ export function useTestingWorkspaceState({
   const fetchAttempts = useCallback(async () => {
     if (!supabase || !activeSchoolId) return;
     setAttemptsMsg("Loading results...");
-    const { data, error } = await supabase
-      .from("attempts")
-      .select("id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json")
-      .eq("school_id", activeSchoolId)
-      .order("created_at", { ascending: false })
-      .limit(5000);
-    if (error) {
-      console.error("attempts fetch error:", error);
-      setAttempts([]);
-      setAttemptsMsg(`Load failed: ${error.message}`);
-      return;
+
+    const allData = [];
+    let offset = 0;
+    const pageSize = 5000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from("attempts")
+        .select("id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json")
+        .eq("school_id", activeSchoolId)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (error) {
+        console.error("attempts fetch error:", error);
+        setAttempts([]);
+        setAttemptsMsg(`Load failed: ${error.message}`);
+        return;
+      }
+
+      const pageData = data ?? [];
+      if (pageData.length === 0) {
+        hasMore = false;
+      } else {
+        allData.push(...pageData);
+        if (pageData.length < pageSize) {
+          hasMore = false;
+        } else {
+          offset += pageSize;
+        }
+      }
     }
-    setAttempts(data ?? []);
+
+    setAttempts(allData);
     setAttemptsMsg("");
   }, [supabase, activeSchoolId]);
 
