@@ -47,7 +47,6 @@ export default function AdminConsoleAttendanceWorkspace() {
     buildAttendanceStats,
     getAttendanceStatusClassName,
     deleteAttendanceDay,
-    cleanupInvalidAttendanceDates,
     attendanceModalDay,
     // Memos from hook
     attendanceDayColumns,
@@ -232,28 +231,20 @@ export default function AdminConsoleAttendanceWorkspace() {
             <span>Export CSV</span>
           </button>
           <button
-            className="btn btn-danger results-page-action-btn"
-            type="button"
-            onClick={clearAllAttendanceValues}
-            disabled={attendanceClearing}
-          >
-            <span>{attendanceClearing ? "Clearing..." : "Clear All Attendance"}</span>
-          </button>
-          <button
-            className="btn results-page-action-btn"
-            type="button"
-            onClick={cleanupInvalidAttendanceDates}
-            title="Remove invalid attendance dates (e.g., 3/32, 4/1 when data only goes to 3/31)"
-          >
-            <span>Clean Up Invalid Dates</span>
-          </button>
-          <button
             className="btn results-page-action-btn"
             type="button"
             onClick={() => attendanceImportInputRef.current?.click()}
           >
             <span className="results-page-action-icon" aria-hidden="true">↑</span>
             <span>Import CSV</span>
+          </button>
+          <button
+            className="btn btn-danger results-page-action-btn"
+            type="button"
+            onClick={clearAllAttendanceValues}
+            disabled={attendanceClearing}
+          >
+            <span>{attendanceClearing ? "Clearing..." : "Clear All Attendance"}</span>
           </button>
           <input
             ref={attendanceImportInputRef}
