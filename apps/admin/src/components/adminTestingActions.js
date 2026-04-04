@@ -366,6 +366,7 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
     fetchTestSessions,
     fetchTests,
     fetchStudents,
+    fetchAttempts,
     setDailyResultsCategory,
     runSearch,
     recordAuditEvent,
@@ -677,6 +678,9 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
     });
     setQuizMsg(message);
     showResultsImportResultStatus("daily", message, "success");
+    if (fetchAttempts) {
+      await fetchAttempts();
+    }
   } catch (error) {
     const message = `Import failed: ${error instanceof Error ? error.message : error}`;
     setQuizMsg(message);
@@ -719,6 +723,7 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
     fetchTestSessions,
     fetchTests,
     fetchStudents,
+    fetchAttempts,
     setModelResultsCategory,
     runSearch,
     recordAuditEvent,
@@ -1118,6 +1123,9 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
     });
     setQuizMsg(message);
     showResultsImportResultStatus("mock", message, "success");
+    if (fetchAttempts) {
+      await fetchAttempts();
+    }
   } catch (error) {
     const message = `Import failed: ${error instanceof Error ? error.message : error}`;
     setQuizMsg(message);

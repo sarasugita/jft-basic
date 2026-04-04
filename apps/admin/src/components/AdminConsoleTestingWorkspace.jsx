@@ -136,6 +136,7 @@ export default function AdminConsoleTestingWorkspace() {
     getResultsImportTargetCategoryName,
     importDailyResultsGoogleSheetsCsv,
     importModelResultsGoogleSheetsCsv,
+    fetchAttempts: hookState.fetchAttempts,
   };
 
   const resultsWorkspaceActive = Boolean(
