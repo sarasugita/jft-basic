@@ -6,6 +6,27 @@ import {
   isAnalyticsExcludedStudent,
 } from "../lib/adminAnalyticsHelpers";
 
+const SUPABASE_SAFE_PAGE_SIZE = 500;
+
+async function fetchAllPages(buildPageQuery, pageSize = SUPABASE_SAFE_PAGE_SIZE) {
+  const rows = [];
+  let offset = 0;
+
+  while (true) {
+    const result = await buildPageQuery(offset, pageSize);
+    if (result.error) return { data: null, error: result.error };
+
+    const page = result.data ?? [];
+    rows.push(...page);
+
+    if (page.length < pageSize) {
+      return { data: rows, error: null };
+    }
+
+    offset += pageSize;
+  }
+}
+
 function getRankingDrafts(periods) {
   const drafts = {};
   (periods ?? []).forEach((period) => {
@@ -178,12 +199,17 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId }) {
       return;
     }
 
-    const { data: attemptsData, error: attemptsError } = await supabase
-      .from("attempts")
-      .select("student_id, test_session_id, test_version, score_rate, correct, total, created_at, ended_at")
-      .eq("school_id", activeSchoolId)
-      .gte("created_at", new Date(`${draft.start_date}T00:00:00`).toISOString())
-      .lte("created_at", new Date(`${draft.end_date}T23:59:59`).toISOString());
+    const { data: attemptsData, error: attemptsError } = await fetchAllPages((offset, pageSize) => (
+      supabase
+        .from("attempts")
+        .select("id, student_id, test_session_id, test_version, score_rate, correct, total, created_at, ended_at")
+        .eq("school_id", activeSchoolId)
+        .gte("created_at", new Date(`${draft.start_date}T00:00:00`).toISOString())
+        .lte("created_at", new Date(`${draft.end_date}T23:59:59`).toISOString())
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + pageSize - 1)
+    ));
     if (attemptsError) {
       console.error("ranking attempts fetch error:", attemptsError);
       setRankingMsg(`Refresh failed: ${attemptsError.message}`);

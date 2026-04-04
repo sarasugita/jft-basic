@@ -40,6 +40,8 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceFilter,
     setAttendanceFilter,
     fetchAttendanceDays,
+    attendanceSheetLoaded,
+    attendanceSheetRefreshing,
     fetchAbsenceApplications,
     absenceApplications,
     decideAbsenceApplication,
@@ -62,11 +64,13 @@ export default function AdminConsoleAttendanceWorkspace() {
       if (!students.length) {
         fetchStudents();
       }
-      fetchAttendanceDays();
+      if (!attendanceSheetLoaded && !attendanceSheetRefreshing) {
+        fetchAttendanceDays();
+      }
       return;
     }
     fetchAbsenceApplications();
-  }, [activeSchoolId, attendanceSubTab, students.length]);
+  }, [activeSchoolId, attendanceSubTab, students.length, attendanceSheetLoaded, attendanceSheetRefreshing]);
 
   if (attendanceSubTab === "absence") {
     return (
@@ -201,11 +205,13 @@ export default function AdminConsoleAttendanceWorkspace() {
             type="button"
             aria-label="Refresh attendance sheet"
             title="Refresh attendance sheet"
+            disabled={attendanceSheetRefreshing}
+            aria-busy={attendanceSheetRefreshing}
             onClick={() => {
               if (!students.length) {
                 fetchStudents();
               }
-              fetchAttendanceDays();
+              fetchAttendanceDays({ force: true });
             }}
           >
             <svg viewBox="0 0 20 20" aria-hidden="true">

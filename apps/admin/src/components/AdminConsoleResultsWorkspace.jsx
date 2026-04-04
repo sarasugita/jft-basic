@@ -660,6 +660,12 @@ function getAttemptScoreRate(attempt, getScoreRate = null) {
     const resolvedRate = Number(getScoreRate(attempt));
     if (Number.isFinite(resolvedRate)) return resolvedRate;
   }
+  if (isImportedSummaryAttempt(attempt)) {
+    const importedMetaRate = Number(attempt?.answers_json?.__meta?.imported_rate);
+    if (Number.isFinite(importedMetaRate)) return importedMetaRate;
+    const importedRate = Number(attempt?.score_rate);
+    if (Number.isFinite(importedRate)) return importedRate;
+  }
   const correct = Number(attempt?.correct ?? 0);
   const total = Number(attempt?.total ?? 0);
   if (Number.isFinite(correct) && Number.isFinite(total) && total > 0) {

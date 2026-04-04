@@ -6,8 +6,68 @@ import { recordAdminAuditEvent } from "../lib/adminAudit";
 const ATTENDANCE_COUNTED_STATUSES = ["P", "L", "E", "A"];
 const ATTENDANCE_SUPPORTED_STATUSES = [...ATTENDANCE_COUNTED_STATUSES, "N/A", "W"];
 const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
-const ATTENDANCE_DAYS_PAGE_SIZE = 1000;
-const ATTENDANCE_ENTRIES_PAGE_SIZE = 1000;
+const ATTENDANCE_DAYS_PAGE_SIZE = 500;
+const ATTENDANCE_ENTRIES_PAGE_SIZE = 500;
+const attendanceSheetCache = new Map();
+
+async function fetchAllPages(buildPageQuery, pageSize) {
+  const rows = [];
+  let offset = 0;
+
+  while (true) {
+    const result = await buildPageQuery(offset, pageSize);
+    if (result.error) return { data: null, error: result.error };
+
+    const page = result.data ?? [];
+    rows.push(...page);
+
+    if (page.length < pageSize) {
+      return { data: rows, error: null };
+    }
+
+    offset += pageSize;
+  }
+}
+
+function cloneAttendanceDays(days) {
+  return Array.isArray(days) ? days.map((day) => ({ ...day })) : [];
+}
+
+function cloneAttendanceEntries(entries) {
+  const cloned = {};
+  Object.entries(entries ?? {}).forEach(([dayId, dayEntries]) => {
+    cloned[dayId] = {};
+    Object.entries(dayEntries ?? {}).forEach(([studentId, entry]) => {
+      cloned[dayId][studentId] = entry ? { ...entry } : entry;
+    });
+  });
+  return cloned;
+}
+
+function readAttendanceSheetCache(schoolId) {
+  if (!schoolId) return null;
+  const cached = attendanceSheetCache.get(String(schoolId));
+  if (!cached) return null;
+  return {
+    attendanceDays: cloneAttendanceDays(cached.attendanceDays),
+    attendanceEntries: cloneAttendanceEntries(cached.attendanceEntries),
+    attendanceMsg: cached.attendanceMsg ?? "",
+  };
+}
+
+function writeAttendanceSheetCache(schoolId, attendanceDays, attendanceEntries, attendanceMsg = "") {
+  if (!schoolId) return;
+  attendanceSheetCache.set(String(schoolId), {
+    attendanceDays: cloneAttendanceDays(attendanceDays),
+    attendanceEntries: cloneAttendanceEntries(attendanceEntries),
+    attendanceMsg,
+  });
+}
+
+function clearAttendanceSheetCache(schoolId) {
+  if (!schoolId) return;
+  attendanceSheetCache.delete(String(schoolId));
+}
 
 
 // Helper functions
@@ -200,14 +260,17 @@ function detectAttendanceImportLayout(rows) {
 
 export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students = [], attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent = () => false, formatDateShort = (d) => d, formatWeekday = (d) => "", openAttendanceDayCtx }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
+  const initialAttendanceSheet = readAttendanceSheetCache(activeSchoolId);
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
   }, [activeSchoolId]);
 
   // State
-  const [attendanceDays, setAttendanceDays] = useState([]);
-  const [attendanceEntries, setAttendanceEntries] = useState({});
-  const [attendanceMsg, setAttendanceMsg] = useState("");
+  const [attendanceDays, setAttendanceDays] = useState(() => initialAttendanceSheet?.attendanceDays ?? []);
+  const [attendanceEntries, setAttendanceEntries] = useState(() => initialAttendanceSheet?.attendanceEntries ?? {});
+  const [attendanceMsg, setAttendanceMsg] = useState(() => initialAttendanceSheet?.attendanceMsg ?? "");
+  const [attendanceSheetLoaded, setAttendanceSheetLoaded] = useState(() => Boolean(initialAttendanceSheet));
+  const [attendanceSheetRefreshing, setAttendanceSheetRefreshing] = useState(false);
   const [attendanceDate, setAttendanceDate] = useState(() => {
     const today = new Date();
     if (Number.isNaN(today.getTime())) return "";
@@ -232,6 +295,15 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
 
   const attendanceImportInputRef = useRef(null);
   const attendanceImportChoiceResolverRef = useRef(null);
+
+  useEffect(() => {
+    const cached = readAttendanceSheetCache(activeSchoolId);
+    setAttendanceDays(cached?.attendanceDays ?? []);
+    setAttendanceEntries(cached?.attendanceEntries ?? {});
+    setAttendanceMsg(cached?.attendanceMsg ?? "");
+    setAttendanceSheetLoaded(Boolean(cached));
+    setAttendanceSheetRefreshing(false);
+  }, [activeSchoolId]);
 
   // Memos - derived attendance data
   const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
@@ -362,89 +434,113 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     fetchAbsenceApplications();
   }
 
-  async function fetchAttendanceDays() {
+  function applyAttendanceSheetSnapshot(schoolIdSnapshot, nextAttendanceDays, nextAttendanceEntries, nextAttendanceMsg = "") {
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+    setAttendanceDays(nextAttendanceDays);
+    setAttendanceEntries(nextAttendanceEntries);
+    setAttendanceMsg(nextAttendanceMsg);
+    setAttendanceSheetLoaded(true);
+    setAttendanceSheetRefreshing(false);
+    writeAttendanceSheetCache(schoolIdSnapshot, nextAttendanceDays, nextAttendanceEntries, nextAttendanceMsg);
+  }
+
+  async function fetchAttendanceDays(options = {}) {
+    const { force = false } = options;
     const schoolIdSnapshot = activeSchoolIdRef.current;
     if (!schoolIdSnapshot || !supabase) {
       setAttendanceDays([]);
       setAttendanceEntries({});
       setAttendanceMsg("");
+      setAttendanceSheetLoaded(false);
+      setAttendanceSheetRefreshing(false);
       return;
     }
-    setAttendanceMsg("Loading attendance...");
-    const rows = [];
-    let offset = 0;
+    const cached = readAttendanceSheetCache(schoolIdSnapshot);
+    if (!force && cached) {
+      applyAttendanceSheetSnapshot(
+        schoolIdSnapshot,
+        cached.attendanceDays,
+        cached.attendanceEntries,
+        cached.attendanceMsg
+      );
+      return;
+    }
 
-    while (true) {
-      const { data, error } = await supabase
+    setAttendanceSheetRefreshing(true);
+    setAttendanceMsg(cached ? "Refreshing attendance..." : "Loading attendance...");
+    const { data: rows, error } = await fetchAllPages((offset, pageSize) => (
+      supabase
         .from("attendance_days")
         .select("id, day_date, created_at")
         .eq("school_id", schoolIdSnapshot)
         .order("day_date", { ascending: true })
-        .range(offset, offset + ATTENDANCE_DAYS_PAGE_SIZE - 1);
-
-      if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
-      if (error) {
-        console.error("attendance_days fetch error:", error);
-        setAttendanceDays([]);
-        setAttendanceEntries({});
-        setAttendanceMsg(`Load failed: ${error.message}`);
-        return;
-      }
-
-      const page = data ?? [];
-      rows.push(...page);
-      if (page.length < ATTENDANCE_DAYS_PAGE_SIZE) break;
-      offset += ATTENDANCE_DAYS_PAGE_SIZE;
-    }
+        .order("id", { ascending: true })
+        .range(offset, offset + pageSize - 1)
+    ), ATTENDANCE_DAYS_PAGE_SIZE);
 
     if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
-    const list = rows;
-    setAttendanceDays(list);
-    setAttendanceMsg(list.length ? "" : "No attendance days yet.");
-    if (list.length) {
-      fetchAttendanceEntries(list.map((d) => d.id), schoolIdSnapshot);
-    } else {
-      setAttendanceEntries({});
-    }
-  }
-
-  async function fetchAttendanceEntries(dayIds, schoolIdSnapshot = activeSchoolIdRef.current) {
-    if (!dayIds?.length) {
-      setAttendanceEntries({});
+    if (error) {
+      console.error("attendance_days fetch error:", error);
+      setAttendanceSheetRefreshing(false);
+      setAttendanceMsg(`Load failed: ${error.message}`);
       return;
     }
 
-    const rows = [];
-    let offset = 0;
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+    const list = rows ?? [];
+    let nextEntries = {};
+    if (list.length) {
+      const { data: entryRows, error: entryError } = await fetchAttendanceEntries(
+        list.map((d) => d.id),
+        schoolIdSnapshot,
+        { applyState: false }
+      );
+      if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+      if (entryError) {
+        console.error("attendance_entries fetch error:", entryError);
+        setAttendanceSheetRefreshing(false);
+        setAttendanceMsg(`Load failed: ${entryError.message}`);
+        return;
+      }
+      nextEntries = entryRows ?? {};
+    }
 
-    while (true) {
-      const { data, error } = await supabase
+    applyAttendanceSheetSnapshot(
+      schoolIdSnapshot,
+      list,
+      nextEntries,
+      list.length ? "" : "No attendance days yet."
+    );
+  }
+
+  async function fetchAttendanceEntries(dayIds, schoolIdSnapshot = activeSchoolIdRef.current, options = {}) {
+    const { applyState = true } = options;
+    if (!dayIds?.length) {
+      if (applyState) {
+        applyAttendanceSheetSnapshot(schoolIdSnapshot, attendanceDays, {}, attendanceMsg);
+      }
+      return { data: {}, error: null };
+    }
+
+    const { data: rows, error } = await fetchAllPages((offset, pageSize) => (
+      supabase
         .from("attendance_entries")
         .select("day_id, student_id, status, comment")
         .eq("school_id", schoolIdSnapshot)
         .in("day_id", dayIds)
         .order("day_id", { ascending: true })
         .order("student_id", { ascending: true })
-        .range(offset, offset + ATTENDANCE_ENTRIES_PAGE_SIZE - 1);
+        .range(offset, offset + pageSize - 1)
+    ), ATTENDANCE_ENTRIES_PAGE_SIZE);
 
-      if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
-      if (error) {
-        console.error("attendance_entries fetch error:", error);
-        setAttendanceEntries({});
-        setAttendanceMsg(`Load failed: ${error.message}`);
-        return;
-      }
-
-      const page = data ?? [];
-      rows.push(...page);
-
-      if (page.length < ATTENDANCE_ENTRIES_PAGE_SIZE) break;
-      offset += ATTENDANCE_ENTRIES_PAGE_SIZE;
+    if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+    if (error) {
+      return { data: null, error };
     }
 
     if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
     const map = {};
-    rows.forEach((row) => {
+    (rows ?? []).forEach((row) => {
       if (!row?.day_id || !row?.student_id) return;
       if (!map[row.day_id]) map[row.day_id] = {};
       map[row.day_id][row.student_id] = {
@@ -452,7 +548,10 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
         comment: row.comment ?? ""
       };
     });
-    setAttendanceEntries(map);
+    if (applyState) {
+      applyAttendanceSheetSnapshot(schoolIdSnapshot, attendanceDays, map, attendanceMsg);
+    }
+    return { data: map, error: null };
   }
 
   // Delegate to context's openAttendanceDay which manages the core modal state
@@ -569,7 +668,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
         entry_count: rows.length,
       },
     });
-    fetchAttendanceDays();
+    await fetchAttendanceDays({ force: true });
   }
 
   async function deleteAttendanceDay(day) {
@@ -599,7 +698,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
         day_date: day.day_date,
       },
     });
-    fetchAttendanceDays();
+    await fetchAttendanceDays({ force: true });
   }
 
   async function clearAllAttendanceValues() {
@@ -615,11 +714,14 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceClearing(true);
     setAttendanceMsg("");
     try {
-      const { data: dayRows, error: dayError } = await supabase
-        .from("attendance_days")
-        .select("id")
-        .eq("school_id", activeSchoolId)
-        .limit(5000);
+      const { data: dayRows, error: dayError } = await fetchAllPages((offset, pageSize) => (
+        supabase
+          .from("attendance_days")
+          .select("id")
+          .eq("school_id", activeSchoolId)
+          .order("id", { ascending: true })
+          .range(offset, offset + pageSize - 1)
+      ), ATTENDANCE_DAYS_PAGE_SIZE);
       if (dayError) throw dayError;
 
       const dayIds = Array.from(new Set((dayRows ?? []).map((row) => row.id).filter(Boolean)));
@@ -663,7 +765,8 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
         },
       });
       setAttendanceMsg("Cleared all attendance data.");
-      fetchAttendanceDays();
+      clearAttendanceSheetCache(activeSchoolId);
+      await fetchAttendanceDays({ force: true });
     } catch (error) {
       console.error("clear attendance values error:", error);
       setAttendanceMsg(`Clear failed: ${error.message || error}`);
@@ -681,11 +784,15 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceMsg("Scanning for invalid attendance dates...");
     try {
       // Fetch all attendance days for this school
-      const { data: allDays, error: fetchError } = await supabase
-        .from("attendance_days")
-        .select("id, day_date")
-        .eq("school_id", activeSchoolId)
-        .limit(1000);
+      const { data: allDays, error: fetchError } = await fetchAllPages((offset, pageSize) => (
+        supabase
+          .from("attendance_days")
+          .select("id, day_date")
+          .eq("school_id", activeSchoolId)
+          .order("day_date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(offset, offset + pageSize - 1)
+      ), ATTENDANCE_DAYS_PAGE_SIZE);
 
       if (fetchError) throw fetchError;
 
@@ -752,7 +859,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       });
 
       setAttendanceMsg(`Deleted ${invalidDayIds.length} invalid attendance date(s).`);
-      await fetchAttendanceDays();
+      await fetchAttendanceDays({ force: true });
     } catch (error) {
       console.error("cleanup invalid attendance dates error:", error);
       setAttendanceMsg(`Cleanup failed: ${error.message || error}`);
@@ -768,6 +875,8 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceEntries,
     attendanceMsg,
     setAttendanceMsg,
+    attendanceSheetLoaded,
+    attendanceSheetRefreshing,
     attendanceDate,
     setAttendanceDate,
     attendanceModalOpen,

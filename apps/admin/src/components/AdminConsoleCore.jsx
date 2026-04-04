@@ -2773,6 +2773,12 @@ function formatWeekday(value) {
 }
 
 function getScoreRate(attempt) {
+  if (isImportedSummaryAttempt(attempt)) {
+    const importedMetaRate = Number(attempt?.answers_json?.__meta?.imported_rate);
+    if (Number.isFinite(importedMetaRate)) return importedMetaRate;
+    const importedRate = Number(attempt?.score_rate);
+    if (Number.isFinite(importedRate)) return importedRate;
+  }
   const correct = Number(attempt?.correct ?? 0);
   const total = Number(attempt?.total ?? 0);
   if (Number.isFinite(correct) && Number.isFinite(total) && total > 0) {
@@ -10215,11 +10221,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
           "",
           "",
           "",
-      ...exportColumns.map((day) => {
-      const statuses = sortedStudents
-        .filter((student) => !isAnalyticsExcludedStudent(student))
-        .map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "N/A")
-        .filter((status) => status && status !== "W");
+          ...exportColumns.map((day) => {
+            const statuses = sortedStudents
+              .filter((student) => !isAnalyticsExcludedStudent(student))
+              .map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "")
+              .filter((status) => status && status !== "W");
             const stats = buildAttendanceStats(statuses);
             return stats.rate == null ? "N/A" : formatRatePercent(stats.rate);
           }),
@@ -10231,11 +10237,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
     sortedStudents.forEach((student, index) => {
       const allStatuses = allColumns.map((day) => {
         const status = attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
-        return status || (student.is_withdrawn ? "W" : "N/A");
+        return status || (student.is_withdrawn ? "W" : "");
       });
       const rangeStatuses = exportColumns.map((day) => {
         const status = attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
-        return status || (student.is_withdrawn ? "W" : "N/A");
+        return status || (student.is_withdrawn ? "W" : "");
       });
       const overallStats = buildAttendanceStats(allStatuses);
       const rangeStats = buildAttendanceStats(rangeStatuses);
@@ -10252,7 +10258,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
             rangeStats.rate == null ? "N/A" : formatRatePercent(rangeStats.rate),
             overallStats.unexcused ?? 0,
             formatBooleanCsv(student.is_withdrawn),
-            ...rangeStatuses.map((status) => status || "N/A"),
+            ...rangeStatuses.map((status) => status || ""),
           ],
           totalColumns
         )
@@ -10269,11 +10275,258 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   function exportDailyGoogleSheetsCsv() {
-    setQuizMsg("Export functionality has been moved to the testing workspace");
+    setQuizMsg("");
+    const sessions = dailyResultsMatrix.sessions ?? [];
+    const matrixRows = dailyResultsMatrix.rows ?? [];
+    if (!sessions.length) {
+      setQuizMsg("No daily test sessions to export.");
+      return;
+    }
+
+    const totalColumns = 5 + sessions.length;
+    const visibleAttemptAt = (row, index) => row?.cells?.[index]?.[0] ?? null;
+    const exportRows = [
+      padCsvRow(
+        ["", "No.", "Student Name", "Section", "Withdrawn", ...sessions.map((session) => session.title ?? session.problem_set_id ?? "")],
+        totalColumns
+      ),
+      padCsvRow(
+        ["", "", "", "", "", ...sessions.map((session) => formatSlashDateShortYear(session.starts_at || session.created_at))],
+        totalColumns
+      ),
+      padCsvRow(
+        [
+          "",
+          "",
+          "",
+          "",
+          "",
+          ...sessions.map((session, index) => {
+            const attemptsForSession = matrixRows
+              .filter((row) => !isAnalyticsExcludedStudent(row.student))
+              .map((row) => visibleAttemptAt(row, index))
+              .filter(Boolean);
+            if (!attemptsForSession.length) return "-";
+            const averageRate = attemptsForSession.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / attemptsForSession.length;
+            return formatRatePercent(averageRate);
+          }),
+        ],
+        totalColumns
+      ),
+    ];
+
+    matrixRows.forEach((row, index) => {
+      exportRows.push(
+        padCsvRow(
+          [
+            "",
+            index + 1,
+            getStudentDisplayName(row.student),
+            getStudentSectionValue(row.student),
+            formatBooleanCsv(row.student?.is_withdrawn),
+            ...sessions.map((session, sessionIndex) => {
+              const attempt = visibleAttemptAt(row, sessionIndex);
+              return attempt ? formatRatePercent(getScoreRate(attempt)) : "-";
+            }),
+          ],
+          totalColumns
+        )
+      );
+    });
+
+    downloadText(`daily_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
   }
 
   async function exportModelGoogleSheetsCsv() {
-    setQuizMsg("Export functionality has been moved to the testing workspace");
+    setQuizMsg("");
+    const sessions = modelResultsMatrix.sessions ?? [];
+    const matrixRows = modelResultsMatrix.rows ?? [];
+    if (!sessions.length) {
+      setQuizMsg("No model test sessions to export.");
+      return;
+    }
+
+    const versions = Array.from(new Set(sessions.map((session) => session.problem_set_id).filter(Boolean)));
+    const questionsByVersion = {};
+    if (versions.length) {
+      const { data, error } = await fetchQuestionsForVersionsWithFallback(supabase, versions);
+      if (error) {
+        console.error("model export questions fetch error:", error);
+        setQuizMsg(`Export failed: ${error.message}`);
+        return;
+      }
+      for (const row of data ?? []) {
+        const version = row.test_version;
+        if (!version) continue;
+        if (!questionsByVersion[version]) questionsByVersion[version] = [];
+        questionsByVersion[version].push(mapDbQuestion(row));
+      }
+    }
+
+    const visibleAttemptAt = (row, index) => row?.cells?.[index]?.[0] ?? null;
+    const activeMatrixRows = matrixRows.filter((row) => !isAnalyticsExcludedStudent(row.student));
+    const resolveMainSectionSummary = (attempt, questionsList) => {
+      if (!attempt) return [];
+      if (isImportedModelResultsSummaryAttempt(attempt)) {
+        return getImportedModelSectionSummaries(attempt);
+      }
+      return buildMainSectionSummary(buildAttemptDetailRowsFromList(attempt.answers_json, questionsList));
+    };
+
+    const sessionBlocks = sessions.map((session, sessionIndex) => {
+      const title = String(session?.title ?? session?.problem_set_id ?? "").trim() || session?.problem_set_id || "";
+      const questionsList = questionsByVersion[session.problem_set_id] ?? [];
+      const baseRows = buildAttemptDetailRowsFromList({}, questionsList);
+      const baseSummary = buildMainSectionSummary(baseRows);
+      const importedSectionRows = activeMatrixRows
+        .map((row) => visibleAttemptAt(row, sessionIndex))
+        .filter((attempt) => isImportedModelResultsSummaryAttempt(attempt))
+        .flatMap((attempt) => getImportedModelSectionSummaries(attempt));
+      const blockSectionTitles = Array.from(new Set([
+        ...sections
+          .filter((section) => section.key !== "DAILY")
+          .map((section) => getSectionTitle(section.key))
+          .filter((sectionTitle) => baseSummary.some((row) => row.section === sectionTitle)),
+        ...importedSectionRows.map((row) => row.section).filter(Boolean),
+      ]));
+      const sectionTotals = Object.fromEntries(
+        blockSectionTitles.map((sectionTitle) => [
+          sectionTitle,
+          Math.max(
+            Number(baseSummary.find((row) => row.section === sectionTitle)?.total ?? 0),
+            ...importedSectionRows
+              .filter((row) => row.section === sectionTitle)
+              .map((row) => Number(row.total ?? 0)),
+            0
+          ),
+        ])
+      );
+      const rankingRows = activeMatrixRows
+        .map((row) => {
+          const attempt = visibleAttemptAt(row, sessionIndex);
+          if (!attempt) return null;
+          return {
+            studentId: row.student.id,
+            displayName: getStudentDisplayName(row.student),
+            studentCode: row.student.student_code ?? "",
+            rate: getScoreRate(attempt),
+            correct: Number(attempt.correct ?? 0),
+          };
+        })
+        .filter(Boolean)
+        .sort((left, right) => {
+          if (right.rate !== left.rate) return right.rate - left.rate;
+          if (right.correct !== left.correct) return right.correct - left.correct;
+          const nameCompare = left.displayName.localeCompare(right.displayName);
+          if (nameCompare !== 0) return nameCompare;
+          return String(left.studentCode).localeCompare(String(right.studentCode));
+        });
+      const rankingByStudentId = Object.fromEntries(
+        rankingRows.map((row, index) => [row.studentId, { rank: index + 1, total: rankingRows.length }])
+      );
+      return {
+        title,
+        session,
+        sessionIndex,
+        questionsList,
+        sectionTitles: blockSectionTitles,
+        sectionTotals,
+        rankingByStudentId,
+      };
+    });
+
+    const totalColumns = 5 + sessionBlocks.reduce(
+      (sum, block) => sum + (block.sectionTitles.length * 2) + 3,
+      0
+    );
+    const row1 = ["", "No.", "Student Name", "Section", "Withdrawn"];
+    const row2 = ["", "", "", "", ""];
+    const row3 = ["", "", "", "", ""];
+    const row4 = ["", "", "", "", ""];
+
+    sessionBlocks.forEach((block) => {
+      const attemptsForBlock = activeMatrixRows
+        .map((row) => visibleAttemptAt(row, block.sessionIndex))
+        .filter(Boolean);
+      const span = (block.sectionTitles.length * 2) + 3;
+      row1.push(block.title, ...Array.from({ length: span - 1 }, () => ""));
+      block.sectionTitles.forEach((sectionTitle) => {
+        const sectionSummaries = attemptsForBlock
+          .map((attempt) => resolveMainSectionSummary(attempt, block.questionsList).find((item) => item.section === sectionTitle) ?? null)
+          .filter(Boolean);
+        const averageRate = sectionSummaries.length
+          ? sectionSummaries.reduce((sum, item) => sum + Number(item.rate ?? 0), 0) / sectionSummaries.length
+          : null;
+        const averageCorrect = sectionSummaries.length
+          ? sectionSummaries.reduce((sum, item) => sum + Number(item.correct ?? 0), 0) / sectionSummaries.length
+          : null;
+        const sectionTotal = Number(block.sectionTotals[sectionTitle] ?? 0);
+        row2.push(sectionTitle, "");
+        row3.push(formatSlashDateShortYear(block.session.starts_at || block.session.created_at), "");
+        row4.push(
+          averageRate == null ? "-" : formatRatePercent(averageRate),
+          averageCorrect == null || sectionTotal <= 0 ? "-" : formatScoreFraction(averageCorrect, sectionTotal, 2)
+        );
+      });
+      const averageTotalRate = attemptsForBlock.length
+        ? attemptsForBlock.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / attemptsForBlock.length
+        : null;
+      const averageTotalCorrect = attemptsForBlock.length
+        ? attemptsForBlock.reduce((sum, attempt) => sum + Number(attempt.correct ?? 0), 0) / attemptsForBlock.length
+        : null;
+      const totalQuestionCount = Math.max(
+        Number(block.questionsList?.length ?? 0),
+        ...attemptsForBlock.map((attempt) => Number(attempt?.total ?? 0)),
+        0
+      );
+      row2.push("Total", "", "Ranking");
+      row3.push(formatSlashDateShortYear(block.session.starts_at || block.session.created_at), "", "");
+      row4.push(
+        averageTotalRate == null ? "-" : formatRatePercent(averageTotalRate),
+        averageTotalCorrect == null || totalQuestionCount <= 0 ? "-" : formatScoreFraction(averageTotalCorrect, totalQuestionCount, 2),
+        ""
+      );
+    });
+
+    const exportRows = [
+      padCsvRow(row1, totalColumns),
+      padCsvRow(row2, totalColumns),
+      padCsvRow(row3, totalColumns),
+      padCsvRow(row4, totalColumns),
+    ];
+
+    matrixRows.forEach((row, index) => {
+      const dataRow = [
+        "",
+        index + 1,
+        getStudentDisplayName(row.student),
+        getStudentSectionValue(row.student),
+        formatBooleanCsv(row.student?.is_withdrawn),
+      ];
+
+      sessionBlocks.forEach((block) => {
+        const attempt = visibleAttemptAt(row, block.sessionIndex);
+        const sectionSummary = attempt ? resolveMainSectionSummary(attempt, block.questionsList) : [];
+        block.sectionTitles.forEach((sectionTitle) => {
+          const summaryRow = sectionSummary.find((item) => item.section === sectionTitle);
+          const sectionTotal = Number(block.sectionTotals[sectionTitle] ?? 0);
+          dataRow.push(
+            summaryRow ? formatRatePercent(summaryRow.rate) : "-",
+            summaryRow && sectionTotal > 0 ? formatScoreFraction(summaryRow.correct, sectionTotal, 0) : "-"
+          );
+        });
+        const ranking = block.rankingByStudentId[row.student.id] ?? null;
+        dataRow.push(
+          attempt ? formatRatePercent(getScoreRate(attempt)) : "-",
+          attempt && Number(attempt.total ?? 0) > 0 ? formatScoreFraction(Number(attempt.correct ?? 0), Number(attempt.total ?? 0), 0) : "-",
+          attempt && ranking ? `${formatOrdinalRank(ranking.rank)} / ${ranking.total}` : "-"
+        );
+      });
+
+      exportRows.push(padCsvRow(dataRow, totalColumns));
+    });
+
+    downloadText(`model_results_google_sheets_${Date.now()}.csv`, toCsv(exportRows), "text/csv");
   }
 
   async function deleteImportedSummaryAttemptsForPairs(pairs) {

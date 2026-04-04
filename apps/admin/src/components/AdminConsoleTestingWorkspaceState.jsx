@@ -24,6 +24,7 @@ const MERIDIEM_OPTIONS = ["AM", "PM"];
 const QUESTION_SELECT_BASE = "id, test_version, question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
 const QUESTION_SELECT_WITH_MEDIA = QUESTION_SELECT_BASE;
 const SET_ID_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+const SUPABASE_SAFE_PAGE_SIZE = 500;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -66,6 +67,25 @@ async function fetchQuestionsForVersionsWithFallback(supabaseClient, versions) {
       .order("order_index", { ascending: true });
   }
   return result;
+}
+
+async function fetchAllPages(buildPageQuery, pageSize = SUPABASE_SAFE_PAGE_SIZE) {
+  const rows = [];
+  let offset = 0;
+
+  while (true) {
+    const result = await buildPageQuery(offset, pageSize);
+    if (result.error) return { data: null, error: result.error };
+
+    const page = result.data ?? [];
+    rows.push(...page);
+
+    if (page.length < pageSize) {
+      return { data: rows, error: null };
+    }
+
+    offset += pageSize;
+  }
 }
 
 function normalizePassRate(value, fallback = 0.8) {
@@ -1780,10 +1800,14 @@ export function useTestingWorkspaceState({
 
   const fetchTestSessions = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await supabase
-      .from("test_sessions")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data, error } = await fetchAllPages((offset, pageSize) => (
+      supabase
+        .from("test_sessions")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + pageSize - 1)
+    ));
     if (error) {
       console.error("test_sessions fetch error:", error);
       return;
@@ -1832,40 +1856,24 @@ export function useTestingWorkspaceState({
     if (!supabase || !activeSchoolId) return;
     setAttemptsMsg("Loading results...");
 
-    const allData = [];
-    let offset = 0;
-    const pageSize = 5000;
-    let hasMore = true;
-
-    while (hasMore) {
-      const { data, error } = await supabase
+    const { data, error } = await fetchAllPages((offset, pageSize) => (
+      supabase
         .from("attempts")
         .select("id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json")
         .eq("school_id", activeSchoolId)
         .order("created_at", { ascending: false })
-        .range(offset, offset + pageSize - 1);
+        .order("id", { ascending: false })
+        .range(offset, offset + pageSize - 1)
+    ));
 
-      if (error) {
-        console.error("attempts fetch error:", error);
-        setAttempts([]);
-        setAttemptsMsg(`Load failed: ${error.message}`);
-        return;
-      }
-
-      const pageData = data ?? [];
-      if (pageData.length === 0) {
-        hasMore = false;
-      } else {
-        allData.push(...pageData);
-        if (pageData.length < pageSize) {
-          hasMore = false;
-        } else {
-          offset += pageSize;
-        }
-      }
+    if (error) {
+      console.error("attempts fetch error:", error);
+      setAttempts([]);
+      setAttemptsMsg(`Load failed: ${error.message}`);
+      return;
     }
 
-    setAttempts(allData);
+    setAttempts(data ?? []);
     setAttemptsMsg("");
   }, [supabase, activeSchoolId]);
 
@@ -2673,11 +2681,15 @@ export function useTestingWorkspaceState({
       fetchQuestionsForVersionWithFallback(supabase, session.problem_set_id, activeSchoolId),
       (async () => {
         const buildAttemptsQuery = (fields) =>
-          supabase
-            .from("attempts")
-            .select(fields)
-            .eq("test_session_id", session.id)
-            .order("created_at", { ascending: true });
+          fetchAllPages((offset, pageSize) => (
+            supabase
+              .from("attempts")
+              .select(fields)
+              .eq("test_session_id", session.id)
+              .order("created_at", { ascending: true })
+              .order("id", { ascending: true })
+              .range(offset, offset + pageSize - 1)
+          ));
         let result = await buildAttemptsQuery(
           "id, student_id, display_name, student_code, test_version, test_session_id, correct, total, score_rate, started_at, ended_at, created_at, answers_json, tab_left_count"
         );

@@ -603,22 +603,21 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
         const { colIndex, session } = column;
         const rate = parsePercentCell(row[colIndex]);
         if (rate == null) return;
-        const total = Math.max(0, Number(session?.linkedTest?.question_count ?? 0));
-        const correct = total > 0 ? Math.round(rate * total) : 0;
         payloads.push({
           student_id: student.id,
           display_name: student.display_name ?? null,
           student_code: student.student_code ?? null,
           test_version: session.problem_set_id,
           test_session_id: session.id,
-          correct,
-          total,
+          correct: 0,
+          total: 0,
           score_rate: rate,
           started_at: session.starts_at ?? null,
           ended_at: session.ends_at ?? session.starts_at ?? new Date().toISOString(),
           answers_json: buildImportedSummaryAnswersJson("daily_results_csv", {
             imported_test_title: column.importTitle,
             imported_test_date: column.importDateIso || null,
+            imported_rate: rate,
           }),
           tab_left_count: 0,
         });
@@ -1063,6 +1062,7 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
           answers_json: buildImportedSummaryAnswersJson("model_results_csv", {
             imported_test_title: session.title || block.importTitle || "",
             imported_test_date: block.importDateIso || null,
+            imported_rate: rate,
             main_section_summary: mainSectionSummary,
           }),
           tab_left_count: 0,
