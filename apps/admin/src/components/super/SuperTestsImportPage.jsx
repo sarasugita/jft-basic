@@ -6,11 +6,16 @@ import { getAdminSupabaseConfig } from "../../lib/adminSupabase";
 
 const DEFAULT_DAILY_CATEGORY = "Vocabulary";
 const DEFAULT_MODEL_CATEGORY = "Book Review";
+const QUESTION_SET_ID_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const QUESTION_SELECT_BASE = "question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
 const QUESTION_SELECT_WITH_MEDIA = `${QUESTION_SELECT_BASE}, media_file, media_type`;
 
 function getDefaultCategoryForTestType(testType) {
   return testType === "model" ? DEFAULT_MODEL_CATEGORY : DEFAULT_DAILY_CATEGORY;
+}
+
+function compareQuestionSetIds(left, right) {
+  return QUESTION_SET_ID_COLLATOR.compare(String(left ?? "").trim(), String(right ?? "").trim());
 }
 
 function emptyUploadForm() {
@@ -496,11 +501,17 @@ export default function SuperTestsImportPage() {
   }, [supabase]);
 
   const filteredQuestionSets = useMemo(() => {
-    return questionSets.filter((item) => {
-      const matchesType = item.test_type === testType;
-      const matchesVisibility = visibility === "all" || item.visibility_scope === visibility;
-      return matchesType && matchesVisibility;
-    });
+    return [...questionSets]
+      .sort((left, right) => {
+        const idCompare = compareQuestionSetIds(left.title ?? left.version ?? "", right.title ?? right.version ?? "");
+        if (idCompare !== 0) return idCompare;
+        return String(right.updated_at ?? right.created_at ?? "").localeCompare(String(left.updated_at ?? left.created_at ?? ""));
+      })
+      .filter((item) => {
+        const matchesType = item.test_type === testType;
+        const matchesVisibility = visibility === "all" || item.visibility_scope === visibility;
+        return matchesType && matchesVisibility;
+      });
   }, [questionSets, testType, visibility]);
 
   const groupedQuestionSets = useMemo(() => {
