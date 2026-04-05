@@ -1316,15 +1316,15 @@ export default function SuperTestsImportPage() {
                       <div style={{ fontSize: 12, color: "#333333", fontWeight: 700 }}>
                         {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""}
                       </div>
-                      {prompt ? <div style={{ marginTop: 6, fontSize: 16, fontWeight: 600 }}>{prompt}</div> : null}
+                      {prompt ? <div style={{ marginTop: 6, fontSize: 16, fontWeight: 600, whiteSpace: "pre-wrap" }}>{prompt}</div> : null}
                       {question.type === "daily" && stemExtra ? (
-                        <div style={{ marginTop: 6, fontSize: 13, color: "#333333" }}>
+                        <div style={{ marginTop: 6, fontSize: 13, color: "#333333", whiteSpace: "pre-wrap" }}>
                           {stemExtra}
                         </div>
                       ) : null}
                       {stemText ? (
                         <div
-                          style={{ marginTop: 6 }}
+                          style={{ marginTop: 6, whiteSpace: "pre-wrap" }}
                           dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
                         />
                       ) : null}

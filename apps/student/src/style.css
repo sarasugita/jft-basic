@@ -657,6 +657,7 @@ body { overflow-x: hidden; }
   font-size: 20px;
   line-height: 1.7;
   margin: 10px 0 12px;
+  white-space: pre-wrap;
 }
 
 .stem-extra{

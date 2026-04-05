@@ -9799,6 +9799,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const questions = [];
     const choices = [];
     const errors = [];
+    const seenQuestionIds = new Set();
 
     for (let r = 1; r < rows.length; r += 1) {
       const row = rows[r];
@@ -9828,6 +9829,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
       const orderIndex = Number(noValue);
       const questionId = `${testVersion}-${noValue || r}`;
+      if (seenQuestionIds.has(questionId)) {
+        errors.push(`Row ${r + 1}: duplicate qid "${questionId}".`);
+        continue;
+      }
+      seenQuestionIds.add(questionId);
       const items = [
         ...wrongs.map((text) => ({ text, correct: false })),
         { text: correct, correct: true }

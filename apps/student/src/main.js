@@ -2975,8 +2975,8 @@ function promptBoxHTML(q, opts = {}) {
   const main = q.promptEn ?? "";
   const sub = q.promptBn ?? "";
   const lines = [];
-  const promptClass = getActiveTestType() === "daily" ? "prompt preserve-lines" : "prompt";
-  const promptSubClass = getActiveTestType() === "daily" ? "prompt-sub preserve-lines" : "prompt-sub";
+  const promptClass = "prompt preserve-lines";
+  const promptSubClass = "prompt-sub preserve-lines";
   if (showPrompt && main) lines.push(`<div class="${promptClass}">${escapeHtml(main)}</div>`);
   if (showPrompt && state.showBangla && sub) lines.push(`<div class="${promptSubClass}">${escapeHtml(sub)}</div>`);
   if (includeStemInPrompt) {
@@ -3072,7 +3072,7 @@ function renderStemHTML(q, opts = {}) {
     }
   } else {
     if (!opts.skipStemText && q.stemText) {
-      parts.push(`<div class="stem-text">${renderUnderlines(q.stemText)}</div>`);
+      parts.push(`<div class="stem-text preserve-lines">${renderUnderlines(q.stemText)}</div>`);
     }
     if (!opts.skipStemExtra && q.stemExtra) {
       const lines = splitStemLines(q.stemExtra);
