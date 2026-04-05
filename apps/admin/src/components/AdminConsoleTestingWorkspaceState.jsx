@@ -437,7 +437,20 @@ function toManualSessionIso(dateValue) {
 
 function isGeneratedScoreRateInsertError(error) {
   const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
-  return /score_rate/i.test(text) && /does not exist/i.test(text);
+  return /score_rate/i.test(text) && /(cannot insert a non-default value|generated|does not exist)/i.test(text);
+}
+
+function getImportedDailyAttemptRate(attempt) {
+  const importedMetaRate = Number(attempt?.answers_json?.__meta?.imported_rate);
+  if (Number.isFinite(importedMetaRate)) return importedMetaRate;
+  const scoreRate = Number(attempt?.score_rate);
+  if (Number.isFinite(scoreRate)) return scoreRate;
+  const correct = Number(attempt?.correct ?? 0);
+  const total = Number(attempt?.total ?? 0);
+  if (Number.isFinite(correct) && Number.isFinite(total) && total > 0) {
+    return correct / total;
+  }
+  return 0;
 }
 
 async function removeImportedSummaryAttemptsForPair(supabaseClient, studentId, sessionId) {
@@ -2061,8 +2074,8 @@ export function useTestingWorkspaceState({
     [dailyManualEntryModal.sessionId, dailyResultsMatrix.sessions]
   );
 
-  const closeDailyManualEntryModal = useCallback(() => {
-    setDailyManualEntryModal((current) => (current?.saving ? current : {
+  const closeDailyManualEntryModal = useCallback((force = false) => {
+    setDailyManualEntryModal((current) => (current?.saving && !force ? current : {
       open: false,
       studentId: "",
       sessionId: "",
@@ -2162,9 +2175,9 @@ export function useTestingWorkspaceState({
         rate,
       },
     });
-    closeDailyManualEntryModal();
+    closeDailyManualEntryModal(true);
     setQuizMsg(`Saved manual result for ${student.display_name ?? student.id} in ${session.title ?? session.problem_set_id}.`);
-  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, fetchAttempts, fetchTestSessions, recordAuditEvent, setQuizMsg, students, supabase]);
+  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, recordAuditEvent, setQuizMsg, students, supabase]);
 
   const clearDailyManualEntry = useCallback(async () => {
     if (!supabase) {
@@ -2200,12 +2213,12 @@ export function useTestingWorkspaceState({
         student_id: student.id,
       },
     });
-    closeDailyManualEntryModal();
+    closeDailyManualEntryModal(true);
     setQuizMsg(`Cleared manual result for ${student.display_name ?? student.id} in ${session.title ?? session.problem_set_id}.`);
-  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, fetchAttempts, fetchTestSessions, recordAuditEvent, setQuizMsg, students, supabase]);
+  }, [closeDailyManualEntryModal, dailyManualEntryModal, dailyResultsMatrix.sessions, recordAuditEvent, setQuizMsg, students, supabase]);
 
-  const closeDailyManualColumnModal = useCallback(() => {
-    setDailyManualColumnModal((current) => (current?.saving ? current : {
+  const closeDailyManualColumnModal = useCallback((force = false) => {
+    setDailyManualColumnModal((current) => (current?.saving && !force ? current : {
       open: false,
       testVersion: "",
       title: "",
@@ -2389,7 +2402,7 @@ export function useTestingWorkspaceState({
         manual_entry: true,
       },
     });
-    closeDailyManualColumnModal();
+    closeDailyManualColumnModal(true);
     setQuizMsg(`Saved manual daily results column "${title}".`);
   }, [
     activeSchoolId,
@@ -2399,9 +2412,6 @@ export function useTestingWorkspaceState({
     dailyManualColumnModal.testVersion,
     dailyManualColumnModal.title,
     dailyResultsCategory,
-    fetchAttempts,
-    fetchTestSessions,
-    hasDuplicateSessionTitle,
     recordAuditEvent,
     selectedDailyCategory,
     setDailyResultsCategory,
@@ -2413,21 +2423,22 @@ export function useTestingWorkspaceState({
     try {
       setQuizMsg("");
       const sessions = dailyResultsMatrix.sessions ?? [];
+      const exportSessions = sessions.map((session, sessionIndex) => ({ session, sessionIndex })).reverse();
       const matrixRows = dailyResultsMatrix.rows ?? [];
-      if (!sessions.length) {
+      if (!exportSessions.length) {
         setQuizMsg("No daily test sessions to export.");
         return;
       }
 
-      const totalColumns = 5 + sessions.length;
+      const totalColumns = 5 + exportSessions.length;
       const visibleAttemptAt = (row, index) => row?.cells?.[index]?.[0] ?? null;
       const exportRows = [
         padCsvRow(
-          ["", "No.", "Student Name", "Section", "Withdrawn", ...sessions.map((session) => session.title ?? session.problem_set_id ?? "")],
+          ["", "No.", "Student Name", "Section", "Withdrawn", ...exportSessions.map(({ session }) => session.title ?? session.problem_set_id ?? "")],
           totalColumns
         ),
         padCsvRow(
-          ["", "", "", "", "", ...sessions.map((session) => formatSlashDateShortYear(session.starts_at || session.created_at))],
+          ["", "", "", "", "", ...exportSessions.map(({ session }) => formatSlashDateShortYear(session.starts_at || session.created_at))],
           totalColumns
         ),
         padCsvRow(
@@ -2437,13 +2448,13 @@ export function useTestingWorkspaceState({
             "",
             "",
             "",
-            ...sessions.map((session, index) => {
+            ...exportSessions.map(({ session, sessionIndex }) => {
               const attemptsForSession = matrixRows
                 .filter((row) => row?.student && !isAnalyticsExcludedStudent(row.student))
-                .map((row) => visibleAttemptAt(row, index))
+                .map((row) => visibleAttemptAt(row, sessionIndex))
                 .filter(Boolean);
               if (!attemptsForSession.length) return "-";
-              const averageRate = attemptsForSession.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / attemptsForSession.length;
+              const averageRate = attemptsForSession.reduce((sum, attempt) => sum + getImportedDailyAttemptRate(attempt), 0) / attemptsForSession.length;
               return formatRatePercent(averageRate);
             }),
           ],
@@ -2460,9 +2471,9 @@ export function useTestingWorkspaceState({
               getStudentDisplayName(row.student),
               getStudentSectionValue(row.student),
               formatBooleanCsv(row.student?.is_withdrawn),
-              ...sessions.map((session, sessionIndex) => {
+              ...exportSessions.map(({ session, sessionIndex }) => {
                 const attempt = visibleAttemptAt(row, sessionIndex);
-                return attempt ? formatRatePercent(getScoreRate(attempt)) : "-";
+                return attempt ? formatRatePercent(getImportedDailyAttemptRate(attempt)) : "-";
               }),
             ],
             totalColumns
@@ -2481,13 +2492,14 @@ export function useTestingWorkspaceState({
     try {
       setQuizMsg("");
       const sessions = modelResultsMatrix.sessions ?? [];
+      const exportSessions = sessions.map((session, sessionIndex) => ({ session, sessionIndex })).reverse();
       const matrixRows = modelResultsMatrix.rows ?? [];
-      if (!sessions.length) {
+      if (!exportSessions.length) {
         setQuizMsg("No model test sessions to export.");
         return;
       }
 
-      const versions = Array.from(new Set(sessions.map((session) => session.problem_set_id).filter(Boolean)));
+      const versions = Array.from(new Set(exportSessions.map(({ session }) => session.problem_set_id).filter(Boolean)));
       const questionsByVersion = {};
       if (versions.length) {
         const { data, error } = await fetchQuestionsForVersionsWithFallback(supabase, versions);
@@ -2514,7 +2526,7 @@ export function useTestingWorkspaceState({
         return buildMainSectionSummaryForExport(buildAttemptDetailRowsFromListForExport(attempt.answers_json, questionsList));
       };
 
-      const sessionBlocks = sessions.map((session, sessionIndex) => {
+      const sessionBlocks = exportSessions.map(({ session, sessionIndex }) => {
         const title = String(session?.title ?? session?.problem_set_id ?? "").trim() || session?.problem_set_id || "";
         const questionsList = questionsByVersion[session.problem_set_id] ?? [];
         const baseRows = buildAttemptDetailRowsFromListForExport({}, questionsList);
