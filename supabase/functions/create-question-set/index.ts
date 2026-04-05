@@ -51,18 +51,31 @@ serve(async (req) => {
   }
 
   const requestedSetIds = validation.question_sets.map((group) => group.set_id);
-  const { data: existingSet, error: existingSetError } = await context.adminClient
+  const { data: existingSets, error: existingSetsError } = await context.adminClient
     .from("question_sets")
-    .select("id, title, test_type, version_label")
+    .select("id, title, test_type, version, status, version_label")
     .eq("test_type", parsed.metadata.test_type)
     .in("title", requestedSetIds);
-  if (existingSetError) return bad(existingSetError.message);
+  if (existingSetsError) return bad(existingSetsError.message);
 
-  const duplicateSets = (existingSet ?? []).filter((item) => requestedSetIds.includes(item.title));
-  if (duplicateSets.length) {
+  const activeDuplicateSets = (existingSets ?? []).filter((item) => item.status !== "archived" && requestedSetIds.includes(item.title));
+  if (activeDuplicateSets.length) {
     return bad("One or more SetIDs already exist for this test type. Use Upload on the existing set to add a new version.", {
-      existing_set_ids: duplicateSets.map((item) => item.title),
+      existing_set_ids: activeDuplicateSets.map((item) => item.title),
     });
+  }
+
+  const archivedVersionOneIds = (existingSets ?? [])
+    .filter((item) => item.status === "archived" && requestedSetIds.includes(item.title) && Number(item.version) === 1)
+    .map((item) => item.id);
+  if (archivedVersionOneIds.length) {
+    const { error: deleteArchivedError } = await context.adminClient
+      .from("question_sets")
+      .delete()
+      .in("id", archivedVersionOneIds);
+    if (deleteArchivedError) {
+      return bad(`Deleted question set cleanup failed: ${deleteArchivedError.message}`);
+    }
   }
 
   const createdSetIds: string[] = [];
