@@ -618,6 +618,7 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
             imported_test_title: column.importTitle,
             imported_test_date: column.importDateIso || null,
             imported_rate: rate,
+            imported_csv_index: column.columnIndex,
           }),
           tab_left_count: 0,
         });
@@ -1064,6 +1065,7 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
             imported_test_date: block.importDateIso || null,
             imported_rate: rate,
             main_section_summary: mainSectionSummary,
+            imported_csv_index: block.blockIndex,
           }),
           tab_left_count: 0,
         });

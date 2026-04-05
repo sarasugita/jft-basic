@@ -142,6 +142,10 @@ export default function AdminConsoleDeferredFeatures({
   setAttemptDetailWrongOnly,
   renderUnderlinesHtml,
 }) {
+  const isImportedSummaryAttemptFn = typeof isImportedSummaryAttempt === "function"
+    ? isImportedSummaryAttempt
+    : () => false;
+
   const handleOpenResultsImportStatus = typeof openResultsImportStatus === "function"
     ? openResultsImportStatus
     : null;
@@ -420,8 +424,8 @@ export default function AdminConsoleDeferredFeatures({
                                 const canEditManualCell = resultContext.type === "daily"
                                   && dailyManualEntryMode
                                   && Array.isArray(attemptList)
-                                  && attemptList.every((attempt) => isImportedSummaryAttempt(attempt));
-                                const editableImportedAttempt = attemptList?.find((attempt) => isImportedSummaryAttempt(attempt)) ?? null;
+                                  && attemptList.every((attempt) => isImportedSummaryAttemptFn(attempt));
+                                const editableImportedAttempt = attemptList?.find((attempt) => isImportedSummaryAttemptFn(attempt)) ?? null;
                                 if (!attemptList?.length) {
                                   return (
                                     <td key={`daily-cell-${row.student.id}-${idx}`} className="daily-score-cell">
@@ -1060,7 +1064,7 @@ export default function AdminConsoleDeferredFeatures({
         const attemptStudentName = selectedAttemptDisplayName || selectedAttempt.display_name || "";
         const showSummaryOnly = selectedAttemptUsesImportedSummary;
         const showRankingMainSectionsOnly = attemptDetailSource === "sessionRanking" || selectedAttemptUsesImportedModelSummary;
-        const isImportedAttempt = isImportedSummaryAttempt(selectedAttempt);
+        const isImportedAttempt = isImportedSummaryAttemptFn(selectedAttempt);
         const radarData = selectedAttemptMainSectionSummary.map((row) => ({
           label: row.section,
           value: row.total ? row.correct / row.total : 0,
@@ -1191,18 +1195,7 @@ export default function AdminConsoleDeferredFeatures({
                     <div className="attempt-detail-score-row">
                       <span className="attempt-detail-score-label">Total Score</span>
                       <span className={`attempt-detail-score-right ${isPass ? "" : "attempt-detail-score-right-fail"}`}>
-                        {isImportedAttempt ? (
-                          <span className="attempt-detail-score-rate">{scorePercent}%</span>
-                        ) : (
-                          <>
-                            <span className="attempt-detail-score-value">
-                              <span className="attempt-detail-score-value-primary">{totalCorrect}</span>
-                              <span className="attempt-detail-score-value-separator">/</span>
-                              <span>{totalQuestions}</span>
-                            </span>
-                            <span className="attempt-detail-score-rate">({scorePercent}%)</span>
-                          </>
-                        )}
+                        <span className="attempt-detail-score-rate">{scorePercent}%</span>
                       </span>
                     </div>
                     <div className="attempt-detail-score-row">

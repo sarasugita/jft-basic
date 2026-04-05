@@ -3827,7 +3827,12 @@ export default function AdminConsole({
   }, [sessionDetailTab, sessionDetailUsesImportedResultsSummary]);
 
   const studentModelAttempts = useMemo(() => {
-    const modelAttempts = (studentAttempts ?? []).filter((attempt) => testMetaByVersion[attempt.test_version]?.type === "mock");
+    const modelAttempts = (studentAttempts ?? []).filter((attempt) => {
+      if (!attempt) return false;
+      const meta = testMetaByVersion[attempt.test_version];
+      if (isImportedResultsSummaryAttempt(attempt) && !meta) return false;
+      return meta?.type === "mock";
+    });
     const actualSessionIds = new Set(
       modelAttempts
         .filter((attempt) => !isImportedResultsSummaryAttempt(attempt))
@@ -3955,7 +3960,12 @@ export default function AdminConsole({
   }, [studentModelAttempts, testMetaByVersion, modelCategories]);
 
   const studentDailyAttempts = useMemo(() => {
-    return (studentAttempts ?? []).filter((a) => testMetaByVersion[a.test_version]?.type !== "mock");
+    return (studentAttempts ?? []).filter((attempt) => {
+      if (!attempt) return false;
+      const meta = testMetaByVersion[attempt.test_version];
+      if (isImportedResultsSummaryAttempt(attempt) && !meta) return false;
+      return meta?.type === "daily";
+    });
   }, [studentAttempts, testMetaByVersion]);
 
   const studentDailyAttemptsByCategory = useMemo(() => {
@@ -3965,15 +3975,23 @@ export default function AdminConsole({
       if (!grouped.has(category)) grouped.set(category, []);
       grouped.get(category).push(a);
     });
-    const ordered = [];
-    dailyResultCategories.forEach((c) => {
-      if (grouped.has(c.name)) ordered.push([c.name, grouped.get(c.name)]);
-    });
-    for (const entry of grouped.entries()) {
-      if (!ordered.some((o) => o[0] === entry[0])) ordered.push(entry);
-    }
-    return ordered;
-  }, [studentDailyAttempts, testMetaByVersion, dailyResultCategories]);
+    const orderedEntries = Array.from(grouped.entries())
+      .map(([category, attemptsList]) => ([
+        category,
+        [...attemptsList].sort((left, right) => {
+          const timeDiff = getAttemptDisplayTimestamp(right) - getAttemptDisplayTimestamp(left);
+          if (timeDiff !== 0) return timeDiff;
+          return getRowTimestamp(right) - getRowTimestamp(left);
+        }),
+      ]))
+      .sort((left, right) => {
+        const leftLatest = left[1][0] ? getAttemptDisplayTimestamp(left[1][0]) : 0;
+        const rightLatest = right[1][0] ? getAttemptDisplayTimestamp(right[1][0]) : 0;
+        if (leftLatest !== rightLatest) return rightLatest - leftLatest;
+        return String(left[0] ?? "").localeCompare(String(right[0] ?? ""));
+      });
+    return orderedEntries;
+  }, [studentDailyAttempts, testMetaByVersion]);
 
   const studentAttemptSummaryById = useMemo(() => {
     const summaryMap = {};
@@ -4005,22 +4023,17 @@ export default function AdminConsole({
         return getScoreRate(attempt) >= passRate;
       }).length;
       const failCount = Math.max(0, count - passCount);
-      const totalCorrect = attempts.reduce((sum, attempt) => sum + Number(attempt.correct ?? 0), 0);
-      const totalQuestions = attempts.reduce((sum, attempt) => sum + Number(attempt.total ?? 0), 0);
-      const avgCorrect = count ? totalCorrect / count : 0;
-      const avgTotal = count ? totalQuestions / count : 0;
       const avgRate = count
         ? attempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / count
         : 0;
       return {
         category,
-        averageScoreLabel: count ? `${avgCorrect.toFixed(1)}/${avgTotal.toFixed(1)}` : "-",
         averageRateLabel: count ? `${(avgRate * 100).toFixed(1)}%` : "-",
         passCount,
         failCount,
       };
     });
-  }, [getAttemptEffectivePassRate]);
+  }, [getAttemptEffectivePassRate, getScoreRate]);
 
   const studentModelCategorySummaryRows = useMemo(
     () => buildCategorySummaryRows(studentModelAttemptsByCategory),
@@ -9225,14 +9238,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
             return getScoreRate(attempt) >= passRate;
           }).length;
           const failCount = Math.max(0, count - passCount);
-          const totalCorrect = attempts.reduce((sum, attempt) => sum + Number(attempt.correct ?? 0), 0);
-          const totalQuestions = attempts.reduce((sum, attempt) => sum + Number(attempt.total ?? 0), 0);
-          const avgCorrect = count ? totalCorrect / count : 0;
-          const avgTotal = count ? totalQuestions / count : 0;
           const avgRate = count ? attempts.reduce((sum, attempt) => sum + getScoreRate(attempt), 0) / count : 0;
           return [
             escapeHtml(category),
-            escapeHtml(count ? `${avgCorrect.toFixed(1)}/${avgTotal.toFixed(1)}` : "-"),
             escapeHtml(count ? `${(avgRate * 100).toFixed(1)}%` : "-"),
             escapeHtml(passCount),
             escapeHtml(failCount),
@@ -9317,13 +9325,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
       );
 
       const dailySummaryTable = renderTable(
-        ["Category", "Average Score", "Average Rate", "Pass", "Fail"],
+        ["Category", "Average Rate", "Pass", "Fail"],
         buildCategorySummaryRowsForExport(dailyAttemptsByCategory),
         { emptyText: "No daily test records." }
       );
 
       const modelSummaryTable = renderTable(
-        ["Category", "Average Score", "Average Rate", "Pass", "Fail"],
+        ["Category", "Average Rate", "Pass", "Fail"],
         buildCategorySummaryRowsForExport(modelAttemptsByCategory),
         { emptyText: "No model test records." }
       );

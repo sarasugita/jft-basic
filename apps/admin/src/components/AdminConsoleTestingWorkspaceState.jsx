@@ -453,6 +453,11 @@ function getImportedDailyAttemptRate(attempt) {
   return 0;
 }
 
+function getImportedCsvOrderIndex(attempt) {
+  const orderIndex = Number(attempt?.answers_json?.__meta?.imported_csv_index);
+  return Number.isFinite(orderIndex) ? orderIndex : null;
+}
+
 async function removeImportedSummaryAttemptsForPair(supabaseClient, studentId, sessionId) {
   if (!supabaseClient || !studentId || !sessionId) {
     return { ok: true, deleted: 0 };
@@ -1942,12 +1947,17 @@ export function useTestingWorkspaceState({
 
     const byStudent = new Map();
     const canonicalSessionIdsWithAttempts = new Set();
+    const importedSessionOrderById = new Map();
     (attempts ?? []).forEach((attempt) => {
       if (!attempt?.student_id || !attempt?.test_session_id) return;
       const sourceSession = sessionById.get(attempt.test_session_id);
       if (!sourceSession) return;
       const canonicalSession = getCanonicalSession(sourceSession);
       if (!canonicalSession?.id) return;
+      const importedCsvOrderIndex = getImportedCsvOrderIndex(attempt);
+      if (importedCsvOrderIndex != null && !importedSessionOrderById.has(canonicalSession.id)) {
+        importedSessionOrderById.set(canonicalSession.id, importedCsvOrderIndex);
+      }
       canonicalSessionIdsWithAttempts.add(canonicalSession.id);
       const perStudent = byStudent.get(attempt.student_id) ?? new Map();
       const perSession = perStudent.get(canonicalSession.id) ?? [];
@@ -1968,6 +1978,11 @@ export function useTestingWorkspaceState({
         const leftTime = new Date(left.starts_at || left.created_at || 0).getTime();
         const rightTime = new Date(right.starts_at || right.created_at || 0).getTime();
         if (leftTime !== rightTime) return rightTime - leftTime;
+        const leftImportedOrder = importedSessionOrderById.get(left.id);
+        const rightImportedOrder = importedSessionOrderById.get(right.id);
+        if (Number.isFinite(leftImportedOrder) && Number.isFinite(rightImportedOrder) && leftImportedOrder !== rightImportedOrder) {
+          return rightImportedOrder - leftImportedOrder;
+        }
         return String(left.title ?? left.problem_set_id ?? "").localeCompare(
           String(right.title ?? right.problem_set_id ?? "")
         );

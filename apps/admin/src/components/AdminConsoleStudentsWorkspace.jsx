@@ -661,7 +661,6 @@ export default function AdminConsoleStudentsWorkspace() {
                   <thead>
                     <tr>
                       <th>Category</th>
-                      <th>Average Score</th>
                       <th>Average Rate</th>
                       <th>Pass</th>
                       <th>Fail</th>
@@ -669,15 +668,14 @@ export default function AdminConsoleStudentsWorkspace() {
                   </thead>
                   <tbody>
                     {studentModelCategorySummaryRows.length ? studentModelCategorySummaryRows.map((row) => (
-                      <tr key={`student-model-summary-${row.category}`}>
+                        <tr key={`student-model-summary-${row.category}`}>
                         <td>{row.category}</td>
-                        <td>{row.averageScoreLabel}</td>
                         <td>{row.averageRateLabel}</td>
                         <td>{row.passCount}</td>
                         <td>{row.failCount}</td>
                       </tr>
                     )) : (
-                      <tr><td colSpan={5}>No model test records.</td></tr>
+                      <tr><td colSpan={4}>No model test records.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -701,7 +699,7 @@ export default function AdminConsoleStudentsWorkspace() {
                   </thead>
                   <tbody>
                     {studentModelAttempts.map((a) => {
-                      const score = `${a.correct}/${a.total}`;
+                      const score = a.correct === 0 && a.total === 0 ? "-" : `${a.correct}/${a.total}`;
                       const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
                       const passRate = getAttemptEffectivePassRate(a);
                       const passed = getScoreRate(a) >= passRate;
@@ -740,7 +738,6 @@ export default function AdminConsoleStudentsWorkspace() {
                   <thead>
                     <tr>
                       <th>Category</th>
-                      <th>Average Score</th>
                       <th>Average Rate</th>
                       <th>Pass</th>
                       <th>Fail</th>
@@ -750,13 +747,12 @@ export default function AdminConsoleStudentsWorkspace() {
                     {studentDailyCategorySummaryRows.length ? studentDailyCategorySummaryRows.map((row) => (
                       <tr key={`student-daily-summary-${row.category}`}>
                         <td>{row.category}</td>
-                        <td>{row.averageScoreLabel}</td>
                         <td>{row.averageRateLabel}</td>
                         <td>{row.passCount}</td>
                         <td>{row.failCount}</td>
                       </tr>
                     )) : (
-                      <tr><td colSpan={5}>No daily test records.</td></tr>
+                      <tr><td colSpan={4}>No daily test records.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -777,16 +773,16 @@ export default function AdminConsoleStudentsWorkspace() {
                       </thead>
                       <tbody>
                         {items.map((a) => {
-                          const score = `${a.correct}/${a.total}`;
+                          const score = a.correct === 0 && a.total === 0 ? "-" : `${a.correct}/${a.total}`;
                           const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
                           const passRate = getAttemptEffectivePassRate(a);
                           const passed = getScoreRate(a) >= passRate;
                           return (
-                            <tr key={`student-daily-${a.id}`} onClick={() => openAttemptDetail(a)}>
-                              <td>{getAttemptTitle(a)}</td>
-                              <td>{formatDateFull(getAttemptDisplayDateValue(a))}</td>
-                              <td>{score}</td>
-                              <td>{rate}</td>
+                        <tr key={`student-daily-${a.id}`} onClick={() => openAttemptDetail(a)}>
+                          <td>{getAttemptTitle(a)}</td>
+                          <td>{formatDateFull(getAttemptDisplayDateValue(a))}</td>
+                          <td>{a.correct === 0 && a.total === 0 ? "-" : `${a.correct}/${a.total}`}</td>
+                          <td>{rate}</td>
                               <td><span className={passed ? "pf-pass" : "pf-fail"}>{passed ? "Pass" : "Fail"}</span></td>
                             </tr>
                           );
