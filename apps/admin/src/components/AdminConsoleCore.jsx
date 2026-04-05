@@ -1223,6 +1223,11 @@ function isImportedResultsSummaryAttempt(attempt) {
     && (source === "daily_results_csv" || source === "model_results_csv");
 }
 
+function getImportedCsvOrderIndex(attempt) {
+  const orderIndex = Number(attempt?.answers_json?.__meta?.imported_csv_index);
+  return Number.isFinite(orderIndex) ? orderIndex : null;
+}
+
 function getImportedModelSectionSummaries(attempt) {
   const rows = Array.isArray(attempt?.answers_json?.__meta?.main_section_summary)
     ? attempt.answers_json.__meta.main_section_summary
@@ -3981,6 +3986,11 @@ export default function AdminConsole({
         [...attemptsList].sort((left, right) => {
           const timeDiff = getAttemptDisplayTimestamp(right) - getAttemptDisplayTimestamp(left);
           if (timeDiff !== 0) return timeDiff;
+          const leftImportedOrder = getImportedCsvOrderIndex(left);
+          const rightImportedOrder = getImportedCsvOrderIndex(right);
+          if (Number.isFinite(leftImportedOrder) && Number.isFinite(rightImportedOrder) && leftImportedOrder !== rightImportedOrder) {
+            return rightImportedOrder - leftImportedOrder;
+          }
           return getRowTimestamp(right) - getRowTimestamp(left);
         }),
       ]))
