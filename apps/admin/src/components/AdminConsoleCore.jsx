@@ -3303,6 +3303,8 @@ export default function AdminConsole({
   const [supabase, setSupabase] = useState(null);
   const activeWorkspaceKey = resolveAdminWorkspaceKey(activeTab);
   const activeWorkspaceConfig = ADMIN_WORKSPACE_CONFIG[activeWorkspaceKey];
+  const [mountedWorkspaceKeys, setMountedWorkspaceKeys] = useState(() => [activeWorkspaceKey]);
+  const mountedWorkspaceScopeRef = useRef(activeSchoolId ?? "");
 
   if (!renderTraceLoggedRef.current) {
     renderTraceLoggedRef.current = true;
@@ -3373,6 +3375,20 @@ export default function AdminConsole({
     profile?.role,
     session?.user?.id,
   ]);
+
+  useEffect(() => {
+    const nextScopeKey = activeSchoolId ?? "";
+    if (mountedWorkspaceScopeRef.current !== nextScopeKey) {
+      mountedWorkspaceScopeRef.current = nextScopeKey;
+      setMountedWorkspaceKeys([activeWorkspaceKey]);
+      return;
+    }
+
+    setMountedWorkspaceKeys((current) => {
+      if (current.includes(activeWorkspaceKey)) return current;
+      return [...current, activeWorkspaceKey];
+    });
+  }, [activeSchoolId, activeWorkspaceKey]);
 
   function generateTempPassword(length = 10) {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
@@ -11963,41 +11979,52 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
           <div className="admin-panel admin-console-panel">
             <AdminConsoleWorkspaceProvider value={workspaceContextValue}>
-              {activeWorkspaceConfig ? (
-                <LoadableAdminWorkspace
-                  key={`${activeWorkspaceKey}:${activeSchoolId ?? "none"}`}
-                  importTarget={activeWorkspaceConfig.importTarget}
-                  loadModule={activeWorkspaceConfig.loadModule}
-                  getLoadedModule={activeWorkspaceConfig.getLoadedModule}
-                  context={{
-                    role: profile?.role ?? null,
-                    userId: session?.user?.id ?? null,
-                    schoolId: activeSchoolId,
-                    activeSchoolId,
-                    managedAuth: isManagedAuth,
-                    source: "shell-workspace",
-                    adminTab: activeTab,
-                    attendanceSubTab,
-                    modelSubTab,
-                    dailySubTab,
-                  }}
-                  loadingLabel={activeWorkspaceConfig.loadingLabel}
-                  errorTitle="Workspace Error"
-                  errorMessage="Failed to load this admin workspace. Retry or switch tabs and try again."
-                  onBack={changeSchoolHref
-                    ? () => {
-                        window.location.assign(changeSchoolHref);
-                      }
-                    : null}
-                  backLabel={changeSchoolHref ? "Back to Schools" : "Back"}
-                  diagnosticsExtra={{
-                    adminTab: activeTab,
-                    attendanceSubTab,
-                    modelSubTab,
-                    dailySubTab,
-                  }}
-                />
-              ) : null}
+              {mountedWorkspaceKeys.map((workspaceKey) => {
+                const workspaceConfig = ADMIN_WORKSPACE_CONFIG[workspaceKey];
+                if (!workspaceConfig) return null;
+
+                const isWorkspaceVisible = workspaceKey === activeWorkspaceKey;
+                return (
+                  <div
+                    key={`${workspaceKey}:${activeSchoolId ?? "none"}`}
+                    style={{ display: isWorkspaceVisible ? "block" : "none" }}
+                    aria-hidden={!isWorkspaceVisible}
+                  >
+                    <LoadableAdminWorkspace
+                      importTarget={workspaceConfig.importTarget}
+                      loadModule={workspaceConfig.loadModule}
+                      getLoadedModule={workspaceConfig.getLoadedModule}
+                      context={{
+                        role: profile?.role ?? null,
+                        userId: session?.user?.id ?? null,
+                        schoolId: activeSchoolId,
+                        activeSchoolId,
+                        managedAuth: isManagedAuth,
+                        source: "shell-workspace",
+                        adminTab: activeTab,
+                        attendanceSubTab,
+                        modelSubTab,
+                        dailySubTab,
+                      }}
+                      loadingLabel={workspaceConfig.loadingLabel}
+                      errorTitle="Workspace Error"
+                      errorMessage="Failed to load this admin workspace. Retry or switch tabs and try again."
+                      onBack={changeSchoolHref
+                        ? () => {
+                            window.location.assign(changeSchoolHref);
+                          }
+                        : null}
+                      backLabel={changeSchoolHref ? "Back to Schools" : "Back"}
+                      diagnosticsExtra={{
+                        adminTab: activeTab,
+                        attendanceSubTab,
+                        modelSubTab,
+                        dailySubTab,
+                      }}
+                    />
+                  </div>
+                );
+              })}
             </AdminConsoleWorkspaceProvider>
           </div>
 
