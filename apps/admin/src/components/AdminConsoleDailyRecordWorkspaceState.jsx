@@ -958,6 +958,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   }, [dailyRecords]);
 
   const scheduleRecordDisplayByDate = useMemo(() => {
+    const todayBangladesh = getBangladeshDateInput(new Date());
     const confirmedSet = new Set(dailyRecordConfirmedDates);
     const recordByDate = Object.fromEntries((dailyRecords ?? []).filter((record) => record?.record_date).map((record) => [record.record_date, record]));
     const displayData = {};
@@ -970,6 +971,8 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       const lockedSpecialTest2 = Boolean(scheduledTests.modelTests[1]);
       const isFullyLocked = lockedMiniTest1 && lockedMiniTest2 && lockedSpecialTest1 && lockedSpecialTest2;
       displayData[recordDate] = {
+        hasRecord: Boolean(record),
+        isPastDate: Boolean(todayBangladesh && recordDate < todayBangladesh),
         isConfirmed: confirmedSet.has(recordDate),
         isFullyLocked,
         isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
