@@ -23,6 +23,13 @@ function formatPercent(value) {
   return `${Math.round(Number(value) * 100)}%`;
 }
 
+function formatVersionLabel(row) {
+  const label = String(row?.version_label ?? "").trim();
+  if (label) return label;
+  const version = Number(row?.version ?? 0);
+  return version > 0 ? `v${version}` : "v?";
+}
+
 export default function SuperTestsAnalyticsPage() {
   const { supabase } = useSuperAdmin();
   const router = useRouter();
@@ -246,6 +253,7 @@ export default function SuperTestsAnalyticsPage() {
             <thead>
               <tr>
                 <th>Title</th>
+                <th>Ver.</th>
                 <th>Type</th>
                 <th>Status</th>
                 <th>Visibility</th>
@@ -261,6 +269,7 @@ export default function SuperTestsAnalyticsPage() {
                   style={{ cursor: "pointer" }}
                 >
                   <td>{row.title}</td>
+                  <td>{formatVersionLabel(row)}</td>
                   <td style={{ textTransform: "capitalize" }}>{row.test_type}</td>
                   <td style={{ textTransform: "capitalize" }}>{row.status}</td>
                   <td style={{ textTransform: "capitalize" }}>{row.visibility_scope}</td>
@@ -270,12 +279,12 @@ export default function SuperTestsAnalyticsPage() {
               ))}
               {!loading && questionSetRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>No question sets found for the selected filters.</td>
+                  <td colSpan={7}>No question sets found for the selected filters.</td>
                 </tr>
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={6}>Loading question sets...</td>
+                  <td colSpan={7}>Loading question sets...</td>
                 </tr>
               ) : null}
             </tbody>

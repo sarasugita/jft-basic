@@ -5464,7 +5464,7 @@ function renderQuiz(app) {
               ? `
                 <div class="question-nav">
                   <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
-                  <button class="nav-btn" id="nextBtn">${nextLabel}</button>
+                  <button class="nav-btn ${isLastQuestion ? "danger" : ""}" id="nextBtn">${nextLabel}</button>
                 </div>
               `
               : ""
@@ -5479,7 +5479,7 @@ function renderQuiz(app) {
               <div class="bottom-left"><button class="icon-btn">⚙️</button><button class="icon-btn">▦</button></div>
               <div class="bottom-right">
                 <button class="nav-btn ghost" id="backBtn" ${state.questionIndexInSection === 0 ? "disabled" : ""}>◀ Back</button>
-                <button class="nav-btn" id="nextBtn">${nextLabel}</button>
+                <button class="nav-btn ${isLastQuestion ? "danger" : ""}" id="nextBtn">${nextLabel}</button>
               </div>
             </footer>
           `

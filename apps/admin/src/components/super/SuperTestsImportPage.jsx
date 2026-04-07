@@ -183,6 +183,13 @@ function statusBadge(status) {
   return <span className={`super-status ${normalized}`}>{status}</span>;
 }
 
+function formatVersionLabel(item) {
+  const label = String(item?.version_label ?? "").trim();
+  if (label) return label;
+  const version = Number(item?.version ?? 0);
+  return version > 0 ? `v${version}` : "v?";
+}
+
 function formatDateTime(value) {
   if (!value) return "N/A";
   const date = new Date(value);
@@ -442,7 +449,6 @@ export default function SuperTestsImportPage() {
       supabase
         .from("question_sets")
         .select("id, library_key, source_question_set_id, title, description, test_type, version, version_label, status, visibility_scope, created_at, updated_at")
-        .neq("status", "archived")
         .order("updated_at", { ascending: false }),
       supabase
         .from("question_set_school_access")
@@ -764,7 +770,7 @@ export default function SuperTestsImportPage() {
         }
 
         setMetaUploadProgress({ phase: "Uploading files", uploaded: 0, total: totalFiles });
-        await invokeUploadFunction(
+        const result = await invokeUploadFunction(
           "upload-question-set-version",
           uploadMetadata,
           metaCsvFile,
@@ -772,7 +778,11 @@ export default function SuperTestsImportPage() {
           setMetaUploadProgress,
         );
         setMetaUploadProgress((current) => ({ ...current, uploaded: current.total }));
-        setMsg("Set updated and new version uploaded.");
+        setMsg(
+          result?.scope_notice
+            ? `Set updated and new version uploaded. ${result.scope_notice}`
+            : "Set updated and new version uploaded.",
+        );
       } else {
         await invokeJsonFunction("update-question-set-metadata", metaForm);
         setMsg("Set metadata updated.");
@@ -786,7 +796,7 @@ export default function SuperTestsImportPage() {
     }
   }
 
-  async function archiveQuestionSet(questionSetId) {
+  async function deleteQuestionSetFamily(questionSetId) {
     setSaving(true);
     try {
       await invokeJsonFunction("archive-question-set", { question_set_id: questionSetId });
@@ -838,6 +848,7 @@ export default function SuperTestsImportPage() {
           <thead>
             <tr>
               <th>SetID</th>
+              <th>Ver.</th>
               <th>Questions</th>
               <th>Visibility</th>
               <th>Preview</th>
@@ -857,8 +868,14 @@ export default function SuperTestsImportPage() {
                         <div>{createdParts.date}</div>
                         <div>{createdParts.time}</div>
                       </div>
+                      {item.status === "archived" ? (
+                        <div style={{ marginTop: 6 }}>
+                          {statusBadge(item.status)}
+                        </div>
+                      ) : null}
                     </div>
                   </td>
+                  <td>{formatVersionLabel(item)}</td>
                   <td style={{ textAlign: "right" }}>{item.question_count ?? 0}</td>
                   <td>
                     <div style={{ fontWeight: 700 }}>
@@ -877,9 +894,12 @@ export default function SuperTestsImportPage() {
                     <button className="btn" onClick={() => openMetadataModal(item)}>Edit</button>
                   </td>
                   <td>
-                    {item.status !== "archived" ? (
-                    <button className="btn btn-danger" onClick={() => openDeleteModal(item)}>Delete</button>
-                  ) : statusBadge(item.status)}
+                    <button
+                      className="btn btn-danger"
+                      onClick={() => openDeleteModal(item)}
+                    >
+                      {item.status === "archived" ? "Hard Delete" : "Delete"}
+                    </button>
                   </td>
                 </tr>
               );
@@ -1102,7 +1122,7 @@ export default function SuperTestsImportPage() {
         <div className="admin-modal-overlay" onClick={() => setMetaOpen(false)}>
           <div className="admin-modal upload-question-modal" onClick={(event) => event.stopPropagation()}>
             <div className="admin-modal-header">
-              <div className="admin-title">Edit Question Set</div>
+              <div className="admin-title">{metaCsvFile ? "Upload New Version" : "Edit Question Set"}</div>
               <button className="admin-modal-close" onClick={() => setMetaOpen(false)} aria-label="Close">
                 ×
               </button>
@@ -1123,11 +1143,17 @@ export default function SuperTestsImportPage() {
                 <label>SetID</label>
                 <input
                   value={metaForm.title}
+                  readOnly={Boolean(metaCsvFile)}
                   onChange={(event) => setMetaForm((prev) => ({ ...prev, title: event.target.value }))}
                 />
+                {metaCsvFile ? (
+                  <div className="admin-help" style={{ marginTop: 4 }}>
+                    The SetID stays fixed for version uploads.
+                  </div>
+                ) : null}
               </div>
               <div className="field">
-                <label>Category</label>
+                <label>{metaCsvFile ? "Category for New Version" : "Category"}</label>
                 <select
                   value={metaCategorySelect}
                   onChange={(event) => handleMetaCategoryChange(event.target.value)}
@@ -1154,7 +1180,7 @@ export default function SuperTestsImportPage() {
                 />
                 {metaCsvFile ? (
                   <div className="admin-help" style={{ marginTop: 4 }}>
-                    CSV ready: {metaCsvFile.name}
+                    CSV ready: {metaCsvFile.name}. Uploading this file will create the next version for this SetID.
                   </div>
                 ) : null}
               </div>
@@ -1203,7 +1229,7 @@ export default function SuperTestsImportPage() {
               ) : null}
               <div className="upload-question-actions">
                 <button className="btn btn-primary" onClick={saveMetadata} disabled={saving}>
-                  {saving ? "Saving..." : "Save Changes"}
+                  {saving ? "Saving..." : metaCsvFile ? "Upload New Version" : "Save Changes"}
                 </button>
               </div>
               {metaUploadProgress.total > 0 ? (
@@ -1214,6 +1240,9 @@ export default function SuperTestsImportPage() {
             </div>
             {metaValidationMsg ? <div className="admin-msg">{metaValidationMsg}</div> : null}
             <ValidationReport validation={metaValidation} />
+            <div className="admin-help" style={{ marginTop: 8 }}>
+              When editing an existing set, choose a CSV to create a new version with the same SetID.
+            </div>
             <div className="admin-help" style={{ marginTop: 8 }}>
               Template: <a href="/daily_question_csv_template.csv" download>Daily CSV template</a>
             </div>
@@ -1236,14 +1265,14 @@ export default function SuperTestsImportPage() {
 
             <div className="super-question-set-delete-body">
               <div className="admin-help">
-                Delete <b>{deleteTarget.title}</b>? This will remove the question set from the library.
+                Permanently delete <b>{deleteTarget.title}</b> and all of its versions? This cannot be undone, but the SetID will be reusable after deletion.
               </div>
               <div className="super-question-set-delete-actions">
                 <button className="btn" type="button" onClick={closeDeleteModal} disabled={saving}>
                   Cancel
                 </button>
-                <button className="btn btn-danger" type="button" onClick={() => archiveQuestionSet(deleteTarget.id)} disabled={saving}>
-                  {saving ? "Deleting..." : "Delete"}
+                <button className="btn btn-danger" type="button" onClick={() => deleteQuestionSetFamily(deleteTarget.id)} disabled={saving}>
+                  {saving ? "Deleting..." : "Delete Permanently"}
                 </button>
               </div>
             </div>

@@ -121,7 +121,14 @@ Behavior:
 - the new version stays in the same library group
 - previous versions remain in the database
 - metadata is copied into the form and can be adjusted
+- the table shows `Ver.` as `v1`, `v2`, and so on
 - question content changes only when a new CSV/assets package is uploaded
+
+Visibility rules:
+
+- a family that started as `global` stays `global` for later versions
+- a family that started as `restricted` can be promoted to `global`
+- when a restricted family is promoted, the new version becomes available to all schools
 
 ## Visibility
 
@@ -133,3 +140,13 @@ Behavior:
 
 - assignable only to the schools selected in the visibility picker
 - backend enforcement uses the question-set school access join table
+
+## Delete
+
+Delete now removes the entire `SetID` family permanently.
+
+Behavior:
+
+- all versions under the same library group are deleted
+- the `SetID` becomes reusable for future uploads
+- if a family is still referenced by historical test instances or attempts, the delete is blocked to preserve history

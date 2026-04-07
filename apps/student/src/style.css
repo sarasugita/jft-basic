@@ -321,6 +321,12 @@ body { overflow-x: hidden; }
   cursor: pointer;
   font-weight: 700;
 }
+.nav-btn.danger {
+  background: #c53030;
+}
+.nav-btn.danger:hover {
+  background: #9b2c2c;
+}
 .nav-btn.ghost {
   background: transparent;
   border: 1px solid var(--green2);

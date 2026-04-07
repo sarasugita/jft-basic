@@ -155,6 +155,11 @@ function isGeneratedDailySessionVersion(version) {
   return String(version ?? "").startsWith("daily_session_");
 }
 
+function isSyntheticImportedSessionLabel(value) {
+  const text = String(value ?? "").trim();
+  return text.startsWith("imported-") || text.startsWith("daily_session_");
+}
+
 function formatCompactDateTime(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -2453,6 +2458,12 @@ export default function AdminConsoleResultsWorkspace(props) {
     const isMockSessionDetail = sessionDetail.type === "mock";
     const isImportedSummarySession = sessionDetailUsesImportedResultsSummary;
     const isImportedModelSummarySession = sessionDetailUsesImportedModelSummary;
+    const selectedSessionDetailTitle = String(selectedSessionDetail.title ?? "").trim();
+    const sessionDetailDisplayTitle = isImportedSummarySession
+      ? (selectedSessionDetailTitle && !isSyntheticImportedSessionLabel(selectedSessionDetailTitle)
+        ? selectedSessionDetailTitle
+        : "Imported Result")
+      : (selectedSessionDetail.title || selectedSessionDetail.problem_set_id);
     const analysisPopupQuestions = Array.isArray(sessionDetailAnalysisPopup.questions)
       ? sessionDetailAnalysisPopup.questions
       : [];
@@ -2517,10 +2528,10 @@ export default function AdminConsoleResultsWorkspace(props) {
               </button>
             </div>
             <div className="admin-title session-detail-title">
-              {selectedSessionDetail.title || selectedSessionDetail.problem_set_id}
+              {sessionDetailDisplayTitle}
             </div>
             <div className="admin-help session-detail-meta">
-              {!isMockSessionDetail ? (
+              {!isMockSessionDetail && !isImportedSummarySession ? (
                 <>
                   SetID: <b>{selectedSessionDetail.problem_set_id}</b>
                   {" · "}

@@ -220,9 +220,17 @@ export default function AdminConsoleTestingTabs({
     );
   }
 
+  const showDailySessionCategories = dailySessions.length > 0;
+
   function getQuestionCount(problemSetId) {
     const item = (tests ?? []).find((test) => test.version === problemSetId);
     return Number(item?.question_count ?? 0);
+  }
+
+  function formatUploadVersionLabel(test) {
+    const label = String(test?.version_label ?? "").trim();
+    if (label) return label;
+    return "v1";
   }
 
   const compactDateColumnStyle = { minWidth: 150, whiteSpace: "nowrap" };
@@ -1030,6 +1038,7 @@ export default function AdminConsoleTestingTabs({
                             <tr>
                               <th>Category</th>
                               <th>SetID</th>
+                              <th>Ver.</th>
                               <th style={compactDateColumnStyle}>Created</th>
                               <th style={{ width: 72, textAlign: "center" }}>Questions</th>
                               <th>Preview</th>
@@ -1045,6 +1054,7 @@ export default function AdminConsoleTestingTabs({
                               >
                                 <td>{t.title ?? ""}</td>
                                 <td>{t.version ?? ""}</td>
+                                <td>{formatUploadVersionLabel(t)}</td>
                                 <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td style={{ width: 72, textAlign: "center" }}>{t.question_count ?? 0}</td>
                                 <td>
@@ -1335,23 +1345,25 @@ export default function AdminConsoleTestingTabs({
 
               {sessionDetail.type === "daily" && sessionDetail.sessionId ? null : (
                 <>
-                <div className="admin-mini-tabs results-category-tabs" style={{ marginTop: 22 }}>
-                    {dailySessionCategories.map((category) => (
-                      <button
-                        key={`daily-session-cat-${category.name}`}
-                        type="button"
-                        className={`admin-mini-tab results-category-tab ${dailySessionCategory === category.name ? "active" : ""}`}
-                        onClick={() => setDailySessionCategory(category.name)}
-                      >
-                        {category.name}
-                      </button>
-                    ))}
-                  </div>
+                  {showDailySessionCategories ? (
+                    <div className="admin-mini-tabs results-category-tabs" style={{ marginTop: 22 }}>
+                      {dailySessionCategories.map((category) => (
+                        <button
+                          key={`daily-session-cat-${category.name}`}
+                          type="button"
+                          className={`admin-mini-tab results-category-tab ${dailySessionCategory === category.name ? "active" : ""}`}
+                          onClick={() => setDailySessionCategory(category.name)}
+                        >
+                          {category.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="admin-table-wrap" style={{ marginTop: 10 }}>
-                    <table className="admin-table daily-sessions-table" style={{ minWidth: 860 }}>
+                    <table className="admin-table daily-sessions-table" style={{ minWidth: showDailySessionCategories ? 860 : 740 }}>
                       <colgroup>
                         <col style={{ minWidth: 180 }} />
-                        <col />
+                        {showDailySessionCategories ? <col /> : null}
                         <col className="daily-sessions-col-setid" style={{ minWidth: 150 }} />
                         <col style={{ minWidth: 100 }} />
                         <col style={{ minWidth: 88 }} />
@@ -1368,7 +1380,7 @@ export default function AdminConsoleTestingTabs({
                       <thead>
                         <tr>
                           <th>Test Title</th>
-                          <th>Category</th>
+                          {showDailySessionCategories ? <th>Category</th> : null}
                           <th>SetID</th>
                           <th style={{ minWidth: 100, textAlign: "left" }}>Start</th>
                           <th style={{ minWidth: 120, textAlign: "left" }}>End</th>
@@ -1388,7 +1400,9 @@ export default function AdminConsoleTestingTabs({
                         {filteredDailySessions.map((t) => (
                           <tr key={t.id} {...getSessionRowProps(t, "daily")}>
                             <td>{t.title ?? ""}</td>
-                            <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
+                            {showDailySessionCategories ? (
+                              <td>{String(t.session_category ?? "").trim() || testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
+                            ) : null}
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
@@ -2335,6 +2349,7 @@ export default function AdminConsoleTestingTabs({
                             <tr>
                               <th>Category</th>
                               <th>SetID</th>
+                              <th>Ver.</th>
                               <th style={compactDateColumnStyle}>Created</th>
                               <th style={{ width: 72, textAlign: "center" }}>Questions</th>
                               <th>Preview</th>
@@ -2350,6 +2365,7 @@ export default function AdminConsoleTestingTabs({
                               >
                                 <td>{t.title ?? ""}</td>
                                 <td>{t.version ?? ""}</td>
+                                <td>{formatUploadVersionLabel(t)}</td>
                                 <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td style={{ width: 72, textAlign: "center" }}>{t.question_count ?? 0}</td>
                                 <td>
@@ -2574,6 +2590,46 @@ export default function AdminConsoleTestingTabs({
                           <label>SetID</label>
                           <input value={editingSessionForm.problem_set_id} disabled readOnly />
                         </div>
+                        {activeTab === "daily" ? (
+                          <div className="field">
+                            <label>Session Category</label>
+                            <select
+                              value={dailySessionCategories.some((category) => category.name === editingSessionForm.session_category)
+                                ? editingSessionForm.session_category
+                                : CUSTOM_CATEGORY_OPTION}
+                              onChange={(e) => {
+                                const next = e.target.value;
+                                if (next === CUSTOM_CATEGORY_OPTION) {
+                                  setEditingSessionForm((s) => ({
+                                    ...s,
+                                    session_category: dailySessionCategories.some((category) => category.name === s.session_category)
+                                      ? ""
+                                      : s.session_category,
+                                  }));
+                                  return;
+                                }
+                                setEditingSessionForm((s) => ({ ...s, session_category: next }));
+                              }}
+                            >
+                              {dailySessionCategories.map((category) => (
+                                <option key={`edit-daily-session-category-${category.name}`} value={category.name}>
+                                  {category.name}
+                                </option>
+                              ))}
+                              <option value={CUSTOM_CATEGORY_OPTION}>Custom...</option>
+                            </select>
+                            {dailySessionCategories.some((category) => category.name === editingSessionForm.session_category)
+                              ? null
+                              : (
+                                <input
+                                  value={editingSessionForm.session_category}
+                                  onChange={(e) => setEditingSessionForm((s) => ({ ...s, session_category: e.target.value }))}
+                                  placeholder="Mixed Practice"
+                                  style={{ marginTop: 6 }}
+                                />
+                              )}
+                          </div>
+                        ) : null}
                         <div className="daily-session-create-split-row">
                           <div className="daily-session-create-field">
                             <label>Start Date</label>
@@ -2755,6 +2811,46 @@ export default function AdminConsoleTestingTabs({
                   placeholder="Test Title"
                 />
               </div>
+              {activeTab === "daily" ? (
+                <div className="field">
+                  <label>Session Category</label>
+                  <select
+                    value={dailySessionCategories.some((category) => category.name === editingSessionForm.session_category)
+                      ? editingSessionForm.session_category
+                      : CUSTOM_CATEGORY_OPTION}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === CUSTOM_CATEGORY_OPTION) {
+                        setEditingSessionForm((s) => ({
+                          ...s,
+                          session_category: dailySessionCategories.some((category) => category.name === s.session_category)
+                            ? ""
+                            : s.session_category,
+                        }));
+                        return;
+                      }
+                      setEditingSessionForm((s) => ({ ...s, session_category: next }));
+                    }}
+                  >
+                    {dailySessionCategories.map((category) => (
+                      <option key={`edit-daily-session-category-bottom-${category.name}`} value={category.name}>
+                        {category.name}
+                      </option>
+                    ))}
+                    <option value={CUSTOM_CATEGORY_OPTION}>Custom...</option>
+                  </select>
+                  {dailySessionCategories.some((category) => category.name === editingSessionForm.session_category)
+                    ? null
+                    : (
+                      <input
+                        value={editingSessionForm.session_category}
+                        onChange={(e) => setEditingSessionForm((s) => ({ ...s, session_category: e.target.value }))}
+                        placeholder="Mixed Practice"
+                        style={{ marginTop: 6 }}
+                      />
+                    )}
+                </div>
+              ) : null}
               <div className="daily-session-create-split-row">
                 <div className="daily-session-create-field">
                   <label>Start Date</label>

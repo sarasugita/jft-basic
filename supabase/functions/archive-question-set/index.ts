@@ -20,29 +20,53 @@ serve(async (req) => {
 
   const { data: questionSet, error: questionSetError } = await context.adminClient
     .from("question_sets")
-    .select("id, title")
+    .select("id, title, library_key, version")
     .eq("id", questionSetId)
     .single();
   if (questionSetError || !questionSet) return bad(questionSetError?.message ?? "Question set not found");
 
-  const { error } = await context.adminClient
+  const { data: familyRows, error: familyError } = await context.adminClient
     .from("question_sets")
-    .update({ status: "archived" })
-    .eq("id", questionSetId);
-  if (error) return bad(error.message);
+    .select("id, title, version")
+    .eq("library_key", questionSet.library_key);
+  if (familyError) return bad(familyError.message);
+  const familyIds = (familyRows ?? []).map((row) => row.id).filter(Boolean);
+  if (!familyIds.length) return bad("Question set family not found");
 
-  const { error: legacyError } = await context.adminClient
-    .from("tests")
-    .update({ is_public: false, updated_at: new Date().toISOString() })
-    .eq("version", questionSet.title);
-  if (legacyError) return bad(legacyError.message);
+  const [{ data: instanceRows, error: instancesError }, { data: attemptRows, error: attemptsError }] = await Promise.all([
+    context.adminClient
+      .from("test_instances")
+      .select("id")
+      .in("question_set_id", familyIds),
+    context.adminClient
+      .from("attempts")
+      .select("id")
+      .in("question_set_id", familyIds),
+  ]);
+  if (instancesError) return bad(instancesError.message);
+  if (attemptsError) return bad(attemptsError.message);
+  if ((instanceRows ?? []).length || (attemptRows ?? []).length) {
+    return bad(
+      "This SetID is still used by historical test instances or attempts, so it cannot be hard-deleted yet.",
+    );
+  }
+
+  const { error: deleteError } = await context.adminClient
+    .from("question_sets")
+    .delete()
+    .eq("library_key", questionSet.library_key);
+  if (deleteError) return bad(deleteError.message);
 
   await logAuditEvent(context.adminClient, context, {
-    actionType: "archive",
+    actionType: "delete",
     entityType: "question_set",
     entityId: questionSetId,
-    metadata: { status: "archived" },
+    metadata: {
+      deleted_family: true,
+      library_key: questionSet.library_key,
+      version: questionSet.version,
+    },
   });
 
-  return ok({ ok: true, question_set_id: questionSetId, status: "archived" });
+  return ok({ ok: true, question_set_id: questionSetId, deleted_family: true });
 });

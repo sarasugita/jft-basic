@@ -1178,6 +1178,7 @@ export function useTestingWorkspaceState({
     id: "",
     problem_set_id: "",
     title: "",
+    session_category: "",
     starts_at_date: "",
     starts_at_time: "",
     ends_at_date: "",
@@ -1579,12 +1580,11 @@ export function useTestingWorkspaceState({
   }, [dailySessions]);
 
   const pastDailySessionCategories = useMemo(() => {
-    const dailyCategoryByVersion = new Map(
-      (dailyTests ?? []).map((test) => [test.version, String(test.title ?? "").trim() || "Uncategorized"])
-    );
     const grouped = new Map();
     dailyRetakeSessions.forEach((session) => {
-      const category = dailyCategoryByVersion.get(session.problem_set_id) || "Uncategorized";
+      const category = String(session.session_category ?? "").trim()
+        || String(dailyTests.find((test) => test.version === session.problem_set_id)?.title ?? "").trim()
+        || "Uncategorized";
       if (!grouped.has(category)) grouped.set(category, []);
       grouped.get(category).push(session);
     });
@@ -1679,6 +1679,33 @@ export function useTestingWorkspaceState({
     });
     return map;
   }, [tests]);
+
+  const getDailySessionCategoryName = useCallback((session) => {
+    const explicit = String(session?.session_category ?? "").trim();
+    if (explicit) return explicit;
+    const fallback = String(testMetaByVersion[session?.problem_set_id]?.category ?? "").trim();
+    return fallback || "Uncategorized";
+  }, [testMetaByVersion]);
+
+  const buildDailySessionCategoryGroups = useCallback((sessions) => {
+    const grouped = new Map();
+    (sessions ?? []).forEach((session) => {
+      if (!session?.id) return;
+      const category = getDailySessionCategoryName(session);
+      if (!grouped.has(category)) grouped.set(category, []);
+      grouped.get(category).push(session);
+    });
+    return Array.from(grouped.entries())
+      .map(([name, sessionList]) => ({
+        name,
+        sessions: [...sessionList].sort((left, right) => {
+          const timeCompare = getSessionSortTime(right) - getSessionSortTime(left);
+          if (timeCompare !== 0) return timeCompare;
+          return compareSetIds(left.problem_set_id, right.problem_set_id);
+        }),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [getDailySessionCategoryName]);
 
   const testSessionsById = useMemo(() => new Map(testSessions.map((s) => [s.id, s])), [testSessions]);
 
@@ -1822,10 +1849,7 @@ export function useTestingWorkspaceState({
     [filteredDailyUploadTests],
   );
 
-  const dailyResultCategories = useMemo(() => {
-    const sessionVersions = new Set((allDailySessions ?? []).map((session) => session.problem_set_id).filter(Boolean));
-    return buildCategories((dailyTests ?? []).filter((test) => sessionVersions.has(test.version)));
-  }, [allDailySessions, dailyTests]);
+  const dailyResultCategories = useMemo(() => buildDailySessionCategoryGroups(allDailySessions), [buildDailySessionCategoryGroups, allDailySessions]);
 
   const modelResultCategories = useMemo(() => {
     const sessionVersions = new Set(
@@ -1837,7 +1861,7 @@ export function useTestingWorkspaceState({
     return buildCategories((modelTests ?? []).filter((test) => sessionVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
   }, [modelTests, allModelSessions]);
 
-  const dailySessionCategories = useMemo(() => buildCategories(dailyTests, "Uncategorized", "version"), [dailyTests]);
+  const dailySessionCategories = useMemo(() => buildDailySessionCategoryGroups(dailySessions), [buildDailySessionCategoryGroups, dailySessions]);
 
   const dailySessionCategorySelectValue = useMemo(() => {
     if (!dailySessionCategories.length) return CUSTOM_CATEGORY_OPTION;
@@ -1874,7 +1898,7 @@ export function useTestingWorkspaceState({
     const list = !selectedDailySessionCategory
       ? dailySessions
       : dailySessions.filter((session) => {
-      const category = String(testMetaByVersion[session.problem_set_id]?.category ?? "").trim() || "Uncategorized";
+      const category = getDailySessionCategoryName(session);
       return category === selectedDailySessionCategory.name;
     });
     return [...list].sort((left, right) => {
@@ -1882,7 +1906,7 @@ export function useTestingWorkspaceState({
       if (timeCompare !== 0) return timeCompare;
       return compareSetIds(left.problem_set_id, right.problem_set_id);
     });
-  }, [dailySessions, selectedDailySessionCategory, testMetaByVersion]);
+  }, [dailySessions, selectedDailySessionCategory, getDailySessionCategoryName]);
 
   useEffect(() => {
     if (!modelCategories.length) {
@@ -1923,15 +1947,21 @@ export function useTestingWorkspaceState({
 
   const buildSessionResultsMatrix = useCallback((selectedCategory) => {
     const testsForCategory = selectedCategory?.tests ?? [];
-    if (!testsForCategory.length) return { sessions: [], rows: [] };
+    const sessionsForCategory = selectedCategory?.sessions ?? [];
+    if (!testsForCategory.length && !sessionsForCategory.length) return { sessions: [], rows: [] };
 
     const testByVersion = new Map(testsForCategory.map((test) => [test.version, test]));
-    const categorySessions = (testSessions ?? [])
-      .filter((session) => testByVersion.has(session.problem_set_id))
-      .map((session) => ({
+    const categorySessions = sessionsForCategory.length
+      ? sessionsForCategory.map((session) => ({
         ...session,
-        linkedTest: testByVersion.get(session.problem_set_id) ?? null,
-      }));
+        linkedTest: testByVersion.get(session.problem_set_id) ?? testMetaByVersion[session.problem_set_id] ?? null,
+      }))
+      : (testSessions ?? [])
+        .filter((session) => testByVersion.has(session.problem_set_id))
+        .map((session) => ({
+          ...session,
+          linkedTest: testByVersion.get(session.problem_set_id) ?? null,
+        }));
 
     if (!categorySessions.length) return { sessions: [], rows: [] };
 
@@ -2040,7 +2070,7 @@ export function useTestingWorkspaceState({
     });
 
     return { sessions: sessionList, rows };
-  }, [attempts, students, testSessions]);
+  }, [attempts, students, testSessions, testMetaByVersion]);
 
   const dailyResultsMatrix = useMemo(
     () => buildSessionResultsMatrix(selectedDailyCategory),
@@ -2255,7 +2285,7 @@ export function useTestingWorkspaceState({
   }, []);
 
   const openDailyManualColumnModal = useCallback(() => {
-    const defaultTestVersion = String(selectedDailyCategory?.tests?.[0]?.version ?? "").trim();
+    const defaultTestVersion = String(selectedDailyCategory?.sessions?.[0]?.problem_set_id ?? "").trim();
     const rows = (dailyResultsMatrix.rows ?? [])
       .filter((row) => !row?.student?.is_withdrawn)
       .map((row) => ({
@@ -2337,11 +2367,13 @@ export function useTestingWorkspaceState({
       return;
     }
 
-    const passRate = Number(selectedDailyCategory?.tests?.[0]?.pass_rate ?? 0.8);
+    const firstSession = selectedDailyCategory?.sessions?.[0] ?? null;
+    const passRate = Number(testMetaByVersion[firstSession?.problem_set_id]?.pass_rate ?? firstSession?.pass_rate ?? 0.8);
     const sessionPayload = {
       school_id: activeSchoolId,
       problem_set_id: testVersion,
       title,
+      session_category: String(selectedDailyCategory?.name ?? "").trim() || "Uncategorized",
       starts_at: startedAt,
       ends_at: startedAt,
       time_limit_min: null,
@@ -2423,6 +2455,7 @@ export function useTestingWorkspaceState({
         test_type: "daily",
         title,
         problem_set_id: testVersion,
+        session_category: sessionPayload.session_category,
         starts_at: startedAt,
         manual_entry: true,
       },
@@ -2441,6 +2474,7 @@ export function useTestingWorkspaceState({
     selectedDailyCategory,
     setDailyResultsCategory,
     setQuizMsg,
+    testMetaByVersion,
     supabase,
   ]);
 
@@ -3332,6 +3366,7 @@ export function useTestingWorkspaceState({
       school_id: activeSchoolId,
       problem_set_id: problemSetId,
       title,
+      session_category: sessionCategory,
       starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,
       ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
@@ -3416,7 +3451,7 @@ export function useTestingWorkspaceState({
 
   const startEditSession = useCallback((session) => {
     if (!session?.id) return;
-    const passRate = getSessionEffectivePassRate(session);
+    const passRate = normalizePassRate(session.pass_rate ?? testMetaByVersion[session.problem_set_id]?.pass_rate);
     const startsAtFormatted = formatDateTimeInput(session.starts_at);
     const endsAtFormatted = formatDateTimeInput(session.ends_at);
     setEditingSessionId(session.id);
@@ -3425,6 +3460,7 @@ export function useTestingWorkspaceState({
       id: session.id,
       problem_set_id: session.problem_set_id ?? "",
       title: session.title ?? "",
+      session_category: getDailySessionCategoryName(session),
       starts_at_date: getBangladeshDateFromFormatted(startsAtFormatted),
       starts_at_time: getBangladeshTimeFromFormatted(startsAtFormatted),
       ends_at_date: getBangladeshDateFromFormatted(endsAtFormatted),
@@ -3434,7 +3470,7 @@ export function useTestingWorkspaceState({
       allow_multiple_attempts: session.allow_multiple_attempts !== false,
       pass_rate: String(passRate)
     });
-  }, []);
+  }, [getDailySessionCategoryName, testMetaByVersion]);
 
   const cancelEditSession = useCallback(() => {
     setEditingSessionId("");
@@ -3443,6 +3479,7 @@ export function useTestingWorkspaceState({
       id: "",
       problem_set_id: "",
       title: "",
+      session_category: "",
       starts_at_date: "",
       starts_at_time: "",
       ends_at_date: "",
@@ -3466,7 +3503,8 @@ export function useTestingWorkspaceState({
       show_answers,
       pass_rate,
       problem_set_id,
-      allow_multiple_attempts
+      allow_multiple_attempts,
+      session_category,
     } = editingSessionForm;
     if (!title.trim()) {
       setEditingSessionMsg("Test Title is required.");
@@ -3503,6 +3541,11 @@ export function useTestingWorkspaceState({
     setEditingSessionMsg("Saving...");
     const payload = {
       title: title.trim(),
+      ...(testMetaByVersion[problem_set_id]?.type === "daily"
+        ? {
+          session_category: String(session_category ?? "").trim() || getDailySessionCategoryName({ problem_set_id }),
+        }
+        : {}),
       starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,
       ends_at: endsAtInput ? fromBangladeshInput(endsAtInput) : null,
       time_limit_min: time_limit_min ? Number(time_limit_min) : null,
@@ -3536,7 +3579,7 @@ export function useTestingWorkspaceState({
     }
     cancelEditSession();
     fetchTestSessions();
-  }, [editingSessionId, editingSessionForm, supabase, hasDuplicateSessionTitle, cancelEditSession, fetchTestSessions]);
+  }, [editingSessionId, editingSessionForm, supabase, hasDuplicateSessionTitle, cancelEditSession, fetchTestSessions, getDailySessionCategoryName, testMetaByVersion]);
 
   const deleteTestSession = useCallback(async (id, options = {}) => {
     if (!id || !supabase) return;
@@ -3599,7 +3642,14 @@ export function useTestingWorkspaceState({
   const getAttemptTitle = useCallback((attempt) => {
     if (!attempt) return "";
     const importedTitle = String(attempt?.answers_json?.__meta?.imported_test_title ?? "").trim();
-    if (isImportedResultsSummaryAttempt(attempt) && importedTitle) return importedTitle;
+    if (isImportedResultsSummaryAttempt(attempt)) {
+      if (importedTitle) return importedTitle;
+      if (attempt.test_session_id) {
+        const session = testSessionsById.get(attempt.test_session_id);
+        if (session?.title) return session.title;
+      }
+      return "Imported Result";
+    }
     if (attempt.test_session_id) {
       const session = testSessionsById.get(attempt.test_session_id);
       if (session?.title) return session.title;
@@ -4752,7 +4802,7 @@ export function useTestingWorkspaceState({
 
   const applyDailyRetakeSourceSession = useCallback((session) => {
     if (!session) return;
-    const sourceCategory = testMetaByVersion[session.problem_set_id]?.category || "";
+    const sourceCategory = getDailySessionCategoryName(session);
     if (sourceCategory) {
       setDailyRetakeCategory(sourceCategory);
       setDailyConductCategory(sourceCategory);
@@ -4784,7 +4834,7 @@ export function useTestingWorkspaceState({
       retake_release_scope: current.retake_release_scope || "all",
       pass_rate: "0.8",
     }));
-  }, [testMetaByVersion, tests]);
+  }, [getDailySessionCategoryName, tests]);
 
   const selectModelRetakeSource = useCallback((sessionId) => {
     setModelRetakeSourceId(sessionId);

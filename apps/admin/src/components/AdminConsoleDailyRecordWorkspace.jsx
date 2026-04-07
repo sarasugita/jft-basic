@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useDailyRecordWorkspaceState } from "./AdminConsoleDailyRecordWorkspaceState";
@@ -81,6 +81,52 @@ function formatWeekday(value) {
   const date = new Date(`${value}T00:00:00`);
   if (isNaN(date.getTime())) return "";
   return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
+}
+
+function DailyRecordPlanTextarea({ value, onChange, placeholder }) {
+  const textareaRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return undefined;
+
+    const syncHeight = () => {
+      const styles = window.getComputedStyle(textarea);
+      const lineHeight = Number.parseFloat(styles.lineHeight) || 18;
+      const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+      const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
+      const borderTop = Number.parseFloat(styles.borderTopWidth) || 0;
+      const borderBottom = Number.parseFloat(styles.borderBottomWidth) || 0;
+      const minHeight = lineHeight + paddingTop + paddingBottom + borderTop + borderBottom;
+      const maxHeight = (lineHeight * 2) + paddingTop + paddingBottom + borderTop + borderBottom;
+
+      textarea.style.height = "auto";
+      const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+      textarea.style.height = `${Math.max(nextHeight, minHeight)}px`;
+      textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+    };
+
+    syncHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [value]);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      className="daily-record-plan-input"
+      value={value}
+      rows={1}
+      onChange={onChange}
+      placeholder={placeholder}
+    />
+  );
 }
 
 function getIrodoriCanDoOptions(book, lesson) {
@@ -427,10 +473,8 @@ export default function AdminConsoleDailyRecordWorkspace() {
                         {rowIsLocked || display.lockedMiniTest1 ? (
                           <span className="daily-record-plan-text">{display.mini_test_1}</span>
                         ) : (
-                          <textarea
-                            className="daily-record-plan-input"
+                          <DailyRecordPlanTextarea
                             value={display.mini_test_1}
-                            rows={2}
                             onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_1", e.target.value)}
                             placeholder="Plan"
                           />
@@ -440,10 +484,8 @@ export default function AdminConsoleDailyRecordWorkspace() {
                         {rowIsLocked || display.lockedMiniTest2 ? (
                           <span className="daily-record-plan-text">{display.mini_test_2}</span>
                         ) : (
-                          <textarea
-                            className="daily-record-plan-input"
+                          <DailyRecordPlanTextarea
                             value={display.mini_test_2}
-                            rows={2}
                             onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
                             placeholder="Plan"
                           />
@@ -453,10 +495,8 @@ export default function AdminConsoleDailyRecordWorkspace() {
                         {rowIsLocked || display.lockedSpecialTest1 ? (
                           <span className="daily-record-plan-text">{display.special_test_1}</span>
                         ) : (
-                          <textarea
-                            className="daily-record-plan-input"
+                          <DailyRecordPlanTextarea
                             value={display.special_test_1}
-                            rows={2}
                             onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
                             placeholder="Plan"
                           />
@@ -466,10 +506,8 @@ export default function AdminConsoleDailyRecordWorkspace() {
                         {rowIsLocked || display.lockedSpecialTest2 ? (
                           <span className="daily-record-plan-text">{display.special_test_2}</span>
                         ) : (
-                          <textarea
-                            className="daily-record-plan-input"
+                          <DailyRecordPlanTextarea
                             value={display.special_test_2}
-                            rows={2}
                             onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_2", e.target.value)}
                             placeholder="Plan"
                           />

@@ -97,6 +97,7 @@ create table if not exists public.test_sessions (
   id uuid primary key default gen_random_uuid(),
   problem_set_id text not null references public.tests(version) on delete restrict,
   title text not null,
+  session_category text,
   starts_at timestamptz,
   ends_at timestamptz,
   time_limit_min int,

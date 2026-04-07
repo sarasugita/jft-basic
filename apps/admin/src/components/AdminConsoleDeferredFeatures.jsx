@@ -25,6 +25,22 @@ function formatAttemptDetailDateTime(value) {
   return `${parts.year ?? ""}-${parts.month ?? ""}-${parts.day ?? ""} ${parts.hour ?? ""}:${parts.minute ?? ""}`.trim();
 }
 
+function formatResultSessionColumnTitle(sessionItem) {
+  const title = String(sessionItem?.title ?? "").trim();
+  const version = String(sessionItem?.problem_set_id ?? "").trim();
+  const titleIsSynthetic = title.startsWith("imported-") || title.startsWith("daily_session_");
+  if (title && !titleIsSynthetic) return title;
+  if (!version) return "";
+  if (version.startsWith("imported-") || version.startsWith("daily_session_")) {
+    return "Imported Result";
+  }
+  return version;
+}
+
+function formatResultSessionDisplayTitle(sessionItem) {
+  return formatResultSessionColumnTitle(sessionItem) || "Imported Result";
+}
+
 export default function AdminConsoleDeferredFeatures({
   resultContext,
   sessionDetail,
@@ -381,7 +397,7 @@ export default function AdminConsoleDeferredFeatures({
                                     className="session-column-link"
                                     onClick={() => openSessionDetailView(sessionItem, resultContext.type)}
                                   >
-                                    <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
+                                    <div className="daily-col-title">{formatResultSessionColumnTitle(sessionItem)}</div>
                                     <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
                                     <div className="daily-col-average">
                                       Avg {(((sessionAverage?.averageRate ?? 0) * 100)).toFixed(1)}%
@@ -389,7 +405,7 @@ export default function AdminConsoleDeferredFeatures({
                                   </button>
                                 ) : (
                                   <div className="session-column-link" style={{ cursor: "default" }}>
-                                    <div className="daily-col-title">{sessionItem.title ?? sessionItem.problem_set_id ?? ""}</div>
+                                    <div className="daily-col-title">{formatResultSessionColumnTitle(sessionItem)}</div>
                                     <div className="daily-col-date">{formatDateShort(sessionItem.starts_at || sessionItem.created_at)}</div>
                                     <div className="daily-col-average">
                                       Avg {(((sessionAverage?.averageRate ?? 0) * 100)).toFixed(1)}%
@@ -564,7 +580,7 @@ export default function AdminConsoleDeferredFeatures({
                             <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
                               <label>Test Session</label>
                               <div className="form-input readonly">
-                                {dailyManualEntrySession?.title ?? dailyManualEntrySession?.problem_set_id ?? "-"}
+                                {formatResultSessionDisplayTitle(dailyManualEntrySession)}
                               </div>
                             </div>
                             <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>

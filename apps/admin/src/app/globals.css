@@ -3696,14 +3696,15 @@ body { padding: 0; }
 
 .daily-record-plan-input {
   width: 100%;
-  min-height: 60px;
+  min-height: 36px;
   resize: none;
-  overflow: auto;
+  overflow: hidden;
   line-height: 1.35;
   padding: 8px 10px;
   border-color: #cbd5e1 !important;
   border-radius: 6px !important;
   font: inherit;
+  box-sizing: border-box;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

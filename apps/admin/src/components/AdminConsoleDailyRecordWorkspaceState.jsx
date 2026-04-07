@@ -348,6 +348,30 @@ function getEmptyScheduledTests() {
   };
 }
 
+function resolveDailyRecordPlanDraft(recordDate, draft, scheduledTests, todayBangladeshDate) {
+  const nextDraft = {
+    ...getEmptyDailyRecordPlanDraft(),
+    ...(draft ?? {}),
+  };
+  const isPastDate = Boolean(recordDate && todayBangladeshDate && recordDate < todayBangladeshDate);
+
+  if (isPastDate) {
+    return {
+      mini_test_1: scheduledTests?.dailyTests?.[0] ?? "",
+      mini_test_2: scheduledTests?.dailyTests?.[1] ?? "",
+      special_test_1: scheduledTests?.modelTests?.[0] ?? "",
+      special_test_2: scheduledTests?.modelTests?.[1] ?? "",
+    };
+  }
+
+  return {
+    mini_test_1: (nextDraft.mini_test_1 ?? "") || scheduledTests?.dailyTests?.[0] || "",
+    mini_test_2: (nextDraft.mini_test_2 ?? "") || scheduledTests?.dailyTests?.[1] || "",
+    special_test_1: (nextDraft.special_test_1 ?? "") || scheduledTests?.modelTests?.[0] || "",
+    special_test_2: (nextDraft.special_test_2 ?? "") || scheduledTests?.modelTests?.[1] || "",
+  };
+}
+
 // Main hook
 export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], tests = [] }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
@@ -375,8 +399,19 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   const [dailyRecordConfirmedDates, setDailyRecordConfirmedDates] = useState(() => cachedState?.dailyRecordConfirmedDates ?? []);
   const [dailyRecordPlanSavingDate, setDailyRecordPlanSavingDate] = useState("");
   const [dailyRecordHolidaySavingDate, setDailyRecordHolidaySavingDate] = useState("");
+  const [todayBangladeshDate, setTodayBangladeshDate] = useState(() => getBangladeshDateInput(new Date()));
   const dailyRecordTableWrapRef = useRef(null);
   const dailyRecordDatePickerRef = useRef(null);
+
+  useEffect(() => {
+    function syncTodayBangladeshDate() {
+      setTodayBangladeshDate(getBangladeshDateInput(new Date()));
+    }
+
+    syncTodayBangladeshDate();
+    const timerId = setInterval(syncTodayBangladeshDate, 60_000);
+    return () => clearInterval(timerId);
+  }, []);
 
   useEffect(() => {
     if (!cacheUserId || !activeSchoolId) return;
@@ -822,14 +857,13 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     setDailyRecordPlanSavingDate(recordDate);
     setDailyRecordsMsg("");
     const scheduledTests = scheduleRecordActualTestsByDate[recordDate] ?? getEmptyScheduledTests();
-    const draft = {
-      ...getEmptyDailyRecordPlanDraft(),
-      ...(dailyRecordPlanDrafts[recordDate] ?? {}),
-      mini_test_1: (dailyRecordPlanDrafts[recordDate]?.mini_test_1 ?? "").trim() || scheduledTests.dailyTests[0] || "",
-      mini_test_2: (dailyRecordPlanDrafts[recordDate]?.mini_test_2 ?? "").trim() || scheduledTests.dailyTests[1] || "",
-      special_test_1: (dailyRecordPlanDrafts[recordDate]?.special_test_1 ?? "").trim() || scheduledTests.modelTests[0] || "",
-      special_test_2: (dailyRecordPlanDrafts[recordDate]?.special_test_2 ?? "").trim() || scheduledTests.modelTests[1] || "",
-    };
+    const currentBangladeshDate = getBangladeshDateInput(new Date());
+    const draft = resolveDailyRecordPlanDraft(
+      recordDate,
+      dailyRecordPlanDrafts[recordDate],
+      scheduledTests,
+      currentBangladeshDate
+    );
     const existingRecord = dailyRecords.find((item) => item.record_date === recordDate) ?? null;
     const payload = {
       school_id: activeSchoolId,
@@ -992,13 +1026,13 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   }, [dailyRecords]);
 
   const scheduleRecordDisplayByDate = useMemo(() => {
-    const todayBangladesh = getBangladeshDateInput(new Date());
     const confirmedSet = new Set(dailyRecordConfirmedDates);
     const recordByDate = Object.fromEntries((dailyRecords ?? []).filter((record) => record?.record_date).map((record) => [record.record_date, record]));
     const displayData = {};
     scheduleRecordRows.forEach(({ recordDate, draft }) => {
       const record = recordByDate[recordDate];
       const scheduledTests = scheduleRecordActualTestsByDate[recordDate] ?? getEmptyScheduledTests();
+      const resolvedDraft = resolveDailyRecordPlanDraft(recordDate, draft, scheduledTests, todayBangladeshDate);
       const lockedMiniTest1 = Boolean(scheduledTests.dailyTests[0]);
       const lockedMiniTest2 = Boolean(scheduledTests.dailyTests[1]);
       const lockedSpecialTest1 = Boolean(scheduledTests.modelTests[0]);
@@ -1006,14 +1040,14 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       const isFullyLocked = lockedMiniTest1 && lockedMiniTest2 && lockedSpecialTest1 && lockedSpecialTest2;
       displayData[recordDate] = {
         hasRecord: Boolean(record),
-        isPastDate: Boolean(todayBangladesh && recordDate < todayBangladesh),
+        isPastDate: Boolean(todayBangladeshDate && recordDate < todayBangladeshDate),
         isConfirmed: confirmedSet.has(recordDate),
         isFullyLocked,
         isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
-        mini_test_1: draft.mini_test_1 || scheduledTests.dailyTests[0] || "",
-        mini_test_2: draft.mini_test_2 || scheduledTests.dailyTests[1] || "",
-        special_test_1: draft.special_test_1 || scheduledTests.modelTests[0] || "",
-        special_test_2: draft.special_test_2 || scheduledTests.modelTests[1] || "",
+        mini_test_1: resolvedDraft.mini_test_1,
+        mini_test_2: resolvedDraft.mini_test_2,
+        special_test_1: resolvedDraft.special_test_1,
+        special_test_2: resolvedDraft.special_test_2,
         lockedMiniTest1,
         lockedMiniTest2,
         lockedSpecialTest1,
@@ -1021,7 +1055,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       };
     });
     return displayData;
-  }, [dailyRecordConfirmedDates, dailyRecords, scheduleRecordActualTestsByDate, scheduleRecordRows]);
+  }, [dailyRecordConfirmedDates, dailyRecords, scheduleRecordActualTestsByDate, scheduleRecordRows, todayBangladeshDate]);
 
   useEffect(() => {
     if (!scheduleRecordDateRange.length) return;
@@ -1034,38 +1068,22 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         if (!scheduledTests) return;
 
         const currentDraft = next[recordDate] ?? getEmptyDailyRecordPlanDraft();
-        const mergedDraft = {
-          ...getEmptyDailyRecordPlanDraft(),
-          ...currentDraft,
-        };
+        const resolvedDraft = resolveDailyRecordPlanDraft(recordDate, currentDraft, scheduledTests, todayBangladeshDate);
 
-        let draftChanged = false;
-        if (!(mergedDraft.mini_test_1 || "").trim() && scheduledTests.dailyTests[0]) {
-          mergedDraft.mini_test_1 = scheduledTests.dailyTests[0];
-          draftChanged = true;
-        }
-        if (!(mergedDraft.mini_test_2 || "").trim() && scheduledTests.dailyTests[1]) {
-          mergedDraft.mini_test_2 = scheduledTests.dailyTests[1];
-          draftChanged = true;
-        }
-        if (!(mergedDraft.special_test_1 || "").trim() && scheduledTests.modelTests[0]) {
-          mergedDraft.special_test_1 = scheduledTests.modelTests[0];
-          draftChanged = true;
-        }
-        if (!(mergedDraft.special_test_2 || "").trim() && scheduledTests.modelTests[1]) {
-          mergedDraft.special_test_2 = scheduledTests.modelTests[1];
-          draftChanged = true;
-        }
-
-        if (draftChanged) {
-          next[recordDate] = mergedDraft;
+        if (
+          resolvedDraft.mini_test_1 !== (currentDraft.mini_test_1 ?? "")
+          || resolvedDraft.mini_test_2 !== (currentDraft.mini_test_2 ?? "")
+          || resolvedDraft.special_test_1 !== (currentDraft.special_test_1 ?? "")
+          || resolvedDraft.special_test_2 !== (currentDraft.special_test_2 ?? "")
+        ) {
+          next[recordDate] = resolvedDraft;
           changed = true;
         }
       });
 
       return changed ? next : prev;
     });
-  }, [scheduleRecordActualTestsByDate, scheduleRecordDateRange]);
+  }, [scheduleRecordActualTestsByDate, scheduleRecordDateRange, todayBangladeshDate]);
 
   const dailyRecordSelectableDates = useMemo(() => {
     return scheduleRecordRows

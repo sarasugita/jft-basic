@@ -66,6 +66,25 @@ serve(async (req) => {
     return bad(`Uploaded set_id "${uploadedSet.set_id}" must match "${sourceSet.title}".`, { validation });
   }
 
+  const { data: rootSet, error: rootSetError } = await context.adminClient
+    .from("question_sets")
+    .select("id, version, visibility_scope")
+    .eq("library_key", sourceSet.library_key)
+    .order("version", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (rootSetError) return bad(rootSetError.message);
+
+  const rootVisibilityScope = rootSet?.visibility_scope ?? sourceSet.visibility_scope;
+  if (rootVisibilityScope === "global" && parsed.metadata.visibility_scope === "restricted") {
+    return bad(
+      "This SetID started as global, so future versions must stay global. Upload the new version with global visibility.",
+    );
+  }
+  const scopeNotice = rootVisibilityScope === "restricted" && parsed.metadata.visibility_scope === "global"
+    ? "Previous version was school-scoped. This new version will be available to all schools."
+    : "";
+
   const { data: maxVersionRow } = await context.adminClient
     .from("question_sets")
     .select("version")
@@ -160,13 +179,14 @@ serve(async (req) => {
       uploadedAssets,
     });
 
-    await logAuditEvent(context.adminClient, context, {
+      await logAuditEvent(context.adminClient, context, {
       actionType: "upload",
       entityType: "question_set_version",
       entityId: inserted.id,
       metadata: {
         source_question_set_id: sourceSet.id,
         library_key: sourceSet.library_key,
+        root_visibility_scope: rootVisibilityScope,
         category: parsed.metadata.category,
         version_label: parsed.metadata.version_label,
         status: parsed.metadata.status,
@@ -179,6 +199,7 @@ serve(async (req) => {
       ok: true,
       question_set: inserted,
       validation,
+      scope_notice: scopeNotice || undefined,
     });
   } catch (error) {
     await context.adminClient.from("question_set_questions").delete().eq("question_set_id", inserted.id);

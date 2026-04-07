@@ -1433,6 +1433,18 @@ function buildImportedResultTestVersion(type, categoryName, index = 0) {
   return `imported-${type}-${sanitizeImportedCategorySlug(categoryName)}-${Date.now()}-${index + 1}`;
 }
 
+function formatImportedResultSessionTitle(session) {
+  const title = String(session?.title ?? "").trim();
+  const titleIsSynthetic = title.startsWith("imported-") || title.startsWith("daily_session_");
+  if (title && !titleIsSynthetic) return title;
+  const version = String(session?.problem_set_id ?? "").trim();
+  if (!version) return "Imported Result";
+  if (version.startsWith("imported-") || version.startsWith("daily_session_")) {
+    return "Imported Result";
+  }
+  return version;
+}
+
 function getStudentSectionValue(student) {
   return String(
     student?.section
@@ -1561,6 +1573,10 @@ function getProblemSetDisplayId(problemSetId, testsList) {
 
 function compareSetIds(left, right) {
   return SET_ID_COLLATOR.compare(String(left ?? "").trim(), String(right ?? "").trim());
+}
+
+function getSessionSortTime(session) {
+  return new Date(session?.starts_at || session?.created_at || 0).getTime();
 }
 
 function parseDailySessionSetId(setId) {
@@ -3206,6 +3222,7 @@ export default function AdminConsole({
     id: "",
     problem_set_id: "",
     title: "",
+    session_category: "",
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
@@ -3569,12 +3586,11 @@ export default function AdminConsole({
     });
   }, [dailySessions]);
   const pastDailySessionCategories = useMemo(() => {
-    const dailyCategoryByVersion = new Map(
-      (dailyTests ?? []).map((test) => [test.version, String(test.title ?? "").trim() || "Uncategorized"])
-    );
     const grouped = new Map();
     dailyRetakeSessions.forEach((session) => {
-      const category = dailyCategoryByVersion.get(session.problem_set_id) || "Uncategorized";
+      const category = String(session.session_category ?? "").trim()
+        || String(dailyTests.find((test) => test.version === session.problem_set_id)?.title ?? "").trim()
+        || "Uncategorized";
       if (!grouped.has(category)) grouped.set(category, []);
       grouped.get(category).push(session);
     });
@@ -3695,7 +3711,27 @@ export default function AdminConsole({
   };
 
   const dailyCategories = useMemo(() => buildCategories(dailyQuestionSets), [dailyQuestionSets]);
-  const dailySessionCategories = useMemo(() => buildCategories(dailyTests), [dailyTests]);
+  const dailySessionCategories = useMemo(() => {
+    const grouped = new Map();
+    (dailySessions ?? []).forEach((session) => {
+      if (!session?.id) return;
+      const category = String(session.session_category ?? "").trim()
+        || String((tests ?? []).find((test) => test.version === session.problem_set_id)?.title ?? "").trim()
+        || "Uncategorized";
+      if (!grouped.has(category)) grouped.set(category, []);
+      grouped.get(category).push(session);
+    });
+    return Array.from(grouped.entries())
+      .map(([name, sessionList]) => ({
+        name,
+        sessions: [...sessionList].sort((left, right) => {
+          const timeCompare = getSessionSortTime(right) - getSessionSortTime(left);
+          if (timeCompare !== 0) return timeCompare;
+          return compareSetIds(left.problem_set_id, right.problem_set_id);
+        }),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [dailySessions, tests]);
   const modelCategories = useMemo(() => buildCategories(modelTests, DEFAULT_MODEL_CATEGORY), [modelTests]);
 
   const testMetaByVersion = useMemo(() => {
@@ -3709,6 +3745,33 @@ export default function AdminConsole({
     });
     return map;
   }, [tests]);
+
+  const getDailySessionCategoryName = useCallback((session) => {
+    const explicit = String(session?.session_category ?? "").trim();
+    if (explicit) return explicit;
+    const fallback = String((tests ?? []).find((test) => test.version === session?.problem_set_id)?.title ?? "").trim();
+    return fallback || "Uncategorized";
+  }, [tests]);
+
+  const buildDailySessionCategoryGroups = useCallback((sessions) => {
+    const grouped = new Map();
+    (sessions ?? []).forEach((session) => {
+      if (!session?.id) return;
+      const category = getDailySessionCategoryName(session);
+      if (!grouped.has(category)) grouped.set(category, []);
+      grouped.get(category).push(session);
+    });
+    return Array.from(grouped.entries())
+      .map(([name, sessionList]) => ({
+        name,
+        sessions: [...sessionList].sort((left, right) => {
+          const timeCompare = getSessionSortTime(right) - getSessionSortTime(left);
+          if (timeCompare !== 0) return timeCompare;
+          return compareSetIds(left.problem_set_id, right.problem_set_id);
+        }),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [getDailySessionCategoryName]);
 
   const testSessionsById = useMemo(
     () => new Map((testSessions ?? []).map((session) => [session.id, session])),
@@ -3997,9 +4060,8 @@ export default function AdminConsole({
   }, [studentAttempts, testMetaByVersion, testSessionsById]);
 
   const dailyResultCategories = useMemo(() => {
-    const sessionVersions = new Set((dailySessions ?? []).map((session) => session.problem_set_id).filter(Boolean));
-    return buildCategories((dailyTests ?? []).filter((test) => sessionVersions.has(test.version)));
-  }, [dailySessions, dailyTests]);
+    return buildDailySessionCategoryGroups(dailySessions);
+  }, [buildDailySessionCategoryGroups, dailySessions]);
 
   const modelResultCategories = useMemo(() => {
     const sessionVersions = new Set(
@@ -4061,7 +4123,8 @@ export default function AdminConsole({
   const studentDailyAttemptsByCategory = useMemo(() => {
     const grouped = new Map();
     (studentDailyAttempts ?? []).forEach((a) => {
-      const category = testMetaByVersion[a.test_version]?.category || "Uncategorized";
+      const session = a?.test_session_id ? testSessionsById.get(a.test_session_id) : null;
+      const category = getDailySessionCategoryName(session || { problem_set_id: a.test_version });
       if (!grouped.has(category)) grouped.set(category, []);
       grouped.get(category).push(a);
     });
@@ -4086,7 +4149,7 @@ export default function AdminConsole({
         return String(left[0] ?? "").localeCompare(String(right[0] ?? ""));
       });
     return orderedEntries;
-  }, [studentDailyAttempts, testMetaByVersion]);
+  }, [studentDailyAttempts, getDailySessionCategoryName, testSessionsById]);
 
   const studentAttemptSummaryById = useMemo(() => {
     const summaryMap = {};
@@ -7689,13 +7752,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setTestSessionsMsg("Loading...");
     let { data, error } = await supabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
+      .select("id, problem_set_id, title, session_category, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
       .order("created_at", { ascending: false })
       .limit(500);
     if (error && isMissingRetakeSessionFieldsError(error)) {
       ({ data, error } = await supabase
         .from("test_sessions")
-        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
+        .select("id, problem_set_id, title, session_category, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
         .order("created_at", { ascending: false })
         .limit(500));
     }
@@ -8098,7 +8161,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   function applyDailyRetakeSourceSession(session) {
     if (!session) return;
-    const sourceCategory = testMetaByVersion[session.problem_set_id]?.category || "";
+    const sourceCategory = getDailySessionCategoryName(session);
     if (sourceCategory) {
       setDailyRetakeCategory(sourceCategory);
       setDailyConductCategory(sourceCategory);
@@ -8522,6 +8585,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       school_id: activeSchoolId,
       problem_set_id: problemSetId,
       title,
+      session_category: sessionCategory,
       starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,
       ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: testSessionForm.time_limit_min ? Number(testSessionForm.time_limit_min) : null,
@@ -8693,6 +8757,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       school_id: activeSchoolId,
       problem_set_id: problemSetId,
       title,
+      session_category: sessionCategory,
       starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,
       ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
@@ -8777,13 +8842,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   function startEditSession(session) {
     if (!session?.id) return;
-    const passRate = getSessionEffectivePassRate(session);
+    const passRate = normalizePassRate(session.pass_rate ?? testMetaByVersion[session.problem_set_id]?.pass_rate);
     setEditingSessionId(session.id);
     setEditingSessionMsg("");
     setEditingSessionForm({
       id: session.id,
       problem_set_id: session.problem_set_id ?? "",
       title: session.title ?? "",
+      session_category: getDailySessionCategoryName(session),
       starts_at: formatDateTimeInput(session.starts_at),
       ends_at: formatDateTimeInput(session.ends_at),
       time_limit_min: session.time_limit_min ?? "",
@@ -8800,6 +8866,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       id: "",
       problem_set_id: "",
       title: "",
+      session_category: "",
       starts_at: "",
       ends_at: "",
       time_limit_min: "",
@@ -8813,6 +8880,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     if (!editingSessionId) return;
     const {
       title,
+      session_category,
       starts_at,
       ends_at,
       time_limit_min,
@@ -8854,6 +8922,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setEditingSessionMsg("Saving...");
     const payload = {
       title: title.trim(),
+      ...(testMetaByVersion[problem_set_id]?.type === "daily"
+        ? {
+          session_category: String(session_category ?? "").trim() || getDailySessionCategoryName({ problem_set_id }),
+        }
+        : {}),
       starts_at: starts_at ? fromBangladeshInput(starts_at) : null,
       ends_at: ends_at ? fromBangladeshInput(ends_at) : null,
       time_limit_min: time_limit_min ? Number(time_limit_min) : null,
@@ -9152,7 +9225,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
   function getAttemptTitle(attempt) {
     if (!attempt) return "";
     const importedTitle = String(attempt?.answers_json?.__meta?.imported_test_title ?? "").trim();
-    if (isImportedResultsSummaryAttempt(attempt) && importedTitle) return importedTitle;
+    if (isImportedResultsSummaryAttempt(attempt)) {
+      if (importedTitle) return importedTitle;
+      if (attempt.test_session_id) {
+        const session = testSessionsById.get(attempt.test_session_id);
+        if (session?.title) return session.title;
+      }
+      return "Imported Result";
+    }
     if (attempt.test_session_id) {
       const session = testSessionsById.get(attempt.test_session_id);
       if (session?.title) return session.title;
@@ -12892,7 +12972,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
                     <label>Test Session</label>
                     <div className="form-input readonly">
-                      {dailyManualEntrySession?.title ?? dailyManualEntrySession?.problem_set_id ?? "-"}
+                      {formatImportedResultSessionTitle(dailyManualEntrySession)}
                     </div>
                   </div>
                   <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
