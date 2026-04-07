@@ -4184,6 +4184,14 @@ export default function AdminConsole({
     const scoreMap = {};
     (visibleStudentAttempts ?? []).forEach((attempt) => {
       if (!attempt?.id) return;
+      if (isImportedSummaryAttempt(attempt)) {
+        scoreMap[attempt.id] = {
+          correct: Number(attempt?.correct ?? 0),
+          total: Number(attempt?.total ?? 0),
+          scoreRate: getScoreRate(attempt),
+        };
+        return;
+      }
       const questionsList = attemptQuestionsByVersion[attempt.test_version];
       if (questionsList?.length) {
         scoreMap[attempt.id] = buildAttemptScorePreviewFromQuestions(attempt, questionsList);
