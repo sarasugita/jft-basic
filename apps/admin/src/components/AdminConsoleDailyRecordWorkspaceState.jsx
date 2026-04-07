@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
 import { getBangladeshDateInput } from "../lib/adminFormatters";
+import {
+  readAdminConsoleDataCache,
+  writeAdminConsoleDataCache,
+} from "../lib/adminConsoleDataCache";
 
 // Constants - Irodori textbook and lessons
 const DAILY_RECORD_CONTENT_FORMAT = "daily_record_content_v1";
@@ -347,12 +351,17 @@ function getEmptyScheduledTests() {
 // Main hook
 export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], tests = [] }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
+  const cacheUserId = session?.user?.id ?? "";
+  const cachedState = cacheUserId && activeSchoolId
+    ? readAdminConsoleDataCache(cacheUserId, activeSchoolId)
+    : null;
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
   }, [activeSchoolId]);
 
-  const [dailyRecords, setDailyRecords] = useState([]);
-  const [dailyRecordsMsg, setDailyRecordsMsg] = useState("");
+  const [dailyRecords, setDailyRecords] = useState(() => cachedState?.dailyRecords ?? []);
+  const [dailyRecordsMsg, setDailyRecordsMsg] = useState(() => cachedState?.dailyRecordsMsg ?? "");
+  const [dailyRecordsLoaded, setDailyRecordsLoaded] = useState(() => Boolean(cachedState?.dailyRecordsLoaded));
   const [dailyRecordDate, setDailyRecordDate] = useState(() => getTodayDateInput());
   const [dailyRecordDatePickerOpen, setDailyRecordDatePickerOpen] = useState(false);
   const [dailyRecordCalendarMonth, setDailyRecordCalendarMonth] = useState(() => getTodayDateInput().slice(0, 7));
@@ -361,13 +370,34 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   const [dailyRecordForm, setDailyRecordForm] = useState(() => getEmptyDailyRecordForm(getTodayDateInput()));
   const [dailyRecordAnnouncementTitleDraft, setDailyRecordAnnouncementTitleDraft] = useState("");
   const [dailyRecordAnnouncementDraft, setDailyRecordAnnouncementDraft] = useState("");
-  const [dailyRecordSyllabusAnnouncements, setDailyRecordSyllabusAnnouncements] = useState([]);
-  const [dailyRecordPlanDrafts, setDailyRecordPlanDrafts] = useState({});
-  const [dailyRecordConfirmedDates, setDailyRecordConfirmedDates] = useState([]);
+  const [dailyRecordSyllabusAnnouncements, setDailyRecordSyllabusAnnouncements] = useState(() => cachedState?.dailyRecordSyllabusAnnouncements ?? []);
+  const [dailyRecordPlanDrafts, setDailyRecordPlanDrafts] = useState(() => cachedState?.dailyRecordPlanDrafts ?? {});
+  const [dailyRecordConfirmedDates, setDailyRecordConfirmedDates] = useState(() => cachedState?.dailyRecordConfirmedDates ?? []);
   const [dailyRecordPlanSavingDate, setDailyRecordPlanSavingDate] = useState("");
   const [dailyRecordHolidaySavingDate, setDailyRecordHolidaySavingDate] = useState("");
   const dailyRecordTableWrapRef = useRef(null);
   const dailyRecordDatePickerRef = useRef(null);
+
+  useEffect(() => {
+    if (!cacheUserId || !activeSchoolId) return;
+    writeAdminConsoleDataCache(cacheUserId, activeSchoolId, {
+      dailyRecords,
+      dailyRecordsMsg,
+      dailyRecordsLoaded,
+      dailyRecordSyllabusAnnouncements,
+      dailyRecordPlanDrafts,
+      dailyRecordConfirmedDates,
+    });
+  }, [
+    activeSchoolId,
+    cacheUserId,
+    dailyRecordConfirmedDates,
+    dailyRecordPlanDrafts,
+    dailyRecordSyllabusAnnouncements,
+    dailyRecords,
+    dailyRecordsLoaded,
+    dailyRecordsMsg,
+  ]);
 
   const testMetaByVersion = useMemo(() => {
     const meta = {};
@@ -387,6 +417,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       setDailyRecordConfirmedDates([]);
       setDailyRecordHolidaySavingDate("");
       setDailyRecordsMsg("Loading...");
+      setDailyRecordsLoaded(false);
       return;
     }
     const schoolIdSnapshot = activeSchoolIdRef.current;
@@ -397,6 +428,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       setDailyRecordConfirmedDates([]);
       setDailyRecordHolidaySavingDate("");
       setDailyRecordsMsg("Select a school.");
+      setDailyRecordsLoaded(false);
       return;
     }
     setDailyRecordsMsg("Loading...");
@@ -452,6 +484,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       setDailyRecordConfirmedDates([]);
       setDailyRecordHolidaySavingDate("");
       setDailyRecordsMsg(`Load failed: ${error.message}`);
+      setDailyRecordsLoaded(false);
       return;
     }
     const { data: announcementRows, error: announcementError } = await supabase
@@ -478,6 +511,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     );
     setDailyRecordHolidaySavingDate("");
     setDailyRecordsMsg(list.length ? "" : "No daily records yet. The next 2 months are shown below for planning.");
+    setDailyRecordsLoaded(true);
   }
 
   function openDailyRecordModal(record = null, recordDate = "") {
@@ -1285,6 +1319,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     setDailyRecordAnnouncementTitleDraft,
     dailyRecordAnnouncementDraft,
     setDailyRecordAnnouncementDraft,
+    dailyRecordsLoaded,
     dailyRecordSyllabusAnnouncements,
     dailyRecordPlanDrafts,
     dailyRecordConfirmedDates,

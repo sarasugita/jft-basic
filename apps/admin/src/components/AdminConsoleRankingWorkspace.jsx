@@ -5,11 +5,12 @@ import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext"
 import { useRankingWorkspaceState } from "./AdminConsoleRankingWorkspaceState";
 
 export default function AdminConsoleRankingWorkspace() {
-  const { supabase, activeSchoolId } = useAdminConsoleWorkspaceContext();
+  const { supabase, activeSchoolId, session } = useAdminConsoleWorkspaceContext();
   const {
     rankingPeriods,
     rankingDrafts,
     rankingMsg,
+    rankingLoaded,
     rankingRefreshingId,
     rankingRowCount,
     fetchRankingPeriods,
@@ -17,12 +18,14 @@ export default function AdminConsoleRankingWorkspace() {
     updateRankingDraft,
     saveRankingPeriodLabel,
     refreshRankingPeriod,
-  } = useRankingWorkspaceState({ supabase, activeSchoolId });
+  } = useRankingWorkspaceState({ supabase, activeSchoolId, session });
 
   useEffect(() => {
     if (!activeSchoolId) return;
-    fetchRankingPeriods();
-  }, [activeSchoolId]);
+    if (!rankingLoaded) {
+      fetchRankingPeriods();
+    }
+  }, [activeSchoolId, fetchRankingPeriods, rankingLoaded]);
 
   return (
     <div style={{ marginBottom: 12 }}>

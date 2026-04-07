@@ -1,6 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  readAdminConsoleDataCache,
+  writeAdminConsoleDataCache,
+} from "../lib/adminConsoleDataCache";
 import {
   buildLatestAttemptMapByStudentAndScope,
   isAnalyticsExcludedStudent,
@@ -40,11 +44,23 @@ function getRankingDrafts(periods) {
   return drafts;
 }
 
-export function useRankingWorkspaceState({ supabase, activeSchoolId }) {
-  const [rankingPeriods, setRankingPeriods] = useState([]);
-  const [rankingMsg, setRankingMsg] = useState("");
+export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) {
+  const cacheUserId = session?.user?.id ?? "";
+  const cachedState = cacheUserId && activeSchoolId ? readAdminConsoleDataCache(cacheUserId, activeSchoolId) : null;
+  const [rankingPeriods, setRankingPeriods] = useState(() => cachedState?.rankingPeriods ?? []);
+  const [rankingMsg, setRankingMsg] = useState(() => cachedState?.rankingMsg ?? "");
+  const [rankingLoaded, setRankingLoaded] = useState(() => Boolean(cachedState?.rankingLoaded));
   const [rankingDrafts, setRankingDrafts] = useState({});
   const [rankingRefreshingId, setRankingRefreshingId] = useState("");
+
+  useEffect(() => {
+    if (!cacheUserId || !activeSchoolId) return;
+    writeAdminConsoleDataCache(cacheUserId, activeSchoolId, {
+      rankingPeriods,
+      rankingMsg,
+      rankingLoaded,
+    });
+  }, [activeSchoolId, cacheUserId, rankingLoaded, rankingMsg, rankingPeriods]);
 
   const rankingRowCount = useMemo(
     () => Math.max(0, ...rankingPeriods.map((period) => period.ranking_entries?.length ?? 0)),
@@ -56,6 +72,7 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId }) {
       setRankingPeriods([]);
       setRankingDrafts({});
       setRankingMsg("Select a school.");
+      setRankingLoaded(false);
       return;
     }
     setRankingMsg("Loading...");
@@ -78,6 +95,7 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId }) {
       setRankingPeriods([]);
       setRankingDrafts({});
       setRankingMsg(`Load failed: ${error.message}`);
+      setRankingLoaded(false);
       return;
     }
     const periods = data ?? [];
@@ -88,6 +106,7 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId }) {
     setRankingPeriods(normalized);
     setRankingDrafts(getRankingDrafts(normalized));
     setRankingMsg(normalized.length ? "" : "No ranking periods yet. Click Add Period.");
+    setRankingLoaded(true);
   }
 
   function updateRankingDraft(periodId, field, value) {
@@ -296,6 +315,7 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId }) {
     rankingPeriods,
     rankingDrafts,
     rankingMsg,
+    rankingLoaded,
     rankingRefreshingId,
     rankingRowCount,
     fetchRankingPeriods,

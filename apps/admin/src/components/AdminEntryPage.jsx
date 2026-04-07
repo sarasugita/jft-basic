@@ -79,6 +79,11 @@ export default function AdminEntryPage() {
   const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
   const loginValidationInFlightRef = useRef(false);
   const [adminConsoleRetryNonce, setAdminConsoleRetryNonce] = useState(0);
+  const profileRef = useRef(null);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   useEffect(() => {
     if (supabaseConfigError) {
@@ -292,10 +297,23 @@ export default function AdminEntryPage() {
         loginValidationInFlightRef.current = false;
         return;
       }
+      if (event === "TOKEN_REFRESHED") {
+        setSession(nextSession);
+        setProfileLoading(false);
+        setAuthReady(true);
+        if (profileRef.current?.id === nextSession.user?.id) {
+          return;
+        }
+      }
       if (loginValidationInFlightRef.current && event === "SIGNED_IN") {
         return;
       }
       setSession(nextSession);
+      if (profileRef.current?.id === nextSession.user?.id) {
+        setProfileLoading(false);
+        setAuthReady(true);
+        return;
+      }
       if (authEventTimeout) clearTimeout(authEventTimeout);
       authEventTimeout = setTimeout(() => {
         void loadProfileForSession(nextSession, `auth:${event}`).finally(() => {

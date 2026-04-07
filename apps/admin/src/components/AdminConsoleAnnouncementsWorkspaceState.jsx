@@ -3,15 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 import { formatDateTimeInput, fromBangladeshInput } from "../lib/adminFormatters";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
+import {
+  readAdminConsoleDataCache,
+  writeAdminConsoleDataCache,
+} from "../lib/adminConsoleDataCache";
 
 export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, session }) {
   const activeSchoolIdRef = useRef(activeSchoolId);
+  const cacheKeyUserId = session?.user?.id ?? "";
+  const cachedState = cacheKeyUserId && activeSchoolId
+    ? readAdminConsoleDataCache(cacheKeyUserId, activeSchoolId)
+    : null;
   useEffect(() => {
     activeSchoolIdRef.current = activeSchoolId;
   }, [activeSchoolId]);
 
-  const [announcements, setAnnouncements] = useState([]);
-  const [announcementMsg, setAnnouncementMsg] = useState("");
+  const [announcements, setAnnouncements] = useState(() => cachedState?.announcements ?? []);
+  const [announcementMsg, setAnnouncementMsg] = useState(() => cachedState?.announcementMsg ?? "");
+  const [announcementsLoaded, setAnnouncementsLoaded] = useState(() => Boolean(cachedState?.announcementsLoaded));
   const [announcementCreateOpen, setAnnouncementCreateOpen] = useState(false);
   const [announcementForm, setAnnouncementForm] = useState({
     title: "",
@@ -27,16 +36,27 @@ export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, sessi
     end_at: "",
   });
 
+  useEffect(() => {
+    if (!cacheKeyUserId || !activeSchoolId) return;
+    writeAdminConsoleDataCache(cacheKeyUserId, activeSchoolId, {
+      announcements,
+      announcementMsg,
+      announcementsLoaded,
+    });
+  }, [announcements, announcementMsg, announcementsLoaded, activeSchoolId, cacheKeyUserId]);
+
   async function fetchAnnouncements() {
     const schoolIdSnapshot = activeSchoolIdRef.current;
     if (!schoolIdSnapshot) {
       setAnnouncements([]);
       setAnnouncementMsg("");
+      setAnnouncementsLoaded(false);
       return;
     }
     if (!supabase) {
       setAnnouncements([]);
       setAnnouncementMsg("Supabase not initialized.");
+      setAnnouncementsLoaded(false);
       return;
     }
     setAnnouncementMsg("Loading...");
@@ -54,10 +74,12 @@ export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, sessi
       console.error("announcements fetch error:", error);
       setAnnouncements([]);
       setAnnouncementMsg(`Load failed: ${error.message}`);
+      setAnnouncementsLoaded(false);
       return;
     }
     setAnnouncements(data ?? []);
     setAnnouncementMsg(data?.length ? "" : "No announcements.");
+    setAnnouncementsLoaded(true);
   }
 
   async function createAnnouncement() {
@@ -179,6 +201,7 @@ export function useAnnouncementsWorkspaceState({ supabase, activeSchoolId, sessi
   return {
     announcements,
     announcementMsg,
+    announcementsLoaded,
     announcementCreateOpen,
     announcementForm,
     setAnnouncementForm,

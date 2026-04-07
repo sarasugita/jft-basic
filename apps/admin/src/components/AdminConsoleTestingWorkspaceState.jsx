@@ -1088,9 +1088,14 @@ export function useTestingWorkspaceState({
   // Optional parameters with sensible defaults
   getAccessToken: externalGetAccessToken = async () => "",
   externalTests = [],
+  externalTestsLoaded = false,
   externalTestSessions = [],
+  externalTestSessionsLoaded = false,
   externalAttempts = [],
+  externalAttemptsLoaded = false,
   setExternalAttempts = () => {},
+  externalAssets = [],
+  externalAssetsLoaded = false,
   externalRunSearch = async () => {},
   externalExportDailyGoogleSheetsCsv = async () => {},
   externalExportModelGoogleSheetsCsv = async () => {},
@@ -1135,12 +1140,16 @@ export function useTestingWorkspaceState({
   // ========================================================================
 
   const [tests, setTests] = useState(externalTests ?? []);
+  const [testsLoaded, setTestsLoaded] = useState(Boolean(externalTestsLoaded));
   const [testsMsg, setTestsMsg] = useState("");
   const [testSessions, setTestSessions] = useState(externalTestSessions ?? []);
+  const [testSessionsLoaded, setTestSessionsLoaded] = useState(Boolean(externalTestSessionsLoaded));
   const [testSessionsMsg, setTestSessionsMsg] = useState("");
-  const [attempts, setAttempts] = useState([]);
+  const [attempts, setAttempts] = useState(externalAttempts ?? []);
+  const [attemptsLoaded, setAttemptsLoaded] = useState(Boolean(externalAttemptsLoaded));
   const [attemptsMsg, setAttemptsMsg] = useState("");
   const [examLinks, setExamLinks] = useState([]);
+  const [examLinksLoaded, setExamLinksLoaded] = useState(false);
   const [linkMsg, setLinkMsg] = useState("");
 
   // Model test session modal
@@ -1235,7 +1244,8 @@ export function useTestingWorkspaceState({
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
 
   // Assets
-  const [assets, setAssets] = useState([]);
+  const [assets, setAssets] = useState(externalAssets ?? []);
+  const [assetsLoaded, setAssetsLoaded] = useState(Boolean(externalAssetsLoaded));
   const [assetsMsg, setAssetsMsg] = useState("");
   const [quizMsg, setQuizMsg] = useState("");
   const [assetForm, setAssetForm] = useState({ category: DEFAULT_MODEL_CATEGORY });
@@ -2733,6 +2743,7 @@ export function useTestingWorkspaceState({
           console.error("tests fetch error:", fallback.error);
           setTests([]);
           setTestsMsg(`Load failed: ${fallback.error.message}`);
+          setTestsLoaded(false);
           return;
         }
         const list = fallback.data ?? [];
@@ -2744,12 +2755,14 @@ export function useTestingWorkspaceState({
         const seeded = await seedModelCategory(withCounts);
         const hydrated = await attachGeneratedDailySourceSetIds(seeded);
         setTests(hydrated);
+        setTestsLoaded(true);
         setTestsMsg(list.length ? "" : "No tests.");
         return;
       }
       console.error("tests fetch error:", error);
       setTests([]);
       setTestsMsg(`Load failed: ${error.message}`);
+      setTestsLoaded(false);
       return;
     }
     const list = data ?? [];
@@ -2764,6 +2777,7 @@ export function useTestingWorkspaceState({
       const seeded = await seedModelCategory(withCounts);
       const hydrated = await attachGeneratedDailySourceSetIds(seeded);
       setTests(hydrated);
+      setTestsLoaded(true);
       setTestsMsg(list.length ? "" : "No tests.");
       return;
     }
@@ -2775,6 +2789,7 @@ export function useTestingWorkspaceState({
     const seeded = await seedModelCategory(withCounts);
     const hydrated = await attachGeneratedDailySourceSetIds(seeded);
     setTests(hydrated);
+    setTestsLoaded(true);
     setTestsMsg(list.length ? "" : "No tests.");
   }, [supabase, fetchQuestionCounts, seedModelCategory, attachGeneratedDailySourceSetIds]);
 
@@ -2790,15 +2805,18 @@ export function useTestingWorkspaceState({
     ));
     if (error) {
       console.error("test_sessions fetch error:", error);
+      setTestSessionsLoaded(false);
       return;
     }
     setTestSessions(data ?? []);
+    setTestSessionsLoaded(true);
   }, [supabase]);
 
   const fetchAssets = useCallback(async () => {
     setAssetsMsg("Loading...");
     if (!supabase) {
       setAssetsMsg("Supabase not initialized.");
+      setAssetsLoaded(false);
       return;
     }
     const { data, error } = await supabase
@@ -2809,10 +2827,12 @@ export function useTestingWorkspaceState({
       console.error("assets fetch error:", error);
       setAssets([]);
       setAssetsMsg(`Load failed: ${error.message}`);
+      setAssetsLoaded(false);
       return;
     }
     setAssets(data ?? []);
     setAssetsMsg("");
+    setAssetsLoaded(true);
   }, [supabase]);
 
   const fetchExamLinks = useCallback(async () => {
@@ -2826,10 +2846,12 @@ export function useTestingWorkspaceState({
       console.error("exam_links fetch error:", error);
       setExamLinks([]);
       setLinkMsg(`Load failed: ${error.message}`);
+      setExamLinksLoaded(false);
       return;
     }
     setExamLinks(data ?? []);
     setLinkMsg(data?.length ? "" : "No links.");
+    setExamLinksLoaded(true);
   }, [supabase]);
 
   const fetchAttempts = useCallback(async () => {
@@ -2850,11 +2872,13 @@ export function useTestingWorkspaceState({
       console.error("attempts fetch error:", error);
       setAttempts([]);
       setAttemptsMsg(`Load failed: ${error.message}`);
+      setAttemptsLoaded(false);
       return;
     }
 
     setAttempts(data ?? []);
     setAttemptsMsg("");
+    setAttemptsLoaded(true);
   }, [supabase, activeSchoolId]);
 
   const buildGeneratedDailySessionTitle = useCallback(({ category, setIds }) => (
@@ -5041,28 +5065,30 @@ export function useTestingWorkspaceState({
 
   // Initialize data on mount
   useEffect(() => {
-    if (!supabase || !activeSchoolId) return;
-    const initializeData = async () => {
-      await fetchTests();
-      // fetchTestSessions and fetchAssets will run after fetchTests completes
-    };
-    void initializeData();
-  }, [supabase, activeSchoolId, fetchTests]);
+    if (!supabase || !activeSchoolId || testsLoaded) return;
+    if (!tests.length) {
+      const initializeData = async () => {
+        await fetchTests();
+        // fetchTestSessions and fetchAssets will run after fetchTests completes
+      };
+      void initializeData();
+    }
+  }, [supabase, activeSchoolId, fetchTests, tests.length, testsLoaded]);
 
   useEffect(() => {
-    if (!supabase || !activeSchoolId || !tests.length) return;
+    if (!supabase || !activeSchoolId || !testsLoaded || testSessionsLoaded) return;
     void fetchTestSessions();
-  }, [supabase, activeSchoolId, tests.length, fetchTestSessions]);
+  }, [supabase, activeSchoolId, fetchTestSessions, testSessionsLoaded, testsLoaded]);
 
   useEffect(() => {
-    if (!supabase || !activeSchoolId) return;
+    if (!supabase || !activeSchoolId || assetsLoaded) return;
     void fetchAssets();
-  }, [supabase, activeSchoolId, fetchAssets]);
+  }, [supabase, activeSchoolId, assetsLoaded, fetchAssets]);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || examLinksLoaded) return;
     void fetchExamLinks();
-  }, [supabase, fetchExamLinks]);
+  }, [examLinksLoaded, fetchExamLinks, supabase]);
 
   // Validate selected category against available categories
   // but don't auto-select - user must explicitly choose
@@ -5172,9 +5198,10 @@ export function useTestingWorkspaceState({
   // Load attempts when the results tab is active
   useEffect(() => {
     if (activeTab !== "model" && activeTab !== "daily") return;
+    if (attemptsLoaded) return;
     if (!supabase || !activeSchoolId) return;
     void fetchAttempts();
-  }, [activeTab, supabase, activeSchoolId, fetchAttempts]);
+  }, [activeTab, attemptsLoaded, supabase, activeSchoolId, fetchAttempts]);
 
   useEffect(() => {
     const isDailyResults = activeTab === "daily" && dailySubTab === "results";

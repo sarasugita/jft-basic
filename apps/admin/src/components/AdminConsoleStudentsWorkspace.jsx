@@ -11,10 +11,14 @@ export default function AdminConsoleStudentsWorkspace() {
   const contextData = useAdminConsoleWorkspaceContext();
   const {
     activeSchoolId,
+    adminViewStateStorageKey,
+    adminDataStorageUserId,
+    adminDataStorageSchoolId,
     session,
     canUseAdminConsole,
     supabase,
     students,
+    studentsLoaded,
     testMetaByVersion,
     getScoreRate,
     fetchStudents,
@@ -188,6 +192,9 @@ export default function AdminConsoleStudentsWorkspace() {
     setStudentWarningForm,
     setStudentWarningIssueMsg,
     setStudentWarningIssueOpen,
+    viewStateStorageKey: adminViewStateStorageKey,
+    dataStorageUserId: adminDataStorageUserId,
+    dataStorageSchoolId: adminDataStorageSchoolId,
   });
 
   const selectedStudent = useMemo(() => {
@@ -213,6 +220,16 @@ export default function AdminConsoleStudentsWorkspace() {
   useEffect(() => {
     if (!activeSchoolId || !session || !canUseAdminConsole || !supabase) return;
     if (autoLoadSchoolIdRef.current === activeSchoolId) return;
+    if (studentsLoaded) {
+      autoLoadSchoolIdRef.current = activeSchoolId;
+      if (!studentListMetricsLoaded) {
+        void fetchStudentListMetrics();
+      }
+      if (!studentWarningsLoaded) {
+        void handleLoadStudentWarnings();
+      }
+      return;
+    }
     autoLoadSchoolIdRef.current = activeSchoolId;
     void fetchStudentListMetrics();
     void handleLoadStudentWarnings();
@@ -223,12 +240,16 @@ export default function AdminConsoleStudentsWorkspace() {
     handleLoadStudentWarnings,
     supabase,
     session,
+    studentsLoaded,
+    studentListMetricsLoaded,
+    studentWarningsLoaded,
   ]);
 
   useEffect(() => {
     if (!activeSchoolId || !session || !canUseAdminConsole) return;
+    if (studentsLoaded) return;
     fetchStudents();
-  }, [activeSchoolId, canUseAdminConsole, session]);
+  }, [activeSchoolId, canUseAdminConsole, session, studentsLoaded]);
 
   useEffect(() => {
     setContextSelectedStudentId(selectedStudentId || "");

@@ -1,6 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  getDefaultStudentListFilters,
+  normalizeStudentListFilters,
+  readAdminConsoleViewState,
+  updateAdminConsoleViewState,
+} from "../lib/adminConsoleViewState";
+import {
+  readAdminConsoleDataCache,
+  writeAdminConsoleDataCache,
+} from "../lib/adminConsoleDataCache";
 
 // Helper functions
 
@@ -75,7 +85,24 @@ function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, tes
   });
 }
 
-export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, students, testMetaByVersion, getScoreRate, fetchStudentDetail, setStudentWarningForm, setStudentWarningIssueMsg, setStudentWarningIssueOpen }) {
+export function useStudentsWorkspaceState({
+  supabase,
+  activeSchoolId,
+  session,
+  students,
+  testMetaByVersion,
+  getScoreRate,
+  fetchStudentDetail,
+  setStudentWarningForm,
+  setStudentWarningIssueMsg,
+  setStudentWarningIssueOpen,
+  viewStateStorageKey = "",
+  dataStorageUserId = "",
+  dataStorageSchoolId = "",
+}) {
+  const storedAdminData = dataStorageUserId && dataStorageSchoolId
+    ? readAdminConsoleDataCache(dataStorageUserId, dataStorageSchoolId)
+    : null;
   // Student list state
   const [studentMsg, setStudentMsg] = useState("");
   const [studentTempMap, setStudentTempMap] = useState({});
@@ -99,18 +126,17 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, s
   const [studentInfoUploadFiles, setStudentInfoUploadFiles] = useState({});
 
   // Student list filters and metrics
-  const [studentListFilters, setStudentListFilters] = useState({
-    from: "",
-    to: "",
-    maxAttendance: "",
-    minUnexcused: "",
-    minModelAvg: "",
-    minDailyAvg: ""
+  const [studentListFilters, setStudentListFilters] = useState(() => {
+    if (!viewStateStorageKey || typeof window === "undefined") {
+      return getDefaultStudentListFilters();
+    }
+    const stored = readAdminConsoleViewState(viewStateStorageKey);
+    return normalizeStudentListFilters(stored?.studentListFilters);
   });
-  const [studentListAttendanceMap, setStudentListAttendanceMap] = useState({});
-  const [studentListAttempts, setStudentListAttempts] = useState([]);
+  const [studentListAttendanceMap, setStudentListAttendanceMap] = useState(() => storedAdminData?.studentListAttendanceMap ?? {});
+  const [studentListAttempts, setStudentListAttempts] = useState(() => storedAdminData?.studentListAttempts ?? []);
   const [studentListLoading, setStudentListLoading] = useState(false);
-  const [studentListMetricsLoaded, setStudentListMetricsLoaded] = useState(false);
+  const [studentListMetricsLoaded, setStudentListMetricsLoaded] = useState(() => Boolean(storedAdminData?.studentListMetricsLoaded));
 
   // Student detail modal state
   const [studentDetailOpen, setStudentDetailOpen] = useState(false);
@@ -121,10 +147,10 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, s
 
   // Student warnings state - Note: studentWarningForm, setStudentWarningForm, and warning issue/delete operations stay in context
   // to ensure context functions can access the current form state
-  const [studentWarnings, setStudentWarnings] = useState([]);
+  const [studentWarnings, setStudentWarnings] = useState(() => storedAdminData?.studentWarnings ?? []);
   const [studentWarningsLoading, setStudentWarningsLoading] = useState(false);
-  const [studentWarningsLoaded, setStudentWarningsLoaded] = useState(false);
-  const [studentWarningsMsg, setStudentWarningsMsg] = useState("");
+  const [studentWarningsLoaded, setStudentWarningsLoaded] = useState(() => Boolean(storedAdminData?.studentWarningsLoaded));
+  const [studentWarningsMsg, setStudentWarningsMsg] = useState(() => storedAdminData?.studentWarningsMsg ?? "");
 
   // Reset state when activeSchoolId changes
   useEffect(() => {
@@ -139,6 +165,34 @@ export function useStudentsWorkspaceState({ supabase, activeSchoolId, session, s
       setStudentWarningsLoaded(false);
     }
   }, [activeSchoolId]);
+
+  useEffect(() => {
+    if (!viewStateStorageKey) return;
+    updateAdminConsoleViewState(viewStateStorageKey, {
+      studentListFilters: normalizeStudentListFilters(studentListFilters),
+    });
+  }, [studentListFilters, viewStateStorageKey]);
+
+  useEffect(() => {
+    if (!dataStorageUserId || !dataStorageSchoolId) return;
+    writeAdminConsoleDataCache(dataStorageUserId, dataStorageSchoolId, {
+      studentListAttendanceMap,
+      studentListAttempts,
+      studentListMetricsLoaded,
+      studentWarnings,
+      studentWarningsLoaded,
+      studentWarningsMsg,
+    });
+  }, [
+    dataStorageSchoolId,
+    dataStorageUserId,
+    studentListAttendanceMap,
+    studentListAttempts,
+    studentListMetricsLoaded,
+    studentWarnings,
+    studentWarningsLoaded,
+    studentWarningsMsg,
+  ]);
 
   // Fetch student list metrics
   const fetchStudentListMetrics = useCallback(async () => {

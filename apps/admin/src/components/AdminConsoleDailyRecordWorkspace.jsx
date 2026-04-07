@@ -127,6 +127,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
     dailyRecordPlanSavingDate,
     dailyRecordsMsg,
     fetchDailyRecords,
+    dailyRecordsLoaded,
     saveDailyRecord,
     updateDailyRecordComment,
     updateDailyRecordTextbookEntry,
@@ -144,11 +145,13 @@ export default function AdminConsoleDailyRecordWorkspace() {
 
   useEffect(() => {
     if (!activeSchoolId) return;
-    fetchDailyRecords();
+    if (!dailyRecordsLoaded) {
+      fetchDailyRecords();
+    }
     if (!students.length) {
       fetchStudents();
     }
-  }, [activeSchoolId, students.length]);
+  }, [activeSchoolId, dailyRecordsLoaded, students.length]);
 
   useEffect(() => {
     // Auto-populate announcement fields when the upcoming sessions change

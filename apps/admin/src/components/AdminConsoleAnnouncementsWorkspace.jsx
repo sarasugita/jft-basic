@@ -10,6 +10,7 @@ export default function AdminConsoleAnnouncementsWorkspace() {
   const {
     announcements,
     announcementMsg,
+    announcementsLoaded,
     announcementCreateOpen,
     announcementForm,
     setAnnouncementForm,
@@ -28,8 +29,10 @@ export default function AdminConsoleAnnouncementsWorkspace() {
 
   useEffect(() => {
     if (!supabase || !activeSchoolId) return;
-    fetchAnnouncements();
-  }, [supabase, activeSchoolId]);
+    if (!announcementsLoaded) {
+      fetchAnnouncements();
+    }
+  }, [supabase, activeSchoolId, announcementsLoaded]);
 
   return (
     <div style={{ marginBottom: 12 }}>
