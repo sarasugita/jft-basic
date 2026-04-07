@@ -796,11 +796,21 @@ export default function SuperTestsImportPage() {
     }
   }
 
-  async function deleteQuestionSetFamily(questionSetId) {
+  async function deleteQuestionSetFamily(questionSet) {
     setSaving(true);
     try {
-      await invokeJsonFunction("archive-question-set", { question_set_id: questionSetId });
-      setMsg("Set deleted.");
+      const result = await invokeJsonFunction("archive-question-set", { question_set_id: questionSet.id });
+      console.log("[super-tests-import] archive-question-set response", {
+        question_set_id: questionSet.id,
+        result,
+      });
+      setMsg(
+        result?.phase === "hard_delete" || result?.deleted_family
+          ? "Set deleted."
+          : result?.phase === "archive" || result?.archived_family
+            ? "Set archived."
+            : "Set updated.",
+      );
       setDeleteTarget(null);
       await loadLibrary();
     } catch (error) {
@@ -1257,7 +1267,9 @@ export default function SuperTestsImportPage() {
         <div className="admin-modal-overlay" onClick={closeDeleteModal}>
           <div className="admin-modal super-question-set-delete-modal" onClick={(event) => event.stopPropagation()}>
             <div className="admin-modal-header">
-              <div className="admin-title">Delete Question Set</div>
+              <div className="admin-title">
+                {deleteTarget.status === "archived" ? "Hard Delete Question Set" : "Archive Question Set"}
+              </div>
               <button className="admin-modal-close" onClick={closeDeleteModal} aria-label="Close" disabled={saving}>
                 ×
               </button>
@@ -1265,14 +1277,22 @@ export default function SuperTestsImportPage() {
 
             <div className="super-question-set-delete-body">
               <div className="admin-help">
-                Permanently delete <b>{deleteTarget.title}</b> and all of its versions? This cannot be undone, but the SetID will be reusable after deletion.
+                {deleteTarget.status === "archived" ? (
+                  <>
+                    Permanently delete <b>{deleteTarget.title}</b> and all of its versions? This cannot be undone, but the SetID will be reusable after deletion.
+                  </>
+                ) : (
+                  <>
+                    Archive <b>{deleteTarget.title}</b> and all of its versions first. After that, the button will change to Hard Delete so the SetID can be removed permanently.
+                  </>
+                )}
               </div>
               <div className="super-question-set-delete-actions">
                 <button className="btn" type="button" onClick={closeDeleteModal} disabled={saving}>
                   Cancel
                 </button>
-                <button className="btn btn-danger" type="button" onClick={() => deleteQuestionSetFamily(deleteTarget.id)} disabled={saving}>
-                  {saving ? "Deleting..." : "Delete Permanently"}
+                <button className="btn btn-danger" type="button" onClick={() => deleteQuestionSetFamily(deleteTarget)} disabled={saving}>
+                  {saving ? "Deleting..." : deleteTarget.status === "archived" ? "Delete Permanently" : "Archive"}
                 </button>
               </div>
             </div>

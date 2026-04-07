@@ -143,10 +143,12 @@ Visibility rules:
 
 ## Delete
 
-Delete now removes the entire `SetID` family permanently.
+Delete is now a two-step lifecycle:
 
 Behavior:
 
-- all versions under the same library group are deleted
+- the first delete action archives every version in the same library group
+- once the family is archived, the action changes to Hard Delete
+- hard delete removes the entire `SetID` family permanently
 - the `SetID` becomes reusable for future uploads
-- if a family is still referenced by historical test instances or attempts, the delete is blocked to preserve history
+- if a family is still referenced by historical test instances or attempts, hard delete is blocked to preserve history

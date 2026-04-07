@@ -1020,9 +1020,23 @@ async function fetchTestSessions() {
     }));
     testSessionsState.list = list;
     testSessionsState.loaded = true;
-    if (!state.linkId && !state.selectedTestSessionId && list.length) {
-      state.selectedTestSessionId = list[0].id;
-      saveState();
+    if (!state.linkId) {
+      const selectedSessionId = state.selectedTestSessionId || "";
+      const selectedSession = selectedSessionId ? list.find((session) => session.id === selectedSessionId) : null;
+      const fallbackSession = list[0] || null;
+      if (!selectedSessionId && fallbackSession) {
+        state.selectedTestSessionId = fallbackSession.id;
+        if (fallbackSession.problem_set_id) state.selectedTestVersion = fallbackSession.problem_set_id;
+        saveState();
+      } else if (selectedSessionId && !selectedSession) {
+        state.selectedTestSessionId = fallbackSession?.id || "";
+        if (fallbackSession?.problem_set_id) {
+          state.selectedTestVersion = fallbackSession.problem_set_id;
+        } else if (!fallbackSession) {
+          state.selectedTestVersion = "";
+        }
+        saveState();
+      }
     }
   } catch (error) {
     logUnexpectedError("test_sessions fetch failed", error);
@@ -5448,8 +5462,13 @@ function renderQuiz(app) {
   const group = getCurrentQuestion();
   const isDaily = getActiveTestType() === "daily";
   const isLastQuestion = state.questionIndexInSection >= secQs.length - 1;
+  const isLastSection = state.sectionIndex >= getActiveSections().length - 1;
   const finishLabel = isDaily ? "Finish Test" : "Finish Section";
-  const nextLabel = isLastQuestion ? "Finish Test ▶" : "Next ▶";
+  const nextLabel = isDaily
+    ? (isLastQuestion ? "Finish Test ▶" : "Next ▶")
+    : (isLastQuestion
+        ? (isLastSection ? "Finish Test ▶" : "Finish Section ▶")
+        : "Next ▶");
 
   app.innerHTML = `
     <div class="app has-topbar ${isDaily ? "" : "has-bottombar"}">
@@ -6132,10 +6151,19 @@ function registerFocusWarning() {
     saveState();
     render();
   };
-  const handleHidden = () => {
-    if (document.hidden || document.visibilityState === "hidden") bumpWarning();
+  const refreshTestCatalog = () => {
+    if (testSessionsState.loading) return;
+    Promise.allSettled([fetchTestSessions()]).finally(render);
   };
-  document.addEventListener("visibilitychange", handleHidden);
+  const handleVisibilityChange = () => {
+    if (document.hidden || document.visibilityState === "hidden") {
+      bumpWarning();
+      return;
+    }
+    refreshTestCatalog();
+  };
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("focus", refreshTestCatalog);
   window.addEventListener("blur", bumpWarning);
   // Mobile browsers often emit pagehide/freeze when the app is backgrounded.
   window.addEventListener("pagehide", bumpWarning);
