@@ -854,8 +854,10 @@ body { overflow-x: hidden; }
   .score-total{ font-size: 34px; }
 
   .result-table{
-    width: 100%;
-    min-width: 700px;
+    width: max-content;
+    min-width: calc(100% + 280px);
+    max-width: none;
+    table-layout: auto;
   }
 
   .result-table th,
@@ -1052,8 +1054,10 @@ body { overflow-x: hidden; }
   .score-total{ font-size: 28px; }
 
   .result-table{
-    min-width: 700px;
-    table-layout: fixed;
+    width: max-content;
+    min-width: calc(100% + 280px);
+    max-width: none;
+    table-layout: auto;
   }
 
   .result-table th,
@@ -2936,7 +2940,8 @@ button.student-application-view {
   margin-top: 18px;
   align-self: stretch;
   display: block;
-  overflow: auto hidden;
+  overflow-x: auto;
+  overflow-y: visible;
   border: 1px solid rgba(0,0,0,.15);
   border-radius: 10px;
   background: #fff;
@@ -2950,11 +2955,11 @@ button.student-application-view {
 }
 
 .result-table{
-  width: 100%;
-  min-width: 760px;
+  width: max-content;
+  min-width: calc(100% + 280px);
   max-width: none;
   border-collapse: collapse;
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .result-table th, .result-table td{
@@ -3118,12 +3123,14 @@ button.student-application-view {
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
+    overflow-y: visible;
   }
 
   .result-table {
-    width: 100%;
-    min-width: 620px;
-    table-layout: fixed;
+    width: max-content;
+    min-width: calc(100% + 280px);
+    max-width: none;
+    table-layout: auto;
   }
 
   .result-table th,
