@@ -4180,6 +4180,29 @@ export default function AdminConsole({
     return summaryMap;
   }, [studentModelAttempts, attemptQuestionsByVersion]);
 
+  const studentAttemptDisplayScoreById = useMemo(() => {
+    const scoreMap = {};
+    (visibleStudentAttempts ?? []).forEach((attempt) => {
+      if (!attempt?.id) return;
+      const questionsList = attemptQuestionsByVersion[attempt.test_version];
+      if (questionsList?.length) {
+        scoreMap[attempt.id] = buildAttemptScorePreviewFromQuestions(attempt, questionsList);
+        return;
+      }
+      const correct = Number(attempt?.correct ?? 0);
+      const total = Number(attempt?.total ?? 0);
+      const scoreRate = total > 0
+        ? correct / total
+        : getScoreRate(attempt);
+      scoreMap[attempt.id] = {
+        correct,
+        total,
+        scoreRate,
+      };
+    });
+    return scoreMap;
+  }, [attemptQuestionsByVersion, getScoreRate, visibleStudentAttempts]);
+
   const sectionTitles = useMemo(
     () => sections.filter((s) => s.key !== "DAILY").map((s) => s.title),
     []
@@ -4212,8 +4235,28 @@ export default function AdminConsole({
   );
 
   const studentDailyCategorySummaryRows = useMemo(
-    () => buildCategorySummaryRows(studentDailyAttemptsByCategory),
-    [buildCategorySummaryRows, studentDailyAttemptsByCategory]
+    () => (studentDailyAttemptsByCategory ?? []).map(([category, attempts]) => {
+      const list = attempts ?? [];
+      const count = list.length;
+      const rates = list.map((attempt) => {
+        const displayScore = studentAttemptDisplayScoreById[attempt.id];
+        return Number(displayScore?.scoreRate ?? getScoreRate(attempt));
+      });
+      const passCount = list.filter((attempt) => {
+        const displayScore = studentAttemptDisplayScoreById[attempt.id];
+        const rate = Number(displayScore?.scoreRate ?? getScoreRate(attempt));
+        return rate >= getAttemptEffectivePassRate(attempt);
+      }).length;
+      const failCount = Math.max(0, count - passCount);
+      const avgRate = count ? rates.reduce((sum, rate) => sum + rate, 0) / count : 0;
+      return {
+        category,
+        averageRateLabel: count ? `${(avgRate * 100).toFixed(1)}%` : "-",
+        passCount,
+        failCount,
+      };
+    }),
+    [getAttemptEffectivePassRate, getScoreRate, studentAttemptDisplayScoreById, studentDailyAttemptsByCategory]
   );
 
   const filteredStudentAttendance = useMemo(() => {
@@ -11927,6 +11970,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     getAttemptEffectivePassRate,
     studentAttemptRanks,
     studentAttemptSummaryById,
+    studentAttemptDisplayScoreById,
     attemptCanOpenDetail,
     openAttemptDetail,
     getAttemptTitle,

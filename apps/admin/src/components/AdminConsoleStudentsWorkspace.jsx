@@ -62,6 +62,7 @@ export default function AdminConsoleStudentsWorkspace() {
     renderTwoLineHeader,
     getAttemptEffectivePassRate,
     studentAttemptSummaryById,
+    studentAttemptDisplayScoreById,
     attemptCanOpenDetail,
     openAttemptDetail,
     getAttemptTitle,
@@ -724,10 +725,14 @@ export default function AdminConsoleStudentsWorkspace() {
                   </thead>
                   <tbody>
                     {studentModelAttempts.map((a) => {
-                      const score = a.correct === 0 && a.total === 0 ? "-" : `${a.correct}/${a.total}`;
-                      const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                      const displayScore = studentAttemptDisplayScoreById[a.id] || null;
+                      const score = displayScore?.total > 0
+                        ? `${displayScore.correct}/${displayScore.total}`
+                        : (a.correct === 0 && a.total === 0 ? "-" : `${a.correct}/${a.total}`);
+                      const rateValue = displayScore ? displayScore.scoreRate : getScoreRate(a);
+                      const rate = `${(rateValue * 100).toFixed(1)}%`;
                       const passRate = getAttemptEffectivePassRate(a);
-                      const passed = getScoreRate(a) >= passRate;
+                      const passed = rateValue >= passRate;
                       const rankInfo = studentAttemptRanks[a.id];
                       const summary = studentAttemptSummaryById[a.id] || {};
                       return (
@@ -798,15 +803,19 @@ export default function AdminConsoleStudentsWorkspace() {
                       </thead>
                       <tbody>
                         {items.map((a) => {
-                          const score = a.correct === 0 && a.total === 0 ? "-" : `${a.correct}/${a.total}`;
-                          const rate = `${(getScoreRate(a) * 100).toFixed(1)}%`;
+                          const displayScore = studentAttemptDisplayScoreById[a.id] || null;
+                          const score = displayScore?.total > 0
+                            ? `${displayScore.correct}/${displayScore.total}`
+                            : (a.correct === 0 && a.total === 0 ? "-" : `${a.correct}/${a.total}`);
+                          const rateValue = displayScore ? displayScore.scoreRate : getScoreRate(a);
+                          const rate = `${(rateValue * 100).toFixed(1)}%`;
                           const passRate = getAttemptEffectivePassRate(a);
-                          const passed = getScoreRate(a) >= passRate;
+                          const passed = rateValue >= passRate;
                           return (
                         <tr key={`student-daily-${a.id}`} onClick={() => openAttemptDetail(a)}>
                           <td>{getAttemptTitle(a)}</td>
                           <td>{formatDateFull(getAttemptDisplayDateValue(a))}</td>
-                          <td>{a.correct === 0 && a.total === 0 ? "-" : `${a.correct}/${a.total}`}</td>
+                          <td>{score}</td>
                           <td>{rate}</td>
                               <td><span className={passed ? "pf-pass" : "pf-fail"}>{passed ? "Pass" : "Fail"}</span></td>
                             </tr>
