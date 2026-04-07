@@ -439,6 +439,10 @@ function buildSectionSummary(rows) {
   }));
 }
 
+function buildSectionSummaryLookup(rows) {
+  return new Map(buildSectionSummary(rows).map((row) => [row.section, row]));
+}
+
 function buildMainSectionSummary(rows, getSectionTitle) {
   const summaryMap = new Map();
   for (const row of rows ?? []) {
@@ -457,6 +461,10 @@ function buildMainSectionSummary(rows, getSectionTitle) {
       ...row,
       rate: row.total ? row.correct / row.total : 0,
     }));
+}
+
+function buildMainSectionSummaryLookup(rows, getSectionTitle) {
+  return new Map(buildMainSectionSummary(rows, getSectionTitle).map((row) => [row.section, row]));
 }
 
 function buildNestedSectionSummary(rows, getSectionTitle) {
@@ -494,7 +502,19 @@ function buildNestedSectionSummary(rows, getSectionTitle) {
       ...subSection,
       rate: subSection.total ? subSection.correct / subSection.total : 0,
     })),
-  }));
+    }));
+}
+
+function buildNestedSectionSummaryLookup(rows, getSectionTitle) {
+  return new Map(
+    buildNestedSectionSummary(rows, getSectionTitle).map((group) => [
+      group.mainSection,
+      {
+        ...group,
+        subSectionMap: new Map(group.subSections.map((subSection) => [subSection.section, subSection])),
+      },
+    ])
+  );
 }
 
 function buildQuestionAnalysisRows(attemptsList, questionsList, getQuestionSectionLabel) {
@@ -526,22 +546,22 @@ function buildSectionAverageRows(attemptsList, questionsList, getQuestionSection
   if (!questionsList?.length || !attemptsList?.length) return [];
   const baseRows = buildAttemptDetailRowsFromList({}, questionsList, getQuestionSectionLabel);
   const baseSummary = buildSectionSummary(baseRows);
+  const attemptSummaryMaps = attemptsList.map((attempt) => buildSectionSummaryLookup(
+    buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel)
+  ));
   return baseSummary
     .map((baseRow) => {
-      const stats = attemptsList.reduce(
-        (acc, attempt) => {
-          const summary = buildSectionSummary(buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel));
-          const row = summary.find((item) => item.section === baseRow.section);
-          acc.rateSum += Number(row?.rate ?? 0);
-          acc.correctSum += Number(row?.correct ?? 0);
-          return acc;
-        },
-        { rateSum: 0, correctSum: 0 }
-      );
+      let rateSum = 0;
+      let correctSum = 0;
+      for (const summaryMap of attemptSummaryMaps) {
+        const row = summaryMap.get(baseRow.section);
+        rateSum += Number(row?.rate ?? 0);
+        correctSum += Number(row?.correct ?? 0);
+      }
       return {
         section: baseRow.section,
-        averageRate: stats.rateSum / attemptsList.length,
-        averageCorrect: stats.correctSum / attemptsList.length,
+        averageRate: rateSum / attemptsList.length,
+        averageCorrect: correctSum / attemptsList.length,
         totalQuestions: Number(baseRow.total ?? 0),
       };
     })
@@ -552,26 +572,24 @@ function buildMainSectionAverageRows(attemptsList, questionsList, getQuestionSec
   if (!questionsList?.length || !attemptsList?.length) return [];
   const baseRows = buildAttemptDetailRowsFromList({}, questionsList, getQuestionSectionLabel);
   const baseSummary = buildMainSectionSummary(baseRows, getSectionTitle);
+  const attemptSummaryMaps = attemptsList.map((attempt) => buildMainSectionSummaryLookup(
+    buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel),
+    getSectionTitle
+  ));
   return baseSummary
     .map((baseRow) => {
-      const stats = attemptsList.reduce(
-        (acc, attempt) => {
-          const summary = buildMainSectionSummary(
-            buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel),
-            getSectionTitle
-          );
-          const row = summary.find((item) => item.section === baseRow.section);
-          acc.rateSum += Number(row?.rate ?? 0);
-          acc.correctSum += Number(row?.correct ?? 0);
-          return acc;
-        },
-        { rateSum: 0, correctSum: 0 }
-      );
+      let rateSum = 0;
+      let correctSum = 0;
+      for (const summaryMap of attemptSummaryMaps) {
+        const row = summaryMap.get(baseRow.section);
+        rateSum += Number(row?.rate ?? 0);
+        correctSum += Number(row?.correct ?? 0);
+      }
       return {
         section: baseRow.section,
         total: Number(baseRow.total ?? 0),
-        averageCorrect: stats.correctSum / attemptsList.length,
-        averageRate: stats.rateSum / attemptsList.length,
+        averageCorrect: correctSum / attemptsList.length,
+        averageRate: rateSum / attemptsList.length,
       };
     })
     .filter((row) => row.total > 0);
@@ -581,45 +599,37 @@ function buildNestedSectionAverageRows(attemptsList, questionsList, getQuestionS
   if (!questionsList?.length || !attemptsList?.length) return [];
   const baseRows = buildAttemptDetailRowsFromList({}, questionsList, getQuestionSectionLabel);
   const baseSummary = buildNestedSectionSummary(baseRows, getSectionTitle);
+  const attemptSummaryMaps = attemptsList.map((attempt) => buildNestedSectionSummaryLookup(
+    buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel),
+    getSectionTitle
+  ));
   return baseSummary.map((baseGroup) => {
-    const groupStats = attemptsList.reduce(
-      (acc, attempt) => {
-        const summary = buildNestedSectionSummary(
-          buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel),
-          getSectionTitle
-        );
-        const group = summary.find((item) => item.mainSection === baseGroup.mainSection);
-        acc.rateSum += Number(group?.rate ?? 0);
-        acc.correctSum += Number(group?.correct ?? 0);
-        return acc;
-      },
-      { rateSum: 0, correctSum: 0 }
-    );
+    let rateSum = 0;
+    let correctSum = 0;
+    for (const summaryMap of attemptSummaryMaps) {
+      const group = summaryMap.get(baseGroup.mainSection);
+      rateSum += Number(group?.rate ?? 0);
+      correctSum += Number(group?.correct ?? 0);
+    }
     return {
       mainSection: baseGroup.mainSection,
       total: Number(baseGroup.total ?? 0),
-      averageCorrect: groupStats.correctSum / attemptsList.length,
-      averageRate: groupStats.rateSum / attemptsList.length,
+      averageCorrect: correctSum / attemptsList.length,
+      averageRate: rateSum / attemptsList.length,
       subSections: baseGroup.subSections.map((baseSubSection) => {
-        const subStats = attemptsList.reduce(
-          (acc, attempt) => {
-            const summary = buildNestedSectionSummary(
-              buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel),
-              getSectionTitle
-            );
-            const group = summary.find((item) => item.mainSection === baseGroup.mainSection);
-            const subSection = group?.subSections?.find((item) => item.section === baseSubSection.section);
-            acc.rateSum += Number(subSection?.rate ?? 0);
-            acc.correctSum += Number(subSection?.correct ?? 0);
-            return acc;
-          },
-          { rateSum: 0, correctSum: 0 }
-        );
+        let subRateSum = 0;
+        let subCorrectSum = 0;
+        for (const summaryMap of attemptSummaryMaps) {
+          const group = summaryMap.get(baseGroup.mainSection);
+          const subSection = group?.subSectionMap?.get(baseSubSection.section);
+          subRateSum += Number(subSection?.rate ?? 0);
+          subCorrectSum += Number(subSection?.correct ?? 0);
+        }
         return {
           section: baseSubSection.section,
           total: Number(baseSubSection.total ?? 0),
-          averageCorrect: subStats.correctSum / attemptsList.length,
-          averageRate: subStats.rateSum / attemptsList.length,
+          averageCorrect: subCorrectSum / attemptsList.length,
+          averageRate: subRateSum / attemptsList.length,
         };
       }),
     };
@@ -628,12 +638,16 @@ function buildNestedSectionAverageRows(attemptsList, questionsList, getQuestionS
 
 function buildImportedMainSectionAverageRows(attemptsList) {
   if (!attemptsList?.length) return [];
+  const summaryByAttempt = attemptsList.map((attempt) => ({
+    attempt,
+    summaryMap: new Map(getImportedModelSectionSummaries(attempt).map((row) => [row.section, row])),
+  }));
   return sections
     .filter((section) => section.key !== "DAILY")
     .map((section) => section.title)
     .map((sectionTitle) => {
-      const matchingRows = attemptsList
-        .map((attempt) => getImportedModelSectionSummaries(attempt).find((row) => row.section === sectionTitle))
+      const matchingRows = summaryByAttempt
+        .map(({ summaryMap }) => summaryMap.get(sectionTitle))
         .filter(Boolean);
       if (!matchingRows.length) return null;
       return {
@@ -690,13 +704,12 @@ function buildSessionStudentRankingRows(attemptsList, questionsList, studentsLis
   if (!attemptsList?.length) return [];
   const sectionAverageRows = buildSectionAverageRows(attemptsList, questionsList, getQuestionSectionLabel);
   const sectionTitles = sectionAverageRows.map((row) => row.section);
+  const studentsById = new Map((studentsList ?? []).map((student) => [student.id, student]));
   const rows = attemptsList.map((attempt) => {
-    const student = (studentsList ?? []).find((item) => item.id === attempt.student_id) ?? null;
+    const student = studentsById.get(attempt.student_id) ?? null;
     const detailRows = buildAttemptDetailRowsFromList(attempt?.answers_json, questionsList, getQuestionSectionLabel);
-    const sectionSummary = buildSectionSummary(detailRows);
-    const sectionRates = Object.fromEntries(
-      sectionTitles.map((title) => [title, Number(sectionSummary.find((row) => row.section === title)?.rate ?? 0)])
-    );
+    const sectionSummaryMap = buildSectionSummaryLookup(detailRows);
+    const sectionRates = Object.fromEntries(sectionTitles.map((title) => [title, Number(sectionSummaryMap.get(title)?.rate ?? 0)]));
     return {
       attempt,
       student_id: attempt.student_id,
@@ -721,12 +734,11 @@ function buildSessionStudentRankingRows(attemptsList, questionsList, studentsLis
 function buildImportedSessionStudentRankingRows(attemptsList, studentsList, getScoreRate = null) {
   if (!attemptsList?.length) return [];
   const sectionTitles = sections.filter((section) => section.key !== "DAILY").map((section) => section.title);
+  const studentsById = new Map((studentsList ?? []).map((student) => [student.id, student]));
   const rows = attemptsList.map((attempt) => {
-    const student = (studentsList ?? []).find((item) => item.id === attempt.student_id) ?? null;
-    const sectionSummary = getImportedModelSectionSummaries(attempt);
-    const sectionRates = Object.fromEntries(
-      sectionTitles.map((title) => [title, Number(sectionSummary.find((row) => row.section === title)?.rate ?? 0)])
-    );
+    const student = studentsById.get(attempt.student_id) ?? null;
+    const sectionSummaryMap = new Map(getImportedModelSectionSummaries(attempt).map((row) => [row.section, row]));
+    const sectionRates = Object.fromEntries(sectionTitles.map((title) => [title, Number(sectionSummaryMap.get(title)?.rate ?? 0)]));
     return {
       attempt,
       student_id: attempt.student_id,
@@ -913,160 +925,216 @@ export default function AdminConsoleResultsWorkspace(props) {
       }
       return normalizePassRate(testMetaByVersion[selectedSessionDetail?.problem_set_id]?.pass_rate);
     })();
-  const sessionDetailUsesImportedResultsSummary = typeof sessionDetailUsesImportedResultsSummaryProp === "boolean"
-    ? sessionDetailUsesImportedResultsSummaryProp
-    : sessionDetailUsesImportedResultsSummaryRaw;
-  const sessionDetailUsesImportedModelSummary = typeof sessionDetailUsesImportedModelSummaryProp === "boolean"
-    ? sessionDetailUsesImportedModelSummaryProp
-    : (
-      sessionDetail.type === "mock"
-      && sessionDetailUsesImportedResultsSummary
-      && sessionDetailLatestAttempts.every((attempt) => isImportedModelResultsSummaryAttempt(attempt))
-    );
-  const resolveSessionAttemptScoreSummary = (attempt) => {
-    if (!attempt || isImportedSummaryAttempt(attempt)) {
+  const sessionDetailDerived = useMemo(() => {
+    const usesImportedResultsSummary = typeof sessionDetailUsesImportedResultsSummaryProp === "boolean"
+      ? sessionDetailUsesImportedResultsSummaryProp
+      : sessionDetailUsesImportedResultsSummaryRaw;
+    const usesImportedModelSummary = typeof sessionDetailUsesImportedModelSummaryProp === "boolean"
+      ? sessionDetailUsesImportedModelSummaryProp
+      : (
+        sessionDetail.type === "mock"
+        && usesImportedResultsSummary
+        && sessionDetailLatestAttempts.every((attempt) => isImportedModelResultsSummaryAttempt(attempt))
+      );
+
+    const resolveSessionAttemptScoreSummary = (attempt) => {
+      if (!attempt || isImportedSummaryAttempt(attempt)) {
+        return {
+          correct: Number(attempt?.correct ?? 0),
+          total: Number(attempt?.total ?? 0),
+          rate: getAttemptScoreRate(attempt, getScoreRate),
+        };
+      }
+      if (sessionDetailQuestions.length) {
+        const nextScore = buildAttemptScorePreviewFromQuestions(attempt, sessionDetailQuestions, getQuestionSectionLabel);
+        return {
+          correct: nextScore.correct,
+          total: nextScore.total,
+          rate: nextScore.scoreRate,
+        };
+      }
       return {
         correct: Number(attempt?.correct ?? 0),
         total: Number(attempt?.total ?? 0),
         rate: getAttemptScoreRate(attempt, getScoreRate),
       };
-    }
-    if (sessionDetailQuestions.length) {
-      const nextScore = buildAttemptScorePreviewFromQuestions(attempt, sessionDetailQuestions, getQuestionSectionLabel);
+    };
+
+    const overview = sessionDetailOverviewProp ?? (() => {
+      const count = sessionDetailLatestAttempts.length;
+      const passCount = sessionDetailLatestAttempts.filter((attempt) => (
+        resolveSessionAttemptScoreSummary(attempt).rate >= sessionDetailPassRate
+      )).length;
+      const averageScore = count
+        ? sessionDetailLatestAttempts.reduce((total, attempt) => (
+          total + resolveSessionAttemptScoreSummary(attempt).rate
+        ), 0) / count
+        : 0;
       return {
-        correct: nextScore.correct,
-        total: nextScore.total,
-        rate: nextScore.scoreRate,
+        count,
+        averageScore,
+        passCount,
+        passRate: count ? passCount / count : 0,
       };
-    }
-    return {
-      correct: Number(attempt?.correct ?? 0),
-      total: Number(attempt?.total ?? 0),
-      rate: getAttemptScoreRate(attempt, getScoreRate),
-    };
-  };
-  const sessionDetailOverview = sessionDetailOverviewProp ?? (() => {
-    const count = sessionDetailLatestAttempts.length;
-    const passCount = sessionDetailLatestAttempts.filter((attempt) => (
-      resolveSessionAttemptScoreSummary(attempt).rate >= sessionDetailPassRate
-    )).length;
-    const averageScore = count
-      ? sessionDetailLatestAttempts.reduce((total, attempt) => (
-        total + resolveSessionAttemptScoreSummary(attempt).rate
-      ), 0) / count
-      : 0;
-    return {
-      count,
-      averageScore,
-      passCount,
-      passRate: count ? passCount / count : 0,
-    };
-  })();
-  const sessionDetailAnalysisSummary = sessionDetailAnalysisSummaryProp ?? (() => {
-    const attendedCount = sessionDetailLatestAttempts.length;
-    const activeStudentCount = sessionStudents.filter((student) => !(student?.is_withdrawn || student?.is_test_account)).length;
-    const absentCount = Math.max(0, activeStudentCount - attendedCount);
-    const passCount = sessionDetailLatestAttempts.filter((attempt) => (
-      resolveSessionAttemptScoreSummary(attempt).rate >= sessionDetailPassRate
-    )).length;
-    const failCount = Math.max(0, attendedCount - passCount);
-    const totalQuestions = sessionDetailUsesImportedResultsSummary
-      ? Math.max(0, ...sessionDetailLatestAttempts.map((attempt) => resolveSessionAttemptScoreSummary(attempt).total))
-      : sessionDetailQuestions.length;
-    const averageCorrect = attendedCount
-      ? sessionDetailLatestAttempts.reduce((total, attempt) => (
-        total + resolveSessionAttemptScoreSummary(attempt).correct
-      ), 0) / attendedCount
-      : 0;
-    const bucketLabels = Array.from({ length: 10 }, (_, index) => {
-      const start = index * 10;
-      const end = index === 9 ? 100 : start + 9;
-      return `${start}-${end}%`;
-    });
-    const bucketCounts = Array.from({ length: 10 }, () => 0);
-    sessionDetailLatestAttempts.forEach((attempt) => {
-      const ratePercent = Math.max(0, Math.min(100, resolveSessionAttemptScoreSummary(attempt).rate * 100));
-      const bucketIndex = ratePercent >= 100 ? 9 : Math.floor(ratePercent / 10);
-      bucketCounts[bucketIndex] += 1;
-    });
-    return {
-      attendedCount,
-      absentCount,
-      passCount,
-      failCount,
-      totalQuestions,
-      averageCorrect,
-      averageRate: sessionDetailOverview.averageScore,
-      bucketLabels,
-      bucketCounts,
-      maxBucketCount: Math.max(0, ...bucketCounts),
-    };
-  })();
-  const sessionDetailQuestionAnalysis = Array.isArray(sessionDetailQuestionAnalysisProp)
-    ? sessionDetailQuestionAnalysisProp
-    : (
-      sessionDetailUsesImportedResultsSummary
-        ? []
-        : buildQuestionAnalysisRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel)
-          .sort((a, b) => {
-            if (b.rate !== a.rate) return b.rate - a.rate;
-            return String(a.qid).localeCompare(String(b.qid));
-          })
-    );
-  const sessionDetailDistributionStep = getDistributionTickStep(sessionDetailAnalysisSummary.maxBucketCount);
-  const sessionDetailDistributionMax = Math.max(
-    sessionDetailDistributionStep,
-    Math.ceil(Math.max(0, sessionDetailAnalysisSummary.maxBucketCount) / sessionDetailDistributionStep) * sessionDetailDistributionStep
-  );
-  const sessionDetailDistributionTicks = Array.from(
-    { length: Math.floor(sessionDetailDistributionMax / sessionDetailDistributionStep) + 1 },
-    (_, index) => sessionDetailDistributionMax - (index * sessionDetailDistributionStep)
-  );
-  const sessionDetailQuestionStudents = Array.isArray(sessionDetailQuestionStudentsProp)
-    ? sessionDetailQuestionStudentsProp
-    : sessionDetailLatestAttempts
-      .map((attempt) => {
-        const student = studentsById.get(attempt.student_id) ?? null;
-        return {
-          id: attempt.student_id,
-          display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
-          student_code: attempt.student_code || student?.student_code || "",
-        };
-      })
-      .sort((a, b) => {
-        const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
-        if (nameCompare !== 0) return nameCompare;
-        return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+    })();
+
+    const analysisSummary = sessionDetailAnalysisSummaryProp ?? (() => {
+      const attendedCount = sessionDetailLatestAttempts.length;
+      const activeStudentCount = sessionStudents.filter((student) => !(student?.is_withdrawn || student?.is_test_account)).length;
+      const absentCount = Math.max(0, activeStudentCount - attendedCount);
+      const passCount = sessionDetailLatestAttempts.filter((attempt) => (
+        resolveSessionAttemptScoreSummary(attempt).rate >= sessionDetailPassRate
+      )).length;
+      const failCount = Math.max(0, attendedCount - passCount);
+      const totalQuestions = usesImportedResultsSummary
+        ? Math.max(0, ...sessionDetailLatestAttempts.map((attempt) => resolveSessionAttemptScoreSummary(attempt).total))
+        : sessionDetailQuestions.length;
+      const averageCorrect = attendedCount
+        ? sessionDetailLatestAttempts.reduce((total, attempt) => (
+          total + resolveSessionAttemptScoreSummary(attempt).correct
+        ), 0) / attendedCount
+        : 0;
+      const bucketLabels = Array.from({ length: 10 }, (_, index) => {
+        const start = index * 10;
+        const end = index === 9 ? 100 : start + 9;
+        return `${start}-${end}%`;
       });
-  const sessionDetailMainSectionAverages = Array.isArray(sessionDetailMainSectionAveragesProp)
-    ? sessionDetailMainSectionAveragesProp
-    : (
-      sessionDetailUsesImportedModelSummary
-        ? buildImportedMainSectionAverageRows(sessionDetailLatestAttempts)
-        : buildMainSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel, getSectionTitle)
+      const bucketCounts = Array.from({ length: 10 }, () => 0);
+      sessionDetailLatestAttempts.forEach((attempt) => {
+        const ratePercent = Math.max(0, Math.min(100, resolveSessionAttemptScoreSummary(attempt).rate * 100));
+        const bucketIndex = ratePercent >= 100 ? 9 : Math.floor(ratePercent / 10);
+        bucketCounts[bucketIndex] += 1;
+      });
+      return {
+        attendedCount,
+        absentCount,
+        passCount,
+        failCount,
+        totalQuestions,
+        averageCorrect,
+        averageRate: overview.averageScore,
+        bucketLabels,
+        bucketCounts,
+        maxBucketCount: Math.max(0, ...bucketCounts),
+      };
+    })();
+
+    const questionAnalysis = Array.isArray(sessionDetailQuestionAnalysisProp)
+      ? sessionDetailQuestionAnalysisProp
+      : (
+        usesImportedResultsSummary
+          ? []
+          : buildQuestionAnalysisRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel)
+            .sort((a, b) => {
+              if (b.rate !== a.rate) return b.rate - a.rate;
+              return String(a.qid).localeCompare(String(b.qid));
+            })
+      );
+    const distributionStep = getDistributionTickStep(analysisSummary.maxBucketCount);
+    const distributionMax = Math.max(
+      distributionStep,
+      Math.ceil(Math.max(0, analysisSummary.maxBucketCount) / distributionStep) * distributionStep
     );
-  const sessionDetailNestedSectionAverages = Array.isArray(sessionDetailNestedSectionAveragesProp)
-    ? sessionDetailNestedSectionAveragesProp
-    : (
-      sessionDetailUsesImportedResultsSummary
-        ? []
-        : buildNestedSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel, getSectionTitle)
+    const distributionTicks = Array.from(
+      { length: Math.floor(distributionMax / distributionStep) + 1 },
+      (_, index) => distributionMax - (index * distributionStep)
     );
-  const sessionDetailStudentRankingRows = Array.isArray(sessionDetailStudentRankingRowsProp)
-    ? sessionDetailStudentRankingRowsProp
-    : (
-      sessionDetailUsesImportedResultsSummary
-        ? buildImportedSessionStudentRankingRows(sessionDetailLatestAttempts, sessionStudents, getScoreRate)
-        : buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, sessionStudents, getQuestionSectionLabel, getScoreRate)
-    );
-  const sessionDetailRankingSections = Array.isArray(sessionDetailRankingSectionsProp)
-    ? sessionDetailRankingSectionsProp
-    : (
-      sessionDetailUsesImportedResultsSummary
-        ? sessionDetailMainSectionAverages.map((row) => ({ section: row.section }))
-        : buildSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel)
-            .map((row) => ({ section: row.section }))
-    );
+    const questionStudents = Array.isArray(sessionDetailQuestionStudentsProp)
+      ? sessionDetailQuestionStudentsProp
+      : sessionDetailLatestAttempts
+        .map((attempt) => {
+          const student = studentsById.get(attempt.student_id) ?? null;
+          return {
+            id: attempt.student_id,
+            display_name: attempt.display_name || student?.display_name || student?.email || attempt.student_id,
+            student_code: attempt.student_code || student?.student_code || "",
+          };
+        })
+        .sort((a, b) => {
+          const nameCompare = String(a.display_name ?? "").localeCompare(String(b.display_name ?? ""));
+          if (nameCompare !== 0) return nameCompare;
+          return String(a.student_code ?? "").localeCompare(String(b.student_code ?? ""));
+        });
+    const mainSectionAverages = Array.isArray(sessionDetailMainSectionAveragesProp)
+      ? sessionDetailMainSectionAveragesProp
+      : (
+        usesImportedModelSummary
+          ? buildImportedMainSectionAverageRows(sessionDetailLatestAttempts)
+          : buildMainSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel, getSectionTitle)
+      );
+    const nestedSectionAverages = Array.isArray(sessionDetailNestedSectionAveragesProp)
+      ? sessionDetailNestedSectionAveragesProp
+      : (
+        usesImportedResultsSummary
+          ? []
+          : buildNestedSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel, getSectionTitle)
+      );
+    const studentRankingRows = Array.isArray(sessionDetailStudentRankingRowsProp)
+      ? sessionDetailStudentRankingRowsProp
+      : (
+        usesImportedResultsSummary
+          ? buildImportedSessionStudentRankingRows(sessionDetailLatestAttempts, sessionStudents, getScoreRate)
+          : buildSessionStudentRankingRows(sessionDetailLatestAttempts, sessionDetailQuestions, sessionStudents, getQuestionSectionLabel, getScoreRate)
+      );
+    const rankingSections = Array.isArray(sessionDetailRankingSectionsProp)
+      ? sessionDetailRankingSectionsProp
+      : (
+        usesImportedResultsSummary
+          ? mainSectionAverages.map((row) => ({ section: row.section }))
+          : buildSectionAverageRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel)
+              .map((row) => ({ section: row.section }))
+      );
+
+    return {
+      sessionDetailUsesImportedResultsSummary: usesImportedResultsSummary,
+      sessionDetailUsesImportedModelSummary: usesImportedModelSummary,
+      sessionDetailOverview: overview,
+      sessionDetailAnalysisSummary: analysisSummary,
+      sessionDetailQuestionAnalysis: questionAnalysis,
+      sessionDetailDistributionStep: distributionStep,
+      sessionDetailDistributionMax: distributionMax,
+      sessionDetailDistributionTicks: distributionTicks,
+      sessionDetailQuestionStudents: questionStudents,
+      sessionDetailMainSectionAverages: mainSectionAverages,
+      sessionDetailNestedSectionAverages: nestedSectionAverages,
+      sessionDetailStudentRankingRows: studentRankingRows,
+      sessionDetailRankingSections: rankingSections,
+    };
+  }, [
+    getQuestionSectionLabel,
+    getSectionTitle,
+    getScoreRate,
+    sessionDetail.type,
+    sessionDetailLatestAttempts,
+    sessionDetailAnalysisSummaryProp,
+    sessionDetailMainSectionAveragesProp,
+    sessionDetailNestedSectionAveragesProp,
+    sessionDetailOverviewProp,
+    sessionDetailQuestionAnalysisProp,
+    sessionDetailQuestionStudentsProp,
+    sessionDetailRankingSectionsProp,
+    sessionDetailStudentRankingRowsProp,
+    sessionDetailUsesImportedModelSummaryProp,
+    sessionDetailUsesImportedResultsSummaryProp,
+    sessionDetailUsesImportedResultsSummaryRaw,
+    sessionDetailQuestions,
+    sessionDetailPassRate,
+    sessionStudents,
+    studentsById,
+  ]);
+  const sessionDetailUsesImportedResultsSummary = sessionDetailDerived.sessionDetailUsesImportedResultsSummary;
+  const sessionDetailUsesImportedModelSummary = sessionDetailDerived.sessionDetailUsesImportedModelSummary;
+  const sessionDetailOverview = sessionDetailDerived.sessionDetailOverview;
+  const sessionDetailAnalysisSummary = sessionDetailDerived.sessionDetailAnalysisSummary;
+  const sessionDetailQuestionAnalysis = sessionDetailDerived.sessionDetailQuestionAnalysis;
+  const sessionDetailDistributionStep = sessionDetailDerived.sessionDetailDistributionStep;
+  const sessionDetailDistributionMax = sessionDetailDerived.sessionDetailDistributionMax;
+  const sessionDetailDistributionTicks = sessionDetailDerived.sessionDetailDistributionTicks;
+  const sessionDetailQuestionStudents = sessionDetailDerived.sessionDetailQuestionStudents;
+  const sessionDetailMainSectionAverages = sessionDetailDerived.sessionDetailMainSectionAverages;
+  const sessionDetailNestedSectionAverages = sessionDetailDerived.sessionDetailNestedSectionAverages;
+  const sessionDetailStudentRankingRows = sessionDetailDerived.sessionDetailStudentRankingRows;
+  const sessionDetailRankingSections = sessionDetailDerived.sessionDetailRankingSections;
   const formatOrdinal = typeof formatOrdinalProp === "function" ? formatOrdinalProp : formatOrdinalFallback;
   const renderTwoLineHeader = typeof renderTwoLineHeaderProp === "function"
     ? renderTwoLineHeaderProp

@@ -57,6 +57,8 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceEntriesByDay,
     attendanceFilteredStudents,
     attendanceDayRates,
+    attendanceStudentRowsById,
+    attendanceSheetHydrated,
   } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: formatDateShortFn, formatWeekday: formatWeekdayFn, openAttendanceDayCtx });
 
   useEffect(() => {
@@ -65,14 +67,14 @@ export default function AdminConsoleAttendanceWorkspace() {
       if (!students.length) {
         fetchStudents();
       }
-      if (attendanceSheetNeedsInitialRefresh && !attendanceSheetRefreshing) {
+      if (!attendanceSheetHydrated && !attendanceSheetRefreshing) {
         setAttendanceSheetNeedsInitialRefresh(false);
         fetchAttendanceDays({ force: true, initialRefresh: true });
       }
       return;
     }
     fetchAbsenceApplications();
-  }, [activeSchoolId, attendanceSubTab, students.length, attendanceSheetNeedsInitialRefresh, attendanceSheetRefreshing]);
+  }, [activeSchoolId, attendanceSubTab, students.length, attendanceSheetHydrated, attendanceSheetRefreshing]);
 
   if (attendanceSubTab === "absence") {
     return (
@@ -353,9 +355,10 @@ export default function AdminConsoleAttendanceWorkspace() {
           </thead>
           <tbody>
             {attendanceFilteredStudents.map((s) => {
-              const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "N/A");
-              const stats = buildAttendanceStats(perDay);
-              const rate = stats.total ? (stats.present / stats.total) * 100 : null;
+              const rowStats = attendanceStudentRowsById?.[s.id];
+              const perDay = rowStats?.perDayStatuses ?? attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "N/A");
+              const stats = rowStats?.stats ?? buildAttendanceStats(perDay);
+              const rate = rowStats?.rate ?? (stats.total ? (stats.present / stats.total) * 100 : null);
               return (
                 <tr key={s.id}>
                   <td className="att-col-code att-sticky-1">{s.student_code ?? ""}</td>
@@ -370,7 +373,7 @@ export default function AdminConsoleAttendanceWorkspace() {
                     </div>
                   </td>
                   <td className="att-col-rate att-sticky-3">{rate == null ? "N/A" : `${rate.toFixed(2)}%`}</td>
-                  <td className="att-col-absent att-sticky-4">{stats.unexcused}</td>
+                  <td className="att-col-absent att-sticky-4">{rowStats?.unexcused ?? stats.unexcused}</td>
                   {attendanceDayColumns.map((d) => {
                     const status = attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "N/A";
                     return (

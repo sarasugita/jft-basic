@@ -3039,8 +3039,8 @@ export default function AdminConsole({
   const [schoolAssignments, setSchoolAssignments] = useState([]);
   const [schoolScopeId, setSchoolScopeId] = useState(null);
   const [attempts, setAttempts] = useState(() => storedRegularAdminData?.attempts ?? []);
-  const [attemptsLoaded, setAttemptsLoaded] = useState(() => Boolean(storedRegularAdminData?.attemptsLoaded));
-  const [examLinks, setExamLinks] = useState([]);
+  const [attemptsLoaded, setAttemptsLoaded] = useState(() => Boolean(storedRegularAdminData?.attemptsLoaded && storedRegularAdminData?.attemptsHydrated));
+  const [examLinks, setExamLinks] = useState(() => storedRegularAdminData?.examLinks ?? []);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedAttemptObj, setSelectedAttemptObj] = useState(null);
   const [attemptDetailOpen, setAttemptDetailOpen] = useState(false);
@@ -3144,7 +3144,7 @@ export default function AdminConsole({
   ));
   const [studentWarnings, setStudentWarnings] = useState(() => storedRegularAdminData?.studentWarnings ?? []);
   const [studentWarningsLoading, setStudentWarningsLoading] = useState(false);
-  const [studentWarningsLoaded, setStudentWarningsLoaded] = useState(() => Boolean(storedRegularAdminData?.studentWarningsLoaded));
+  const [studentWarningsLoaded, setStudentWarningsLoaded] = useState(() => Boolean(storedRegularAdminData?.studentWarningsLoaded && storedRegularAdminData?.studentWarningsHydrated));
   const [studentWarningsMsg, setStudentWarningsMsg] = useState(() => storedRegularAdminData?.studentWarningsMsg ?? "");
   const [studentWarningIssueOpen, setStudentWarningIssueOpen] = useState(false);
   const [studentWarningIssueSaving, setStudentWarningIssueSaving] = useState(false);
@@ -3156,7 +3156,7 @@ export default function AdminConsole({
   const [studentListAttendanceMap, setStudentListAttendanceMap] = useState(() => storedRegularAdminData?.studentListAttendanceMap ?? {});
   const [studentListAttempts, setStudentListAttempts] = useState(() => storedRegularAdminData?.studentListAttempts ?? []);
   const [studentListLoading, setStudentListLoading] = useState(false);
-  const [studentListMetricsLoaded, setStudentListMetricsLoaded] = useState(() => Boolean(storedRegularAdminData?.studentListMetricsLoaded));
+  const [studentListMetricsLoaded, setStudentListMetricsLoaded] = useState(() => Boolean(storedRegularAdminData?.studentListMetricsLoaded && storedRegularAdminData?.studentListMetricsHydrated));
   const [studentDetailOpen, setStudentDetailOpen] = useState(false);
   const [studentDetailLoading, setStudentDetailLoading] = useState(false);
   const [studentDetailMsg, setStudentDetailMsg] = useState("");
@@ -3176,10 +3176,10 @@ export default function AdminConsole({
   const [testSessions, setTestSessions] = useState(() => storedRegularAdminData?.testSessions ?? []);
   const [testSessionsMsg, setTestSessionsMsg] = useState(() => storedRegularAdminData?.testSessionsMsg ?? "");
   const [linkMsg, setLinkMsg] = useState(() => storedRegularAdminData?.linkMsg ?? "");
-  const [studentsLoaded, setStudentsLoaded] = useState(() => Boolean(storedRegularAdminData?.studentsLoaded));
-  const [testsLoaded, setTestsLoaded] = useState(() => Boolean(storedRegularAdminData?.testsLoaded));
-  const [testSessionsLoaded, setTestSessionsLoaded] = useState(() => Boolean(storedRegularAdminData?.testSessionsLoaded));
-  const [examLinksLoaded, setExamLinksLoaded] = useState(() => Boolean(storedRegularAdminData?.examLinksLoaded));
+  const [studentsLoaded, setStudentsLoaded] = useState(() => Boolean(storedRegularAdminData?.studentsLoaded && storedRegularAdminData?.studentsHydrated));
+  const [testsLoaded, setTestsLoaded] = useState(() => Boolean(storedRegularAdminData?.testsLoaded && storedRegularAdminData?.testsHydrated));
+  const [testSessionsLoaded, setTestSessionsLoaded] = useState(() => Boolean(storedRegularAdminData?.testSessionsLoaded && storedRegularAdminData?.testSessionsHydrated));
+  const [examLinksLoaded, setExamLinksLoaded] = useState(() => Boolean(storedRegularAdminData?.examLinksLoaded && storedRegularAdminData?.examLinksHydrated));
   const [modelConductOpen, setModelConductOpen] = useState(false);
   const [modelUploadOpen, setModelUploadOpen] = useState(false);
   const [dailyConductOpen, setDailyConductOpen] = useState(false);
@@ -3230,7 +3230,7 @@ export default function AdminConsole({
   });
   const [assets, setAssets] = useState(() => storedRegularAdminData?.assets ?? []);
   const [assetsMsg, setAssetsMsg] = useState(() => storedRegularAdminData?.assetsMsg ?? "");
-  const [assetsLoaded, setAssetsLoaded] = useState(() => Boolean(storedRegularAdminData?.assetsLoaded));
+  const [assetsLoaded, setAssetsLoaded] = useState(() => Boolean(storedRegularAdminData?.assetsLoaded && storedRegularAdminData?.assetsHydrated));
   const [quizMsg, setQuizMsg] = useState("");
   const [resultsImportStatus, setResultsImportStatus] = useState(null);
   const [dailyManualEntryMode, setDailyManualEntryMode] = useState(false);
@@ -5051,26 +5051,34 @@ export default function AdminConsole({
     writeAdminConsoleDataCache(regularAdminDataUserId, regularAdminDataSchoolId, {
       attempts,
       attemptsLoaded,
+      attemptsHydrated: attemptsLoaded,
       assets,
       assetsLoaded,
+      assetsHydrated: assetsLoaded,
       students,
       studentMsg,
       studentsLoaded,
+      studentsHydrated: studentsLoaded,
       tests,
       testsMsg,
       testsLoaded,
+      testsHydrated: testsLoaded,
       testSessions,
       testSessionsMsg,
       testSessionsLoaded,
+      testSessionsHydrated: testSessionsLoaded,
       examLinks,
       linkMsg,
       examLinksLoaded,
+      examLinksHydrated: examLinksLoaded,
       studentWarnings,
       studentWarningsLoaded,
+      studentWarningsHydrated: studentWarningsLoaded,
       studentWarningsMsg,
       studentListAttendanceMap,
       studentListAttempts,
       studentListMetricsLoaded,
+      studentListMetricsHydrated: studentListMetricsLoaded,
       assetsMsg,
     });
   }, [

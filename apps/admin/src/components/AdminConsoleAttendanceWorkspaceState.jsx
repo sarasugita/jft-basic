@@ -234,9 +234,12 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
   const [attendanceDays, setAttendanceDays] = useState(() => initialAttendanceSheet?.attendanceDays ?? []);
   const [attendanceEntries, setAttendanceEntries] = useState(() => initialAttendanceSheet?.attendanceEntries ?? {});
   const [attendanceMsg, setAttendanceMsg] = useState(() => initialAttendanceSheet?.attendanceMsg ?? "");
-  const [attendanceSheetLoaded, setAttendanceSheetLoaded] = useState(() => Boolean(initialAttendanceSheet));
+  const [attendanceSheetHydrated, setAttendanceSheetHydrated] = useState(() => Boolean(initialAttendanceSheet?.attendanceSheetHydrated));
+  const [attendanceSheetLoaded, setAttendanceSheetLoaded] = useState(() => Boolean(initialAttendanceSheet?.attendanceSheetHydrated));
   const [attendanceSheetRefreshing, setAttendanceSheetRefreshing] = useState(false);
-  const [attendanceSheetNeedsInitialRefresh, setAttendanceSheetNeedsInitialRefresh] = useState(() => !hasAttendanceSheetAutoRefreshed(activeSchoolId));
+  const [attendanceSheetNeedsInitialRefresh, setAttendanceSheetNeedsInitialRefresh] = useState(
+    () => !hasAttendanceSheetAutoRefreshed(activeSchoolId) && !initialAttendanceSheet?.attendanceSheetHydrated
+  );
   const [attendanceDate, setAttendanceDate] = useState(() => {
     const today = new Date();
     if (Number.isNaN(today.getTime())) return "";
@@ -273,20 +276,22 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       startDate: "",
       endDate: ""
     });
-    setAttendanceSheetLoaded(Boolean(cached));
+    setAttendanceSheetHydrated(Boolean(cached?.attendanceSheetHydrated));
+    setAttendanceSheetLoaded(Boolean(cached?.attendanceSheetHydrated));
     setAttendanceSheetRefreshing(false);
-    setAttendanceSheetNeedsInitialRefresh(!hasAttendanceSheetAutoRefreshed(activeSchoolId));
+    setAttendanceSheetNeedsInitialRefresh(!hasAttendanceSheetAutoRefreshed(activeSchoolId) && !cached?.attendanceSheetHydrated);
   }, [activeSchoolId]);
 
   useEffect(() => {
-    if (!activeSchoolId) return;
+    if (!activeSchoolId || !attendanceSheetHydrated) return;
     writeAttendanceSheetCache(activeSchoolId, {
       attendanceDays,
       attendanceEntries,
       attendanceMsg,
       attendanceFilter,
+      attendanceSheetHydrated,
     });
-  }, [activeSchoolId, attendanceDays, attendanceEntries, attendanceMsg, attendanceFilter]);
+  }, [activeSchoolId, attendanceDays, attendanceEntries, attendanceMsg, attendanceFilter, attendanceSheetHydrated]);
 
   // Memos - derived attendance data
   const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
@@ -334,19 +339,34 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     return sorted;
   }, [students]);
 
+  const attendanceStudentRowsById = useMemo(() => {
+    const rowsById = {};
+    activeStudents.forEach((student) => {
+      const perDayStatuses = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[student.id]?.status || "");
+      const stats = buildAttendanceStats(perDayStatuses);
+      rowsById[student.id] = {
+        student,
+        perDayStatuses,
+        stats,
+        rate: stats.total ? (stats.present / stats.total) * 100 : null,
+        unexcused: stats.unexcused,
+      };
+    });
+    return rowsById;
+  }, [activeStudents, attendanceRangeColumns, attendanceEntriesByDay]);
+
   const attendanceFilteredStudents = useMemo(() => {
     const minRate = attendanceFilter.minRate === "" ? null : Number(attendanceFilter.minRate);
     const minAbsences = attendanceFilter.minAbsences === "" ? null : Number(attendanceFilter.minAbsences);
     return activeStudents.filter((s) => {
-      const perDay = attendanceRangeColumns.map((d) => attendanceEntriesByDay?.[d.id]?.[s.id]?.status || "");
-      const stats = buildAttendanceStats(perDay);
+      const stats = attendanceStudentRowsById[s.id]?.stats ?? buildAttendanceStats([]);
       const rate = stats.total ? (stats.present / stats.total) * 100 : null;
       const absences = stats.unexcused;
       if (minRate != null && (rate == null || rate >= minRate)) return false;
       if (minAbsences != null && absences < minAbsences) return false;
       return true;
     });
-  }, [activeStudents, attendanceFilter, attendanceRangeColumns, attendanceEntriesByDay]);
+  }, [activeStudents, attendanceFilter, attendanceStudentRowsById]);
 
   const attendanceAnalyticsStudents = useMemo(
     () => attendanceFilteredStudents.filter((student) => !isAnalyticsExcludedStudent(student)),
@@ -422,6 +442,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceDays(nextAttendanceDays);
     setAttendanceEntries(nextAttendanceEntries);
     setAttendanceMsg(nextAttendanceMsg);
+    setAttendanceSheetHydrated(true);
     setAttendanceSheetLoaded(true);
     setAttendanceSheetRefreshing(false);
     writeAttendanceSheetCache(schoolIdSnapshot, {
@@ -429,6 +450,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       attendanceEntries: nextAttendanceEntries,
       attendanceMsg: nextAttendanceMsg,
       attendanceFilter,
+      attendanceSheetHydrated: true,
     });
   }
 
@@ -440,6 +462,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       setAttendanceEntries({});
       setAttendanceMsg("");
       setAttendanceSheetLoaded(false);
+      setAttendanceSheetHydrated(false);
       setAttendanceSheetRefreshing(false);
       return;
     }
@@ -471,6 +494,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       console.error("attendance_days fetch error:", error);
       setAttendanceSheetRefreshing(false);
       setAttendanceMsg(`Load failed: ${error.message}`);
+      setAttendanceSheetHydrated(false);
       return;
     }
 
@@ -867,6 +891,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceEntries,
     attendanceMsg,
     setAttendanceMsg,
+    attendanceSheetHydrated,
     attendanceSheetLoaded,
     attendanceSheetRefreshing,
     attendanceSheetNeedsInitialRefresh,
@@ -919,5 +944,6 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     attendanceFilteredStudents,
     attendanceAnalyticsStudents,
     attendanceDayRates,
+    attendanceStudentRowsById,
   };
 }

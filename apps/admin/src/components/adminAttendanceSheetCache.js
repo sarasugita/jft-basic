@@ -61,6 +61,7 @@ export function readAttendanceSheetCache(schoolId) {
       attendanceEntries: cloneAttendanceEntries(cached.attendanceEntries),
       attendanceMsg: cached.attendanceMsg ?? "",
       attendanceFilter: cloneAttendanceFilter(cached.attendanceFilter),
+      attendanceSheetHydrated: Boolean(cached.attendanceSheetHydrated),
     };
   }
   if (typeof window === "undefined") return null;
@@ -71,12 +72,14 @@ export function readAttendanceSheetCache(schoolId) {
     attendanceEntries: cloneAttendanceEntries(stored.attendanceEntries),
     attendanceMsg: stored.attendanceMsg ?? "",
     attendanceFilter: cloneAttendanceFilter(stored.attendanceFilter),
+    attendanceSheetHydrated: Boolean(stored.attendanceSheetHydrated),
   });
   return {
     attendanceDays: cloneAttendanceDays(stored.attendanceDays),
     attendanceEntries: cloneAttendanceEntries(stored.attendanceEntries),
     attendanceMsg: stored.attendanceMsg ?? "",
     attendanceFilter: cloneAttendanceFilter(stored.attendanceFilter),
+    attendanceSheetHydrated: Boolean(stored.attendanceSheetHydrated),
   };
 }
 
@@ -87,6 +90,7 @@ export function writeAttendanceSheetCache(schoolId, snapshot = {}) {
     attendanceEntries: cloneAttendanceEntries(snapshot.attendanceEntries),
     attendanceMsg: snapshot.attendanceMsg ?? "",
     attendanceFilter: cloneAttendanceFilter(snapshot.attendanceFilter),
+    attendanceSheetHydrated: Boolean(snapshot.attendanceSheetHydrated),
   };
   attendanceSheetCache.set(String(schoolId), payload);
   if (typeof window !== "undefined") {
