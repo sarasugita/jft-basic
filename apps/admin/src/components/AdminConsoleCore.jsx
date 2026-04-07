@@ -914,10 +914,11 @@ function getStudentWarningIssues(row, criteria) {
   return issues;
 }
 
-function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, testMetaByVersion) {
+function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, testMetaByVersion, sessionById = null) {
   const byStudent = new Map();
   Array.from(buildLatestAttemptMapByStudentAndScope(attemptsList).values()).forEach((attempt) => {
     if (!attempt?.student_id) return;
+    if (attempt?.test_session_id && sessionById && !sessionById.has(attempt.test_session_id)) return;
     const list = byStudent.get(attempt.student_id) || [];
     list.push(attempt);
     byStudent.set(attempt.student_id, list);
@@ -3778,6 +3779,18 @@ export default function AdminConsole({
     [testSessions]
   );
 
+  const shouldFilterStudentAttemptsBySession = testSessionsLoaded;
+
+  const visibleStudentAttempts = useMemo(
+    () => (studentAttempts ?? []).filter((attempt) => !shouldFilterStudentAttemptsBySession || !attempt?.test_session_id || testSessionsById.has(attempt.test_session_id)),
+    [shouldFilterStudentAttemptsBySession, studentAttempts, testSessionsById]
+  );
+
+  const visibleStudentListAttempts = useMemo(
+    () => (studentListAttempts ?? []).filter((attempt) => !shouldFilterStudentAttemptsBySession || !attempt?.test_session_id || testSessionsById.has(attempt.test_session_id)),
+    [shouldFilterStudentAttemptsBySession, studentListAttempts, testSessionsById]
+  );
+
   const sessionDetailRawAttempts = useMemo(
     () => (Array.isArray(sessionDetailAttempts) ? sessionDetailAttempts : []),
     [sessionDetailAttempts]
@@ -3980,7 +3993,7 @@ export default function AdminConsole({
   }, [sessionDetailTab, sessionDetailUsesImportedResultsSummary]);
 
   const studentModelAttempts = useMemo(() => {
-    const modelAttempts = (studentAttempts ?? []).filter((attempt) => {
+    const modelAttempts = (visibleStudentAttempts ?? []).filter((attempt) => {
       if (!attempt) return false;
       const meta = testMetaByVersion[attempt.test_version];
       if (isImportedResultsSummaryAttempt(attempt) && !meta) return false;
@@ -4057,7 +4070,7 @@ export default function AdminConsole({
       if (timeDiff !== 0) return timeDiff;
       return getRowTimestamp(right) - getRowTimestamp(left);
     });
-  }, [studentAttempts, testMetaByVersion, testSessionsById]);
+  }, [visibleStudentAttempts, testMetaByVersion, testSessionsById]);
 
   const dailyResultCategories = useMemo(() => {
     return buildDailySessionCategoryGroups(dailySessions);
@@ -4112,13 +4125,13 @@ export default function AdminConsole({
   }, [studentModelAttempts, testMetaByVersion, modelCategories]);
 
   const studentDailyAttempts = useMemo(() => {
-    return (studentAttempts ?? []).filter((attempt) => {
+    return (visibleStudentAttempts ?? []).filter((attempt) => {
       if (!attempt) return false;
       const meta = testMetaByVersion[attempt.test_version];
       if (isImportedResultsSummaryAttempt(attempt) && !meta) return false;
       return meta?.type === "daily";
     });
-  }, [studentAttempts, testMetaByVersion]);
+  }, [visibleStudentAttempts, testMetaByVersion]);
 
   const studentDailyAttemptsByCategory = useMemo(() => {
     const grouped = new Map();
@@ -5046,7 +5059,13 @@ export default function AdminConsole({
   }, []);
 
   const studentListRows = useMemo(() => {
-    const rows = buildStudentMetricRows(sortedStudents, studentListAttendanceMap, studentListAttempts, testMetaByVersion);
+    const rows = buildStudentMetricRows(
+      sortedStudents,
+      studentListAttendanceMap,
+      visibleStudentListAttempts,
+      testMetaByVersion,
+      shouldFilterStudentAttemptsBySession ? testSessionsById : null
+    );
 
     const maxAttendance =
       studentListFilters.maxAttendance === "" ? null : Number(studentListFilters.maxAttendance);
@@ -5076,9 +5095,11 @@ export default function AdminConsole({
   }, [
     sortedStudents,
     studentListAttendanceMap,
-    studentListAttempts,
+    visibleStudentListAttempts,
     studentListFilters,
-    testMetaByVersion
+    testMetaByVersion,
+    testSessionsById,
+    shouldFilterStudentAttemptsBySession
   ]);
 
   const linkBySession = useMemo(() => {
@@ -5788,6 +5809,8 @@ export default function AdminConsole({
       closeSessionDetail,
       fetchTestSessions,
       fetchTests,
+      fetchStudentAttempts,
+      selectedStudentId,
       runSearch,
       recordAuditEvent,
     }, category);
@@ -6604,7 +6627,13 @@ export default function AdminConsole({
     }
     if (attemptsError) throw attemptsError;
 
-    return buildStudentMetricRows(sortedStudents, attendanceMap, attemptsData ?? [], testMetaByVersion);
+    return buildStudentMetricRows(
+      sortedStudents,
+      attendanceMap,
+      attemptsData ?? [],
+      testMetaByVersion,
+      shouldFilterStudentAttemptsBySession ? testSessionsById : null
+    );
   }
 
   async function issueStudentWarning() {
@@ -8992,6 +9021,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
     }
     await fetchTestSessions();
     fetchExamLinks();
+    if (selectedStudentId) {
+      await fetchStudentAttempts(selectedStudentId);
+    }
     if (options?.refreshResults && options?.type) {
       await runSearch(options.type);
     }

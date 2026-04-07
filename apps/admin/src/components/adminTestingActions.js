@@ -139,6 +139,8 @@ export async function clearDailyResultsForCategoryAction(context, category) {
     closeSessionDetail,
     fetchTestSessions,
     fetchTests,
+    fetchStudentAttempts,
+    selectedStudentId,
     runSearch,
     recordAuditEvent,
   } = context;
@@ -208,6 +210,9 @@ export async function clearDailyResultsForCategoryAction(context, category) {
   }
   if (typeof fetchTests === "function") {
     await fetchTests();
+  }
+  if (typeof fetchStudentAttempts === "function" && selectedStudentId) {
+    await fetchStudentAttempts(selectedStudentId);
   }
   await runSearch("daily");
   await recordAuditEvent({

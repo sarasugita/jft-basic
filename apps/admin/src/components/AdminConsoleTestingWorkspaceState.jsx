@@ -3609,7 +3609,10 @@ export function useTestingWorkspaceState({
       closeSessionDetail();
     }
     await fetchTestSessions();
-  }, [supabase, sessionDetail.sessionId, recordAuditEvent, fetchTestSessions]);
+    if (options?.refreshResults && options?.type && typeof runSearch === "function") {
+      await runSearch(options.type);
+    }
+  }, [supabase, sessionDetail.sessionId, recordAuditEvent, fetchTestSessions, runSearch]);
 
   const deleteTest = useCallback(async (testVersion) => {
     if (!testVersion || !supabase) return;

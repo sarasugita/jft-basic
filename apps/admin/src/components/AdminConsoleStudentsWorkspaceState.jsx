@@ -54,10 +54,11 @@ function isMissingTabLeftCountError(error) {
   return /tab_left_count/i.test(text) && /does not exist/i.test(text);
 }
 
-function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, testMetaByVersion, getScoreRate) {
+function buildStudentMetricRows(sortedStudents, attendanceMap, attemptsList, testMetaByVersion, getScoreRate, sessionById = null) {
   const byStudent = new Map();
   Array.from(buildLatestAttemptMapByStudentAndScope(attemptsList).values()).forEach((attempt) => {
     if (!attempt?.student_id) return;
+    if (attempt?.test_session_id && sessionById && !sessionById.has(attempt.test_session_id)) return;
     const list = byStudent.get(attempt.student_id) || [];
     list.push(attempt);
     byStudent.set(attempt.student_id, list);
@@ -90,6 +91,8 @@ export function useStudentsWorkspaceState({
   activeSchoolId,
   session,
   students,
+  testSessions,
+  testSessionsLoaded,
   testMetaByVersion,
   getScoreRate,
   fetchStudentDetail,
@@ -137,6 +140,11 @@ export function useStudentsWorkspaceState({
   const [studentListAttempts, setStudentListAttempts] = useState(() => storedAdminData?.studentListAttempts ?? []);
   const [studentListLoading, setStudentListLoading] = useState(false);
   const [studentListMetricsLoaded, setStudentListMetricsLoaded] = useState(() => Boolean(storedAdminData?.studentListMetricsLoaded));
+  const testSessionsById = useMemo(
+    () => new Map((testSessions ?? []).map((session) => [session.id, session])),
+    [testSessions]
+  );
+  const shouldFilterStudentAttemptsBySession = Boolean(testSessionsLoaded);
 
   // Student detail modal state
   const [studentDetailOpen, setStudentDetailOpen] = useState(false);
@@ -323,7 +331,14 @@ export function useStudentsWorkspaceState({
   }, [students]);
 
   const studentListRows = useMemo(() => {
-    const rows = buildStudentMetricRows(sortedStudents, studentListAttendanceMap, studentListAttempts, testMetaByVersion, getScoreRate);
+    const rows = buildStudentMetricRows(
+      sortedStudents,
+      studentListAttendanceMap,
+      studentListAttempts,
+      testMetaByVersion,
+      getScoreRate,
+      shouldFilterStudentAttemptsBySession ? testSessionsById : null
+    );
 
     const maxAttendance =
       studentListFilters.maxAttendance === "" ? null : Number(studentListFilters.maxAttendance);
@@ -356,7 +371,9 @@ export function useStudentsWorkspaceState({
     studentListAttempts,
     studentListFilters,
     testMetaByVersion,
-    getScoreRate
+    getScoreRate,
+    testSessionsById,
+    shouldFilterStudentAttemptsBySession
   ]);
 
   return {
