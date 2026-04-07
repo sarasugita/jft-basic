@@ -4185,10 +4185,19 @@ export default function AdminConsole({
     (visibleStudentAttempts ?? []).forEach((attempt) => {
       if (!attempt?.id) return;
       if (isImportedSummaryAttempt(attempt)) {
+        const importedRate = getScoreRate(attempt);
+        const questionsList = attemptQuestionsByVersion[attempt.test_version];
+        if (questionsList?.length) {
+          const preview = buildAttemptScorePreviewFromQuestions(attempt, questionsList);
+          if (importedRate <= 0 && preview.total > 0) {
+            scoreMap[attempt.id] = preview;
+            return;
+          }
+        }
         scoreMap[attempt.id] = {
           correct: Number(attempt?.correct ?? 0),
           total: Number(attempt?.total ?? 0),
-          scoreRate: getScoreRate(attempt),
+          scoreRate: importedRate,
         };
         return;
       }
