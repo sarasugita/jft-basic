@@ -464,6 +464,39 @@ function normalizeAssetName(value: string | null | undefined) {
     ?.toLowerCase() ?? "";
 }
 
+function sanitizeStoragePathSegment(value: string | null | undefined, fallback = "file") {
+  const normalized = String(value ?? "")
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const sanitized = normalized
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return sanitized || fallback;
+}
+
+function buildQuestionSetAssetObjectPath(libraryKey: string, versionLabel: string, fileName: string) {
+  const relativeSegments = String(fileName ?? "")
+    .split(/[\\/]/)
+    .map((segment) => sanitizeStoragePathSegment(segment))
+    .filter(Boolean);
+  return [
+    "question-sets",
+    sanitizeStoragePathSegment(libraryKey, "set"),
+    sanitizeStoragePathSegment(versionLabel, "v1"),
+    ...(relativeSegments.length ? relativeSegments : ["file"]),
+  ].join("/");
+}
+
+function getUploadedAssetPath(uploadedAssets: Map<string, string>, fileName: string | null | undefined) {
+  const normalized = normalizeAssetName(fileName);
+  if (!normalized) return null;
+  for (const [name, path] of uploadedAssets.entries()) {
+    if (normalizeAssetName(name) === normalized) return path;
+  }
+  return null;
+}
+
 export type QuestionSetValidation = {
   valid: boolean;
   errors: string[];
@@ -1071,7 +1104,9 @@ export async function uploadAssets(
   const uploaded = new Map<string, string>();
 
   for (const file of assetFiles) {
-    const objectPath = `question-sets/${libraryKey}/${versionLabel}/${file.name}`;
+    const objectPath = buildQuestionSetAssetObjectPath(libraryKey, versionLabel, file.name);
+    const lookupName = String(file.name ?? "").trim();
+    const baseName = lookupName.split(/[\\/]/).pop() ?? lookupName;
     const { error } = await adminClient.storage.from("test-assets").upload(objectPath, file, {
       cacheControl: "3600",
       upsert: true,
@@ -1080,7 +1115,8 @@ export async function uploadAssets(
     if (error) {
       throw new Error(`Failed to upload asset "${file.name}": ${error.message}`);
     }
-    uploaded.set(file.name, objectPath);
+    if (lookupName) uploaded.set(lookupName, objectPath);
+    if (baseName && baseName !== lookupName) uploaded.set(baseName, objectPath);
   }
 
   return uploaded;
@@ -1212,7 +1248,7 @@ export async function syncLegacyTestCatalog(
     const stemImage = normalizeLegacyOptionValue(question.metadata?.stem_image, uploadedAssets);
     const stemAudio = normalizeLegacyOptionValue(question.metadata?.stem_audio, uploadedAssets);
     const mediaUrl = question.media_file
-      ? normalizeLegacyOptionValue(question.media_file, uploadedAssets)
+      ? getUploadedAssetPath(uploadedAssets, question.media_file) ?? normalizeLegacyOptionValue(question.media_file, uploadedAssets)
       : null;
     const stemKind = String(question.metadata?.stem_kind ?? "").trim()
       || (stemAudio ? "audio" : stemImage ? "image" : question.media_type ?? "");
