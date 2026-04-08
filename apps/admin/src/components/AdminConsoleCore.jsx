@@ -4185,19 +4185,10 @@ export default function AdminConsole({
     (visibleStudentAttempts ?? []).forEach((attempt) => {
       if (!attempt?.id) return;
       if (isImportedSummaryAttempt(attempt)) {
-        const importedRate = getScoreRate(attempt);
-        const questionsList = attemptQuestionsByVersion[attempt.test_version];
-        if (questionsList?.length) {
-          const preview = buildAttemptScorePreviewFromQuestions(attempt, questionsList);
-          if (importedRate <= 0 && preview.total > 0) {
-            scoreMap[attempt.id] = preview;
-            return;
-          }
-        }
         scoreMap[attempt.id] = {
           correct: Number(attempt?.correct ?? 0),
           total: Number(attempt?.total ?? 0),
-          scoreRate: importedRate,
+          scoreRate: getScoreRate(attempt),
         };
         return;
       }
@@ -4356,10 +4347,46 @@ export default function AdminConsole({
     selectedDailySourceCategoryNames,
   ]);
 
+  const getQuestionSetVersionRank = useCallback((item) => {
+    const label = String(item?.version_label ?? "").trim().toLowerCase();
+    const match = label.match(/^v(\d+)$/i);
+    if (match) return Number(match[1]);
+    const version = Number(item?.version ?? 0);
+    return Number.isFinite(version) ? version : 0;
+  }, []);
+
+  const selectLatestQuestionSetVersions = useCallback((list, getKey) => {
+    const latestByKey = new Map();
+    (list ?? []).forEach((item) => {
+      const key = String(getKey?.(item) ?? "").trim();
+      if (!key) return;
+      const current = latestByKey.get(key);
+      if (!current) {
+        latestByKey.set(key, item);
+        return;
+      }
+
+      const currentRank = getQuestionSetVersionRank(current);
+      const nextRank = getQuestionSetVersionRank(item);
+      if (nextRank !== currentRank) {
+        if (nextRank > currentRank) latestByKey.set(key, item);
+        return;
+      }
+
+      const currentTime = new Date(current.updated_at || current.created_at || 0).getTime();
+      const nextTime = new Date(item.updated_at || item.created_at || 0).getTime();
+      if (nextTime > currentTime) {
+        latestByKey.set(key, item);
+      }
+    });
+    return Array.from(latestByKey.values());
+  }, [getQuestionSetVersionRank]);
+
   const filteredModelUploadTests = useMemo(() => {
-    if (!modelUploadCategory) return modelTests;
-    return modelTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
-  }, [modelTests, modelUploadCategory]);
+    const latestTests = selectLatestQuestionSetVersions(modelTests, (item) => item.version);
+    if (!modelUploadCategory) return latestTests;
+    return latestTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
+  }, [modelTests, modelUploadCategory, selectLatestQuestionSetVersions]);
 
   const groupedModelUploadTests = useMemo(
     () => buildCategories(filteredModelUploadTests, DEFAULT_MODEL_CATEGORY),
@@ -4367,9 +4394,10 @@ export default function AdminConsole({
   );
 
   const filteredDailyUploadTests = useMemo(() => {
-    if (!dailyUploadCategory) return dailyQuestionSets;
-    return dailyQuestionSets.filter((t) => String(t.title ?? "").trim() === dailyUploadCategory);
-  }, [dailyQuestionSets, dailyUploadCategory]);
+    const latestTests = selectLatestQuestionSetVersions(dailyQuestionSets, (item) => item.version);
+    if (!dailyUploadCategory) return latestTests;
+    return latestTests.filter((t) => String(t.title ?? "").trim() === dailyUploadCategory);
+  }, [dailyQuestionSets, dailyUploadCategory, selectLatestQuestionSetVersions]);
 
   const groupedDailyUploadTests = useMemo(
     () => buildCategories(filteredDailyUploadTests),

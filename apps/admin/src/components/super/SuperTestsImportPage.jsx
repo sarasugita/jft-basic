@@ -190,6 +190,41 @@ function formatVersionLabel(item) {
   return version > 0 ? `v${version}` : "v?";
 }
 
+function getQuestionSetVersionRank(item) {
+  const label = String(item?.version_label ?? "").trim().toLowerCase();
+  const match = label.match(/^v(\d+)$/i);
+  if (match) return Number(match[1]);
+  const version = Number(item?.version ?? 0);
+  return Number.isFinite(version) ? version : 0;
+}
+
+function selectLatestQuestionSetVersions(list, getKey) {
+  const latestByKey = new Map();
+  (list ?? []).forEach((item) => {
+    const key = String(getKey?.(item) ?? "").trim();
+    if (!key) return;
+    const current = latestByKey.get(key);
+    if (!current) {
+      latestByKey.set(key, item);
+      return;
+    }
+
+    const currentRank = getQuestionSetVersionRank(current);
+    const nextRank = getQuestionSetVersionRank(item);
+    if (nextRank !== currentRank) {
+      if (nextRank > currentRank) latestByKey.set(key, item);
+      return;
+    }
+
+    const currentTime = new Date(current.updated_at || current.created_at || 0).getTime();
+    const nextTime = new Date(item.updated_at || item.created_at || 0).getTime();
+    if (nextTime > currentTime) {
+      latestByKey.set(key, item);
+    }
+  });
+  return Array.from(latestByKey.values());
+}
+
 function formatDateTime(value) {
   if (!value) return "N/A";
   const date = new Date(value);
@@ -507,7 +542,8 @@ export default function SuperTestsImportPage() {
   }, [supabase]);
 
   const filteredQuestionSets = useMemo(() => {
-    return [...questionSets]
+    return selectLatestQuestionSetVersions(questionSets, (item) => `${item.test_type ?? "daily"}::${item.title}`)
+      .slice()
       .sort((left, right) => {
         const idCompare = compareQuestionSetIds(left.title ?? left.version ?? "", right.title ?? right.version ?? "");
         if (idCompare !== 0) return idCompare;
