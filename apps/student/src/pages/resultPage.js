@@ -1,7 +1,7 @@
 import { escapeHtml } from "../lib/escapeHtml";
 import { topbarHTML } from "../lib/uiHelpers";
 import { scoreAll } from "../lib/quizControls";
-import { getActiveTestVersion, getActivePassRate } from "../lib/sessionHelpers";
+import { getActiveTestVersion, getActivePassRate, getActiveTestSession, getActiveTestTitle } from "../lib/sessionHelpers";
 import { isMissingTabLeftCountError } from "../lib/errorHelpers";
 import { state, saveState, exitToHome } from "../state/appState";
 import { authState } from "../state/authState";
@@ -21,6 +21,7 @@ async function saveAttemptIfNeeded(app) {
 
   const { correct, total } = scoreAll();
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId || null;
+  const activeSession = getActiveTestSession();
   const tabLeftCount = Math.max(
     0,
     Number(state.tabLeftCount ?? state.focusWarnings ?? 0)
@@ -39,6 +40,8 @@ async function saveAttemptIfNeeded(app) {
       ...(state.answers ?? {}),
       __meta: {
         tab_left_count: tabLeftCount,
+        session_title: activeSession?.title ?? getActiveTestTitle(),
+        session_date: activeSession?.starts_at || activeSession?.ends_at || null,
       },
     },
     tab_left_count: tabLeftCount,

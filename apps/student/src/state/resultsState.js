@@ -5,6 +5,7 @@ import { dedupeAttempts, buildLatestAttemptMapByStudent, getScoreRateFromAttempt
 import { authState } from "./authState";
 import { mapDbQuestion, fetchQuestionRowsWithFallback } from "./questionsState";
 import { fetchSessionAttemptOverrides } from "./sessionOverrideState";
+import { ensureTestVersionsLoaded } from "./testsState";
 
 export let studentResultsState = {
   loaded: false,
@@ -75,6 +76,13 @@ export async function fetchStudentResults() {
       return;
     }
     studentResultsState.list = dedupeAttempts(data ?? []);
+    // Ensure all test versions referenced in results are in testsState.list so
+    // getAttemptTestType() can classify them and buildResultAttemptEntries()
+    // doesn't silently drop attempts whose test_version wasn't in the initial fetch.
+    const resultVersions = Array.from(
+      new Set(studentResultsState.list.map((a) => String(a?.test_version ?? "").trim()).filter(Boolean))
+    );
+    await ensureTestVersionsLoaded(resultVersions);
     await refreshQuestionsForResultAttempts(studentResultsState.list, { force: true });
     studentResultsState.loaded = true;
     await fetchSessionAttemptOverrides();

@@ -32,10 +32,28 @@ function pickChoiceImage(question, index) {
   return "";
 }
 
+function getAttemptMeta(attempt) {
+  return attempt?.answers_json?.__meta ?? {};
+}
+
+export function isImportedSummaryAttempt(attempt) {
+  return Boolean(getAttemptMeta(attempt)?.imported_summary);
+}
+
+export function isImportedResultsSummaryAttempt(attempt) {
+  const source = String(getAttemptMeta(attempt)?.imported_source ?? "").trim();
+  return isImportedSummaryAttempt(attempt)
+    && (source === "daily_results_csv" || source === "model_results_csv");
+}
+
 export function getAttemptDedupKey(attempt) {
   const startedAt = String(attempt?.started_at || "");
   const endedAt = String(attempt?.ended_at || "");
   if (!startedAt && !endedAt) return `id:${attempt?.id || ""}`;
+  // Strip __meta so the key is stable regardless of which insert path was used
+  // (legacy schema omits tab_left_count column; both paths include __meta in answers_json)
+  // eslint-disable-next-line no-unused-vars
+  const { __meta, ...answersCore } = (attempt?.answers_json ?? {});
   return JSON.stringify([
     attempt?.test_session_id || "",
     attempt?.test_version || "",
@@ -43,8 +61,7 @@ export function getAttemptDedupKey(attempt) {
     endedAt,
     Number(attempt?.correct) || 0,
     Number(attempt?.total) || 0,
-    Number(attempt?.tab_left_count) || 0,
-    JSON.stringify(attempt?.answers_json || {}),
+    JSON.stringify(answersCore),
   ]);
 }
 
@@ -78,6 +95,8 @@ export function buildLatestAttemptMapByStudent(attemptsList) {
 }
 
 export function getScoreRateFromAttempt(attempt) {
+  const importedRate = Number(getAttemptMeta(attempt)?.imported_rate);
+  if (Number.isFinite(importedRate)) return importedRate;
   const rate = Number(attempt?.score_rate);
   if (Number.isFinite(rate)) return rate;
   const total = Number(attempt?.total) || 0;
@@ -102,12 +121,23 @@ export function getAttemptCategory(attempt, testsList) {
   return name || "Uncategorized";
 }
 
+export function getAttemptDisplayDateValue(attempt, sessionsList) {
+  const meta = getAttemptMeta(attempt);
+  const importedDate = String(meta.imported_test_date ?? meta.imported_date_iso ?? meta.session_date ?? "").trim();
+  if (importedDate) return importedDate;
+  const session = getAttemptSession(attempt, sessionsList);
+  return session?.starts_at || session?.ends_at || attempt?.ended_at || attempt?.created_at || attempt?.started_at || "";
+}
+
 export function getAttemptDateLabel(attempt) {
-  const date = attempt?.ended_at || attempt?.created_at;
+  const date = getAttemptDisplayDateValue(attempt);
   return date ? formatDateShort(date) : "—";
 }
 
 export function getAttemptTitle(attempt, sessionsList, testsList) {
+  const meta = getAttemptMeta(attempt);
+  const importedTitle = String(meta.imported_test_title ?? meta.session_title ?? "").trim();
+  if (importedTitle) return importedTitle;
   if (attempt?.test_session_id) {
     const list = sessionsList ?? testSessionsState.list;
     const session = list.find((item) => item.id === attempt.test_session_id);
@@ -168,6 +198,15 @@ export function buildAttemptScoreSummaryFromQuestions(attempt, questionsList) {
 }
 
 export function getVisibleAttemptScoreSummary(attempt) {
+  if (isImportedResultsSummaryAttempt(attempt)) {
+    const correct = Number(attempt?.correct);
+    const total = Number(attempt?.total);
+    return {
+      correct: Number.isFinite(correct) ? correct : 0,
+      total: Number.isFinite(total) ? total : 0,
+      rate: getScoreRateFromAttempt(attempt),
+    };
+  }
   const fallback = {
     correct: Number(attempt?.correct) || 0,
     total: Number(attempt?.total) || 0,
@@ -175,10 +214,20 @@ export function getVisibleAttemptScoreSummary(attempt) {
   };
   const version = String(attempt?.test_version ?? "").trim();
   if (!version) return fallback;
-  if (!Object.prototype.hasOwnProperty.call(resultDetailState.questionsByVersion, version)) {
-    return fallback;
+  // If questions haven't loaded for this version yet, fall back to stored values.
+  // Also fall back when the questions array is empty (load failed or version has no
+  // questions in the DB) — calling buildAttemptScoreSummaryFromQuestions with []
+  // would produce "0 / N" which is misleading.
+  const questions = resultDetailState.questionsByVersion[version];
+  if (!questions?.length) return fallback;
+  return buildAttemptScoreSummaryFromQuestions(attempt, questions);
+}
+
+export function formatAttemptScoreCell(attempt, scoreSummary = getVisibleAttemptScoreSummary(attempt)) {
+  if (isImportedResultsSummaryAttempt(attempt) && !(Number(scoreSummary?.total) > 0)) {
+    return "—";
   }
-  return buildAttemptScoreSummaryFromQuestions(attempt, resultDetailState.questionsByVersion[version] ?? []);
+  return `${Number(scoreSummary?.correct) || 0} / ${Number(scoreSummary?.total) || 0}`;
 }
 
 export function buildResultAttemptEntries(testType, attemptsList = []) {

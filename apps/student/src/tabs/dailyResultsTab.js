@@ -13,6 +13,7 @@ import {
   getAttemptTitle,
   getAttemptCategory,
   getVisibleAttemptScoreSummary,
+  formatAttemptScoreCell,
   buildAttemptDetailRows,
   shouldShowAnswers,
   renderDetailTable,
@@ -120,7 +121,7 @@ export function buildDailyResultsTabHTML() {
                 <tr class="student-results-row" data-daily-attempt-id="${attempt.id}">
                   <td>${escapeHtml(getAttemptDateLabel(attempt))}</td>
                   <td>${escapeHtml(getAttemptTitle(attempt))}</td>
-                  <td>${scoreSummary.correct} / ${scoreSummary.total}</td>
+                  <td>${escapeHtml(formatAttemptScoreCell(attempt, scoreSummary))}</td>
                   <td>${(scoreSummary.rate * 100).toFixed(1)}%</td>
                   <td class="col-pf ${entry.convertedToPass ? "result-converted-cell" : isPass ? "result-pass-cell" : "result-fail-cell"}">${passLabel}</td>
                 </tr>

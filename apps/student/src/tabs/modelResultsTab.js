@@ -16,6 +16,7 @@ import {
   getAttemptDateLabel,
   getAttemptTitle,
   getVisibleAttemptScoreSummary,
+  formatAttemptScoreCell,
   buildAttemptDetailRows,
   shouldShowAnswers,
   renderDetailTable,
@@ -308,7 +309,7 @@ export function buildModelResultsTabHTML() {
                   <td>${escapeHtml(getAttemptTitle(attempt))}</td>
                   <td class="col-pf ${entry.convertedToPass ? "result-converted-cell" : isPass ? "result-pass-cell" : "result-fail-cell"}">${passLabel}</td>
                   <td>${(scoreSummary.rate * 100).toFixed(1)}%</td>
-                  <td class="col-total-score">${scoreSummary.correct} / ${scoreSummary.total}</td>
+                  <td class="col-total-score">${escapeHtml(formatAttemptScoreCell(attempt, scoreSummary))}</td>
                   <td>${escapeHtml(rankLabel)}</td>
                 </tr>
               `;

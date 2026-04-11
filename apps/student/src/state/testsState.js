@@ -29,7 +29,7 @@ export async function fetchPublicTests() {
       .from("tests")
       .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
       .order("created_at", { ascending: false })
-      .limit(100);
+      .limit(500);
     if (!authState.session) {
       query = query.eq("is_public", true);
     }
@@ -184,4 +184,34 @@ export function getPassRateForVersion(version) {
   const test = testsState.list.find((t) => t.version === version);
   const passRate = Number(test?.pass_rate ?? PASS_RATE_DEFAULT);
   return Number.isFinite(passRate) ? passRate : PASS_RATE_DEFAULT;
+}
+
+/**
+ * Fetch any test versions that appear in attempt records but are missing from
+ * testsState.list (e.g., historical versions beyond the initial load limit, or
+ * versions belonging to tests that were never published as public).
+ */
+export async function ensureTestVersionsLoaded(versions) {
+  if (!versions?.length) return;
+  const missing = versions.filter((v) => v && !testsState.list.find((t) => t.version === v));
+  if (!missing.length) return;
+  try {
+    const client = authState.session ? supabase : publicSupabase;
+    const { data, error } = await client
+      .from("tests")
+      .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
+      .in("version", missing);
+    if (error) {
+      logSupabaseError("ensureTestVersionsLoaded error", error);
+      return;
+    }
+    const newTests = (data ?? []).filter((t) => t.type === "mock" || t.type === "daily");
+    const existingVersions = new Set(testsState.list.map((t) => t.version));
+    const toAdd = newTests.filter((t) => !existingVersions.has(t.version));
+    if (toAdd.length) {
+      testsState.list = [...testsState.list, ...toAdd];
+    }
+  } catch (error) {
+    logUnexpectedError("ensureTestVersionsLoaded failed", error);
+  }
 }
