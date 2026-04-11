@@ -64,7 +64,12 @@
       "Bash(find /Users/1231s/Projects/jft-navi/apps/admin/src -type f -name *.js -o -name *.jsx -o -name *.ts -o -name *.tsx)",
       "Bash(find /Users/1231s/Projects/jft-navi -name *question-set*upload* -o -name *upload*question*)",
       "Bash(git fsck:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Read(//usr/local/bin/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(command -v npx)",
+      "Bash(/usr/local/bin/node /usr/local/bin/npm run build)",
+      "Bash(PATH=\"$HOME/.nvm/versions/node/v24.13.0/bin:$PATH\" npm run build --prefix /Users/1231s/Projects/jft-navi/.claude/worktrees/funny-ramanujan/apps/student)"
     ]
   }
 }
