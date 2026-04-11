@@ -44,13 +44,30 @@ function getRankingDrafts(periods) {
   return drafts;
 }
 
+function normalizeRankingDraft(period, draft = {}) {
+  return {
+    label: draft.label ?? period?.label ?? "",
+    start_date: draft.start_date ?? period?.start_date ?? "",
+    end_date: draft.end_date ?? period?.end_date ?? "",
+  };
+}
+
 export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) {
   const cacheUserId = session?.user?.id ?? "";
   const cachedState = cacheUserId && activeSchoolId ? readAdminConsoleDataCache(cacheUserId, activeSchoolId) : null;
   const [rankingPeriods, setRankingPeriods] = useState(() => cachedState?.rankingPeriods ?? []);
   const [rankingMsg, setRankingMsg] = useState(() => cachedState?.rankingMsg ?? "");
   const [rankingLoaded, setRankingLoaded] = useState(() => Boolean(cachedState?.rankingLoaded));
-  const [rankingDrafts, setRankingDrafts] = useState({});
+  const [rankingDrafts, setRankingDrafts] = useState(() => {
+    const periods = cachedState?.rankingPeriods ?? [];
+    const cachedDrafts = cachedState?.rankingDrafts ?? {};
+    const drafts = {};
+    periods.forEach((period) => {
+      if (!period?.id) return;
+      drafts[period.id] = normalizeRankingDraft(period, cachedDrafts[period.id]);
+    });
+    return drafts;
+  });
   const [rankingRefreshingId, setRankingRefreshingId] = useState("");
 
   useEffect(() => {
@@ -59,8 +76,9 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
       rankingPeriods,
       rankingMsg,
       rankingLoaded,
+      rankingDrafts,
     });
-  }, [activeSchoolId, cacheUserId, rankingLoaded, rankingMsg, rankingPeriods]);
+  }, [activeSchoolId, cacheUserId, rankingDrafts, rankingLoaded, rankingMsg, rankingPeriods]);
 
   const rankingRowCount = useMemo(
     () => Math.max(0, ...rankingPeriods.map((period) => period.ranking_entries?.length ?? 0)),
@@ -104,7 +122,14 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
       ranking_entries: [...(period.ranking_entries ?? [])].sort((a, b) => (a.rank_position ?? 0) - (b.rank_position ?? 0))
     }));
     setRankingPeriods(normalized);
-    setRankingDrafts(getRankingDrafts(normalized));
+    setRankingDrafts((prev) => {
+      const nextDrafts = {};
+      normalized.forEach((period) => {
+        if (!period?.id) return;
+        nextDrafts[period.id] = normalizeRankingDraft(period, prev[period.id]);
+      });
+      return nextDrafts;
+    });
     setRankingMsg(normalized.length ? "" : "No ranking periods yet. Click Add Period.");
     setRankingLoaded(true);
   }
@@ -113,9 +138,9 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
     setRankingDrafts((prev) => ({
       ...prev,
       [periodId]: {
-        label: prev[periodId]?.label ?? "",
-        start_date: prev[periodId]?.start_date ?? "",
-        end_date: prev[periodId]?.end_date ?? "",
+        label: prev[periodId]?.label ?? rankingPeriods.find((period) => period.id === periodId)?.label ?? "",
+        start_date: prev[periodId]?.start_date ?? rankingPeriods.find((period) => period.id === periodId)?.start_date ?? "",
+        end_date: prev[periodId]?.end_date ?? rankingPeriods.find((period) => period.id === periodId)?.end_date ?? "",
         [field]: value,
       }
     }));
