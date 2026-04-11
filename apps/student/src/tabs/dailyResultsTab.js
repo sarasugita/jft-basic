@@ -12,7 +12,6 @@ import {
   getAttemptDateLabel,
   getAttemptTitle,
   getAttemptCategory,
-  getAttemptTestType,
   getVisibleAttemptScoreSummary,
   formatAttemptScoreCell,
   buildAttemptDetailRows,
@@ -34,55 +33,15 @@ export function buildDailyResultsTabHTML() {
     return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
   }
 
-  // DEBUG: pipeline breakdown — runs once per render after results load
-  if (studentResultsState.loaded && !studentResultsState.loading) {
-    const total = studentResultsState.list.length;
-    let passType = 0, failType = 0, failSession = 0;
-    const typeBreakdown = {};
-    const dropped = [];
-    studentResultsState.list.forEach((attempt) => {
-      const type = getAttemptTestType(attempt, testsState.list);
-      typeBreakdown[type || "(none)"] = (typeBreakdown[type || "(none)"] || 0) + 1;
-      const isImported = isImportedResultsSummaryAttempt(attempt);
-      const hasSession = Boolean(attempt?.test_session_id);
-      const sessionFound = hasSession
-        ? Boolean(testSessionsState.list.find((s) => s.id === attempt.test_session_id))
-        : true;
-      const passesShow = isImported || !hasSession || sessionFound;
-      if (type === "daily" && passesShow) passType += 1;
-      if (type !== "daily") failType += 1;
-      if (type === "daily" && !passesShow) {
-        failSession += 1;
-        dropped.push({
-          id: attempt?.id,
-          test_session_id: attempt?.test_session_id,
-          test_version: attempt?.test_version,
-          isImported,
-          sessionFound,
-          importedSource: attempt?.answers_json?.__meta?.imported_source ?? null,
-        });
-      }
-    });
-    console.log("[student results] daily display pipeline", {
-      total,
-      typeBreakdown,
-      passTypeFilter: passType,
-      failTypeFilter: failType,
-      failSessionFilter: failSession,
-      droppedBySession: dropped.slice(0, 10),
-      testSessionsListSize: testSessionsState.list.length,
-    });
-  }
-
   const dailyAttemptEntries = buildResultAttemptEntries("daily", studentResultsState.list);
   const dailyAttempts = dailyAttemptEntries.map((entry) => entry.attempt);
   const dailyCategories = Array.from(
     new Set(
-      (testsState.list ?? [])
-        .filter((t) => t.type === "daily")
-        .map((t) => getAttemptCategory({ test_version: t.version }, testsState.list))
+      dailyAttemptEntries
+        .map((entry) => getAttemptCategory(entry.attempt))
+        .filter(Boolean)
     )
-  ).filter(Boolean);
+  );
   const rawCategoryFilter = state.dailyResultsCategory || "";
   const categoryFilter = dailyCategories.includes(rawCategoryFilter) ? rawCategoryFilter : "";
   const failedOnly = Boolean(state.dailyResultsFailedOnly);

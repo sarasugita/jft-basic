@@ -36,8 +36,23 @@ function getAttemptMeta(attempt) {
   return attempt?.answers_json?.__meta ?? {};
 }
 
+function hasImportedCsvSummaryMeta(meta) {
+  const source = String(meta?.imported_source ?? "").trim();
+  if (source !== "daily_results_csv" && source !== "model_results_csv") {
+    return false;
+  }
+  return Boolean(
+    String(meta?.imported_test_title ?? "").trim()
+    || String(meta?.imported_test_date ?? "").trim()
+    || String(meta?.imported_csv_index ?? "").trim()
+    || String(meta?.imported_rate ?? "").trim()
+    || (Array.isArray(meta?.main_section_summary) && meta.main_section_summary.length > 0)
+  );
+}
+
 export function isImportedSummaryAttempt(attempt) {
-  return Boolean(getAttemptMeta(attempt)?.imported_summary);
+  const meta = getAttemptMeta(attempt);
+  return Boolean(meta?.imported_summary) || hasImportedCsvSummaryMeta(meta);
 }
 
 export function isImportedResultsSummaryAttempt(attempt) {
@@ -54,7 +69,7 @@ export function getAttemptDedupKey(attempt) {
   // (legacy schema omits tab_left_count column; both paths include __meta in answers_json)
   // eslint-disable-next-line no-unused-vars
   const { __meta, ...answersCore } = (attempt?.answers_json ?? {});
-  return JSON.stringify([
+  const keyParts = [
     attempt?.test_session_id || "",
     attempt?.test_version || "",
     startedAt,
@@ -62,7 +77,19 @@ export function getAttemptDedupKey(attempt) {
     Number(attempt?.correct) || 0,
     Number(attempt?.total) || 0,
     JSON.stringify(answersCore),
-  ]);
+  ];
+  if (isImportedSummaryAttempt(attempt)) {
+    const meta = getAttemptMeta(attempt);
+    keyParts.push(
+      String(meta.imported_source ?? ""),
+      String(meta.imported_test_title ?? ""),
+      String(meta.imported_test_date ?? ""),
+      String(meta.imported_csv_index ?? ""),
+      String(meta.imported_rate ?? ""),
+      JSON.stringify(meta.main_section_summary ?? []),
+    );
+  }
+  return JSON.stringify(keyParts);
 }
 
 export function dedupeAttempts(list) {

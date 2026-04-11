@@ -71,7 +71,7 @@ export async function fetchTestSessions() {
   testSessionsState.loading = true;
   testSessionsState.error = "";
   const hadData = testSessionsState.loaded && testSessionsState.list.length > 0;
-  try {
+    try {
     let { data, error } = await publicSupabase
       .from("test_sessions")
       .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")

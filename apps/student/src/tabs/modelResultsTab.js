@@ -23,6 +23,8 @@ import {
   buildMainSectionSummary,
   buildNestedSectionSummary,
   getAvailableSections,
+  isImportedResultsSummaryAttempt,
+  renderImportedResultsSummaryDetail,
 } from "../lib/attemptHelpers.js";
 import { getPassRateForVersion } from "../lib/sessionHelpers.js";
 import { triggerRender } from "../lib/renderBus.js";
@@ -44,6 +46,20 @@ export function buildModelResultsTabHTML() {
   if (resultDetailState.open && resultDetailState.mode === "model" && resultDetailState.attempt) {
     const attempt = resultDetailState.attempt;
     const title = getAttemptTitle(attempt);
+    const isImportedSummary = isImportedResultsSummaryAttempt(attempt);
+    if (isImportedSummary) {
+      const detailBody = renderImportedResultsSummaryDetail(attempt, "model");
+      return `
+        <div class="student-detail-topbar">
+          <button class="student-detail-back" id="modelResultBack" aria-label="Back">←</button>
+          <div class="student-detail-title">${escapeHtml(title)}</div>
+          <div class="student-detail-date">${escapeHtml(getAttemptDateLabel(attempt) || "—")}</div>
+        </div>
+        <div class="student-detail-body">
+          ${detailBody}
+        </div>
+      `;
+    }
     const showAnswers = shouldShowAnswers(attempt, testSessionsState.list, testsState.list);
     const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
     const detailRows = buildAttemptDetailRows(attempt, questionsList);
@@ -337,9 +353,12 @@ export function bindModelResultsTabEvents(app) {
       resultDetailState.popupRows = [];
       resultDetailState.attempt = attempt;
       resultDetailState.error = "";
-      if (attempt.test_version) {
+      resultDetailState.loading = false;
+      if (!isImportedResultsSummaryAttempt(attempt) && attempt.test_version) {
+        resultDetailState.loading = true;
         await fetchQuestionsForDetailWithOptions(attempt.test_version, { force: true });
       }
+      resultDetailState.loading = false;
       triggerRender();
     });
   });
