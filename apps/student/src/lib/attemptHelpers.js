@@ -230,8 +230,18 @@ export function formatAttemptScoreCell(attempt, scoreSummary = getVisibleAttempt
   return `${Number(scoreSummary?.correct) || 0} / ${Number(scoreSummary?.total) || 0}`;
 }
 
+export function shouldShowAttemptInStudentResults(attempt) {
+  if (!attempt) return false;
+  if (isImportedResultsSummaryAttempt(attempt)) return true;
+  if (!attempt.test_session_id) return true;
+  return Boolean(getAttemptSession(attempt, testSessionsState.list));
+}
+
 export function buildResultAttemptEntries(testType, attemptsList = []) {
-  const baseAttempts = (attemptsList ?? []).filter((attempt) => getAttemptTestType(attempt, testsState.list) === testType);
+  const baseAttempts = (attemptsList ?? []).filter((attempt) => (
+    getAttemptTestType(attempt, testsState.list) === testType
+    && shouldShowAttemptInStudentResults(attempt)
+  ));
   const convertedSourceSessionIds = new Set();
 
   baseAttempts.forEach((attempt) => {

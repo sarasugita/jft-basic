@@ -9083,8 +9083,24 @@ function openDailyRecordModal(record = null, recordDate = "") {
   async function deleteTestSession(id, options = {}) {
     if (!id) return;
     const label = String(options?.title ?? id).trim() || id;
-    const ok = window.confirm(`Delete test session "${label}"?\n\nThis removes the test session record overall.`);
+    const ok = window.confirm(`Delete test session "${label}"?\n\nThis removes the session and its saved results.`);
     if (!ok) return;
+    const [{ error: attemptsError }, { error: linksError }] = await Promise.all([
+      supabase.from("attempts").delete().eq("test_session_id", id),
+      supabase.from("exam_links").delete().eq("test_session_id", id),
+    ]);
+    if (attemptsError) {
+      console.error("session attempts delete error:", attemptsError);
+      setTestSessionsMsg(`Delete failed: ${attemptsError.message}`);
+      if (options?.surface === "results") setQuizMsg(`Delete failed: ${attemptsError.message}`);
+      return;
+    }
+    if (linksError) {
+      console.error("session links delete error:", linksError);
+      setTestSessionsMsg(`Delete failed: ${linksError.message}`);
+      if (options?.surface === "results") setQuizMsg(`Delete failed: ${linksError.message}`);
+      return;
+    }
     const { error } = await supabase.from("test_sessions").delete().eq("id", id);
     if (error) {
       console.error("test_sessions delete error:", error);

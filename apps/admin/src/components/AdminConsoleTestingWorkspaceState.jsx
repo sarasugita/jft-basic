@@ -484,6 +484,23 @@ async function removeImportedSummaryAttemptsForPair(supabaseClient, studentId, s
   return { ok: true, deleted: deleteIds.length };
 }
 
+async function deleteSessionResultsAndLinks(supabaseClient, sessionId) {
+  if (!supabaseClient || !sessionId) {
+    return { ok: true };
+  }
+  const [{ error: attemptsError }, { error: linksError }] = await Promise.all([
+    supabaseClient.from("attempts").delete().eq("test_session_id", sessionId),
+    supabaseClient.from("exam_links").delete().eq("test_session_id", sessionId),
+  ]);
+  if (attemptsError) {
+    return { ok: false, message: attemptsError.message };
+  }
+  if (linksError) {
+    return { ok: false, message: linksError.message };
+  }
+  return { ok: true };
+}
+
 async function insertImportedSummaryAttempts(supabaseClient, payloads) {
   const entries = Array.isArray(payloads) ? payloads.filter(Boolean) : [];
   if (!entries.length) {
@@ -3584,8 +3601,15 @@ export function useTestingWorkspaceState({
   const deleteTestSession = useCallback(async (id, options = {}) => {
     if (!id || !supabase) return;
     const label = String(options?.title ?? id).trim() || id;
-    const ok = window.confirm(`Delete test session "${label}"?\n\nThis removes the test session record overall.`);
+    const ok = window.confirm(`Delete test session "${label}"?\n\nThis removes the session and its saved results.`);
     if (!ok) return;
+    const cleanupResult = await deleteSessionResultsAndLinks(supabase, id);
+    if (!cleanupResult.ok) {
+      console.error("session cleanup error:", cleanupResult.message);
+      setTestSessionsMsg(`Delete failed: ${cleanupResult.message}`);
+      if (options?.surface === "results") setQuizMsg(`Delete failed: ${cleanupResult.message}`);
+      return;
+    }
     const { error } = await supabase.from("test_sessions").delete().eq("id", id);
     if (error) {
       console.error("test_sessions delete error:", error);
