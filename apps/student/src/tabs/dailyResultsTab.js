@@ -12,11 +12,14 @@ import {
   getAttemptDateLabel,
   getAttemptTitle,
   getAttemptCategory,
+  getAttemptTestType,
   getVisibleAttemptScoreSummary,
   formatAttemptScoreCell,
   buildAttemptDetailRows,
   shouldShowAnswers,
   renderDetailTable,
+  isImportedResultsSummaryAttempt,
+  renderImportedResultsSummaryDetail,
 } from "../lib/attemptHelpers.js";
 import { triggerRender } from "../lib/renderBus.js";
 
@@ -29,6 +32,46 @@ export function buildDailyResultsTabHTML() {
   }
   if (studentResultsState.error) {
     return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
+  }
+
+  // DEBUG: pipeline breakdown — runs once per render after results load
+  if (studentResultsState.loaded && !studentResultsState.loading) {
+    const total = studentResultsState.list.length;
+    let passType = 0, failType = 0, failSession = 0;
+    const typeBreakdown = {};
+    const dropped = [];
+    studentResultsState.list.forEach((attempt) => {
+      const type = getAttemptTestType(attempt, testsState.list);
+      typeBreakdown[type || "(none)"] = (typeBreakdown[type || "(none)"] || 0) + 1;
+      const isImported = isImportedResultsSummaryAttempt(attempt);
+      const hasSession = Boolean(attempt?.test_session_id);
+      const sessionFound = hasSession
+        ? Boolean(testSessionsState.list.find((s) => s.id === attempt.test_session_id))
+        : true;
+      const passesShow = isImported || !hasSession || sessionFound;
+      if (type === "daily" && passesShow) passType += 1;
+      if (type !== "daily") failType += 1;
+      if (type === "daily" && !passesShow) {
+        failSession += 1;
+        dropped.push({
+          id: attempt?.id,
+          test_session_id: attempt?.test_session_id,
+          test_version: attempt?.test_version,
+          isImported,
+          sessionFound,
+          importedSource: attempt?.answers_json?.__meta?.imported_source ?? null,
+        });
+      }
+    });
+    console.log("[student results] daily display pipeline", {
+      total,
+      typeBreakdown,
+      passTypeFilter: passType,
+      failTypeFilter: failType,
+      failSessionFilter: failSession,
+      droppedBySession: dropped.slice(0, 10),
+      testSessionsListSize: testSessionsState.list.length,
+    });
   }
 
   const dailyAttemptEntries = buildResultAttemptEntries("daily", studentResultsState.list);
@@ -52,14 +95,17 @@ export function buildDailyResultsTabHTML() {
   if (resultDetailState.open && resultDetailState.mode === "daily" && resultDetailState.attempt) {
     const attempt = resultDetailState.attempt;
     const title = getAttemptTitle(attempt);
-    const showAnswers = shouldShowAnswers(attempt, testSessionsState.list, testsState.list);
-    const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
-    const detailRows = buildAttemptDetailRows(attempt, questionsList);
-    const detailBody = resultDetailState.loading
-      ? `<div class="text-muted">Loading details...</div>`
-      : resultDetailState.error
-        ? `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`
-        : renderDetailTable(detailRows, showAnswers);
+    const isImportedSummary = isImportedResultsSummaryAttempt(attempt);
+    const detailBody = isImportedSummary
+      ? renderImportedResultsSummaryDetail(attempt, "daily")
+      : (() => {
+          const showAnswers = shouldShowAnswers(attempt, testSessionsState.list, testsState.list);
+          const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
+          const detailRows = buildAttemptDetailRows(attempt, questionsList);
+          if (resultDetailState.loading) return `<div class="text-muted">Loading details...</div>`;
+          if (resultDetailState.error) return `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`;
+          return renderDetailTable(detailRows, showAnswers);
+        })();
     return `
       <div class="student-detail-topbar">
         <button class="student-detail-back" id="dailyResultBack" aria-label="Back">←</button>
@@ -164,9 +210,12 @@ export function bindDailyResultsTabEvents(app) {
       resultDetailState.popupRows = [];
       resultDetailState.attempt = attempt;
       resultDetailState.error = "";
-      if (attempt.test_version) {
+      resultDetailState.loading = false;
+      if (!isImportedResultsSummaryAttempt(attempt) && attempt.test_version) {
+        resultDetailState.loading = true;
         await fetchQuestionsForDetailWithOptions(attempt.test_version, { force: true });
       }
+      resultDetailState.loading = false;
       triggerRender();
     });
   });
