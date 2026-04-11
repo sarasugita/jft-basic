@@ -12,8 +12,8 @@ import { buildResultRows, getAttemptDedupKey } from "../lib/attemptHelpers";
 let pendingAttemptSave = null;
 let pendingAttemptSaveKey = "";
 
-async function saveAttemptIfNeeded() {
-  const statusEl = document.querySelector("#saveStatus");
+async function saveAttemptIfNeeded(app) {
+  const statusEl = app.querySelector("#saveStatus");
   if (state.attemptSaved) {
     if (statusEl) statusEl.textContent = "Saved";
     return pendingAttemptSave;
@@ -68,7 +68,7 @@ async function saveAttemptIfNeeded() {
     state.attemptSaved = true;
     studentResultsState.loaded = false;
     saveState();
-    const currentStatusEl = document.querySelector("#saveStatus");
+    const currentStatusEl = app.querySelector("#saveStatus");
     if (currentStatusEl) currentStatusEl.textContent = "Saved";
   })().finally(() => {
     pendingAttemptSave = null;
@@ -179,8 +179,9 @@ export function renderResult(app) {
     </div>
   `;
 
-  document.querySelector("#disabledBtn").disabled = true;
-  document.querySelector("#exitTestBtn")?.addEventListener("click", exitToHome);
+  const disabledBtn = app.querySelector("#disabledBtn");
+  if (disabledBtn) disabledBtn.disabled = true;
+  app.querySelector("#exitTestBtn")?.addEventListener("click", exitToHome);
 
-  saveAttemptIfNeeded();
+  saveAttemptIfNeeded(app);
 }

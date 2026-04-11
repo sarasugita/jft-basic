@@ -3,9 +3,8 @@ import { PROFILE_SELECT_FIELDS } from "../lib/constants";
 import { getErrorMessage, logSupabaseError, logUnexpectedError } from "../lib/errorHelpers";
 import { triggerRender } from "../lib/renderBus";
 import { state, saveState } from "./appState";
-import { resetSessionScopedState } from "./index";
+import { resetSessionScopedState, syncScopedStateForUser } from "./index";
 import { fetchPublicTests, fetchTestSessions } from "./testsState";
-import { resultDetailState } from "./resultsState";
 
 export let authState = {
   checked: false,
@@ -103,54 +102,11 @@ export async function refreshAuthState() {
         state.studentPanelUserId = currentUserId;
         if (shouldResetStudentTab) {
           state.studentTab = "home";
-          resultDetailState.open = false;
-          resultDetailState.mode = "";
-          resultDetailState.subTab = "score";
-          resultDetailState.sectionFilter = "";
-          resultDetailState.wrongOnly = false;
-          resultDetailState.popupOpen = false;
-          resultDetailState.popupTitle = "";
-          resultDetailState.popupRows = [];
-          resultDetailState.attempt = null;
         }
         saveState();
       }
 
-      // Reset per-user state when user changes
-      const { studentResultsState } = await import("./resultsState");
-      const { studentAttendanceState } = await import("./attendanceState");
-      const { rankingState } = await import("./rankingState");
-      const { sessionAttemptOverrideState } = await import("./sessionOverrideState");
-
-      if (studentResultsState.userId !== currentUserId) {
-        studentResultsState.userId = currentUserId;
-        studentResultsState.loaded = false;
-        studentResultsState.loading = false;
-        studentResultsState.list = [];
-        studentResultsState.error = "";
-      }
-      if (studentAttendanceState.userId !== currentUserId) {
-        studentAttendanceState.userId = currentUserId;
-        studentAttendanceState.loaded = false;
-        studentAttendanceState.loading = false;
-        studentAttendanceState.list = [];
-        studentAttendanceState.error = "";
-      }
-      if (rankingState.userId !== currentUserId) {
-        rankingState.userId = currentUserId;
-        rankingState.loaded = false;
-        rankingState.loading = false;
-        rankingState.list = [];
-        rankingState.error = "";
-      }
-      if (sessionAttemptOverrideState.userId !== currentUserId) {
-        sessionAttemptOverrideState.userId = currentUserId;
-        sessionAttemptOverrideState.loaded = false;
-        sessionAttemptOverrideState.loading = false;
-        sessionAttemptOverrideState.map = {};
-        sessionAttemptOverrideState.error = "";
-        sessionAttemptOverrideState.lastFetchedAt = 0;
-      }
+      syncScopedStateForUser(currentUserId);
     } catch (error) {
       logUnexpectedError("refreshAuthState failed", error);
       authState.session = null;

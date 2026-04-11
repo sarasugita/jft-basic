@@ -1,6 +1,7 @@
 import { supabase } from "../supabaseClient";
 import { SESSION_ATTEMPT_OVERRIDE_REFRESH_MS } from "../lib/constants";
 import { getErrorMessage, logSupabaseError, logUnexpectedError, isMissingSessionAttemptOverrideTableError } from "../lib/errorHelpers";
+import { authState } from "./authState";
 
 export let sessionAttemptOverrideState = {
   loaded: false,
@@ -12,7 +13,6 @@ export let sessionAttemptOverrideState = {
 };
 
 export async function fetchSessionAttemptOverrides(options = {}) {
-  const { authState } = await import("./authState");
   if (!authState.session) return;
   const { force = false } = options;
   const isFresh =

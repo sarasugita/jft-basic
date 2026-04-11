@@ -16,7 +16,7 @@ export function renderLinkInvalid(app) {
       </main>
     </div>
   `;
-  const disabledBtn = document.querySelector("#disabledBtn");
+  const disabledBtn = app.querySelector("#disabledBtn");
   if (disabledBtn) disabledBtn.disabled = true;
-  document.querySelector("#backBtn").addEventListener("click", goIntro);
+  app.querySelector("#backBtn")?.addEventListener("click", goIntro);
 }

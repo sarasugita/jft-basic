@@ -1,5 +1,6 @@
 import { supabase } from "../supabaseClient";
 import { getErrorMessage, logSupabaseError, logUnexpectedError, isMissingStudentWarningsTableError } from "../lib/errorHelpers";
+import { authState } from "./authState";
 
 export let issuedWarningsState = {
   loaded: false,
@@ -9,7 +10,6 @@ export let issuedWarningsState = {
 };
 
 export async function fetchIssuedStudentWarnings() {
-  const { authState } = await import("./authState");
   if (!authState.session || issuedWarningsState.loading) return;
   if (!authState.profile?.school_id) return;
   issuedWarningsState.loading = true;

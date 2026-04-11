@@ -13,7 +13,8 @@ export function renderLoading(app) {
       </main>
     </div>
   `;
-  document.querySelector("#disabledBtn").disabled = true;
+  const disabledBtn = app.querySelector("#disabledBtn");
+  if (disabledBtn) disabledBtn.disabled = true;
 }
 
 export function renderQuestionLoadError(app) {
@@ -32,11 +33,12 @@ export function renderQuestionLoadError(app) {
       </main>
     </div>
   `;
-  document.querySelector("#disabledBtn").disabled = true;
-  document.querySelector("#backToTestSelectBtn")?.addEventListener("click", () => {
+  const disabledBtn = app.querySelector("#disabledBtn");
+  if (disabledBtn) disabledBtn.disabled = true;
+  app.querySelector("#backToTestSelectBtn")?.addEventListener("click", () => {
     goIntro();
   });
-  document.querySelector("#resetErrorStateBtn")?.addEventListener("click", () => {
+  app.querySelector("#resetErrorStateBtn")?.addEventListener("click", () => {
     resetAll();
   });
 }

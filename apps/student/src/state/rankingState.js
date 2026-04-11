@@ -1,5 +1,6 @@
 import { supabase } from "../supabaseClient";
 import { getErrorMessage, logSupabaseError, logUnexpectedError } from "../lib/errorHelpers";
+import { authState } from "./authState";
 
 export let rankingState = {
   loaded: false,
@@ -10,7 +11,6 @@ export let rankingState = {
 };
 
 export async function fetchStudentRanking() {
-  const { authState } = await import("./authState");
   if (rankingState.loading) return;
   if (!authState.profile?.school_id) {
     return;

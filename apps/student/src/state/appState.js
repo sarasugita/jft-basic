@@ -1,6 +1,8 @@
 import { STORAGE_KEY } from "../lib/constants";
 import { triggerRender } from "../lib/renderBus";
 
+let refreshLinkStateFn = null;
+
 export const defaultState = {
   phase: "intro",
   sectionIndex: 0,
@@ -65,8 +67,42 @@ export function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+export function setLinkStateRefreshCallback(fn) {
+  refreshLinkStateFn = typeof fn === "function" ? fn : null;
+}
+
 export function shouldBlockOnQuestions() {
   return ["sectionIntro", "quiz", "result"].includes(state.phase);
+}
+
+export function resetAll() {
+  Object.assign(state, defaultState);
+  state.testEndAt = null;
+  state.requireLogin = true;
+  state.focusWarnings = 0;
+  state.tabLeftCount = 0;
+  state.focusWarningAt = 0;
+
+  let linkId = "";
+  try {
+    const url = new URL(window.location.href);
+    linkId = url.searchParams.get("link") || "";
+  } catch {
+    linkId = "";
+  }
+
+  if (!linkId) {
+    state.linkChecked = true;
+    saveState();
+    triggerRender();
+    return;
+  }
+
+  saveState();
+  Promise.resolve(refreshLinkStateFn?.())
+    .finally(() => {
+      triggerRender();
+    });
 }
 
 export function exitToHome() {

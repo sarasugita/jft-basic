@@ -2,6 +2,7 @@ import { supabase, publicSupabase } from "../supabaseClient";
 import { PASS_RATE_DEFAULT, TEST_VERSION } from "../lib/constants";
 import { getErrorMessage, logSupabaseError, logUnexpectedError, isMissingRetakeSessionFieldsError } from "../lib/errorHelpers";
 import { state, saveState } from "./appState";
+import { authState } from "./authState";
 
 export let testsState = {
   loaded: false,
@@ -23,8 +24,6 @@ export async function fetchPublicTests() {
   testsState.error = "";
   const hadData = testsState.loaded && testsState.list.length > 0;
   try {
-    // authState imported lazily to avoid circular deps
-    const { authState } = await import("./authState");
     const client = authState.session ? supabase : publicSupabase;
     let query = client
       .from("tests")

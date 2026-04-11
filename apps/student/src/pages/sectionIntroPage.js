@@ -45,16 +45,17 @@ export function renderSectionIntro(app) {
     </div>
   `;
 
-  document.querySelector("#disabledBtn").disabled = true;
+  const disabledBtn = app.querySelector("#disabledBtn");
+  if (disabledBtn) disabledBtn.disabled = true;
 
   if (isFirstSection) {
-    document.querySelector("#backHomeBtn")?.addEventListener("click", () => {
+    app.querySelector("#backHomeBtn")?.addEventListener("click", () => {
       state.studentTab = "home";
       exitToHome();
     });
   }
 
-  document.querySelector("#goBtn").addEventListener("click", async () => {
+  app.querySelector("#goBtn")?.addEventListener("click", async () => {
     if (isFirstSection) {
       try {
         await document.documentElement.requestFullscreen?.();

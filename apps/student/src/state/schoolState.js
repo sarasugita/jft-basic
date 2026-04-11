@@ -1,5 +1,6 @@
 import { supabase } from "../supabaseClient";
 import { getErrorMessage, logSupabaseError, logUnexpectedError } from "../lib/errorHelpers";
+import { authState } from "./authState";
 
 export let studentSchoolState = {
   loaded: false,
@@ -10,7 +11,6 @@ export let studentSchoolState = {
 };
 
 export async function fetchStudentSchool() {
-  const { authState } = await import("./authState");
   const schoolId = authState.profile?.school_id ?? "";
   if (!schoolId || studentSchoolState.loading) return;
   if (studentSchoolState.loaded && studentSchoolState.schoolId === schoolId) return;

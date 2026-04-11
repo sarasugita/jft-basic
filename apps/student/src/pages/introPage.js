@@ -10,7 +10,6 @@ import { triggerRender } from "../lib/renderBus";
 
 export function renderIntro(app) {
   const activeSections = getActiveSections();
-  const activeVersion = getActiveTestVersion();
   const activeTitle = getActiveTestTitle();
   const isGuest = !authState.session;
   const isDaily = getActiveTestType() === "daily";
@@ -128,10 +127,10 @@ export function renderIntro(app) {
     </div>
   `;
 
-  const disabledBtn = document.querySelector("#disabledBtn");
+  const disabledBtn = app.querySelector("#disabledBtn");
   if (disabledBtn) disabledBtn.disabled = true;
 
-  const testSelect = document.querySelector("#testSelect");
+  const testSelect = app.querySelector("#testSelect");
   if (testSelect) {
     testSelect.addEventListener("change", () => {
       state.selectedTestSessionId = testSelect.value;
@@ -142,10 +141,10 @@ export function renderIntro(app) {
     });
   }
 
-  document.querySelector("#nextBtn").addEventListener("click", async () => {
+  app.querySelector("#nextBtn")?.addEventListener("click", async () => {
     if (isGuest) {
-      const name = document.querySelector("#nameInput").value.trim();
-      const id = document.querySelector("#idInput").value.trim();
+      const name = app.querySelector("#nameInput")?.value.trim() ?? "";
+      const id = app.querySelector("#idInput")?.value.trim() ?? "";
       state.user = { name, id };
     }
     if (linkBlocked) {
@@ -169,17 +168,17 @@ export function renderIntro(app) {
     triggerRender();
   });
 
-  document.querySelector("#signOutBtn")?.addEventListener("click", () => {
+  app.querySelector("#signOutBtn")?.addEventListener("click", () => {
     supabase.auth.signOut();
     state.requireLogin = true;
     state.phase = "login";
     saveState();
     triggerRender();
   });
-  document.querySelector("#loginNavBtn")?.addEventListener("click", () => {
+  app.querySelector("#loginNavBtn")?.addEventListener("click", () => {
     state.phase = "login";
     saveState();
     triggerRender();
   });
-  document.querySelector("#resetBtn").addEventListener("click", resetAll);
+  app.querySelector("#resetBtn")?.addEventListener("click", resetAll);
 }

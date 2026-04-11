@@ -8,6 +8,7 @@ import {
 import { getErrorMessage, logSupabaseError, logUnexpectedError } from "../lib/errorHelpers";
 import { triggerRender } from "../lib/renderBus";
 import { state } from "./appState";
+import { authState } from "./authState";
 import { testsState, getActiveTestVersion, getActiveTestSession, getActiveTestType, getSessionTestType } from "./testsState";
 
 export let questionsState = {
@@ -161,8 +162,6 @@ function orderQuestionsForSession(list, version) {
 }
 
 export async function fetchQuestionRowsWithFallback(version) {
-  // authState imported lazily to avoid circular deps
-  const { authState } = await import("./authState");
   const client = authState.session ? supabase : publicSupabase;
   return client
     .from("questions")

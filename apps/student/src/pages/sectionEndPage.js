@@ -22,9 +22,10 @@ export function renderSectionEnd(app) {
       </main>
     </div>
   `;
-  document.querySelector("#disabledBtn").disabled = true;
+  const disabledBtn = app.querySelector("#disabledBtn");
+  if (disabledBtn) disabledBtn.disabled = true;
 
-  document.querySelector("#nextSectionBtn").addEventListener("click", () => {
+  app.querySelector("#nextSectionBtn")?.addEventListener("click", () => {
     const activeSectionsInner = getActiveSections();
     const nextSectionIndex = state.sectionIndex + 1;
 
@@ -45,7 +46,7 @@ export function renderSectionEnd(app) {
     triggerRender();
   });
 
-  document.querySelector("#reviewBtn").addEventListener("click", () => {
+  app.querySelector("#reviewBtn")?.addEventListener("click", () => {
     state.phase = "quiz";
     saveState();
     triggerRender();

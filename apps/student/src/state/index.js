@@ -1,6 +1,6 @@
-import { state, defaultState } from "./appState";
+import { state } from "./appState";
 import { questionsState } from "./questionsState";
-import { studentResultsState, modelRankState } from "./resultsState";
+import { studentResultsState, resultDetailState, modelRankState } from "./resultsState";
 import { studentAttendanceState, absenceApplicationsState } from "./attendanceState";
 import { rankingState } from "./rankingState";
 import { sessionAttemptOverrideState } from "./sessionOverrideState";
@@ -64,4 +64,58 @@ export function resetSessionScopedState() {
   modelRankState.loaded = false;
   modelRankState.map = {};
   modelRankState.totalMap = {};
+}
+
+export function syncScopedStateForUser(currentUserId) {
+  if (!currentUserId) return;
+  let didResetUserScopedState = false;
+
+  if (studentResultsState.userId !== currentUserId) {
+    didResetUserScopedState = true;
+    studentResultsState.userId = currentUserId;
+    studentResultsState.loaded = false;
+    studentResultsState.loading = false;
+    studentResultsState.list = [];
+    studentResultsState.error = "";
+  }
+
+  if (studentAttendanceState.userId !== currentUserId) {
+    didResetUserScopedState = true;
+    studentAttendanceState.userId = currentUserId;
+    studentAttendanceState.loaded = false;
+    studentAttendanceState.loading = false;
+    studentAttendanceState.list = [];
+    studentAttendanceState.error = "";
+  }
+
+  if (rankingState.userId !== currentUserId) {
+    didResetUserScopedState = true;
+    rankingState.userId = currentUserId;
+    rankingState.loaded = false;
+    rankingState.loading = false;
+    rankingState.list = [];
+    rankingState.error = "";
+  }
+
+  if (sessionAttemptOverrideState.userId !== currentUserId) {
+    didResetUserScopedState = true;
+    sessionAttemptOverrideState.userId = currentUserId;
+    sessionAttemptOverrideState.loaded = false;
+    sessionAttemptOverrideState.loading = false;
+    sessionAttemptOverrideState.map = {};
+    sessionAttemptOverrideState.error = "";
+    sessionAttemptOverrideState.lastFetchedAt = 0;
+  }
+
+  if (didResetUserScopedState) {
+    resultDetailState.open = false;
+    resultDetailState.mode = "";
+    resultDetailState.subTab = "score";
+    resultDetailState.sectionFilter = "";
+    resultDetailState.wrongOnly = false;
+    resultDetailState.popupOpen = false;
+    resultDetailState.popupTitle = "";
+    resultDetailState.popupRows = [];
+    resultDetailState.attempt = null;
+  }
 }

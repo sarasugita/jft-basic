@@ -263,14 +263,14 @@ export function renderTestSelect(app) {
   } else if (showAttendanceHistory) {
     bindAttendanceHistoryTabEvents(app);
   } else if (showTakeTest) {
-    document.querySelector("#startBtn")?.addEventListener("click", async () => {
+    app.querySelector("#startBtn")?.addEventListener("click", async () => {
       if (!canStart) return;
       if (isGuest) {
-        const name = document.querySelector("#nameInput").value.trim();
-        const id = document.querySelector("#idInput").value.trim();
+        const name = app.querySelector("#nameInput")?.value.trim() ?? "";
+        const id = app.querySelector("#idInput")?.value.trim() ?? "";
         state.user = { name, id };
       }
-      const selected = document.querySelector('input[name="testSelect"]:checked');
+      const selected = app.querySelector('input[name="testSelect"]:checked');
       let session = null;
       if (selected) {
         state.selectedTestSessionId = selected.value;
@@ -317,7 +317,7 @@ export function renderTestSelect(app) {
     triggerRender();
   });
 
-  document.querySelector("#signOutBtn")?.addEventListener("click", () => {
+  app.querySelector("#signOutBtn")?.addEventListener("click", () => {
     resultDetailState.open = false;
     resultDetailState.mode = "";
     resultDetailState.subTab = "score";

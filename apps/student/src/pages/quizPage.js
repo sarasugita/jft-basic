@@ -67,15 +67,15 @@ export function renderQuiz(app) {
   `;
 
   // Bangla toggle
-  document.querySelector("#banglaBtn")?.addEventListener("click", toggleBangla);
+  app.querySelector("#banglaBtn")?.addEventListener("click", toggleBangla);
 
   // Sidebar step jump
-  document.querySelectorAll("[data-step]").forEach((btn) => {
+  app.querySelectorAll("[data-step]").forEach((btn) => {
     btn.addEventListener("click", () => jumpToQuestionInSection(Number(btn.dataset.step)));
   });
 
   // Choice click (single)
-  document.querySelectorAll("[data-choice]").forEach((btn) => {
+  app.querySelectorAll("[data-choice]").forEach((btn) => {
     const part = btn.dataset.part;
     const choice = Number(btn.dataset.choice);
     const qid = btn.dataset.qid || "";
@@ -88,8 +88,8 @@ export function renderQuiz(app) {
   });
 
   // Nav
-  document.querySelector("#backBtn")?.addEventListener("click", goPrevQuestion);
-  document.querySelector("#nextBtn")?.addEventListener("click", goNextQuestionOrEnd);
+  app.querySelector("#backBtn")?.addEventListener("click", goPrevQuestion);
+  app.querySelector("#nextBtn")?.addEventListener("click", goNextQuestionOrEnd);
 
-  document.querySelector("#finishBtn")?.addEventListener("click", finishSection);
+  app.querySelector("#finishBtn")?.addEventListener("click", finishSection);
 }

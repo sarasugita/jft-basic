@@ -1,5 +1,6 @@
 import { supabase } from "../supabaseClient";
 import { getErrorMessage, logSupabaseError, logUnexpectedError } from "../lib/errorHelpers";
+import { authState } from "./authState";
 
 export let studentAttendanceState = {
   loaded: false,
@@ -17,7 +18,6 @@ export let absenceApplicationsState = {
 };
 
 export async function fetchStudentAttendance() {
-  const { authState } = await import("./authState");
   if (!authState.session) return;
   if (studentAttendanceState.loading) return;
   studentAttendanceState.loading = true;
@@ -80,7 +80,6 @@ export async function fetchStudentAttendance() {
 }
 
 export async function fetchAbsenceApplications() {
-  const { authState } = await import("./authState");
   if (!authState.session || absenceApplicationsState.loading) return;
   absenceApplicationsState.loading = true;
   absenceApplicationsState.error = "";

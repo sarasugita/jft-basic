@@ -1,6 +1,8 @@
 import { supabase, publicSupabase } from "../supabaseClient";
 import { QUESTION_SELECT_BASE } from "../lib/constants";
 import { getErrorMessage, logSupabaseError, logUnexpectedError, isMissingTabLeftCountError } from "../lib/errorHelpers";
+import { dedupeAttempts, buildLatestAttemptMapByStudent, getScoreRateFromAttempt } from "../lib/attemptHelpers";
+import { authState } from "./authState";
 import { mapDbQuestion, fetchQuestionRowsWithFallback } from "./questionsState";
 import { fetchSessionAttemptOverrides } from "./sessionOverrideState";
 
@@ -37,65 +39,9 @@ export let modelRankState = {
 let resultQuestionRefreshPromise = null;
 let resultQuestionRefreshKey = "";
 
-// --- Attempt helpers (will move to lib/attemptHelpers.js in Phase 3) ---
-
-export function getAttemptDedupKey(attempt) {
-  const startedAt = String(attempt?.started_at || "");
-  const endedAt = String(attempt?.ended_at || "");
-  if (!startedAt && !endedAt) return `id:${attempt?.id || ""}`;
-  return JSON.stringify([
-    attempt?.test_session_id || "",
-    attempt?.test_version || "",
-    startedAt,
-    endedAt,
-    Number(attempt?.correct) || 0,
-    Number(attempt?.total) || 0,
-    Number(attempt?.tab_left_count) || 0,
-    JSON.stringify(attempt?.answers_json || {}),
-  ]);
-}
-
-export function dedupeAttempts(list) {
-  const seen = new Set();
-  return (list ?? []).filter((attempt) => {
-    const key = getAttemptDedupKey(attempt);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-export function getAttemptTimestamp(attempt) {
-  const value = attempt?.ended_at || attempt?.created_at || attempt?.started_at || null;
-  if (!value) return 0;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : 0;
-}
-
-export function buildLatestAttemptMapByStudent(attemptsList) {
-  const map = new Map();
-  for (const attempt of attemptsList ?? []) {
-    if (!attempt?.student_id) continue;
-    const existing = map.get(attempt.student_id);
-    if (!existing || getAttemptTimestamp(attempt) >= getAttemptTimestamp(existing)) {
-      map.set(attempt.student_id, attempt);
-    }
-  }
-  return map;
-}
-
-export function getScoreRateFromAttempt(attempt) {
-  const rate = Number(attempt?.score_rate);
-  if (Number.isFinite(rate)) return rate;
-  const total = Number(attempt?.total) || 0;
-  const correct = Number(attempt?.correct) || 0;
-  return total ? correct / total : 0;
-}
-
 // --- Fetch functions ---
 
 export async function fetchStudentResults() {
-  const { authState } = await import("./authState");
   if (!authState.session) return;
   if (studentResultsState.loading) return;
   studentResultsState.loading = true;
@@ -250,7 +196,6 @@ export async function refreshQuestionsForResultAttempts(attemptsList, options = 
   if (!force && resultQuestionRefreshPromise && resultQuestionRefreshKey === refreshKey) {
     return resultQuestionRefreshPromise;
   }
-  const { authState } = await import("./authState");
   const client = authState.session ? supabase : publicSupabase;
   resultQuestionRefreshKey = refreshKey;
   resultQuestionRefreshPromise = (async () => {
