@@ -1,6 +1,6 @@
 import { sections } from "../../../../packages/shared/questions.js";
 import { escapeHtml } from "./escapeHtml";
-import { formatDateShort } from "./formatters";
+import { formatDateFull, formatDateShort } from "./formatters";
 import {
   getEffectiveAnswerIndices,
   getStemMediaAssets,
@@ -112,7 +112,14 @@ export function getAttemptTest(attempt, testsList) {
 
 export function getAttemptTestType(attempt, testsList) {
   const test = getAttemptTest(attempt, testsList);
-  return test?.type || "";
+  if (test?.type) return test.type;
+  // For CSV-imported attempts whose test_version is a synthetic string
+  // (e.g. "imported-daily-vocabulary-…") there is no matching entry in
+  // the tests table.  Fall back to the import source flag stored in meta.
+  const importedSource = String(attempt?.answers_json?.__meta?.imported_source ?? "").trim();
+  if (importedSource === "daily_results_csv") return "daily";
+  if (importedSource === "model_results_csv") return "mock";
+  return "";
 }
 
 export function getAttemptCategory(attempt, testsList) {
@@ -127,6 +134,15 @@ export function getAttemptDisplayDateValue(attempt, sessionsList) {
   if (importedDate) return importedDate;
   const session = getAttemptSession(attempt, sessionsList);
   return session?.starts_at || session?.ends_at || attempt?.ended_at || attempt?.created_at || attempt?.started_at || "";
+}
+
+export function getAttemptDisplayTimestamp(attempt, sessionsList) {
+  const value = getAttemptDisplayDateValue(attempt, sessionsList);
+  if (!value) return getAttemptTimestamp(attempt);
+  const text = String(value).trim();
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00:00` : text;
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? time : getAttemptTimestamp(attempt);
 }
 
 export function getAttemptDateLabel(attempt) {
@@ -230,6 +246,133 @@ export function formatAttemptScoreCell(attempt, scoreSummary = getVisibleAttempt
   return `${Number(scoreSummary?.correct) || 0} / ${Number(scoreSummary?.total) || 0}`;
 }
 
+function getImportedSummarySourceLabel(attempt) {
+  const source = String(getAttemptMeta(attempt)?.imported_source ?? "").trim();
+  if (source === "daily_results_csv") return "Daily CSV";
+  if (source === "model_results_csv") return "Model CSV";
+  return "Imported CSV";
+}
+
+export function getImportedModelSectionSummaries(attempt) {
+  const rows = Array.isArray(getAttemptMeta(attempt)?.main_section_summary)
+    ? getAttemptMeta(attempt).main_section_summary
+    : [];
+  const orderMap = new Map(
+    sections
+      .filter((section) => section.key !== "DAILY")
+      .map((section, index) => [section.title, index])
+  );
+  return rows
+    .map((row) => {
+      const rawSection = String(row?.section ?? "").trim();
+      const matchedSection = sections.find((section) => (
+        section.key !== "DAILY"
+        && (
+          String(section.title ?? "").trim().toLowerCase() === rawSection.toLowerCase()
+          || String(section.key ?? "").trim().toLowerCase() === rawSection.toLowerCase()
+        )
+      ));
+      const section = matchedSection?.title || rawSection;
+      const correct = Number(row?.correct ?? 0);
+      const total = Number(row?.total ?? 0);
+      const rawRate = Number(row?.rate);
+      const rate = Number.isFinite(rawRate) ? rawRate : (total > 0 ? correct / total : 0);
+      return {
+        section,
+        correct: Number.isFinite(correct) ? correct : 0,
+        total: Number.isFinite(total) ? total : 0,
+        rate: Number.isFinite(rate) ? rate : 0,
+      };
+    })
+    .filter((row) => row.section)
+    .sort((left, right) => {
+      const leftOrder = orderMap.has(left.section) ? orderMap.get(left.section) : 999;
+      const rightOrder = orderMap.has(right.section) ? orderMap.get(right.section) : 999;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return left.section.localeCompare(right.section);
+    });
+}
+
+export function renderImportedResultsSummaryDetail(attempt, mode = "daily") {
+  const meta = getAttemptMeta(attempt);
+  const scoreSummary = getVisibleAttemptScoreSummary(attempt);
+  const rate = Number(scoreSummary?.rate) || 0;
+  const scoreCell = formatAttemptScoreCell(attempt, scoreSummary);
+  const importedTitle = String(meta.imported_test_title ?? meta.session_title ?? "").trim();
+  const importedDate = String(meta.imported_test_date ?? meta.imported_date_iso ?? meta.session_date ?? "").trim();
+  const sourceLabel = getImportedSummarySourceLabel(attempt);
+  const passRate = getPassRateForVersion(attempt?.test_version);
+  const isPass = rate >= passRate;
+  const sectionSummaries = mode === "model" ? getImportedModelSectionSummaries(attempt) : [];
+  const hasSectionSummaries = sectionSummaries.length > 0;
+
+  return `
+    <div class="student-score-summary">
+      ${importedTitle ? `
+        <div class="student-score-row">
+          <span class="student-score-label">Test Name</span>
+          <span class="student-score-rank-value">${escapeHtml(importedTitle)}</span>
+        </div>
+      ` : ""}
+      ${importedDate ? `
+        <div class="student-score-row">
+          <span class="student-score-label">Date</span>
+          <span class="student-score-rank-value">${escapeHtml(formatDateFull(importedDate) || formatDateShort(importedDate) || importedDate)}</span>
+        </div>
+      ` : ""}
+      <div class="student-score-row">
+        <span class="student-score-label">Source</span>
+        <span class="student-score-rank-value">${escapeHtml(sourceLabel)}</span>
+      </div>
+      <div class="student-score-row">
+        <span class="student-score-label">Score</span>
+        <span class="student-score-right ${isPass ? "" : "student-score-right-fail"}">
+          <span class="student-score-value">
+            <span class="student-score-value-primary">${escapeHtml(scoreCell)}</span>
+          </span>
+          <span class="student-score-rate">(${(rate * 100).toFixed(1)}%)</span>
+        </span>
+      </div>
+      <div class="student-score-row">
+        <span class="student-score-label">Pass/Fail</span>
+        <span class="student-score-pass ${isPass ? "result-pass-cell" : "result-fail-cell"}">
+          ${isPass ? "Pass" : "Fail"}
+        </span>
+      </div>
+      <div class="student-score-row">
+        <span class="student-score-label">Note</span>
+        <span class="student-score-rank-value">Imported CSV results do not include question-level detail.</span>
+      </div>
+    </div>
+    ${mode === "model" && hasSectionSummaries ? `
+      <div class="detail-table-wrap">
+        <table class="detail-table score-detail-table">
+          <thead>
+            <tr>
+              <th class="score-detail-head-section">Section</th>
+              <th class="score-detail-head-total"><span class="score-detail-head-label score-detail-head-label-total">Total</span></th>
+              <th class="score-detail-head-correct"><span class="score-detail-head-label score-detail-head-label-correct">Correct</span></th>
+              <th class="score-detail-head-rate"><span class="score-detail-head-label score-detail-head-label-rate">%</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sectionSummaries
+              .map((row) => `
+                <tr>
+                  <td class="score-detail-cell-section">${escapeHtml(row.section)}</td>
+                  <td class="score-detail-cell-total">${row.total}</td>
+                  <td class="score-detail-cell-correct">${row.correct}</td>
+                  <td class="score-detail-cell-rate">${(row.rate * 100).toFixed(1)}%</td>
+                </tr>
+              `)
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    ` : ""}
+  `;
+}
+
 export function shouldShowAttemptInStudentResults(attempt) {
   if (!attempt) return false;
   if (isImportedResultsSummaryAttempt(attempt)) return true;
@@ -242,9 +385,18 @@ export function buildResultAttemptEntries(testType, attemptsList = []) {
     getAttemptTestType(attempt, testsState.list) === testType
     && shouldShowAttemptInStudentResults(attempt)
   ));
+  const sortedAttempts = [...baseAttempts].sort((left, right) => {
+    const rightDisplay = getAttemptDisplayTimestamp(right, testSessionsState.list);
+    const leftDisplay = getAttemptDisplayTimestamp(left, testSessionsState.list);
+    if (rightDisplay !== leftDisplay) return rightDisplay - leftDisplay;
+    const rightTime = getAttemptTimestamp(right);
+    const leftTime = getAttemptTimestamp(left);
+    if (rightTime !== leftTime) return rightTime - leftTime;
+    return String(right?.id ?? "").localeCompare(String(left?.id ?? ""));
+  });
   const convertedSourceSessionIds = new Set();
 
-  baseAttempts.forEach((attempt) => {
+  sortedAttempts.forEach((attempt) => {
     const session = getAttemptSession(attempt, testSessionsState.list);
     if (!isRetakeSession(session)) return;
     const sourceSession = getSourceSessionForRetake(session);
@@ -255,7 +407,7 @@ export function buildResultAttemptEntries(testType, attemptsList = []) {
     }
   });
 
-  return baseAttempts.map((attempt) => {
+  return sortedAttempts.map((attempt) => {
     const session = getAttemptSession(attempt, testSessionsState.list);
     const sourceSession = isRetakeSession(session) ? getSourceSessionForRetake(session) : null;
     const isRetake = Boolean(sourceSession?.id);
