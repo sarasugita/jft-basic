@@ -193,9 +193,15 @@ export function getAttemptCategory(attempt, testsList) {
   const test = getAttemptTest(attempt, testsList);
   const name = String(test?.title ?? "").trim();
   if (name) return name;
-  // No test found (session not linked to a question set) — fall back to session title
+  // For CSV-imported results: category stored directly in attempt meta
+  const meta = getAttemptMeta(attempt);
+  const metaCategory = String(meta?.imported_category ?? "").trim();
+  if (metaCategory) return metaCategory;
+  // Final fallback: session category or title (for in-app tests with missing test record)
   const session = getAttemptSession(attempt, testSessionsState.list);
-  return String(session?.title ?? "").trim() || "Uncategorized";
+  return String(session?.session_category ?? "").trim()
+    || String(session?.title ?? "").trim()
+    || "Uncategorized";
 }
 
 export function getAttemptDisplayDateValue(attempt, sessionsList) {

@@ -102,6 +102,14 @@ function getSessionSortTime(session) {
   return new Date(session?.starts_at || session?.created_at || 0).getTime();
 }
 
+function getQuestionSetVersionRank(item) {
+  const label = String(item?.version_label ?? "").trim().toLowerCase();
+  const match = label.match(/^v(\d+)$/i);
+  if (match) return Number(match[1]);
+  const version = Number(item?.version ?? 0);
+  return Number.isFinite(version) ? version : 0;
+}
+
 function normalizeLegacyTestErrorMessage(error, action = "update") {
   const text = String(error?.message ?? "").trim();
   if (
@@ -121,6 +129,10 @@ function isImportedResultsSummaryAttempt(attempt) {
 
 function isGeneratedDailySessionVersion(version) {
   return String(version ?? "").startsWith("daily_session_");
+}
+
+function isImportedModelResultsTestVersion(version) {
+  return String(version ?? "").startsWith("imported-");
 }
 
 function shuffleCopy(items) {
@@ -1798,6 +1810,33 @@ export function useTestingWorkspaceState({
     selectedDailySourceCategoryNames,
   ]);
 
+  const selectLatestQuestionSetVersions = useCallback((list, getKey) => {
+    const latestByKey = new Map();
+    (list ?? []).forEach((item) => {
+      const key = String(getKey?.(item) ?? "").trim();
+      if (!key) return;
+      const current = latestByKey.get(key);
+      if (!current) {
+        latestByKey.set(key, item);
+        return;
+      }
+
+      const currentRank = getQuestionSetVersionRank(current);
+      const nextRank = getQuestionSetVersionRank(item);
+      if (nextRank !== currentRank) {
+        if (nextRank > currentRank) latestByKey.set(key, item);
+        return;
+      }
+
+      const currentTime = new Date(current.updated_at || current.created_at || 0).getTime();
+      const nextTime = new Date(item.updated_at || item.created_at || 0).getTime();
+      if (nextTime > currentTime) {
+        latestByKey.set(key, item);
+      }
+    });
+    return Array.from(latestByKey.values());
+  }, []);
+
   const dailyCategories = useMemo(() => {
     const categorySet = new Set(
       dailyQuestionSets
@@ -1820,20 +1859,9 @@ export function useTestingWorkspaceState({
       .sort((left, right) => left.name.localeCompare(right.name));
   }, [modelTests]);
 
-  // Categories for session creation UI
-  // Show tests that have published sessions OR are not bare imported tests
-  // Bare imported tests = tests with no published sessions (they're imported result CSV tests)
   const modelConductCategories = useMemo(() => {
-    const publishedSessionVersions = new Set(
-      modelSessions.map((s) => s.problem_set_id).filter(Boolean)
-    );
-    // Include tests that either have a published session OR are regular test uploads
-    // Exclude only bare imported tests (those with no published sessions)
-    const testsToShow = modelTests.filter(
-      (t) => publishedSessionVersions.has(t.version) || !t.version.startsWith("daily_session_")
-    );
-    return buildCategories(testsToShow, DEFAULT_MODEL_CATEGORY, "version");
-  }, [modelTests, modelSessions]);
+    return buildCategories(modelTestsInSessions, DEFAULT_MODEL_CATEGORY, "version");
+  }, [modelTestsInSessions]);
 
   const dailyConductCategories = useMemo(() => {
     const publishedSessionVersions = new Set(
@@ -1847,9 +1875,11 @@ export function useTestingWorkspaceState({
   }, [dailyQuestionSets, dailySessions]);
 
   const filteredModelUploadTests = useMemo(() => {
-    if (!modelUploadCategory) return modelTests;
-    return modelTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
-  }, [modelTests, modelUploadCategory]);
+    const latestTests = selectLatestQuestionSetVersions(modelTests, (item) => item.version)
+      .filter((test) => !isImportedModelResultsTestVersion(test.version));
+    if (!modelUploadCategory) return latestTests;
+    return latestTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
+  }, [modelTests, modelUploadCategory, selectLatestQuestionSetVersions]);
 
   const groupedModelUploadTests = useMemo(
     () => buildCategories(filteredModelUploadTests, DEFAULT_MODEL_CATEGORY, "version"),
@@ -1869,14 +1899,27 @@ export function useTestingWorkspaceState({
   const dailyResultCategories = useMemo(() => buildDailySessionCategoryGroups(allDailySessions), [buildDailySessionCategoryGroups, allDailySessions]);
 
   const modelResultCategories = useMemo(() => {
-    const sessionVersions = new Set(
-      (allModelSessions ?? [])
-        .filter((session) => !isRetakeSessionTitle(session.title))
-        .map((session) => session.problem_set_id)
+    const resultVersions = new Set(
+      (attempts ?? [])
+        .filter((attempt) => {
+          const meta = testMetaByVersion[attempt?.test_version];
+          return meta?.type === "mock";
+        })
+        .map((attempt) => attempt?.test_version)
         .filter(Boolean)
     );
-    return buildCategories((modelTests ?? []).filter((test) => sessionVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
-  }, [modelTests, allModelSessions]);
+    return buildCategories((modelTests ?? []).filter((test) => resultVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
+  }, [attempts, modelTests, testMetaByVersion]);
+
+  const modelTestsWithResults = useMemo(() => {
+    const resultVersions = new Set(
+      (attempts ?? [])
+        .filter((attempt) => testMetaByVersion[attempt?.test_version]?.type === "mock")
+        .map((attempt) => attempt?.test_version)
+        .filter(Boolean)
+    );
+    return modelTests.filter((test) => resultVersions.has(test.version));
+  }, [attempts, modelTests, testMetaByVersion]);
 
   const dailySessionCategories = useMemo(() => buildDailySessionCategoryGroups(dailySessions), [buildDailySessionCategoryGroups, dailySessions]);
 
@@ -1888,9 +1931,9 @@ export function useTestingWorkspaceState({
   }, [dailySessionCategories, dailySessionForm.session_category]);
 
   const selectedModelSessionCategory = useMemo(() => {
-    if (!modelCategories.length) return null;
-    return modelCategories.find((category) => category.name === modelSessionCategory) ?? modelCategories[0];
-  }, [modelCategories, modelSessionCategory]);
+    if (!modelConductCategories.length) return null;
+    return modelConductCategories.find((category) => category.name === modelSessionCategory) ?? modelConductCategories[0];
+  }, [modelConductCategories, modelSessionCategory]);
 
   const filteredModelSessions = useMemo(() => {
     const list = !selectedModelSessionCategory
@@ -1926,14 +1969,14 @@ export function useTestingWorkspaceState({
   }, [dailySessions, selectedDailySessionCategory, getDailySessionCategoryName]);
 
   useEffect(() => {
-    if (!modelCategories.length) {
+    if (!modelConductCategories.length) {
       if (modelSessionCategory) setModelSessionCategory("");
       return;
     }
-    if (!modelSessionCategory || !modelCategories.some((category) => category.name === modelSessionCategory)) {
-      setModelSessionCategory(modelCategories[0].name);
+    if (!modelSessionCategory || !modelConductCategories.some((category) => category.name === modelSessionCategory)) {
+      setModelSessionCategory(modelConductCategories[0].name);
     }
-  }, [modelCategories, modelSessionCategory]);
+  }, [modelConductCategories, modelSessionCategory]);
 
   useEffect(() => {
     if (!dailySessionCategories.length) {
@@ -2095,8 +2138,8 @@ export function useTestingWorkspaceState({
   );
 
   const modelResultsMatrix = useMemo(
-    () => buildSessionResultsMatrix(selectedModelCategory ?? { tests: modelTests }),
-    [buildSessionResultsMatrix, selectedModelCategory, modelTests]
+    () => buildSessionResultsMatrix(selectedModelCategory ?? { tests: modelTestsWithResults }),
+    [buildSessionResultsMatrix, modelTestsWithResults, selectedModelCategory]
   );
 
   const buildSessionHeaderAverageMap = useCallback((matrix) => {
@@ -5243,14 +5286,14 @@ export function useTestingWorkspaceState({
   }, [dailyCategories, dailyForm.category]);
 
   useEffect(() => {
-    if (!modelCategories.length) {
+    if (!groupedModelUploadTests.length) {
       setAssetCategorySelect(DEFAULT_MODEL_CATEGORY);
       if (!assetForm.category) {
         setAssetForm((current) => ({ ...current, category: DEFAULT_MODEL_CATEGORY }));
       }
       return;
     }
-    if (assetForm.category && modelCategories.some((category) => category.name === assetForm.category)) {
+    if (assetForm.category && groupedModelUploadTests.some((category) => category.name === assetForm.category)) {
       setAssetCategorySelect(assetForm.category);
       return;
     }
@@ -5258,12 +5301,12 @@ export function useTestingWorkspaceState({
       setAssetCategorySelect(CUSTOM_CATEGORY_OPTION);
       return;
     }
-    const fallbackCategory = modelCategories[0]?.name ?? DEFAULT_MODEL_CATEGORY;
+    const fallbackCategory = groupedModelUploadTests[0]?.name ?? DEFAULT_MODEL_CATEGORY;
     setAssetCategorySelect(fallbackCategory);
     if (assetForm.category !== fallbackCategory) {
       setAssetForm((current) => ({ ...current, category: fallbackCategory }));
     }
-  }, [modelCategories, assetForm.category, assetCategorySelect]);
+  }, [assetCategorySelect, assetForm.category, groupedModelUploadTests]);
 
   // Cleanup effect for preview section refs
   useEffect(() => {

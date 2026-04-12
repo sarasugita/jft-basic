@@ -1435,6 +1435,10 @@ function buildImportedResultTestVersion(type, categoryName, index = 0) {
   return `imported-${type}-${sanitizeImportedCategorySlug(categoryName)}-${Date.now()}-${index + 1}`;
 }
 
+function isImportedModelResultsTestVersion(version) {
+  return String(version ?? "").startsWith("imported-");
+}
+
 function formatImportedResultSessionTitle(session) {
   const title = String(session?.title ?? "").trim();
   const titleIsSynthetic = title.startsWith("imported-") || title.startsWith("daily_session_");
@@ -3568,6 +3572,10 @@ export default function AdminConsole({
     () => testSessions.filter((s) => modelTests.some((t) => t.version === s.problem_set_id)),
     [testSessions, modelTests]
   );
+  const modelTestsInSessions = useMemo(() => {
+    const usedVersions = new Set(modelSessions.map((session) => session.problem_set_id).filter(Boolean));
+    return modelTests.filter((test) => usedVersions.has(test.version));
+  }, [modelSessions, modelTests]);
   const dailySessions = useMemo(
     () => testSessions.filter((s) => dailyTests.some((t) => t.version === s.problem_set_id)),
     [testSessions, dailyTests]
@@ -4081,14 +4089,14 @@ export default function AdminConsole({
   }, [buildDailySessionCategoryGroups, dailySessions]);
 
   const modelResultCategories = useMemo(() => {
-    const sessionVersions = new Set(
-      (testSessions ?? [])
-        .filter((session) => !isRetakeSessionTitle(session.title))
-        .map((session) => session.problem_set_id)
+    const resultVersions = new Set(
+      (studentModelAttempts ?? [])
+        .filter((attempt) => testMetaByVersion[attempt?.test_version]?.type === "mock")
+        .map((attempt) => attempt?.test_version)
         .filter(Boolean)
     );
-    return buildCategories((modelTests ?? []).filter((test) => sessionVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
-  }, [modelTests, testSessions]);
+    return buildCategories((modelTests ?? []).filter((test) => resultVersions.has(test.version)), DEFAULT_MODEL_CATEGORY);
+  }, [modelTests, studentModelAttempts, testMetaByVersion]);
 
   const dailyResultsImportCategories = useMemo(() => {
     const seen = new Set();
@@ -4285,10 +4293,12 @@ export default function AdminConsole({
   const [modelUploadCategory, setModelUploadCategory] = useState("");
   const [dailyUploadCategory, setDailyUploadCategory] = useState("");
 
+  const modelConductCategories = useMemo(() => buildCategories(modelTestsInSessions, DEFAULT_MODEL_CATEGORY, "version"), [modelTestsInSessions]);
+
   const selectedModelConductCategory = useMemo(() => {
-    if (!modelCategories.length || !modelConductCategory) return null;
-    return modelCategories.find((c) => c.name === modelConductCategory) ?? null;
-  }, [modelCategories, modelConductCategory]);
+    if (!modelConductCategories.length || !modelConductCategory) return null;
+    return modelConductCategories.find((c) => c.name === modelConductCategory) ?? null;
+  }, [modelConductCategories, modelConductCategory]);
 
   const modelConductTests = selectedModelConductCategory?.tests ?? [];
   const selectedDailySourceCategoryNames = useMemo(() => {
@@ -4388,8 +4398,9 @@ export default function AdminConsole({
 
   const filteredModelUploadTests = useMemo(() => {
     const latestTests = selectLatestQuestionSetVersions(modelTests, (item) => item.version);
-    if (!modelUploadCategory) return latestTests;
-    return latestTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
+    const realUploadedTests = latestTests.filter((test) => !isImportedModelResultsTestVersion(test.version));
+    if (!modelUploadCategory) return realUploadedTests;
+    return realUploadedTests.filter((t) => String(t.title ?? "").trim() === modelUploadCategory);
   }, [modelTests, modelUploadCategory, selectLatestQuestionSetVersions]);
 
   const groupedModelUploadTests = useMemo(
@@ -4521,14 +4532,14 @@ export default function AdminConsole({
   }, [dailyCategories, dailyForm.category]);
 
   useEffect(() => {
-    if (!modelCategories.length) {
+    if (!groupedModelUploadTests.length) {
       setAssetCategorySelect(DEFAULT_MODEL_CATEGORY);
       if (!assetForm.category) {
         setAssetForm((s) => ({ ...s, category: DEFAULT_MODEL_CATEGORY }));
       }
       return;
     }
-    if (assetForm.category && modelCategories.some((c) => c.name === assetForm.category)) {
+    if (assetForm.category && groupedModelUploadTests.some((c) => c.name === assetForm.category)) {
       setAssetCategorySelect(assetForm.category);
       return;
     }
@@ -4536,22 +4547,22 @@ export default function AdminConsole({
       setAssetCategorySelect("__custom__");
       return;
     }
-    const fallbackCategory = modelCategories[0]?.name ?? DEFAULT_MODEL_CATEGORY;
+    const fallbackCategory = groupedModelUploadTests[0]?.name ?? DEFAULT_MODEL_CATEGORY;
     setAssetCategorySelect(fallbackCategory);
     if (assetForm.category !== fallbackCategory) {
       setAssetForm((s) => ({ ...s, category: fallbackCategory }));
     }
-  }, [modelCategories, assetForm.category, assetCategorySelect]);
+  }, [groupedModelUploadTests, assetForm.category, assetCategorySelect]);
 
   useEffect(() => {
-    if (!modelCategories.length) {
+    if (!modelConductCategories.length) {
       if (modelConductCategory) setModelConductCategory("");
       return;
     }
-    if (modelConductCategory && !modelCategories.some((c) => c.name === modelConductCategory)) {
+    if (modelConductCategory && !modelConductCategories.some((c) => c.name === modelConductCategory)) {
       setModelConductCategory("");
     }
-  }, [modelCategories, modelConductCategory]);
+  }, [modelConductCategories, modelConductCategory]);
 
   function openModelUploadModal() {
     const normalizedCategory = String(assetForm.category ?? "").trim();

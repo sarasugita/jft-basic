@@ -335,7 +335,7 @@ export default function AdminConsoleTestingTabs({
               {sessionDetail.type === "mock" && sessionDetail.sessionId ? null : (
                 <>
                   <div className="admin-mini-tabs results-category-tabs" style={{ marginTop: 22 }}>
-                    {modelCategories.map((category) => (
+                    {modelConductCategories.map((category) => (
                       <button
                         key={`model-session-cat-${category.name}`}
                         type="button"
@@ -1018,7 +1018,7 @@ export default function AdminConsoleTestingTabs({
                   >
                     All
                   </button>
-                  {modelCategories.map((category) => (
+                  {groupedModelUploadTests.map((category) => (
                     <button
                       key={`model-upload-cat-${category.name}`}
                       type="button"
@@ -1141,7 +1141,7 @@ export default function AdminConsoleTestingTabs({
                               }
                             }}
                           >
-                            {(modelCategories.length ? modelCategories : [{ name: DEFAULT_MODEL_CATEGORY }]).map((category) => (
+                            {(groupedModelUploadTests.length ? groupedModelUploadTests : [{ name: DEFAULT_MODEL_CATEGORY }]).map((category) => (
                               <option key={`asset-upload-category-${category.name}`} value={category.name}>
                                 {category.name}
                               </option>

@@ -527,6 +527,7 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
           school_id: activeSchoolId,
           problem_set_id: column.linkedTest.version,
           title: column.importTitle,
+          session_category: categoryName,
           starts_at: sessionDateIso,
           ends_at: sessionDateIso,
           time_limit_min: null,
@@ -624,6 +625,7 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
             imported_test_date: column.importDateIso || null,
             imported_rate: rate,
             imported_csv_index: column.columnIndex,
+            imported_category: categoryName,
           }),
           tab_left_count: 0,
         });
