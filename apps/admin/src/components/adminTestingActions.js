@@ -151,7 +151,11 @@ export async function clearDailyResultsForCategoryAction(context, category) {
     return;
   }
   const testVersions = (category?.tests ?? []).map((test) => test?.version).filter(Boolean);
-  const sessionsToDelete = (dailySessions ?? [])
+  const categorySessions = Array.isArray(category?.sessions) ? category.sessions : [];
+  const sessionsSource = categorySessions.length
+    ? categorySessions
+    : (dailySessions ?? []).filter((session) => testVersions.includes(session.problem_set_id));
+  const sessionsToDelete = sessionsSource
     .filter((session) => testVersions.includes(session.problem_set_id))
     .filter((session) => session?.id)
     .filter((session, index, list) => list.findIndex((item) => item.id === session.id) === index);
@@ -177,7 +181,7 @@ export async function clearDailyResultsForCategoryAction(context, category) {
   }
 
   const confirmed = window.confirm(
-    `Clear all daily test results in "${categoryName}"?\n\nThis will delete ${attemptCount} result record${attemptCount === 1 ? "" : "s"} from the current category.`
+    `Warning: clear all daily test results in "${categoryName}"?\n\nThis will permanently delete ${attemptCount} result record${attemptCount === 1 ? "" : "s"} and ${sessionIds.length} result session${sessionIds.length === 1 ? "" : "s"} from the current category.`
   );
   if (!confirmed) return;
 

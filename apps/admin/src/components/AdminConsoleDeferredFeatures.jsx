@@ -308,14 +308,19 @@ export default function AdminConsoleDeferredFeatures({
                       </button>
                     ) : null}
                     {resultContext.type === "daily" ? (
-                      <button
-                        className="btn btn-danger results-page-action-btn"
-                        type="button"
-                        onClick={() => handleClearDailyResultsForCategory?.(selectedDailyCategory)}
-                        disabled={!selectedDailyCategory || !handleClearDailyResultsForCategory}
-                      >
-                        <span>Clear All Results</span>
-                      </button>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <button
+                          className="btn btn-danger results-page-action-btn"
+                          type="button"
+                          onClick={() => handleClearDailyResultsForCategory?.(selectedDailyCategory)}
+                          disabled={!selectedDailyCategory || !handleClearDailyResultsForCategory}
+                        >
+                          <span>Clear All Results</span>
+                        </button>
+                        <div className="admin-help" style={{ color: "#b91c1c", maxWidth: 320 }}>
+                          Warning: deletes every result and session in the selected daily category.
+                        </div>
+                      </div>
                     ) : null}
                     <input
                       ref={resultsImportInputRef}
