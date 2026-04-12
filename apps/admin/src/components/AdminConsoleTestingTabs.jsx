@@ -726,10 +726,10 @@ export default function AdminConsoleTestingTabs({
                               value={modelConductCategory}
                               onChange={(e) => setModelConductCategory(e.target.value)}
                             >
-                              {modelConductCategories.length ? (
+                              {modelCategories.length ? (
                                 <>
                                   <option value="">Select category</option>
-                                  {modelConductCategories.map((c) => (
+                                  {modelCategories.map((c) => (
                                     <option key={`model-cat-${c.name}`} value={c.name}>
                                       {c.name}
                                     </option>
@@ -760,6 +760,11 @@ export default function AdminConsoleTestingTabs({
                                 <option value="">No problem sets</option>
                               )}
                             </select>
+                            {modelConductCategory && !modelConductTests.length ? (
+                              <div className="admin-help" style={{ marginTop: 4 }}>
+                                No SetIDs have been uploaded yet for this category.
+                              </div>
+                            ) : null}
                           </div>
                           <div className="daily-session-create-field">
                             <label>Test Title</label>

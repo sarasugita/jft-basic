@@ -2041,11 +2041,17 @@ export function useTestingWorkspaceState({
   }, [modelResultCategories, modelResultsCategory]);
 
   const selectedModelConductCategory = useMemo(() => {
-    if (!modelConductCategories.length || !modelConductCategory) return null;
-    return modelConductCategories.find((c) => c.name === modelConductCategory) ?? null;
-  }, [modelConductCategories, modelConductCategory]);
+    if (!modelCategories.length || !modelConductCategory) return null;
+    return modelCategories.find((c) => c.name === modelConductCategory) ?? null;
+  }, [modelCategories, modelConductCategory]);
 
-  const modelConductTests = selectedModelConductCategory?.tests ?? [];
+  const modelConductTests = useMemo(() => {
+    const categoryName = String(modelConductCategory ?? "").trim();
+    if (!categoryName) return [];
+    return tests.filter(
+      (test) => test.type === "mock" && (String(test.title ?? "").trim() || DEFAULT_MODEL_CATEGORY) === categoryName
+    );
+  }, [tests, modelConductCategory]);
 
   const buildSessionResultsMatrix = useCallback((selectedCategory) => {
     const testsForCategory = selectedCategory?.tests ?? [];
@@ -5355,13 +5361,14 @@ export function useTestingWorkspaceState({
   // Validate selected category against available categories
   // but don't auto-select - user must explicitly choose
   useEffect(() => {
-    if (!modelConductCategory || !modelConductCategories.some((c) => c.name === modelConductCategory)) {
+    const availableModelCategories = modelConductMode === "retake" ? modelConductCategories : modelCategories;
+    if (!modelConductCategory || !availableModelCategories.some((c) => c.name === modelConductCategory)) {
       // If selected category is no longer valid, clear it
       if (modelConductCategory) {
         setModelConductCategory("");
       }
     }
-  }, [modelConductCategories, modelConductCategory]);
+  }, [modelConductMode, modelCategories, modelConductCategories, modelConductCategory]);
 
   useEffect(() => {
     if (!dailyConductCategory || !dailyCategories.some((c) => c.name === dailyConductCategory)) {
