@@ -146,7 +146,7 @@ export function renderResult(app) {
                         `
                         : ""
                     }
-                    <div class="prompt-text">${escapeHtml(r.prompt ?? "")}</div>
+                    <div class="prompt-text">${r.promptHtml || escapeHtml(r.prompt ?? "")}</div>
                   </td>
 
                   <td class="cell-judge">

@@ -409,6 +409,9 @@ function inferModelQuestionType(
   if (sectionKey === "SV" && /【.+?】/.test(String(stemText ?? ""))) {
     return "mcq_kanji_reading";
   }
+  if (normalizedStemKind === "text_box") {
+    return "mcq_sentence_blank";
+  }
   if (hasSubQuestion) return "mcq_grouped_text";
   return "mcq_text";
 }
@@ -1302,6 +1305,7 @@ export async function syncLegacyTestCatalog(
         stemAsset: stemAsset || null,
         stemExtra: String(question.metadata?.description ?? "").trim() || null,
         boxText: String(question.metadata?.box_text ?? "").trim() || null,
+        blankStyle: String(question.metadata?.blank_style ?? "").trim() || (normalizedStemKind === "text_box" ? "redBox" : null),
         choices: resolvedOptions,
         target: String(question.metadata?.target ?? "").trim() || null,
         canDo: String(question.metadata?.canDo ?? question.metadata?.can_do ?? "").trim() || null,

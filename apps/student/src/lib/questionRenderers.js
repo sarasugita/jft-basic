@@ -28,6 +28,25 @@ export function renderUnderlines(text) {
   return renderStemMarkup(text);
 }
 
+function hasSpeakerLine(text) {
+  return splitStemLinesPreserveIndent(text).some((line) => Boolean(parseSpeakerStemLine(line)?.speaker));
+}
+
+function shouldUseSpeakerLayout(question, text) {
+  const stemKind = normalizeStemKindValue(question.stemKind || "");
+  const type = String(question?.type ?? "").trim();
+  const blankStyle = String(question?.blankStyle ?? question?.blank_style ?? "").trim().toLowerCase();
+  return (
+    stemKind === "dialog"
+    || stemKind === "text_box"
+    || type === "mcq_dialog"
+    || type === "mcq_dialog_with_image"
+    || type === "mcq_sentence_blank"
+    || blankStyle === "redbox"
+    || hasSpeakerLine(text)
+  );
+}
+
 export function renderSpeakerStemLines(lines, containerClass = "dialog-lines") {
   if (!Array.isArray(lines) || !lines.length) return "";
   return `<div class="${containerClass}">${lines
@@ -100,11 +119,18 @@ export function renderStemHTML(question, opts = {}) {
   const stemMedia = getStemMediaAssets(question);
   const audioAssets = stemMedia.audios;
   const imageAssets = stemMedia.images;
-  if (stemKind === "dialog" || stemKind === "text_box") {
-    const lines = stemKind === "text_box"
-      ? splitTextBoxStemLines(question.stemExtra || question.stemText || "")
-      : splitStemLinesPreserveIndent(question.stemExtra || question.stemText || "");
-    const dialogLines = renderSpeakerStemLines(lines, stemKind === "text_box" ? "dialog-lines text-box-lines" : "dialog-lines");
+  const stemSourceText = question.stemExtra || question.stemText || "";
+  const useSpeakerLayout = shouldUseSpeakerLayout(question, stemSourceText);
+  if (useSpeakerLayout && stemSourceText) {
+    const lines = stemKind === "text_box" || String(question?.type ?? "").trim() === "mcq_sentence_blank"
+      ? splitTextBoxStemLines(stemSourceText)
+      : splitStemLinesPreserveIndent(stemSourceText);
+    const dialogLines = renderSpeakerStemLines(
+      lines,
+      stemKind === "text_box" || String(question?.type ?? "").trim() === "mcq_sentence_blank"
+        ? "dialog-lines text-box-lines"
+        : "dialog-lines"
+    );
     if (imageAssets.length) {
       parts.push(`
         <div class="dialog-row">

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuperAdmin } from "./SuperAdminShell";
 import { getAdminSupabaseConfig } from "../../lib/adminSupabase";
+import { notifyQuestionSetLibraryUpdated } from "../../lib/questionSetLibraryRefresh";
 
 const DEFAULT_DAILY_CATEGORY = "Vocabulary";
 const DEFAULT_MODEL_CATEGORY = "Book Review";
@@ -78,63 +79,6 @@ function splitCsvLine(line) {
   }
   out.push(current);
   return out;
-}
-
-function parseCsvRows(text) {
-  const rows = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
-    const next = text[i + 1];
-
-    if (char === "\"") {
-      current += char;
-      if (inQuotes && next === "\"") {
-        current += next;
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") i += 1;
-      if (current.trim().length > 0) {
-        rows.push(splitCsvLine(current).map((value) => String(value ?? "").trim().replace(/^\uFEFF/, "")));
-      }
-      current = "";
-      continue;
-    }
-
-    current += char;
-  }
-
-  if (current.trim().length > 0) {
-    rows.push(splitCsvLine(current).map((value) => String(value ?? "").trim().replace(/^\uFEFF/, "")));
-  }
-
-  return rows;
-}
-
-function detectFirstSetIdFromCsvText(text, testType) {
-  const rows = parseCsvRows(text);
-  if (rows.length < 2) return "";
-  const header = rows[0].map((value) => String(value ?? "").trim().toLowerCase().replace(/^\uFEFF/, ""));
-  const candidates = testType === "daily"
-    ? ["set_id", "set id", "testid", "test_id", "test id"]
-    : ["set_id", "set id", "test_version", "test version"];
-  const idx = candidates
-    .map((name) => header.indexOf(name))
-    .find((value) => value !== -1);
-  if (idx == null || idx === -1) return "";
-  for (let i = 1; i < rows.length; i += 1) {
-    const value = String(rows[i]?.[idx] ?? "").trim();
-    if (value) return value;
-  }
-  return "";
 }
 
 function getUploadFiles(csvFile, assetFiles) {
@@ -297,9 +241,17 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+function renderBlankBoxHtml() {
+  return '<span style="display:inline-block;width:3.6em;height:0.82lh;border:0.14em solid #ef4444;box-sizing:border-box;vertical-align:-0.02em;margin:0 0.25em;"></span>';
+}
+
 function renderUnderlinesHtml(text) {
   const escaped = escapeHtml(text ?? "");
-  return escaped.replace(/【(.*?)】/g, '<span class="u">$1</span>');
+  return escaped
+    .replace(/【(.*?)】/g, (_, inner) => (String(inner ?? "").replace(/[\s\u3000]/g, "").length
+      ? `<span class="u">${inner}</span>`
+      : renderBlankBoxHtml()))
+    .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, renderBlankBoxHtml());
 }
 
 function splitStemLines(text) {
@@ -307,6 +259,67 @@ function splitStemLines(text) {
     .split(/\r?\n|\|/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function splitStemLinesPreserveIndent(text) {
+  return String(text ?? "")
+    .split(/\r?\n|\|/)
+    .map((s) => s.replace(/\s+$/g, ""))
+    .filter((s) => s.trim().length);
+}
+
+function splitTextBoxStemLines(text) {
+  const baseLines = splitStemLinesPreserveIndent(text);
+  const expanded = [];
+  for (const line of baseLines) {
+    const speakerMatches = Array.from(
+      String(line).matchAll(/(?:^|\s+)([^:：\s]{1,20}[：:].*?)(?=(?:\s+[^:：\s]{1,20}[：:])|$)/g)
+    )
+      .map((match) => String(match[1] ?? "").trim())
+      .filter(Boolean);
+    if (speakerMatches.length >= 2) {
+      expanded.push(...speakerMatches);
+      continue;
+    }
+    expanded.push(line);
+  }
+  return expanded;
+}
+
+function parseSpeakerStemLine(line) {
+  const match = String(line ?? "").match(/^\s*([^:：]+?)([:：])(.*)$/);
+  if (!match) return null;
+  return {
+    speaker: String(match[1] ?? "").trim(),
+    delimiter: match[2] ?? "：",
+    body: String(match[3] ?? "").replace(/^\s+/g, ""),
+  };
+}
+
+function normalizeQuestionKind(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s/+]+/g, "_");
+}
+
+function hasSpeakerLine(text) {
+  return splitStemLinesPreserveIndent(text).some((line) => Boolean(parseSpeakerStemLine(line)?.speaker));
+}
+
+function shouldUseSpeakerLayout(question, text) {
+  const stemKind = normalizeQuestionKind(question?.stemKind ?? "");
+  const type = normalizeQuestionKind(question?.type ?? "");
+  const blankStyle = normalizeQuestionKind(question?.blankStyle ?? question?.blank_style ?? "");
+  return (
+    stemKind === "dialog"
+    || stemKind === "text_box"
+    || blankStyle === "redbox"
+    || type === "mcq_sentence_blank"
+    || type === "mcq_dialog"
+    || type === "mcq_dialog_with_image"
+    || hasSpeakerLine(text)
+  );
 }
 
 function mapDbQuestion(row) {
@@ -593,10 +606,6 @@ export default function SuperTestsImportPage() {
       ...metadataInput,
       school_ids: metadataInput.visibility_scope === "restricted" ? metadataInput.school_ids : [],
     };
-    if (!metadata.title && selectedCsvFile) {
-      const detectedTitle = detectFirstSetIdFromCsvText(await selectedCsvFile.text(), metadata.test_type);
-      if (detectedTitle) metadata.title = detectedTitle;
-    }
     const uploadFiles = getUploadFiles(selectedCsvFile, selectedAssetFiles);
     const formData = new FormData();
     formData.append("metadata", JSON.stringify(metadata));
@@ -771,6 +780,7 @@ export default function SuperTestsImportPage() {
             ? `${createdCount} question sets created.`
             : "Question set created.",
       );
+      notifyQuestionSetLibraryUpdated();
       await loadLibrary();
     } catch (error) {
       setValidationMsg(String(error.message ?? error));
@@ -819,9 +829,11 @@ export default function SuperTestsImportPage() {
             ? `Set updated and new version uploaded. ${result.scope_notice}`
             : "Set updated and new version uploaded.",
         );
+        notifyQuestionSetLibraryUpdated();
       } else {
         await invokeJsonFunction("update-question-set-metadata", metaForm);
         setMsg("Set metadata updated.");
+        notifyQuestionSetLibraryUpdated();
       }
       setMetaOpen(false);
       await loadLibrary();
@@ -847,6 +859,7 @@ export default function SuperTestsImportPage() {
             ? "Set archived."
             : "Set updated.",
       );
+      notifyQuestionSetLibraryUpdated();
       setDeleteTarget(null);
       await loadLibrary();
     } catch (error) {
@@ -1140,7 +1153,7 @@ export default function SuperTestsImportPage() {
               ) : null}
               <div className="upload-question-actions">
                 <button className="btn btn-primary" onClick={saveUpload} disabled={saving}>
-                  {saving ? "Uploading..." : "Upload Question Sets"}
+                  {saving ? "Uploading..." : uploadForm.mode === "version" ? "Upload New Version" : "Create Question Sets"}
                 </button>
               </div>
               {uploadProgress.total > 0 ? (
@@ -1152,7 +1165,7 @@ export default function SuperTestsImportPage() {
             {validationMsg ? <div className="admin-msg">{validationMsg}</div> : null}
             <ValidationReport validation={validation} />
             <div className="admin-help" style={{ marginTop: 8 }}>
-              SetID is read from the CSV `set_id` column. If the file contains multiple `set_id` values, each one is imported as a separate question set.
+              SetID is read from the CSV `set_id` column. If the file is missing `set_id`, the upload will fail. If the file contains multiple `set_id` values, each one is imported as a separate question set.
             </div>
             <div className="admin-help" style={{ marginTop: 8 }}>
               Template: <a href="/daily_question_csv_template.csv" download>Daily CSV template</a>
@@ -1395,6 +1408,9 @@ export default function SuperTestsImportPage() {
                   const shouldShowImage = isImageStem || (!stemKind && isImageAsset(stemAsset));
                   const shouldShowAudio = isAudioStem || (!stemKind && isAudioAsset(stemAsset));
                   const stemLines = splitStemLines(stemExtra);
+                  const stemSourceText = stemExtra || stemText || "";
+                  const useSpeakerLayout = shouldUseSpeakerLayout(question, stemSourceText);
+                  const speakerLines = useSpeakerLayout ? splitTextBoxStemLines(stemSourceText) : [];
                   return (
                     <div key={`${question.qid}-${index}`}>
                       {previewSet?.test_type === "model" && showHeader ? (
@@ -1418,13 +1434,37 @@ export default function SuperTestsImportPage() {
                           {stemExtra}
                         </div>
                       ) : null}
-                      {stemText ? (
+                      {stemText && !useSpeakerLayout ? (
                         <div
                           style={{ marginTop: 6, whiteSpace: "pre-wrap" }}
                           dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
                         />
                       ) : null}
-                      {stemLines.length && question.type !== "daily" ? (
+                      {useSpeakerLayout && speakerLines.length ? (
+                        <div style={{ marginTop: 6, display: "grid", gap: 4 }}>
+                          {speakerLines.map((line, lineIndex) => {
+                            const parsed = parseSpeakerStemLine(line);
+                            if (!parsed || !parsed.speaker) {
+                              return (
+                                <div
+                                  key={`${question.id}-textbox-line-${lineIndex}`}
+                                  dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(line) }}
+                                />
+                              );
+                            }
+                            return (
+                              <div
+                                key={`${question.id}-textbox-line-${lineIndex}`}
+                                style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", columnGap: "0.45em", alignItems: "start" }}
+                              >
+                                <span style={{ whiteSpace: "nowrap" }}>{parsed.speaker}{parsed.delimiter}</span>
+                                <span dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(parsed.body) }} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                      {stemLines.length && question.type !== "daily" && !useSpeakerLayout ? (
                         <div style={{ marginTop: 6 }}>
                           {stemLines.map((line, lineIndex) => (
                             <div

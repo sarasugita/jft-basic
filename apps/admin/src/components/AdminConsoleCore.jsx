@@ -17,6 +17,7 @@ import {
   readAdminConsoleDataCache,
   writeAdminConsoleDataCache,
 } from "../lib/adminConsoleDataCache";
+import { subscribeQuestionSetLibraryUpdated } from "../lib/questionSetLibraryRefresh";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
 import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
 import { AdminConsoleWorkspaceProvider } from "./AdminConsoleWorkspaceContext";
@@ -1920,6 +1921,9 @@ function inferModelQuestionType({ sectionKey, stemKind, stemText, stemImage, ste
   }
   if (sectionKey === "SV" && /【.+?】/.test(String(stemText ?? ""))) {
     return "mcq_kanji_reading";
+  }
+  if (normalizedStemKind === "text_box") {
+    return "mcq_sentence_blank";
   }
   if (hasSubQuestion) return "mcq_grouped_text";
   return "mcq_text";
@@ -7865,6 +7869,16 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setTestsMsg(list.length ? "" : "No tests.");
   }
 
+  const fetchTestsRef = useRef(fetchTests);
+
+  useEffect(() => {
+    fetchTestsRef.current = fetchTests;
+  }, [fetchTests]);
+
+  useEffect(() => subscribeQuestionSetLibraryUpdated(() => {
+    void fetchTestsRef.current?.();
+  }), []);
+
   async function fetchTestSessions() {
     setTestSessionsMsg("Loading...");
     let { data, error } = await supabase
@@ -8319,8 +8333,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setActiveModelTimePicker("");
     if (mode !== "retake") {
       setModelRetakeSourceId("");
+      const firstModelVersion = modelConductTests[0]?.version ?? "";
       setTestSessionForm((current) => ({
         ...current,
+        problem_set_id: modelConductTests.some((test) => test.version === current.problem_set_id)
+          ? current.problem_set_id
+          : firstModelVersion,
         title: "",
         session_date: current.ends_at ? getBangladeshDateInput(current.ends_at) : "",
         start_time: current.starts_at ? getBangladeshTimeInput(current.starts_at) : "",
@@ -10082,6 +10100,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           stemAsset,
           stemExtra: null,
           boxText: subQuestion,
+          blankStyle: normalizeModelCsvKind(stemKind) === "text_box" ? "redBox" : null,
           choices: choicesList,
           sectionLabel: subSection,
           optionType,
@@ -10166,9 +10185,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
         stemAsset: getCell(row, "stem_asset") || null,
         stemExtra: getCell(row, "stem_extra") || null,
         boxText: getCell(row, "box_text") || null,
+        blankStyle: normalizeModelCsvKind(getCell(row, "stem_kind")) === "text_box" ? "redBox" : getCell(row, "meta_blank_style") || null,
         choices: choicesList,
         target: getCell(row, "target") || null,
-        blankStyle: getCell(row, "meta_blank_style") || null,
       };
 
       questions.push({

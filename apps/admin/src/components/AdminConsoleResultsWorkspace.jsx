@@ -13,13 +13,17 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+function renderBlankBoxHtml() {
+  return '<span style="display:inline-block;width:3.6em;height:0.82lh;border:0.14em solid #ef4444;box-sizing:border-box;vertical-align:-0.02em;margin:0 0.25em;"></span>';
+}
+
 function renderUnderlinesHtml(text) {
   const escaped = escapeHtml(text ?? "");
   return escaped
     .replace(/【(.*?)】/g, (_, inner) => (String(inner ?? "").replace(/[\s\u3000]/g, "").length
       ? `<span class="u">${inner}</span>`
-      : '<span class="blank-red"></span>'))
-    .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, '<span class="blank-red"></span>');
+      : renderBlankBoxHtml()))
+    .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, renderBlankBoxHtml());
 }
 
 function splitStemLines(text) {
@@ -62,6 +66,32 @@ function parseSpeakerStemLine(line) {
     delimiter: match[2] ?? "：",
     body: String(match[3] ?? "").replace(/^\s+/g, ""),
   };
+}
+
+function normalizeModelCsvKind(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s/+]+/g, "_");
+}
+
+function hasSpeakerLine(text) {
+  return splitStemLinesPreserveIndent(text).some((line) => Boolean(parseSpeakerStemLine(line)?.speaker));
+}
+
+function shouldUseSpeakerLayout(question, text) {
+  const stemKind = normalizeModelCsvKind(question?.stemKind ?? "");
+  const type = normalizeModelCsvKind(question?.type ?? "");
+  const blankStyle = normalizeModelCsvKind(question?.blankStyle ?? question?.blank_style ?? "");
+  return (
+    stemKind === "dialog"
+    || stemKind === "text_box"
+    || blankStyle === "redbox"
+    || type === "mcq_sentence_blank"
+    || type === "mcq_dialog"
+    || type === "mcq_dialog_with_image"
+    || hasSpeakerLine(text)
+  );
 }
 
 function getSectionLabelLines(label) {
@@ -2167,7 +2197,9 @@ export default function AdminConsoleResultsWorkspace(props) {
     const shouldShowImage = imageAssets.length > 0 || (isImageStem && stemAsset);
     const shouldShowAudio = audioAssets.length > 0 || (isAudioStem && stemAsset);
     const stemLines = splitStemLines(stemExtra);
-    const textBoxLines = splitTextBoxStemLines(stemExtra || stemText);
+    const stemSourceText = stemExtra || stemText || "";
+    const useSpeakerLayout = shouldUseSpeakerLayout(question, stemSourceText);
+    const speakerLines = useSpeakerLayout ? splitTextBoxStemLines(stemSourceText) : [];
     const sectionLabel = getQuestionSectionLabel(question) || question.sectionKey;
     const displayQuestionId = formatSourceQuestionLabel(
       question.sourceVersion || question.testVersion,
@@ -2277,15 +2309,15 @@ export default function AdminConsoleResultsWorkspace(props) {
             {stemExtra}
           </div>
         ) : null}
-        {stemText && stemKind !== "text_box" ? (
+        {stemText && !useSpeakerLayout ? (
           <div
             style={{ marginTop: 6 }}
             dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemText) }}
           />
         ) : null}
-        {stemKind === "text_box" && textBoxLines.length ? (
+        {useSpeakerLayout && speakerLines.length ? (
           <div style={{ marginTop: 6, display: "grid", gap: 4 }}>
-            {textBoxLines.map((line, lineIndex) => {
+            {speakerLines.map((line, lineIndex) => {
               const parsed = parseSpeakerStemLine(line);
               if (!parsed || !parsed.speaker) {
                 return (
@@ -2307,7 +2339,7 @@ export default function AdminConsoleResultsWorkspace(props) {
             })}
           </div>
         ) : null}
-        {stemLines.length && question.type !== "daily" && stemKind !== "text_box" ? (
+        {stemLines.length && question.type !== "daily" && !useSpeakerLayout ? (
           <div style={{ marginTop: 6 }}>
             {stemLines.map((line, lineIndex) => (
               <div

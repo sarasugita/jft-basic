@@ -5,12 +5,17 @@ import {
   getEffectiveAnswerIndices,
   getStemMediaAssets,
   isChoiceCorrect,
+  normalizeStemKindValue,
+  parseSpeakerStemLine,
+  splitStemLinesPreserveIndent,
+  splitTextBoxStemLines,
 } from "./questionHelpers";
 import { getPassRateForVersion, getSourceSessionForRetake, isRetakeSession } from "./sessionHelpers";
 import { getQuestions } from "../state/questionsState";
 import { state } from "../state/appState";
 import { resultDetailState } from "../state/resultsState";
 import { testsState, testSessionsState } from "../state/testsState";
+import { renderSpeakerStemLines, renderUnderlines } from "./questionRenderers";
 
 function getSectionTitle(sectionKey) {
   return sections.find((section) => section.key === sectionKey)?.title ?? sectionKey ?? "";
@@ -30,6 +35,41 @@ function pickChoiceImage(question, index) {
     return value;
   }
   return "";
+}
+
+function hasSpeakerLine(text) {
+  return splitStemLinesPreserveIndent(text).some((line) => Boolean(parseSpeakerStemLine(line)?.speaker));
+}
+
+function shouldUseSpeakerLayout(question, text) {
+  const stemKind = normalizeStemKindValue(question?.stemKind ?? "");
+  const type = String(question?.type ?? "").trim();
+  const blankStyle = String(question?.blankStyle ?? question?.blank_style ?? "").trim().toLowerCase();
+  return (
+    stemKind === "dialog"
+    || stemKind === "text_box"
+    || blankStyle === "redbox"
+    || type === "mcq_sentence_blank"
+    || type === "mcq_dialog"
+    || type === "mcq_dialog_with_image"
+    || hasSpeakerLine(text)
+  );
+}
+
+function renderPromptHtml(question, text) {
+  const promptText = String(text ?? "");
+  if (!promptText) return "";
+  if (!shouldUseSpeakerLayout(question, promptText)) {
+    return `<div class="preserve-lines">${renderUnderlines(promptText)}</div>`;
+  }
+  const stemKind = normalizeStemKindValue(question?.stemKind ?? "");
+  const lines = stemKind === "text_box" || String(question?.type ?? "").trim() === "mcq_sentence_blank"
+    ? splitTextBoxStemLines(promptText)
+    : splitStemLinesPreserveIndent(promptText);
+  const className = stemKind === "text_box" || String(question?.type ?? "").trim() === "mcq_sentence_blank"
+    ? "dialog-lines text-box-lines"
+    : "dialog-lines";
+  return renderSpeakerStemLines(lines, className);
 }
 
 function getAttemptMeta(attempt) {
@@ -152,7 +192,10 @@ export function getAttemptTestType(attempt, testsList) {
 export function getAttemptCategory(attempt, testsList) {
   const test = getAttemptTest(attempt, testsList);
   const name = String(test?.title ?? "").trim();
-  return name || "Uncategorized";
+  if (name) return name;
+  // No test found (session not linked to a question set) — fall back to session title
+  const session = getAttemptSession(attempt, testSessionsState.list);
+  return String(session?.title ?? "").trim() || "Uncategorized";
 }
 
 export function getAttemptDisplayDateValue(attempt, sessionsList) {
@@ -213,11 +256,13 @@ export function buildAttemptDetailRows(attempt, questionsList) {
     const chosenIdx = answers[question.id];
     const correctIndices = getEffectiveAnswerIndices(question);
     const stemMedia = getStemMediaAssets(question);
+    const promptText = getQuestionPrompt(question);
     return {
       qid: String(question.id),
       sectionKey: question.sectionKey || "",
       section: getQuestionSectionLabel(question),
-      prompt: getQuestionPrompt(question),
+      prompt: promptText,
+      promptHtml: renderPromptHtml(question, promptText),
       stemImages: stemMedia.images,
       stemAudios: stemMedia.audios,
       chosen: getChoiceText(question, chosenIdx),
@@ -466,6 +511,7 @@ export function buildResultRows() {
     rows.push({
       id: String(question.id),
       prompt: promptText,
+      promptHtml: renderPromptHtml(question, promptText),
       isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
       stemImages: stemMedia.images,
       stemAudios: stemMedia.audios,
@@ -595,7 +641,7 @@ export function renderDetailTable(rows, showAnswers) {
                   <td class="cell-no">${index + 1}</td>
                   <td class="cell-question">
                     <div class="detail-question">
-                      <div class="detail-question-text">${escapeHtml(row.prompt)}</div>
+                      <div class="detail-question-text">${row.promptHtml || escapeHtml(row.prompt)}</div>
                       ${
                         row.stemAudios?.length || row.stemImages?.length
                           ? `

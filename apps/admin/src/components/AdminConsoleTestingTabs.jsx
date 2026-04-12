@@ -738,8 +738,12 @@ export default function AdminConsoleTestingTabs({
                             <label>Set ID</label>
                             <select
                               value={testSessionForm.problem_set_id}
-                              onChange={(e) => setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }))}
+                              onChange={(e) => {
+                                setModelConductError("");
+                                setTestSessionForm((s) => ({ ...s, problem_set_id: e.target.value }));
+                              }}
                             >
+                              <option value="">Select SetID</option>
                               {modelConductTests.length ? (
                                 modelConductTests.map((t) => (
                                   <option key={`ps-${t.version}`} value={t.version}>
