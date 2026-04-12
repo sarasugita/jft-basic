@@ -18,6 +18,7 @@ export default function AdminConsoleRankingWorkspace() {
     updateRankingDraft,
     saveRankingPeriodLabel,
     refreshRankingPeriod,
+    deleteRankingPeriod,
   } = useRankingWorkspaceState({ supabase, activeSchoolId, session });
 
   useEffect(() => {
@@ -91,6 +92,25 @@ export default function AdminConsoleRankingWorkspace() {
                             fill="none"
                             stroke="currentColor"
                             strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        className="btn btn-danger admin-icon-action-btn ranking-delete-btn"
+                        type="button"
+                        aria-label={`Delete ${draft.label || period.label || "ranking period"}`}
+                        title="Delete period"
+                        onClick={() => deleteRankingPeriod(period)}
+                        disabled={rankingRefreshingId === period.id}
+                      >
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                          <path
+                            d="M6 6.5h8M8 6.5V5.2c0-.4.3-.7.7-.7h2.6c.4 0 .7.3.7.7v1.3M7.5 6.5l.4 8m4.2-8-.4 8M5.8 6.5l.5 8.3c0 .7.6 1.2 1.3 1.2h4.8c.7 0 1.2-.5 1.3-1.2l.5-8.3"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
                             strokeLinecap="round"
                             strokeLinejoin="round"
                           />

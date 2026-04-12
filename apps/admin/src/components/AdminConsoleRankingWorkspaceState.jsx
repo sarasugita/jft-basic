@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { logAdminEvent } from "../lib/adminDiagnostics";
 import {
   readAdminConsoleDataCache,
   writeAdminConsoleDataCache,
@@ -57,7 +58,7 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
   const cachedState = cacheUserId && activeSchoolId ? readAdminConsoleDataCache(cacheUserId, activeSchoolId) : null;
   const [rankingPeriods, setRankingPeriods] = useState(() => cachedState?.rankingPeriods ?? []);
   const [rankingMsg, setRankingMsg] = useState(() => cachedState?.rankingMsg ?? "");
-  const [rankingLoaded, setRankingLoaded] = useState(() => Boolean(cachedState?.rankingLoaded));
+  const [rankingLoaded, setRankingLoaded] = useState(false);
   const [rankingDrafts, setRankingDrafts] = useState(() => {
     const periods = cachedState?.rankingPeriods ?? [];
     const cachedDrafts = cachedState?.rankingDrafts ?? {};
@@ -79,6 +80,10 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
       rankingDrafts,
     });
   }, [activeSchoolId, cacheUserId, rankingDrafts, rankingLoaded, rankingMsg, rankingPeriods]);
+
+  useEffect(() => {
+    setRankingLoaded(false);
+  }, [activeSchoolId, cacheUserId]);
 
   const rankingRowCount = useMemo(
     () => Math.max(0, ...rankingPeriods.map((period) => period.ranking_entries?.length ?? 0)),
@@ -227,6 +232,13 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
     }
     setRankingRefreshingId(period.id);
     setRankingMsg("");
+    logAdminEvent("Ranking refresh start", {
+      schoolId: activeSchoolId,
+      periodId: period.id,
+      label: nextLabel,
+      startDate: draft.start_date,
+      endDate: draft.end_date,
+    });
     const { error: periodError } = await supabase
       .from("ranking_periods")
       .update({
@@ -310,6 +322,21 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
         rank_position: index + 1,
       }));
 
+    const rankingRates = rankings.map((item) => Number(item.average_rate)).filter((value) => Number.isFinite(value));
+    logAdminEvent("Ranking refresh debug", {
+      schoolId: activeSchoolId,
+      periodId: period.id,
+      label: nextLabel,
+      attemptsFetched: attemptsData?.length ?? 0,
+      studentsFetched: studentRows?.length ?? 0,
+      rankingStudents: rankingStudents.length,
+      latestAttemptRows: totalsByStudent.size,
+      rankingsCount: rankings.length,
+      minRate: rankingRates.length ? Math.min(...rankingRates) : null,
+      maxRate: rankingRates.length ? Math.max(...rankingRates) : null,
+      topRate: rankings[0]?.average_rate ?? null,
+    });
+
     const { error: clearError } = await supabase
       .from("ranking_entries")
       .delete()
@@ -333,6 +360,39 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
     }
     setRankingRefreshingId("");
     setRankingMsg(`Updated ${nextLabel}.`);
+    logAdminEvent("Ranking refresh complete", {
+      schoolId: activeSchoolId,
+      periodId: period.id,
+      label: nextLabel,
+      rankingsCount: rankings.length,
+    });
+    await fetchRankingPeriods();
+  }
+
+  async function deleteRankingPeriod(period) {
+    if (!period?.id) return;
+    const label = String(period.label ?? "Ranking period").trim() || "Ranking period";
+    const ok = window.confirm(
+      `Delete "${label}"?\n\nThis will also remove its saved ranking entries.`
+    );
+    if (!ok) return;
+
+    setRankingRefreshingId(period.id);
+    setRankingMsg("");
+    const { error } = await supabase
+      .from("ranking_periods")
+      .delete()
+      .eq("id", period.id)
+      .eq("school_id", activeSchoolId);
+    if (error) {
+      console.error("ranking period delete error:", error);
+      setRankingMsg(`Delete failed: ${error.message}`);
+      setRankingRefreshingId("");
+      return;
+    }
+
+    setRankingRefreshingId("");
+    setRankingMsg(`Deleted ${label}.`);
     await fetchRankingPeriods();
   }
 
@@ -348,5 +408,6 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
     saveRankingPeriodLabel,
     addRankingPeriod,
     refreshRankingPeriod,
+    deleteRankingPeriod,
   };
 }
