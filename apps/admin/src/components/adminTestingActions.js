@@ -180,11 +180,6 @@ export async function clearDailyResultsForCategoryAction(context, category) {
     return;
   }
 
-  const confirmed = window.confirm(
-    `Warning: clear all daily test results in "${categoryName}"?\n\nThis will permanently delete ${attemptCount} result record${attemptCount === 1 ? "" : "s"} and ${sessionIds.length} result session${sessionIds.length === 1 ? "" : "s"} from the current category.`
-  );
-  if (!confirmed) return;
-
   setQuizMsg("Clearing daily results...");
   for (let index = 0; index < sessionIds.length; index += 100) {
     const deleteSessionIds = sessionIds.slice(index, index + 100);

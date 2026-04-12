@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { createPortal } from "react-dom";
 
 function formatAttemptDetailDateTime(value) {
@@ -168,6 +168,7 @@ export default function AdminConsoleDeferredFeatures({
   const handleClearDailyResultsForCategory = typeof clearDailyResultsForCategory === "function"
     ? clearDailyResultsForCategory
     : null;
+  const [clearDailyResultsConfirmOpen, setClearDailyResultsConfirmOpen] = useState(false);
 
   const canAttemptOpenDetail = (attempt) => (
     typeof attemptCanOpenDetail === "function"
@@ -185,6 +186,18 @@ export default function AdminConsoleDeferredFeatures({
       total,
       rate: getScoreRate(attempt),
     };
+  };
+
+  const openClearDailyResultsConfirm = () => {
+    if (!selectedDailyCategory || !handleClearDailyResultsForCategory) return;
+    setClearDailyResultsConfirmOpen(true);
+  };
+
+  const confirmClearDailyResults = async () => {
+    const category = selectedDailyCategory;
+    if (!category || !handleClearDailyResultsForCategory) return;
+    setClearDailyResultsConfirmOpen(false);
+    await handleClearDailyResultsForCategory(category);
   };
 
   return (
@@ -308,19 +321,14 @@ export default function AdminConsoleDeferredFeatures({
                       </button>
                     ) : null}
                     {resultContext.type === "daily" ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <button
-                          className="btn btn-danger results-page-action-btn"
-                          type="button"
-                          onClick={() => handleClearDailyResultsForCategory?.(selectedDailyCategory)}
-                          disabled={!selectedDailyCategory || !handleClearDailyResultsForCategory}
-                        >
-                          <span>Clear All Results</span>
-                        </button>
-                        <div className="admin-help" style={{ color: "#b91c1c", maxWidth: 320 }}>
-                          Warning: deletes every result and session in the selected daily category.
-                        </div>
-                      </div>
+                      <button
+                        className="btn btn-danger results-page-action-btn"
+                        type="button"
+                        onClick={openClearDailyResultsConfirm}
+                        disabled={!selectedDailyCategory || !handleClearDailyResultsForCategory}
+                      >
+                        <span>Clear All Results</span>
+                      </button>
                     ) : null}
                     <input
                       ref={resultsImportInputRef}
@@ -1544,6 +1552,49 @@ export default function AdminConsoleDeferredFeatures({
           </div>
         ), document.body);
       })() : null}
+      {clearDailyResultsConfirmOpen && typeof document !== "undefined" ? createPortal((
+        <div className="admin-modal-overlay" onClick={() => setClearDailyResultsConfirmOpen(false)}>
+          <div
+            className="admin-modal"
+            onClick={(event) => event.stopPropagation()}
+            style={{ maxWidth: 560, width: "min(560px, calc(100vw - 28px))" }}
+          >
+            <div className="admin-modal-header">
+              <div className="admin-title">Clear All Results</div>
+              <button
+                className="admin-modal-close"
+                onClick={() => setClearDailyResultsConfirmOpen(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="admin-help" style={{ marginTop: 12, color: "#b91c1c" }}>
+              Warning: this will permanently delete every result and session in <b>{selectedDailyCategory?.name ?? ""}</b>.
+            </div>
+            <div className="admin-help" style={{ marginTop: 8 }}>
+              This cannot be undone.
+            </div>
+            <div className="upload-question-actions" style={{ marginTop: 16 }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => setClearDailyResultsConfirmOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                type="button"
+                onClick={confirmClearDailyResults}
+                disabled={!selectedDailyCategory || !handleClearDailyResultsForCategory}
+              >
+                Clear All Results
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body) : null}
     </>
   );
 }
