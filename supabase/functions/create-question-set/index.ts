@@ -53,15 +53,24 @@ serve(async (req) => {
   const requestedSetIds = validation.question_sets.map((group) => group.set_id);
   const { data: existingSets, error: existingSetsError } = await context.adminClient
     .from("question_sets")
-    .select("id, title, test_type, version, status, version_label")
+    .select("id, library_key, title, description, test_type, version, status, version_label, visibility_scope")
     .eq("test_type", parsed.metadata.test_type)
     .in("title", requestedSetIds);
   if (existingSetsError) return bad(existingSetsError.message);
 
+  const duplicateStrategy = parsed.metadata.duplicate_strategy ?? null;
   const activeDuplicateSets = (existingSets ?? []).filter((item) => item.status !== "archived" && requestedSetIds.includes(item.title));
-  if (activeDuplicateSets.length) {
-    return bad("One or more SetIDs already exist for this test type. Use Upload on the existing set to add a new version.", {
-      existing_set_ids: activeDuplicateSets.map((item) => item.title),
+  const activeDuplicateSetIds = Array.from(new Set(activeDuplicateSets.map((item) => item.title)));
+  const activeDuplicateSetMap = new Map<string, (typeof activeDuplicateSets)[number]>();
+  for (const item of activeDuplicateSets) {
+    const current = activeDuplicateSetMap.get(item.title);
+    if (!current || Number(item.version ?? 0) > Number(current.version ?? 0)) {
+      activeDuplicateSetMap.set(item.title, item);
+    }
+  }
+  if (activeDuplicateSets.length && !["all", "new_only"].includes(String(duplicateStrategy ?? ""))) {
+    return bad("One or more SetIDs already exist for this test type. Choose how to handle the duplicates and try again.", {
+      existing_set_ids: activeDuplicateSetIds,
     });
   }
 
@@ -80,21 +89,58 @@ serve(async (req) => {
 
   const createdSetIds: string[] = [];
   const createdQuestionSets: Array<{ id: string; library_key: string; version: number; version_label: string; title: string }> = [];
+  const skippedSetIds: string[] = [];
+  const updatedSetIds: string[] = [];
 
   try {
     for (const questionSetGroup of validation.question_sets) {
+      const existingSet = activeDuplicateSetMap.get(questionSetGroup.set_id) ?? null;
+      if (existingSet && duplicateStrategy === "new_only") {
+        skippedSetIds.push(questionSetGroup.set_id);
+        continue;
+      }
+
+      const isVersionUpload = Boolean(existingSet);
+      const nextVersion = isVersionUpload
+        ? Number(
+            (existingSets ?? [])
+              .filter((item) => item.title === questionSetGroup.set_id && item.status !== "archived")
+              .reduce((max, item) => Math.max(max, Number(item.version ?? 0)), 0)
+          ) + 1
+        : 1;
+      const questionSetPayload: Record<string, unknown> = {
+        title: questionSetGroup.set_id,
+        description: isVersionUpload ? parsed.metadata.description ?? existingSet?.description ?? null : parsed.metadata.description,
+        test_type: parsed.metadata.test_type,
+        version: nextVersion,
+        version_label: parsed.metadata.version_label,
+        status: parsed.metadata.status,
+        visibility_scope: parsed.metadata.visibility_scope,
+        created_by: context.callerUserId,
+      };
+      if (isVersionUpload) {
+        const { data: rootSet, error: rootSetError } = await context.adminClient
+          .from("question_sets")
+          .select("id, version, visibility_scope")
+          .eq("library_key", existingSet?.library_key)
+          .order("version", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (rootSetError) return bad(rootSetError.message);
+
+        const rootVisibilityScope = rootSet?.visibility_scope ?? existingSet?.visibility_scope ?? parsed.metadata.visibility_scope;
+        if (rootVisibilityScope === "global" && parsed.metadata.visibility_scope === "restricted") {
+          return bad(
+            "This SetID started as global, so future versions must stay global. Upload the new version with global visibility.",
+          );
+        }
+
+        questionSetPayload.library_key = existingSet?.library_key ?? null;
+        questionSetPayload.source_question_set_id = existingSet?.id ?? null;
+      }
       const { data: inserted, error: insertError } = await context.adminClient
         .from("question_sets")
-        .insert({
-          title: questionSetGroup.set_id,
-          description: parsed.metadata.description,
-          test_type: parsed.metadata.test_type,
-          version: 1,
-          version_label: parsed.metadata.version_label,
-          status: parsed.metadata.status,
-          visibility_scope: parsed.metadata.visibility_scope,
-          created_by: context.callerUserId,
-        })
+        .insert(questionSetPayload)
         .select("id, library_key, version, version_label, title")
         .single();
 
@@ -102,6 +148,9 @@ serve(async (req) => {
         throw new Error(insertError?.message ?? `Failed to create question set "${questionSetGroup.set_id}"`);
       }
       createdSetIds.push(inserted.id);
+      if (isVersionUpload) {
+        updatedSetIds.push(questionSetGroup.set_id);
+      }
 
       const uploadedAssets = await uploadAssets(
         context.adminClient,
@@ -186,6 +235,8 @@ serve(async (req) => {
     return ok({
       ok: true,
       question_sets: createdQuestionSets,
+      skipped_set_ids: skippedSetIds,
+      updated_set_ids: updatedSetIds,
       validation,
     });
   } catch (error) {

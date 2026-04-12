@@ -1,6 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
+import QuestionSetUploadConflictModal from "./QuestionSetUploadConflictModal";
 
 export default function AdminConsoleTestingTabs({
   activeTab,
@@ -94,6 +95,10 @@ export default function AdminConsoleTestingTabs({
   uploadAssets,
   dailySessions,
   testMetaByVersion,
+  modelUploadConflict,
+  dailyUploadConflict,
+  resolveModelUploadConflict,
+  resolveDailyUploadConflict,
   dailyConductOpen,
   setDailyConductOpen,
   setDailyConductMode,
@@ -136,6 +141,7 @@ export default function AdminConsoleTestingTabs({
   selectedDailyQuestionCount,
   dailyUploadOpen,
   setDailyUploadOpen,
+  openDailyUploadModal,
   dailyUploadCategory,
   setDailyUploadCategory,
   dailySessionCategory,
@@ -2289,7 +2295,7 @@ export default function AdminConsoleTestingTabs({
                         setAssetCsvFile(null);
                         setDailyUploadMsg("");
                         setDailyImportMsg("");
-                        setDailyUploadOpen(true);
+                        openDailyUploadModal();
                       }}>
                         <svg viewBox="0 0 20 20" aria-hidden="true">
                           <path
@@ -2567,6 +2573,34 @@ export default function AdminConsoleTestingTabs({
                     </div>
                   </div>
                 ), document.body) : null}
+                <QuestionSetUploadConflictModal
+                  open={Boolean(modelUploadConflict?.open && modelUploadOpen)}
+                  title="Existing Model SetIDs Found"
+                  description="Some model SetIDs already exist. Choose whether to update the existing sets or upload only the new SetIDs."
+                  duplicateSetIds={modelUploadConflict?.duplicateVersions ?? []}
+                  allSetIds={modelUploadConflict?.versions ?? []}
+                  allActionLabel="Upload All and Update Existing SetIDs"
+                  newOnlyActionLabel="Upload Only New SetIDs"
+                  allActionHint="Existing SetIDs will be updated in place."
+                  newOnlyActionHint="Existing SetIDs will be skipped."
+                  onAll={() => resolveModelUploadConflict("all")}
+                  onNewOnly={() => resolveModelUploadConflict("new_only")}
+                  onCancel={() => resolveModelUploadConflict("cancel")}
+                />
+                <QuestionSetUploadConflictModal
+                  open={Boolean(dailyUploadConflict?.open && dailyUploadOpen)}
+                  title="Existing Daily SetIDs Found"
+                  description="Some daily SetIDs already exist. Choose whether to update the existing sets or upload only the new SetIDs."
+                  duplicateSetIds={dailyUploadConflict?.duplicateVersions ?? []}
+                  allSetIds={dailyUploadConflict?.versions ?? []}
+                  allActionLabel="Upload All and Update Existing SetIDs"
+                  newOnlyActionLabel="Upload Only New SetIDs"
+                  allActionHint="Existing SetIDs will be updated in place."
+                  newOnlyActionHint="Existing SetIDs will be skipped."
+                  onAll={() => resolveDailyUploadConflict("all")}
+                  onNewOnly={() => resolveDailyUploadConflict("new_only")}
+                  onCancel={() => resolveDailyUploadConflict("cancel")}
+                />
                 {editingSessionId && typeof document !== "undefined" ? createPortal((
                   <div className="admin-modal-overlay" onClick={cancelEditSession}>
                     <div

@@ -110,6 +110,26 @@ function getQuestionSetVersionRank(item) {
   return Number.isFinite(version) ? version : 0;
 }
 
+function getExistingImportedVersions(testsList, versions, testType) {
+  const existing = new Set(
+    (testsList ?? [])
+      .filter((test) => (testType === "model" ? test?.type === "mock" : test?.type === "daily"))
+      .map((test) => String(test?.version ?? "").trim())
+      .filter(Boolean)
+  );
+  return (versions ?? []).filter((version) => existing.has(String(version ?? "").trim()));
+}
+
+function createUploadConflictState() {
+  return {
+    open: false,
+    versions: [],
+    duplicateVersions: [],
+    file: null,
+    category: "",
+  };
+}
+
 function normalizeLegacyTestErrorMessage(error, action = "update") {
   const text = String(error?.message ?? "").trim();
   if (
@@ -1305,6 +1325,7 @@ export function useTestingWorkspaceState({
   const [assetCsvFile, setAssetCsvFile] = useState(null);
   const [assetUploadMsg, setAssetUploadMsg] = useState("");
   const [assetImportMsg, setAssetImportMsg] = useState("");
+  const [modelUploadConflict, setModelUploadConflict] = useState(() => createUploadConflictState());
 
   // Daily assets
   const [dailyForm, setDailyForm] = useState({ category: "" });
@@ -1314,6 +1335,7 @@ export function useTestingWorkspaceState({
   const [dailyUploadMsg, setDailyUploadMsg] = useState("");
   const [dailyImportMsg, setDailyImportMsg] = useState("");
   const [dailyCategorySelect, setDailyCategorySelect] = useState(CUSTOM_CATEGORY_OPTION);
+  const [dailyUploadConflict, setDailyUploadConflict] = useState(() => createUploadConflictState());
 
   // Preview
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -4358,6 +4380,7 @@ export function useTestingWorkspaceState({
     const importResult = await importModelQuestionsFromCsvFile(csvFile, category);
     console.log("Import result:", importResult);
     if (!importResult.ok) {
+      if (importResult.conflict) return;
       setAssetUploadMsg(`Uploaded files: ${ok} ok / ${ng} failed. Question import failed.`);
       return;
     }
@@ -4375,7 +4398,7 @@ export function useTestingWorkspaceState({
     setAssetCsvFile(null);
   }, [activeSchoolId, assetFile, assetFiles, assetForm, assetCsvFile, validateCsvAssetsBeforeUpload, ensureTestRecord, uploadSingleAsset, fetchTests, fetchAssets, mergeRegisteredTestsIntoState, DEFAULT_MODEL_CATEGORY, importModelQuestionsFromCsvFile]);
 
-  async function importModelQuestionsFromCsvFile(file, category) {
+  async function importModelQuestionsFromCsvFile(file, category, options = {}) {
     console.log("importModelQuestionsFromCsvFile called with file:", file?.name, "category:", category);
     setAssetImportMsg("");
     if (!activeSchoolId) {
@@ -4419,6 +4442,27 @@ export function useTestingWorkspaceState({
       return { ok: false };
     }
 
+    const duplicateStrategy = options.duplicateStrategy ?? null;
+    const existingVersions = getExistingImportedVersions(tests, versions, "model");
+    const versionsToImport = duplicateStrategy === "new_only"
+      ? versions.filter((version) => !existingVersions.includes(version))
+      : versions;
+    if (existingVersions.length && !duplicateStrategy) {
+      setModelUploadConflict({
+        open: true,
+        versions,
+        duplicateVersions: existingVersions,
+        file: csvFile,
+        category: normalizedCategory,
+      });
+      setAssetImportMsg(`Some SetIDs already exist: ${existingVersions.join(", ")}.`);
+      return { ok: false, conflict: true, existingVersions };
+    }
+    if (!versionsToImport.length) {
+      setAssetImportMsg("No new SetIDs to upload.");
+      return { ok: false };
+    }
+
     setAssetImportMsg("Resolving assets...");
     let totalQuestions = 0;
     let totalChoiceRows = 0;
@@ -4429,7 +4473,7 @@ export function useTestingWorkspaceState({
       return { ok: false };
     }
 
-    for (const version of versions) {
+    for (const version of versionsToImport) {
       const group = groupedByVersion.get(version);
       if (!group) continue;
       const groupQuestions = group.questions.map((question) => ({ ...question }));
@@ -4555,24 +4599,32 @@ export function useTestingWorkspaceState({
       totalChoiceRows += choiceRows.length;
     }
 
-    setAssetImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versions.length} set${versions.length === 1 ? "" : "s"}.`);
+    setAssetImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versionsToImport.length} set${versionsToImport.length === 1 ? "" : "s"}.`);
     await recordAuditEvent({
       actionType: "import",
       entityType: "question_import",
-      entityId: versions[0] || `mock-import-${Date.now()}`,
-      summary: `Imported ${versions.length} model set${versions.length === 1 ? "" : "s"} in ${normalizedCategory}.`,
+      entityId: versionsToImport[0] || `mock-import-${Date.now()}`,
+      summary: `Imported ${versionsToImport.length} model set${versionsToImport.length === 1 ? "" : "s"} in ${normalizedCategory}.`,
       metadata: {
         category: normalizedCategory,
-        set_ids: versions,
+        set_ids: versionsToImport,
+        skipped_set_ids: existingVersions,
         question_count: totalQuestions,
         choice_count: totalChoiceRows,
       },
     });
 
-    return { ok: true, versions, totalQuestions, totalChoiceRows, questionCountsByVersion };
+    return {
+      ok: true,
+      versions: versionsToImport,
+      skippedVersions: duplicateStrategy === "new_only" ? existingVersions : [],
+      totalQuestions,
+      totalChoiceRows,
+      questionCountsByVersion,
+    };
   }
 
-  async function importDailyQuestionsFromCsvFile(file, category) {
+  async function importDailyQuestionsFromCsvFile(file, category, options = {}) {
     console.log("importDailyQuestionsFromCsvFile called with file:", file?.name, "category:", category);
     setDailyImportMsg("");
     if (!activeSchoolId) {
@@ -4614,6 +4666,27 @@ export function useTestingWorkspaceState({
       return { ok: false };
     }
 
+    const duplicateStrategy = options.duplicateStrategy ?? null;
+    const existingVersions = getExistingImportedVersions(tests, versions, "daily");
+    const versionsToImport = duplicateStrategy === "new_only"
+      ? versions.filter((version) => !existingVersions.includes(version))
+      : versions;
+    if (existingVersions.length && !duplicateStrategy) {
+      setDailyUploadConflict({
+        open: true,
+        versions,
+        duplicateVersions: existingVersions,
+        file: csvFile,
+        category: normalizedCategory,
+      });
+      setDailyImportMsg(`Some SetIDs already exist: ${existingVersions.join(", ")}.`);
+      return { ok: false, conflict: true, existingVersions };
+    }
+    if (!versionsToImport.length) {
+      setDailyImportMsg("No new SetIDs to upload.");
+      return { ok: false };
+    }
+
     setDailyImportMsg("Resolving assets...");
     let totalQuestions = 0;
     let totalChoiceRows = 0;
@@ -4624,7 +4697,7 @@ export function useTestingWorkspaceState({
       return { ok: false };
     }
 
-    for (const version of versions) {
+    for (const version of versionsToImport) {
       const group = groupedByVersion.get(version);
       if (!group) continue;
       const groupQuestions = group.questions.map((question) => ({ ...question }));
@@ -4739,22 +4812,64 @@ export function useTestingWorkspaceState({
       totalChoiceRows += choiceRows.length;
     }
 
-    setDailyImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versions.length} set${versions.length === 1 ? "" : "s"}.`);
+    setDailyImportMsg(`Imported ${totalQuestions} questions / ${totalChoiceRows} choices across ${versionsToImport.length} set${versionsToImport.length === 1 ? "" : "s"}.`);
     await recordAuditEvent({
       actionType: "import",
       entityType: "question_import",
-      entityId: versions[0] || `daily-import-${Date.now()}`,
-      summary: `Imported ${versions.length} daily set${versions.length === 1 ? "" : "s"} in ${normalizedCategory}.`,
+      entityId: versionsToImport[0] || `daily-import-${Date.now()}`,
+      summary: `Imported ${versionsToImport.length} daily set${versionsToImport.length === 1 ? "" : "s"} in ${normalizedCategory}.`,
       metadata: {
         category: normalizedCategory,
-        set_ids: versions,
+        set_ids: versionsToImport,
+        skipped_set_ids: existingVersions,
         question_count: totalQuestions,
         choice_count: totalChoiceRows,
       },
     });
 
-    return { ok: true, versions, totalQuestions, totalChoiceRows, questionCountsByVersion };
+    return {
+      ok: true,
+      versions: versionsToImport,
+      skippedVersions: duplicateStrategy === "new_only" ? existingVersions : [],
+      totalQuestions,
+      totalChoiceRows,
+      questionCountsByVersion,
+    };
   }
+
+  const resolveModelUploadConflict = useCallback(async (duplicateStrategy) => {
+    const conflict = modelUploadConflict;
+    if (!conflict?.file) return { ok: false };
+    if (duplicateStrategy === "cancel") {
+      setModelUploadConflict(createUploadConflictState());
+      return { ok: false, cancelled: true };
+    }
+    setModelUploadConflict(createUploadConflictState());
+    const result = await importModelQuestionsFromCsvFile(conflict.file, conflict.category, {
+      duplicateStrategy,
+    });
+    if (!result.ok && result.conflict) {
+      setModelUploadConflict(conflict);
+    }
+    return result;
+  }, [importModelQuestionsFromCsvFile, modelUploadConflict]);
+
+  const resolveDailyUploadConflict = useCallback(async (duplicateStrategy) => {
+    const conflict = dailyUploadConflict;
+    if (!conflict?.file) return { ok: false };
+    if (duplicateStrategy === "cancel") {
+      setDailyUploadConflict(createUploadConflictState());
+      return { ok: false, cancelled: true };
+    }
+    setDailyUploadConflict(createUploadConflictState());
+    const result = await importDailyQuestionsFromCsvFile(conflict.file, conflict.category, {
+      duplicateStrategy,
+    });
+    if (!result.ok && result.conflict) {
+      setDailyUploadConflict(conflict);
+    }
+    return result;
+  }, [dailyUploadConflict, importDailyQuestionsFromCsvFile]);
 
   const importQuestionsFromCsv = useCallback(async () => {
     const file = assetCsvFile || assetFile;
@@ -4850,6 +4965,7 @@ export function useTestingWorkspaceState({
     setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed. Importing questions...`);
     const importResult = await importDailyQuestionsFromCsvFile(csvFile, category);
     if (!importResult.ok) {
+      if (importResult.conflict) return;
       setDailyUploadMsg(`Uploaded: ${ok} ok / ${ng} failed. Question import failed.`);
       return;
     }
@@ -5175,6 +5291,7 @@ export function useTestingWorkspaceState({
     setAssetCsvFile(null);
     setAssetUploadMsg("");
     setAssetImportMsg("");
+    setModelUploadConflict(createUploadConflictState());
 
     const availableCategories = modelCategories.length
       ? modelCategories
@@ -5184,6 +5301,11 @@ export function useTestingWorkspaceState({
     setAssetForm((current) => ({ ...current, category: fallbackCategory }));
     setModelUploadOpen(true);
   }, [modelCategories]);
+
+  const openDailyUploadModal = useCallback(() => {
+    setDailyUploadConflict(createUploadConflictState());
+    setDailyUploadOpen(true);
+  }, []);
 
   const getSessionEffectivePassRate = useCallback((session) => {
     if (!session) return 0.8;
@@ -5428,10 +5550,13 @@ export function useTestingWorkspaceState({
     setDailyConductOpen,
     dailyUploadOpen,
     setDailyUploadOpen,
+    openDailyUploadModal,
     modelConductError,
     setModelConductError,
     dailyConductError,
     setDailyConductError,
+    modelUploadConflict,
+    dailyUploadConflict,
 
     // Conduct modes
     modelConductMode,
@@ -5694,6 +5819,8 @@ export function useTestingWorkspaceState({
     uploadAssets,
     importQuestionsFromCsv,
     uploadDailyAssets,
+    resolveModelUploadConflict,
+    resolveDailyUploadConflict,
     hasDuplicateSessionTitle,
     openModelConductModal,
     openDailyConductModal,

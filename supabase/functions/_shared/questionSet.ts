@@ -130,6 +130,7 @@ export type UploadMetadata = {
   visibility_scope: "global" | "restricted";
   school_ids: string[];
   source_question_set_id: string | null;
+  duplicate_strategy: "all" | "new_only" | null;
 };
 
 export async function parseUploadForm(req: Request): Promise<{ metadata: UploadMetadata; csvFile: File; assetFiles: File[] } | Response> {
@@ -189,6 +190,7 @@ export async function parseUploadForm(req: Request): Promise<{ metadata: UploadM
       visibility_scope: visibilityScope as "global" | "restricted",
       school_ids: schoolIds,
       source_question_set_id: normalizeText(parsed.source_question_set_id),
+      duplicate_strategy: normalizeText(parsed.duplicate_strategy) as "all" | "new_only" | null,
     },
     csvFile,
     assetFiles,

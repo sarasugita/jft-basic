@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSuperAdmin } from "./SuperAdminShell";
 import { getAdminSupabaseConfig } from "../../lib/adminSupabase";
 import { notifyQuestionSetLibraryUpdated } from "../../lib/questionSetLibraryRefresh";
+import QuestionSetUploadConflictModal from "../QuestionSetUploadConflictModal";
 
 const DEFAULT_DAILY_CATEGORY = "Vocabulary";
 const DEFAULT_MODEL_CATEGORY = "Book Review";
@@ -167,6 +168,19 @@ function selectLatestQuestionSetVersions(list, getKey) {
     }
   });
   return Array.from(latestByKey.values());
+}
+
+function getExistingUploadedQuestionSetIds(questionSets, requestedSetIds, testType) {
+  const requested = new Set((requestedSetIds ?? []).map((value) => String(value ?? "").trim()).filter(Boolean));
+  const existing = new Set();
+  (questionSets ?? []).forEach((item) => {
+    if (String(item?.test_type ?? "daily") !== String(testType ?? "daily")) return;
+    if (item?.status === "archived") return;
+    const title = String(item?.title ?? "").trim();
+    if (!title || !requested.has(title)) return;
+    existing.add(title);
+  });
+  return Array.from(existing);
 }
 
 function formatDateTime(value) {
@@ -464,9 +478,15 @@ export default function SuperTestsImportPage() {
   const [previewQuestions, setPreviewQuestions] = useState([]);
   const [previewMsg, setPreviewMsg] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [uploadConflict, setUploadConflict] = useState({
+    open: false,
+    duplicateSetIds: [],
+    allSetIds: [],
+  });
   const assetFolderInputRef = useRef(null);
   const metaAssetFolderInputRef = useRef(null);
   const previewSectionRefs = useRef({});
+  const pendingCreateUploadRef = useRef(null);
 
   const categoryOptionsByTestType = useMemo(() => {
     const next = {
@@ -639,6 +659,8 @@ export default function SuperTestsImportPage() {
     setValidation(null);
     setValidationMsg("");
     setUploadProgress({ phase: "", uploaded: 0, total: 0 });
+    setUploadConflict({ open: false, duplicateSetIds: [], allSetIds: [] });
+    pendingCreateUploadRef.current = null;
     setUploadOpen(true);
   }
 
@@ -751,6 +773,29 @@ export default function SuperTestsImportPage() {
     }
   }
 
+  async function runQuestionSetUpload({
+    functionName,
+    metadataInput,
+    selectedCsvFile,
+    selectedAssetFiles,
+    duplicateStrategy = null,
+  }) {
+    const uploadMetadata = duplicateStrategy
+      ? { ...metadataInput, duplicate_strategy: duplicateStrategy }
+      : metadataInput;
+    const totalFiles = getUploadFiles(selectedCsvFile, selectedAssetFiles).length;
+    setUploadProgress({ phase: "Uploading files", uploaded: 0, total: totalFiles });
+    const result = await invokeUploadFunction(
+      functionName,
+      uploadMetadata,
+      selectedCsvFile,
+      selectedAssetFiles,
+      setUploadProgress,
+    );
+    setUploadProgress((current) => ({ ...current, uploaded: current.total }));
+    return result;
+  }
+
   async function saveUpload() {
     setSaving(true);
     setValidationMsg("");
@@ -764,10 +809,32 @@ export default function SuperTestsImportPage() {
       }
 
       const functionName = uploadForm.mode === "version" ? "upload-question-set-version" : "create-question-set";
-      const totalFiles = getUploadFiles(csvFile, assetFiles).length;
-      setUploadProgress({ phase: "Uploading files", uploaded: 0, total: totalFiles });
-      const result = await invokeUploadFunction(functionName, uploadForm, csvFile, assetFiles, setUploadProgress);
-      setUploadProgress((current) => ({ ...current, uploaded: current.total }));
+      const nextSetIds = (nextValidation.question_sets ?? []).map((item) => item.set_id).filter(Boolean);
+      if (uploadForm.mode !== "version") {
+        const duplicateSetIds = getExistingUploadedQuestionSetIds(questionSets, nextSetIds, uploadForm.test_type);
+        if (duplicateSetIds.length) {
+          pendingCreateUploadRef.current = {
+            functionName,
+            metadata: { ...uploadForm },
+            csvFile,
+            assetFiles: [...assetFiles],
+          };
+          setUploadConflict({
+            open: true,
+            duplicateSetIds,
+            allSetIds: nextSetIds,
+          });
+          setSaving(false);
+          return;
+        }
+      }
+
+      const result = await runQuestionSetUpload({
+        functionName,
+        metadataInput: uploadForm,
+        selectedCsvFile: csvFile,
+        selectedAssetFiles: assetFiles,
+      });
       setUploadOpen(false);
       setValidation(null);
       setValidationMsg("");
@@ -784,6 +851,63 @@ export default function SuperTestsImportPage() {
       await loadLibrary();
     } catch (error) {
       setValidationMsg(String(error.message ?? error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUploadConflictChoice(duplicateStrategy) {
+    if (duplicateStrategy === "cancel") {
+      pendingCreateUploadRef.current = null;
+      setUploadConflict({ open: false, duplicateSetIds: [], allSetIds: [] });
+      return;
+    }
+
+    const pending = pendingCreateUploadRef.current;
+    if (!pending) {
+      setUploadConflict({ open: false, duplicateSetIds: [], allSetIds: [] });
+      return;
+    }
+
+    pendingCreateUploadRef.current = null;
+    setSaving(true);
+    try {
+      const result = await runQuestionSetUpload({
+        functionName: pending.functionName,
+        metadataInput: pending.metadata,
+        selectedCsvFile: pending.csvFile,
+        selectedAssetFiles: pending.assetFiles,
+        duplicateStrategy,
+      });
+      setUploadOpen(false);
+      setValidation(null);
+      setValidationMsg("");
+      setUploadProgress({ phase: "", uploaded: 0, total: 0 });
+      setUploadConflict({ open: false, duplicateSetIds: [], allSetIds: [] });
+      const createdCount = result?.question_sets?.length ?? 0;
+      const skippedCount = result?.skipped_set_ids?.length ?? 0;
+      const updatedCount = result?.updated_set_ids?.length ?? 0;
+      const existingSuffix = duplicateStrategy === "new_only"
+        ? skippedCount
+          ? ` ${skippedCount} existing SetID${skippedCount === 1 ? "" : "s"} skipped.`
+          : ""
+        : updatedCount
+          ? ` ${updatedCount} existing SetID${updatedCount === 1 ? "" : "s"} updated.`
+          : "";
+      setMsg(
+        pending.functionName === "upload-question-set-version"
+          ? "Set version uploaded."
+          : duplicateStrategy === "new_only" && createdCount === 0
+            ? "No new SetIDs were uploaded."
+          : createdCount > 1
+            ? `${createdCount} question sets created.${existingSuffix}`
+            : `Question set created.${existingSuffix}`,
+      );
+      notifyQuestionSetLibraryUpdated();
+      await loadLibrary();
+    } catch (error) {
+      setValidationMsg(String(error.message ?? error));
+      setUploadConflict({ open: false, duplicateSetIds: [], allSetIds: [] });
     } finally {
       setSaving(false);
     }
@@ -1176,6 +1300,21 @@ export default function SuperTestsImportPage() {
           </div>
         </div>
       ) : null}
+
+      <QuestionSetUploadConflictModal
+        open={Boolean(uploadConflict.open && uploadOpen)}
+        title="Existing SetIDs Found"
+        description="Some SetIDs in this upload already exist. Choose whether to create new versions for them or upload only the new SetIDs."
+        duplicateSetIds={uploadConflict.duplicateSetIds}
+        allSetIds={uploadConflict.allSetIds}
+        allActionLabel="Upload All and Update Existing SetIDs"
+        newOnlyActionLabel="Upload Only New SetIDs"
+        allActionHint="Existing SetIDs will be imported as new versions."
+        newOnlyActionHint="Existing SetIDs will be skipped."
+        onAll={() => handleUploadConflictChoice("all")}
+        onNewOnly={() => handleUploadConflictChoice("new_only")}
+        onCancel={() => handleUploadConflictChoice("cancel")}
+      />
 
       {metaOpen ? (
         <div className="admin-modal-overlay" onClick={() => setMetaOpen(false)}>
