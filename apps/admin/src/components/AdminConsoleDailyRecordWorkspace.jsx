@@ -427,7 +427,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 lockedSpecialTest1: false,
                 lockedSpecialTest2: false,
               };
-              const rowIsLocked = Boolean(display.hasRecord || display.isPastDate || display.isFullyLocked);
+              const rowIsLocked = Boolean(display.isFullyLocked);
               const weekdayLabel = formatWeekday(recordDate);
               return (
                 <tr
@@ -520,12 +520,12 @@ export default function AdminConsoleDailyRecordWorkspace() {
                           onClick={() => saveDailyRecordPlan(recordDate)}
                           disabled={rowIsLocked || dailyRecordPlanSavingDate === recordDate}
                         >
-                          {display.hasRecord
-                            ? "Saved"
-                            : display.isPastDate
-                              ? "Locked"
-                              : dailyRecordPlanSavingDate === recordDate
-                                ? "Saving..."
+                          {rowIsLocked
+                            ? "Locked"
+                            : dailyRecordPlanSavingDate === recordDate
+                              ? "Saving..."
+                              : display.hasRecord
+                                ? "Update Plan"
                                 : "Save Plan"}
                         </button>
                       </td>

@@ -348,22 +348,11 @@ function getEmptyScheduledTests() {
   };
 }
 
-function resolveDailyRecordPlanDraft(recordDate, draft, scheduledTests, todayBangladeshDate) {
+function resolveDailyRecordPlanDraft(draft, scheduledTests) {
   const nextDraft = {
     ...getEmptyDailyRecordPlanDraft(),
     ...(draft ?? {}),
   };
-  const isPastDate = Boolean(recordDate && todayBangladeshDate && recordDate < todayBangladeshDate);
-
-  if (isPastDate) {
-    return {
-      mini_test_1: scheduledTests?.dailyTests?.[0] ?? "",
-      mini_test_2: scheduledTests?.dailyTests?.[1] ?? "",
-      special_test_1: scheduledTests?.modelTests?.[0] ?? "",
-      special_test_2: scheduledTests?.modelTests?.[1] ?? "",
-    };
-  }
-
   return {
     mini_test_1: (nextDraft.mini_test_1 ?? "") || scheduledTests?.dailyTests?.[0] || "",
     mini_test_2: (nextDraft.mini_test_2 ?? "") || scheduledTests?.dailyTests?.[1] || "",
@@ -1032,7 +1021,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     scheduleRecordRows.forEach(({ recordDate, draft }) => {
       const record = recordByDate[recordDate];
       const scheduledTests = scheduleRecordActualTestsByDate[recordDate] ?? getEmptyScheduledTests();
-      const resolvedDraft = resolveDailyRecordPlanDraft(recordDate, draft, scheduledTests, todayBangladeshDate);
+      const resolvedDraft = resolveDailyRecordPlanDraft(draft, scheduledTests);
       const lockedMiniTest1 = Boolean(scheduledTests.dailyTests[0]);
       const lockedMiniTest2 = Boolean(scheduledTests.dailyTests[1]);
       const lockedSpecialTest1 = Boolean(scheduledTests.modelTests[0]);
@@ -1040,14 +1029,13 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       const isFullyLocked = lockedMiniTest1 && lockedMiniTest2 && lockedSpecialTest1 && lockedSpecialTest2;
       displayData[recordDate] = {
         hasRecord: Boolean(record),
-        isPastDate: Boolean(todayBangladeshDate && recordDate < todayBangladeshDate),
         isConfirmed: confirmedSet.has(recordDate),
         isFullyLocked,
         isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
-        mini_test_1: resolvedDraft.mini_test_1,
-        mini_test_2: resolvedDraft.mini_test_2,
-        special_test_1: resolvedDraft.special_test_1,
-        special_test_2: resolvedDraft.special_test_2,
+        mini_test_1: lockedMiniTest1 ? (scheduledTests.dailyTests[0] ?? resolvedDraft.mini_test_1) : resolvedDraft.mini_test_1,
+        mini_test_2: lockedMiniTest2 ? (scheduledTests.dailyTests[1] ?? resolvedDraft.mini_test_2) : resolvedDraft.mini_test_2,
+        special_test_1: lockedSpecialTest1 ? (scheduledTests.modelTests[0] ?? resolvedDraft.special_test_1) : resolvedDraft.special_test_1,
+        special_test_2: lockedSpecialTest2 ? (scheduledTests.modelTests[1] ?? resolvedDraft.special_test_2) : resolvedDraft.special_test_2,
         lockedMiniTest1,
         lockedMiniTest2,
         lockedSpecialTest1,
@@ -1068,7 +1056,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         if (!scheduledTests) return;
 
         const currentDraft = next[recordDate] ?? getEmptyDailyRecordPlanDraft();
-        const resolvedDraft = resolveDailyRecordPlanDraft(recordDate, currentDraft, scheduledTests, todayBangladeshDate);
+        const resolvedDraft = resolveDailyRecordPlanDraft(currentDraft, scheduledTests);
 
         if (
           resolvedDraft.mini_test_1 !== (currentDraft.mini_test_1 ?? "")
