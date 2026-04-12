@@ -103,6 +103,9 @@ function getQuestionSubSection(question) {
 
 function resolveCorrectAnswerIndex(question) {
   const raw = question?.correct_answer;
+  if (raw == null || raw === "" || String(raw).trim().toLowerCase() === "blank") {
+    return -1;
+  }
   if (typeof raw === "number" && Number.isFinite(raw)) return raw;
   if (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw))) return Number(raw);
   const options = Array.isArray(question?.options) ? question.options : [];
@@ -119,6 +122,9 @@ function resolveCorrectAnswerIndex(question) {
 function isQuestionAnswerCorrect(question, answerValue) {
   const correctIndex = resolveCorrectAnswerIndex(question);
   if (correctIndex != null) {
+    if (correctIndex === -1) {
+      return answerValue == null || answerValue === -1 || String(answerValue).trim() === "";
+    }
     return Number(answerValue) === correctIndex;
   }
   return String(answerValue ?? "").trim() === String(question?.correct_answer ?? "").trim();

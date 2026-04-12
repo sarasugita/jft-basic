@@ -102,6 +102,14 @@ export function splitAssetList(value) {
   return [raw];
 }
 
+export const BLANK_ANSWER_INDEX = -1;
+
+function parseAnswerIndex(value) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function getStemMediaAssets(question) {
   const assets = [
     question?.stemAsset,
@@ -131,15 +139,27 @@ export function getEffectiveAnswerIndices(question) {
         ? question.data.answer_indices
         : [];
   const normalized = fromArray
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value));
+    .map((value) => parseAnswerIndex(value))
+    .filter((value) => value != null);
   if (normalized.length) return Array.from(new Set(normalized));
-  const single = Number(question?.answerIndex);
-  return Number.isFinite(single) ? [single] : [];
+  const single = parseAnswerIndex(question?.answerIndex);
+  return single != null ? [single] : [];
+}
+
+export function isBlankAnswerChoice(choiceIndex) {
+  return choiceIndex == null
+    || choiceIndex === ""
+    || Number(choiceIndex) === BLANK_ANSWER_INDEX;
 }
 
 export function isChoiceCorrect(choiceIndex, answerIndices) {
-  const chosen = Number(choiceIndex);
-  if (!Number.isFinite(chosen)) return false;
-  return (answerIndices ?? []).includes(chosen);
+  const normalizedAnswers = Array.isArray(answerIndices)
+    ? answerIndices.map((value) => parseAnswerIndex(value)).filter((value) => value != null)
+    : [];
+  if (isBlankAnswerChoice(choiceIndex)) {
+    return normalizedAnswers.includes(BLANK_ANSWER_INDEX);
+  }
+  const chosen = parseAnswerIndex(choiceIndex);
+  if (chosen == null) return false;
+  return normalizedAnswers.includes(chosen);
 }

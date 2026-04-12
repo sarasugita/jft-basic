@@ -4,6 +4,7 @@ import { formatDateFull, formatDateShort } from "./formatters";
 import {
   getEffectiveAnswerIndices,
   getStemMediaAssets,
+  isBlankAnswerChoice,
   isChoiceCorrect,
   normalizeStemKindValue,
   parseSpeakerStemLine,
@@ -22,15 +23,19 @@ function getSectionTitle(sectionKey) {
 }
 
 function getChoiceText(question, index) {
-  if (index == null) return "";
-  if (Array.isArray(question?.choices) && question.choices[index] != null) return question.choices[index];
-  if (Array.isArray(question?.choicesJa) && question.choicesJa[index] != null) return question.choicesJa[index];
+  if (isBlankAnswerChoice(index)) return "No answer";
+  const chosen = Number(index);
+  if (!Number.isFinite(chosen)) return "";
+  if (Array.isArray(question?.choices) && question.choices[chosen] != null) return question.choices[chosen];
+  if (Array.isArray(question?.choicesJa) && question.choicesJa[chosen] != null) return question.choicesJa[chosen];
   return "";
 }
 
 function pickChoiceImage(question, index) {
-  if (index == null) return "";
-  const value = question?.choices?.[index] ?? question?.choicesJa?.[index];
+  if (isBlankAnswerChoice(index)) return "";
+  const chosen = Number(index);
+  if (!Number.isFinite(chosen)) return "";
+  const value = question?.choices?.[chosen] ?? question?.choicesJa?.[chosen];
   if (value && /\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(String(value))) {
     return value;
   }

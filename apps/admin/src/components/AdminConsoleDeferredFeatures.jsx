@@ -1069,16 +1069,20 @@ export default function AdminConsoleDeferredFeatures({
           : null;
         const totalCorrect = derivedRowSummary?.correct ?? Number(selectedAttempt.correct ?? 0);
         const totalQuestions = derivedRowSummary?.total ?? Number(selectedAttempt.total ?? 0);
+        const showSummaryOnly = selectedAttemptUsesImportedSummary;
         const scoreRate = derivedRowSummary && derivedRowSummary.total > 0
           ? derivedRowSummary.correct / derivedRowSummary.total
           : (Number.isFinite(selectedAttemptScoreRate) ? selectedAttemptScoreRate : (selectedAttempt ? getScoreRate(selectedAttempt) : 0));
         const scorePercent = (scoreRate * 100).toFixed(1);
+        const scoreFraction = `${totalCorrect}/${totalQuestions}`;
+        const scoreDisplay = showSummaryOnly
+          ? `${scorePercent}%`
+          : `${scoreFraction} (${scorePercent}%)`;
         const isPass = scoreRate >= selectedAttemptPassRate;
         const attemptTitle = getAttemptTitle(selectedAttempt) || selectedAttempt.test_version || "";
         const tabLeftCount = getTabLeftCount(selectedAttempt);
         const selectedAttemptRankInfo = studentAttemptRanks[selectedAttempt.id] ?? null;
         const attemptStudentName = selectedAttemptDisplayName || selectedAttempt.display_name || "";
-        const showSummaryOnly = selectedAttemptUsesImportedSummary;
         const showRankingMainSectionsOnly = attemptDetailSource === "sessionRanking" || selectedAttemptUsesImportedModelSummary;
         const isImportedAttempt = isImportedSummaryAttemptFn(selectedAttempt);
         const radarData = selectedAttemptMainSectionSummary.map((row) => ({
@@ -1211,7 +1215,7 @@ export default function AdminConsoleDeferredFeatures({
                     <div className="attempt-detail-score-row">
                       <span className="attempt-detail-score-label">Total Score</span>
                       <span className={`attempt-detail-score-right ${isPass ? "" : "attempt-detail-score-right-fail"}`}>
-                        <span className="attempt-detail-score-rate">{scorePercent}%</span>
+                        <span className="attempt-detail-score-rate">{scoreDisplay}</span>
                       </span>
                     </div>
                     <div className="attempt-detail-score-row">

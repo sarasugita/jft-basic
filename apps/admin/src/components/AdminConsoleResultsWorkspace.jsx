@@ -352,6 +352,20 @@ function mapDbQuestion(row) {
   };
 }
 
+const BLANK_ANSWER_INDEX = -1;
+
+function parseAnswerIndex(value) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isBlankAnswerChoice(choiceIndex) {
+  return choiceIndex == null
+    || choiceIndex === ""
+    || Number(choiceIndex) === BLANK_ANSWER_INDEX;
+}
+
 function mergeQuestionData(question) {
   return {
     ...(question?.data ?? {}),
@@ -368,25 +382,31 @@ function getEffectiveAnswerIndices(question) {
       ? question.data.answer_indices
       : [];
   const normalized = fromArray
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value));
+    .map((value) => parseAnswerIndex(value))
+    .filter((value) => value != null);
   if (normalized.length) return Array.from(new Set(normalized));
-  const single = Number(question?.answerIndex);
-  return Number.isFinite(single) ? [single] : [];
+  const single = parseAnswerIndex(question?.answerIndex);
+  return single != null ? [single] : [];
 }
 
 function isChoiceCorrect(choiceIndex, answerIndices) {
-  const chosen = Number(choiceIndex);
-  if (!Number.isFinite(chosen)) return false;
-  return (answerIndices ?? []).includes(chosen);
+  const normalizedAnswers = Array.isArray(answerIndices)
+    ? answerIndices.map((value) => parseAnswerIndex(value)).filter((value) => value != null)
+    : [];
+  if (isBlankAnswerChoice(choiceIndex)) {
+    return normalizedAnswers.includes(BLANK_ANSWER_INDEX);
+  }
+  const chosen = parseAnswerIndex(choiceIndex);
+  if (chosen == null) return false;
+  return normalizedAnswers.includes(chosen);
 }
 
 function normalizeAnswerIndices(answerIndices) {
   return Array.from(
     new Set(
       (answerIndices ?? [])
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value))
+        .map((value) => parseAnswerIndex(value))
+        .filter((value) => value != null)
     )
   );
 }
@@ -394,6 +414,9 @@ function normalizeAnswerIndices(answerIndices) {
 function applyAnswerIndicesToQuestion(question, answerIndices) {
   const normalizedAnswers = normalizeAnswerIndices(answerIndices);
   if (!normalizedAnswers.length) return question;
+  const primaryAnswer = normalizedAnswers.includes(BLANK_ANSWER_INDEX)
+    ? BLANK_ANSWER_INDEX
+    : normalizedAnswers[0];
   const nextRawData = {
     ...(question?.rawData ?? question?.data ?? {}),
   };
@@ -404,7 +427,7 @@ function applyAnswerIndicesToQuestion(question, answerIndices) {
   }
   return {
     ...question,
-    answerIndex: normalizedAnswers[0],
+    answerIndex: primaryAnswer,
     answerIndices: normalizedAnswers.length > 1 ? normalizedAnswers : null,
     rawData: nextRawData,
     data: {
@@ -422,6 +445,14 @@ function getQuestionPrompt(question) {
   if (q.promptEn) return q.promptEn;
   if (q.promptBn) return q.promptBn;
   return q.questionId || q.id || "";
+}
+
+function formatAnswerChoiceLabel(question, choiceIndex) {
+  if (isBlankAnswerChoice(choiceIndex)) return "No answer";
+  const chosen = parseAnswerIndex(choiceIndex);
+  if (chosen == null) return "";
+  const choices = question?.choices ?? question?.choicesJa ?? question?.choicesEn ?? [];
+  return choices[chosen] ?? `#${chosen + 1}`;
 }
 
 function buildAttemptDetailRowsFromList(answersJson, questionsList, getQuestionSectionLabel) {
@@ -1575,6 +1606,9 @@ export default function AdminConsoleResultsWorkspace(props) {
       }
 
       const existingData = question?.rawData ?? {};
+      const primaryAnswer = update.answerIndices.includes(BLANK_ANSWER_INDEX)
+        ? BLANK_ANSWER_INDEX
+        : update.answerIndices[0];
       const dataUpdate = update.answerIndices.length > 1
         ? { ...existingData, answer_indices: update.answerIndices }
         : (() => {
@@ -1586,7 +1620,7 @@ export default function AdminConsoleResultsWorkspace(props) {
       const { data, error } = await client
         .from("questions")
         .update({
-          answer_index: update.answerIndices[0],
+          answer_index: primaryAnswer,
           data: dataUpdate,
         })
         .eq("id", update.dbId)
@@ -1645,27 +1679,31 @@ export default function AdminConsoleResultsWorkspace(props) {
   const buildDetailedAttemptRows = (answersJson, questionsList) => {
     const answers = answersJson ?? {};
     const getChoiceText = (question, choiceIndex) => {
-      if (choiceIndex == null) return "";
-      const choices = question?.choices ?? question?.choicesJa ?? question?.choicesEn ?? [];
-      return choices[choiceIndex] ?? `#${Number(choiceIndex) + 1}`;
+      return formatAnswerChoiceLabel(question, choiceIndex);
     };
     const getChoiceImage = (question, choiceIndex) => {
-      if (choiceIndex == null) return "";
-      const direct = question?.choiceImages?.[choiceIndex];
+      if (isBlankAnswerChoice(choiceIndex)) return "";
+      const chosen = parseAnswerIndex(choiceIndex);
+      if (chosen == null) return "";
+      const direct = question?.choiceImages?.[chosen];
       if (direct) return direct;
-      const value = getChoiceText(question, choiceIndex);
+      const value = getChoiceText(question, chosen);
       return isImageAsset(value) ? value : "";
     };
     const getPartChoiceText = (part, choiceIndex) => {
-      if (choiceIndex == null) return "";
+      if (isBlankAnswerChoice(choiceIndex)) return "No answer";
+      const chosen = parseAnswerIndex(choiceIndex);
+      if (chosen == null) return "";
       const choices = part?.choices ?? part?.choicesJa ?? [];
-      return choices[choiceIndex] ?? `#${Number(choiceIndex) + 1}`;
+      return choices[chosen] ?? `#${chosen + 1}`;
     };
     const getPartChoiceImage = (part, choiceIndex) => {
-      if (choiceIndex == null) return "";
-      const direct = part?.choiceImages?.[choiceIndex];
+      if (isBlankAnswerChoice(choiceIndex)) return "";
+      const chosen = parseAnswerIndex(choiceIndex);
+      if (chosen == null) return "";
+      const direct = part?.choiceImages?.[chosen];
       if (direct) return direct;
-      const value = getPartChoiceText(part, choiceIndex);
+      const value = getPartChoiceText(part, chosen);
       return isImageAsset(value) ? value : "";
     };
 
@@ -1700,9 +1738,9 @@ export default function AdminConsoleResultsWorkspace(props) {
             sectionKey: question.sectionKey || "",
             section,
             prompt: `${question.promptEn ?? question.promptBn ?? ""} ${part?.partLabel ?? ""} ${part?.questionJa ?? part?.promptEn ?? ""}`.trim(),
-            chosen: getPartChoiceText(part, chosenIdx),
+            chosen: formatAnswerChoiceLabel(part, chosenIdx),
             chosenImage: getPartChoiceImage(part, chosenIdx),
-            correct: correctIndices.map((value) => getPartChoiceText(part, value)).filter(Boolean).join(" / "),
+            correct: correctIndices.map((value) => formatAnswerChoiceLabel(part, value)).filter(Boolean).join(" / "),
             correctImage: getPartChoiceImage(part, correctIndices[0]),
             isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
             stemImages,
@@ -1717,9 +1755,9 @@ export default function AdminConsoleResultsWorkspace(props) {
         sectionKey: question.sectionKey || "",
         section,
         prompt: getQuestionPrompt(question),
-        chosen: getChoiceText(question, chosenIdx),
+        chosen: formatAnswerChoiceLabel(question, chosenIdx),
         chosenImage: getChoiceImage(question, chosenIdx),
-        correct: correctIndices.map((value) => getChoiceText(question, value)).filter(Boolean).join(" / "),
+        correct: correctIndices.map((value) => formatAnswerChoiceLabel(question, value)).filter(Boolean).join(" / "),
         correctImage: getChoiceImage(question, correctIndices[0]),
         isCorrect: isChoiceCorrect(chosenIdx, correctIndices),
         stemImages,
@@ -2215,6 +2253,7 @@ export default function AdminConsoleResultsWorkspace(props) {
       ? pendingAnswer
       : getEffectiveAnswerIndices(question);
     const hasMultipleAnswers = effectiveAnswers.length > 1;
+    const hasBlankAnswer = effectiveAnswers.includes(BLANK_ANSWER_INDEX);
     const isMultiSelect = multiSelectMode || hasMultipleAnswers;
 
     const renderChoices = () => (
@@ -2257,11 +2296,40 @@ export default function AdminConsoleResultsWorkspace(props) {
             );
           })}
         </div>
-        {hasMultipleAnswers && (
+        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <button
+            key={`choice-${question.id}-blank`}
+            onMouseDown={(event) => {
+              if (isEditMode) event.preventDefault();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              if (isEditMode && onAnswerChange) onAnswerChange(question.dbId, BLANK_ANSWER_INDEX, event, isMultiSelect);
+            }}
+            className="btn"
+            type="button"
+            style={{
+              border: hasBlankAnswer ? (hasMultipleAnswers ? "2px solid #d97706" : "2px solid #1a7f37") : "1px solid #ddd",
+              background: hasBlankAnswer ? (hasMultipleAnswers ? "#fef3c7" : "#e7f7ee") : "#fff",
+              padding: 8,
+              cursor: isEditMode ? "pointer" : "default",
+              position: "relative",
+              minWidth: 140,
+            }}
+          >
+            No answer
+            {hasBlankAnswer && hasMultipleAnswers && (
+              <span style={{
+                position: "absolute", top: 2, right: 2, fontSize: 14, fontWeight: "bold", color: "#d97706",
+              }}>✓</span>
+            )}
+          </button>
+        </div>
+        {(hasMultipleAnswers || hasBlankAnswer) && (
           <div style={{
             marginTop: 8, padding: 8, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 4, fontSize: 12, color: "#92400e",
           }}>
-            ⚠ Multiple answers selected. Keep Multiple mode on to add or remove options before saving.
+            ⚠ {hasBlankAnswer && hasMultipleAnswers ? "Blank/no answer is selected too." : hasBlankAnswer ? "Blank/no answer is selected as correct." : "Multiple answers selected."} Keep Multiple mode on to add or remove options before saving.
           </div>
         )}
       </div>
@@ -2412,9 +2480,10 @@ export default function AdminConsoleResultsWorkspace(props) {
                 setPendingAnswerEdits((answerPrev) => {
                   const current = answerPrev[dbId] ?? getEffectiveAnswerIndices(question);
                   if (current.length <= 1) return answerPrev;
+                  const nextSingle = current.find((value) => value !== BLANK_ANSWER_INDEX) ?? current[0];
                   return {
                     ...answerPrev,
-                    [dbId]: current.length ? [current[0]] : current,
+                    [dbId]: nextSingle != null ? [nextSingle] : current,
                   };
                 });
               }
