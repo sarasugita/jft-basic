@@ -435,6 +435,8 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 display.special_test_1,
                 display.special_test_2,
               ].some((value) => String(value ?? "").trim());
+              const todaysContentText = String(record?.todays_content ?? "").trim();
+              const isHolidayContent = todaysContentText.toUpperCase() === "HOLIDAY";
               const collapseHolidayRow = Boolean(display.isHoliday)
                 && !hasPlanContent
                 && !dailyRecordPlanInputEnabledDates.has(recordDate);
@@ -470,9 +472,9 @@ export default function AdminConsoleDailyRecordWorkspace() {
                       <td colSpan={6} className="daily-record-holiday-summary">
                         {dailyRecordHolidaySavingDate === recordDate ? "Saving..." : "Holiday"}
                       </td>
-                      <td>
+                      <td className="daily-record-holiday-action-cell">
                         <button
-                          className="btn"
+                          className="btn daily-record-input-plan-btn"
                           type="button"
                           onClick={() => enableDailyRecordPlanInput(recordDate)}
                           disabled={dailyRecordPlanSavingDate === recordDate}
@@ -485,10 +487,12 @@ export default function AdminConsoleDailyRecordWorkspace() {
                     <>
                       <td>
                         {record?.todays_content
-                          ? (() => {
-                              const summary = summarizeDailyRecordContent(record.todays_content);
-                              return summary.length > 140 ? `${summary.slice(0, 140)}...` : summary;
-                            })()
+                          ? isHolidayContent
+                            ? <span className="daily-record-holiday-summary">HOLIDAY</span>
+                            : (() => {
+                                const summary = summarizeDailyRecordContent(record.todays_content);
+                                return summary.length > 140 ? `${summary.slice(0, 140)}...` : summary;
+                              })()
                           : "-"}
                       </td>
                       <td>{record ? summarizeDailyRecordComments(record) : "-"}</td>
