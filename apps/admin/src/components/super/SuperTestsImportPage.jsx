@@ -11,6 +11,8 @@ const DEFAULT_MODEL_CATEGORY = "Book Review";
 const QUESTION_SET_ID_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const QUESTION_SELECT_BASE = "question_id, section_key, type, prompt_en, prompt_bn, answer_index, order_index, data";
 const QUESTION_SELECT_WITH_MEDIA = `${QUESTION_SELECT_BASE}, media_file, media_type`;
+const SUPER_IMPORT_PAGE_SIZE = 500;
+const SUPER_IMPORT_BATCH_SIZE = 200;
 
 function getDefaultCategoryForTestType(testType) {
   return testType === "model" ? DEFAULT_MODEL_CATEGORY : DEFAULT_DAILY_CATEGORY;
@@ -230,6 +232,59 @@ async function fetchQuestionsForVersionWithFallback(supabase, version) {
       .order("order_index", { ascending: true });
   }
   return result;
+}
+
+async function fetchAllPages(buildPageQuery, pageSize = SUPER_IMPORT_PAGE_SIZE) {
+  const rows = [];
+  let offset = 0;
+
+  while (true) {
+    const result = await buildPageQuery(offset, pageSize);
+    if (result.error) return { data: null, error: result.error };
+
+    const page = result.data ?? [];
+    rows.push(...page);
+
+    if (page.length < pageSize) {
+      return { data: rows, error: null };
+    }
+
+    offset += pageSize;
+  }
+}
+
+function chunkItems(items, size) {
+  const list = Array.isArray(items) ? items : [];
+  const batchSize = Math.max(1, Number(size) || 1);
+  const chunks = [];
+  for (let index = 0; index < list.length; index += batchSize) {
+    chunks.push(list.slice(index, index + batchSize));
+  }
+  return chunks;
+}
+
+async function fetchQuestionCountsBySetId(supabase, setIds) {
+  const counts = {};
+  const batches = chunkItems(setIds, SUPER_IMPORT_BATCH_SIZE);
+
+  for (const batch of batches) {
+    const { data, error } = await fetchAllPages((offset, pageSize) => (
+      supabase
+        .from("questions")
+        .select("test_version")
+        .in("test_version", batch)
+        .range(offset, offset + pageSize - 1)
+    ));
+    if (error) return { data: null, error };
+
+    for (const row of data ?? []) {
+      const setId = String(row?.test_version ?? "").trim();
+      if (!setId) continue;
+      counts[setId] = (counts[setId] ?? 0) + 1;
+    }
+  }
+
+  return { data: counts, error: null };
 }
 
 function isImageAsset(value) {
@@ -513,7 +568,7 @@ export default function SuperTestsImportPage() {
     setLoading(true);
     setMsg("");
 
-    const [questionSetsRes, visibilityRes, schoolsRes, questionsRes, legacyTestsRes] = await Promise.all([
+    const [questionSetsRes, visibilityRes, schoolsRes, legacyTestsRes] = await Promise.all([
       supabase
         .from("question_sets")
         .select("id, library_key, source_question_set_id, title, description, test_type, version, version_label, status, visibility_scope, created_at, updated_at")
@@ -525,9 +580,6 @@ export default function SuperTestsImportPage() {
         .from("schools")
         .select("id, name")
         .order("name", { ascending: true }),
-      supabase
-        .from("questions")
-        .select("test_version"),
       supabase
         .from("tests")
         .select("version, title, type"),
@@ -554,10 +606,19 @@ export default function SuperTestsImportPage() {
       if (schoolMap[row.school_id]) visibilityBySet[row.question_set_id].push(schoolMap[row.school_id]);
     }
 
-    for (const row of (questionsRes.data ?? [])) {
-      const setId = String(row?.test_version ?? "").trim();
-      if (!setId) continue;
-      questionCountBySet[setId] = (questionCountBySet[setId] ?? 0) + 1;
+    const setIds = Object.keys(questionCountBySet);
+    if (setIds.length) {
+      const { data: countedQuestions, error: countError } = await fetchQuestionCountsBySetId(supabase, setIds);
+      if (countError) {
+        setQuestionSets([]);
+        setSchools([]);
+        setMsg(`Failed to load question-set counts: ${countError.message}`);
+        setLoading(false);
+        return;
+      }
+      for (const [setId, count] of Object.entries(countedQuestions ?? {})) {
+        questionCountBySet[setId] = count;
+      }
     }
     const legacyTestBySetId = Object.fromEntries((legacyTestsRes.data ?? []).map((row) => [row.version, row]));
 
