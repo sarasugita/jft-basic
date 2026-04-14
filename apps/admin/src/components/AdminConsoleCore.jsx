@@ -1724,13 +1724,7 @@ function buildDailySessionTitle({ category, setIds }) {
 
   const summary = buildDailySessionTitleLabel(normalizedSetIds);
   if (!summary) return normalizedCategory;
-  if (/^grammar$/i.test(normalizedCategory) && /^Grammar Book/i.test(summary)) {
-    return summary;
-  }
-  if (/^weekly review$/i.test(normalizedCategory)) {
-    return `Week Review (${summary})`;
-  }
-  return `${normalizedCategory} (${summary})`;
+  return summary;
 }
 
 function buildSourceQuestionKey(sourceVersion, sourceQuestionId) {
