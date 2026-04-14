@@ -846,13 +846,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     setDailyRecordPlanSavingDate(recordDate);
     setDailyRecordsMsg("");
     const scheduledTests = scheduleRecordActualTestsByDate[recordDate] ?? getEmptyScheduledTests();
-    const currentBangladeshDate = getBangladeshDateInput(new Date());
-    const draft = resolveDailyRecordPlanDraft(
-      recordDate,
-      dailyRecordPlanDrafts[recordDate],
-      scheduledTests,
-      currentBangladeshDate
-    );
+    const draft = resolveDailyRecordPlanDraft(dailyRecordPlanDrafts[recordDate], scheduledTests);
     const existingRecord = dailyRecords.find((item) => item.record_date === recordDate) ?? null;
     const payload = {
       school_id: activeSchoolId,
