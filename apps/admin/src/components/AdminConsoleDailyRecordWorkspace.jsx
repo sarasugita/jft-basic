@@ -454,83 +454,75 @@ export default function AdminConsoleDailyRecordWorkspace() {
                       <span className="daily-session-create-switch-slider" />
                     </label>
                   </td>
-                  {display.isHoliday ? (
-                    <td colSpan={7} className="daily-record-holiday-summary">
-                      {dailyRecordHolidaySavingDate === recordDate ? "Saving..." : "Holiday"}
-                    </td>
-                  ) : (
-                    <>
-                      <td>
-                        {record?.todays_content
-                          ? (() => {
-                              const summary = summarizeDailyRecordContent(record.todays_content);
-                              return summary.length > 140 ? `${summary.slice(0, 140)}...` : summary;
-                            })()
-                          : "-"}
-                      </td>
-                      <td>{record ? summarizeDailyRecordComments(record) : "-"}</td>
-                      <td>
-                        {rowIsLocked || display.lockedMiniTest1 ? (
-                          <span className="daily-record-plan-text">{display.mini_test_1}</span>
-                        ) : (
-                          <DailyRecordPlanTextarea
-                            value={display.mini_test_1}
-                            onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_1", e.target.value)}
-                            placeholder="Plan"
-                          />
-                        )}
-                      </td>
-                      <td>
-                        {rowIsLocked || display.lockedMiniTest2 ? (
-                          <span className="daily-record-plan-text">{display.mini_test_2}</span>
-                        ) : (
-                          <DailyRecordPlanTextarea
-                            value={display.mini_test_2}
-                            onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
-                            placeholder="Plan"
-                          />
-                        )}
-                      </td>
-                      <td>
-                        {rowIsLocked || display.lockedSpecialTest1 ? (
-                          <span className="daily-record-plan-text">{display.special_test_1}</span>
-                        ) : (
-                          <DailyRecordPlanTextarea
-                            value={display.special_test_1}
-                            onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
-                            placeholder="Plan"
-                          />
-                        )}
-                      </td>
-                      <td>
-                        {rowIsLocked || display.lockedSpecialTest2 ? (
-                          <span className="daily-record-plan-text">{display.special_test_2}</span>
-                        ) : (
-                          <DailyRecordPlanTextarea
-                            value={display.special_test_2}
-                            onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_2", e.target.value)}
-                            placeholder="Plan"
-                          />
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          className="btn"
-                          type="button"
-                          onClick={() => saveDailyRecordPlan(recordDate)}
-                          disabled={rowIsLocked || dailyRecordPlanSavingDate === recordDate}
-                        >
-                          {rowIsLocked
-                            ? "Locked"
-                            : dailyRecordPlanSavingDate === recordDate
-                              ? "Saving..."
-                              : display.hasRecord
-                                ? "Update Plan"
-                                : "Save Plan"}
-                        </button>
-                      </td>
-                    </>
-                  )}
+                  <td>
+                    {record?.todays_content
+                      ? (() => {
+                          const summary = summarizeDailyRecordContent(record.todays_content);
+                          return summary.length > 140 ? `${summary.slice(0, 140)}...` : summary;
+                        })()
+                      : "-"}
+                  </td>
+                  <td>{record ? summarizeDailyRecordComments(record) : "-"}</td>
+                  <td>
+                    {rowIsLocked || display.lockedMiniTest1 ? (
+                      <span className="daily-record-plan-text">{display.mini_test_1}</span>
+                    ) : (
+                      <DailyRecordPlanTextarea
+                        value={display.mini_test_1}
+                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_1", e.target.value)}
+                        placeholder="Plan"
+                      />
+                    )}
+                  </td>
+                  <td>
+                    {rowIsLocked || display.lockedMiniTest2 ? (
+                      <span className="daily-record-plan-text">{display.mini_test_2}</span>
+                    ) : (
+                      <DailyRecordPlanTextarea
+                        value={display.mini_test_2}
+                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
+                        placeholder="Plan"
+                      />
+                    )}
+                  </td>
+                  <td>
+                    {rowIsLocked || display.lockedSpecialTest1 ? (
+                      <span className="daily-record-plan-text">{display.special_test_1}</span>
+                    ) : (
+                      <DailyRecordPlanTextarea
+                        value={display.special_test_1}
+                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_1", e.target.value)}
+                        placeholder="Plan"
+                      />
+                    )}
+                  </td>
+                  <td>
+                    {rowIsLocked || display.lockedSpecialTest2 ? (
+                      <span className="daily-record-plan-text">{display.special_test_2}</span>
+                    ) : (
+                      <DailyRecordPlanTextarea
+                        value={display.special_test_2}
+                        onChange={(e) => updateDailyRecordPlanDraft(recordDate, "special_test_2", e.target.value)}
+                        placeholder="Plan"
+                      />
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => saveDailyRecordPlan(recordDate)}
+                      disabled={rowIsLocked || dailyRecordPlanSavingDate === recordDate}
+                    >
+                      {rowIsLocked
+                        ? "Locked"
+                        : dailyRecordPlanSavingDate === recordDate
+                          ? "Saving..."
+                          : display.hasRecord
+                            ? "Update Plan"
+                            : "Save Plan"}
+                    </button>
+                  </td>
                 </tr>
               );
             })}
