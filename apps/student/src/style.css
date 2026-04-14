@@ -107,6 +107,7 @@ body { overflow-x: hidden; }
   border-radius: 4px;
   cursor: pointer;
   font-weight: 600;
+  color: #111;
 }
 .finish-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .candidate { font-size: 12px; opacity: 0.9; }
@@ -279,6 +280,7 @@ body { overflow-x: hidden; }
   max-width: 100%;
   width: 100%;
   box-sizing: border-box;
+  color: #111;
 }
 .choice.selected {
   border-color: var(--orange);
@@ -750,6 +752,7 @@ body { overflow-x: hidden; }
   background:#fff;
   padding: 10px;
   cursor:pointer;
+  color: #111;
 }
 .img-choice.selected{
   border-color: #d97706;
@@ -3099,6 +3102,26 @@ button.student-application-view {
 
 .finish-actions .btn {
   max-width: 100%;
+}
+
+.choice,
+.img-choice,
+.finish-btn,
+.nav-btn,
+.home-btn,
+.menu-btn,
+.icon-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  font: inherit;
+}
+
+.choice,
+.img-choice,
+.finish-btn,
+.home-btn {
+  -webkit-text-fill-color: currentColor;
 }
 
 @media (max-width: 520px) {

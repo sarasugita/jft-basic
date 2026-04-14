@@ -6,8 +6,9 @@ import { isMissingTabLeftCountError } from "../lib/errorHelpers";
 import { state, saveState, exitToHome } from "../state/appState";
 import { authState } from "../state/authState";
 import { studentResultsState } from "../state/resultsState";
+import { testsState, testSessionsState } from "../state/testsState";
 import { supabase } from "../supabaseClient";
-import { buildResultRows, getAttemptDedupKey } from "../lib/attemptHelpers";
+import { buildResultRows, getAttemptDedupKey, shouldShowAnswers } from "../lib/attemptHelpers";
 
 let pendingAttemptSave = null;
 let pendingAttemptSaveKey = "";
@@ -84,6 +85,11 @@ async function saveAttemptIfNeeded(app) {
 export function renderResult(app) {
   const { correct, total } = scoreAll();
   const rows = buildResultRows();
+  const showAnswers = shouldShowAnswers(
+    { test_session_id: state.linkTestSessionId || state.selectedTestSessionId || null, test_version: getActiveTestVersion() },
+    testSessionsState.list,
+    testsState.list,
+  );
   const scoreRate = total === 0 ? 0 : correct / total;
   const passRate = getActivePassRate();
   const isPass = scoreRate >= passRate;
@@ -121,7 +127,7 @@ export function renderResult(app) {
                 <th class="col-question">Question</th>
                 <th class="col-result">Result</th>
                 <th class="col-choice">Chosen Answer</th>
-                <th class="col-choice">Correct Answer</th>
+                ${showAnswers ? '<th class="col-choice">Correct Answer</th>' : ""}
               </tr>
             </thead>
             <tbody>
@@ -162,14 +168,15 @@ export function renderResult(app) {
                         : `<div class="choice-text">${r.chosen ? escapeHtml(r.chosen) : "—"}</div>`
                     }
                   </td>
-
-                  <td class="cell-choice">
-                    ${
-                      r.correctImg
-                        ? `<img class="result-choice-big" src="${r.correctImg}" alt="correct" />`
-                        : `<div class="choice-text">${escapeHtml(r.correct ?? "")}</div>`
-                    }
-                  </td>
+                  ${showAnswers ? `
+                    <td class="cell-choice">
+                      ${
+                        r.correctImg
+                          ? `<img class="result-choice-big" src="${r.correctImg}" alt="correct" />`
+                          : `<div class="choice-text">${escapeHtml(r.correct ?? "")}</div>`
+                      }
+                    </td>
+                  ` : ""}
 
                 </tr>
               `
