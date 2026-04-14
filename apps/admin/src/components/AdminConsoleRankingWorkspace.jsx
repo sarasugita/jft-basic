@@ -5,7 +5,7 @@ import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext"
 import { useRankingWorkspaceState } from "./AdminConsoleRankingWorkspaceState";
 
 export default function AdminConsoleRankingWorkspace() {
-  const { supabase, activeSchoolId, session } = useAdminConsoleWorkspaceContext();
+  const { supabase, activeSchoolId, session, testSessions, tests } = useAdminConsoleWorkspaceContext();
   const {
     rankingPeriods,
     rankingDrafts,
@@ -22,7 +22,7 @@ export default function AdminConsoleRankingWorkspace() {
     deleteRankingPeriod,
     openRankingEntryDetail,
     closeRankingEntryDetail,
-  } = useRankingWorkspaceState({ supabase, activeSchoolId, session });
+  } = useRankingWorkspaceState({ supabase, activeSchoolId, session, testSessions, tests });
 
   useEffect(() => {
     if (!activeSchoolId) return;
@@ -215,16 +215,11 @@ export default function AdminConsoleRankingWorkspace() {
                       <th>Score</th>
                       <th>Correct / Total</th>
                       <th>Completed</th>
-                      <th>Attempt ID</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rankingDetailModal.usedAttempts.map((attempt) => {
-                      const scopeLabel = attempt.test_session_id
-                        ? `Session ${attempt.test_session_id}`
-                        : attempt.test_version
-                          ? `Set ${attempt.test_version}`
-                          : "Attempt";
+                      const scopeLabel = attempt.scopeLabel || attempt.test_session_id || attempt.test_version || "Attempt";
                       const scoreText = `${(Number(attempt.scoreRate ?? 0) * 100).toFixed(2)}%`;
                       const totalText = `${attempt.correct ?? 0} / ${attempt.total ?? 0}`;
                       const completedAtRaw = attempt.ended_at || attempt.created_at || "";
@@ -235,7 +230,6 @@ export default function AdminConsoleRankingWorkspace() {
                           <td>{scoreText}</td>
                           <td>{totalText}</td>
                           <td>{completedAt}</td>
-                          <td>{attempt.id}</td>
                         </tr>
                       );
                     })}

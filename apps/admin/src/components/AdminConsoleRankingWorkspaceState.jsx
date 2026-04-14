@@ -54,7 +54,16 @@ function normalizeRankingDraft(period, draft = {}) {
   };
 }
 
-export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) {
+function getSessionDisplayTitle(session, tests = []) {
+  const sessionTitle = String(session?.title ?? "").trim();
+  if (sessionTitle) return sessionTitle;
+  const version = String(session?.problem_set_id ?? "").trim();
+  if (!version) return "Session";
+  const fallbackTitle = String((tests ?? []).find((test) => test.version === version)?.title ?? "").trim();
+  return fallbackTitle || version;
+}
+
+export function useRankingWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], tests = [] }) {
   const cacheUserId = session?.user?.id ?? "";
   const cachedState = cacheUserId && activeSchoolId ? readAdminConsoleDataCache(cacheUserId, activeSchoolId) : null;
   const [rankingPeriods, setRankingPeriods] = useState(() => cachedState?.rankingPeriods ?? []);
@@ -443,6 +452,7 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
       return;
     }
 
+    const testSessionsById = new Map((testSessions ?? []).map((item) => [item.id, item]));
     const usedAttempts = Array.from(buildLatestAttemptMapByStudentAndScope(attemptsData).values())
       .filter((attempt) => attempt?.student_id === entry.student_id)
       .sort((a, b) => {
@@ -452,9 +462,11 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
       })
       .map((attempt) => {
         const scoreRate = Number(attempt?.score_rate ?? (attempt?.total ? attempt.correct / attempt.total : 0));
+        const sessionRecord = attempt?.test_session_id ? testSessionsById.get(attempt.test_session_id) ?? null : null;
         return {
           ...attempt,
           scoreRate: Number.isFinite(scoreRate) ? scoreRate : 0,
+          scopeLabel: sessionRecord ? getSessionDisplayTitle(sessionRecord, tests) : (String(attempt?.test_version ?? "").trim() || "Attempt"),
         };
       });
 
