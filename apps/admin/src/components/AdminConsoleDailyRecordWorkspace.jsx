@@ -435,8 +435,6 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 display.special_test_1,
                 display.special_test_2,
               ].some((value) => String(value ?? "").trim());
-              const todaysContentText = String(record?.todays_content ?? "").trim();
-              const isHolidayContent = todaysContentText.toUpperCase() === "HOLIDAY";
               const collapseHolidayRow = Boolean(display.isHoliday)
                 && !hasPlanContent
                 && !dailyRecordPlanInputEnabledDates.has(recordDate);
@@ -487,7 +485,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                     <>
                       <td>
                         {record?.todays_content
-                          ? isHolidayContent
+                          ? display.isHoliday
                             ? <span className="daily-record-holiday-summary">HOLIDAY</span>
                             : (() => {
                                 const summary = summarizeDailyRecordContent(record.todays_content);
