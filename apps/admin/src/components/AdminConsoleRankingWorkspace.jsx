@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useRankingWorkspaceState } from "./AdminConsoleRankingWorkspaceState";
 
@@ -23,6 +23,32 @@ export default function AdminConsoleRankingWorkspace() {
     openRankingEntryDetail,
     closeRankingEntryDetail,
   } = useRankingWorkspaceState({ supabase, activeSchoolId, session, testSessions, tests });
+  const [hoveredRankingPair, setHoveredRankingPair] = useState(null);
+  const rankingHoverClearTimerRef = useRef(null);
+
+  useEffect(() => () => {
+    if (rankingHoverClearTimerRef.current) {
+      window.clearTimeout(rankingHoverClearTimerRef.current);
+    }
+  }, []);
+
+  function setRankingPairHover(periodId, rowIndex) {
+    if (rankingHoverClearTimerRef.current) {
+      window.clearTimeout(rankingHoverClearTimerRef.current);
+      rankingHoverClearTimerRef.current = null;
+    }
+    setHoveredRankingPair({ periodId, rowIndex });
+  }
+
+  function clearRankingPairHover() {
+    if (rankingHoverClearTimerRef.current) {
+      window.clearTimeout(rankingHoverClearTimerRef.current);
+    }
+    rankingHoverClearTimerRef.current = window.setTimeout(() => {
+      setHoveredRankingPair(null);
+      rankingHoverClearTimerRef.current = null;
+    }, 60);
+  }
 
   useEffect(() => {
     if (!activeSchoolId) return;
@@ -153,13 +179,18 @@ export default function AdminConsoleRankingWorkspace() {
                   <td>{idx + 1}</td>
                   {rankingPeriods.map((period) => {
                     const entry = period.ranking_entries?.[idx] ?? null;
+                    const isPairHovered = hoveredRankingPair?.periodId === period.id && hoveredRankingPair?.rowIndex === idx;
                     return (
                       <Fragment key={`${period.id}-${idx + 1}`}>
-                        <td>
+                        <td
+                          className={isPairHovered ? "ranking-entry-cell is-hovered" : "ranking-entry-cell"}
+                          onMouseEnter={() => setRankingPairHover(period.id, idx)}
+                          onMouseLeave={clearRankingPairHover}
+                        >
                           {entry ? (
                             <button
                               type="button"
-                              className="ranking-student-button"
+                              className="ranking-entry-button"
                               onClick={() => openRankingEntryDetail(period, entry)}
                               title="View scores used for this ranking"
                             >
@@ -169,7 +200,24 @@ export default function AdminConsoleRankingWorkspace() {
                             "-"
                           )}
                         </td>
-                        <td>{entry ? `${(Number(entry.average_rate) * 100).toFixed(2)}%` : "-"}</td>
+                        <td
+                          className={isPairHovered ? "ranking-entry-cell is-hovered" : "ranking-entry-cell"}
+                          onMouseEnter={() => setRankingPairHover(period.id, idx)}
+                          onMouseLeave={clearRankingPairHover}
+                        >
+                          {entry ? (
+                            <button
+                              type="button"
+                              className="ranking-entry-button ranking-entry-button-average"
+                              onClick={() => openRankingEntryDetail(period, entry)}
+                              title="View scores used for this ranking"
+                            >
+                              {(Number(entry.average_rate) * 100).toFixed(2)}%
+                            </button>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
                       </Fragment>
                     );
                   })}

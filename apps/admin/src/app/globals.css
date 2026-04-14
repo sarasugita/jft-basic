@@ -3923,7 +3923,16 @@ body { padding: 0; }
   vertical-align: middle;
 }
 
-.ranking-student-button {
+.ranking-entry-cell {
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.ranking-entry-cell.is-hovered {
+  background: #eef4ff;
+  box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.18);
+}
+
+.ranking-entry-button {
   display: inline-flex;
   width: 100%;
   align-items: center;
@@ -3941,15 +3950,20 @@ body { padding: 0; }
   -webkit-appearance: none;
 }
 
-.ranking-student-button:hover {
+.ranking-entry-button:hover {
   color: #0f172a;
   text-decoration: underline;
 }
 
-.ranking-student-button:focus-visible {
+.ranking-entry-button:focus-visible {
   outline: 2px solid #4f46e5;
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+.ranking-entry-button-average {
+  justify-content: flex-end;
+  text-align: right;
 }
 
 .ranking-detail-modal {
