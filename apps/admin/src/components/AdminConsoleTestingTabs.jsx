@@ -1734,6 +1734,17 @@ export default function AdminConsoleTestingTabs({
                             </div>
                           </div>
                           <div className="daily-session-create-toggle-row">
+                            <span>Random Order</span>
+                            <label className="daily-session-create-switch" aria-label="Random Order">
+                              <input
+                                type="checkbox"
+                                checked={dailySessionForm.random_order}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, random_order: e.target.checked }))}
+                              />
+                              <span className="daily-session-create-switch-slider" />
+                            </label>
+                          </div>
+                          <div className="daily-session-create-toggle-row">
                             <span>Show Answers After Attempt</span>
                             <label className="daily-session-create-switch" aria-label="Show Answers After Attempt">
                               <input
@@ -2262,6 +2273,17 @@ export default function AdminConsoleTestingTabs({
                                 placeholder=""
                               />
                             </div>
+                          </div>
+                          <div className="daily-session-create-toggle-row">
+                            <span>Random Order</span>
+                            <label className="daily-session-create-switch" aria-label="Random Order">
+                              <input
+                                type="checkbox"
+                                checked={dailySessionForm.random_order}
+                                onChange={(e) => setDailySessionForm((s) => ({ ...s, random_order: e.target.checked }))}
+                              />
+                              <span className="daily-session-create-switch-slider" />
+                            </label>
                           </div>
                           <div className="daily-session-create-toggle-row">
                             <span>Show Answers After Attempt</span>

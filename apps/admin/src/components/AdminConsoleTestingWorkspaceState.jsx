@@ -1315,6 +1315,7 @@ export function useTestingWorkspaceState({
     close_time_auto_filled: false,
     question_count_mode: "all",
     question_count: "",
+    random_order: true,
     starts_at: "",
     ends_at: "",
     time_limit_min: "",
@@ -3108,6 +3109,7 @@ export function useTestingWorkspaceState({
     questionCountMode,
     questionCount,
     passRate,
+    randomOrder = true,
   }) => {
     if (!supabase) throw new Error("Supabase not initialized.");
 
@@ -3117,7 +3119,8 @@ export function useTestingWorkspaceState({
     }
 
     const shouldCreateDerivedSet =
-      normalizedSetIds.length > 1
+      Boolean(randomOrder)
+      || normalizedSetIds.length > 1
       || questionCountMode === "specify";
 
     if (!shouldCreateDerivedSet) {
@@ -3151,7 +3154,7 @@ export function useTestingWorkspaceState({
       throw new Error(`Only ${orderedQuestions.length} questions are available for the selected SetID values.`);
     }
 
-    const selectedQuestions = shuffleCopy(orderedQuestions).slice(0, requestedQuestionCount);
+    const selectedQuestions = (randomOrder ? shuffleCopy(orderedQuestions) : [...orderedQuestions]).slice(0, requestedQuestionCount);
     const sourceQuestionIds = selectedQuestions.map((row) => row.id).filter(Boolean);
     const { data: sourceChoices, error: sourceChoicesError } = sourceQuestionIds.length
       ? await supabase
@@ -3540,6 +3543,7 @@ export function useTestingWorkspaceState({
           questionCountMode: dailySessionForm.question_count_mode,
           questionCount: dailySessionForm.question_count,
           passRate,
+          randomOrder: Boolean(dailySessionForm.random_order),
         });
       } catch (error) {
         setDailySessionsMsg(error.message);
@@ -3621,6 +3625,7 @@ export function useTestingWorkspaceState({
       question_count_mode: "all",
       question_count: "",
       problem_set_ids: s.problem_set_id ? [s.problem_set_id] : [],
+      random_order: true,
       show_answers: false,
       allow_multiple_attempts: false,
       pass_rate: "0.8",
@@ -5421,6 +5426,7 @@ export function useTestingWorkspaceState({
         close_time_auto_filled: false,
         question_count_mode: "all",
         question_count: "",
+        random_order: true,
         time_limit_min: "",
         show_answers: false,
         allow_multiple_attempts: false,
