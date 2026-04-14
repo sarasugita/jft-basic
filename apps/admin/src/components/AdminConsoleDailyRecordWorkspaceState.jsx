@@ -245,6 +245,7 @@ function getEmptyDailyRecordForm(recordDate = "") {
 function getDailyRecordForm(record) {
   if (!record) return getEmptyDailyRecordForm("");
   const content = parseDailyRecordContent(record?.todays_content);
+  const isHoliday = resolveDailyRecordHoliday(record?.record_date, record?.is_holiday);
   const comments = (record.daily_record_student_comments ?? []).length
     ? record.daily_record_student_comments.map((item) => ({
         tempId: item.id ?? `comment-${Math.random().toString(36).slice(2, 10)}`,
@@ -257,7 +258,7 @@ function getDailyRecordForm(record) {
     id: record.id ?? "",
     record_date: record.record_date ?? "",
     textbook_entries: content.textbook_entries,
-    free_writing: content.free_writing,
+    free_writing: isHoliday ? "HOLIDAY" : content.free_writing,
     comments,
     mini_test_1: record.mini_test_1 ?? "",
     mini_test_2: record.mini_test_2 ?? "",
@@ -562,8 +563,15 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         };
       }
     }
+    const resolvedDate = nextForm.record_date || recordDate || getTodayDateInput();
+    if (resolveDailyRecordHoliday(resolvedDate, existingRecord?.is_holiday)) {
+      nextForm = {
+        ...nextForm,
+        free_writing: "HOLIDAY",
+      };
+    }
     setDailyRecordForm(nextForm);
-    setDailyRecordDate(nextForm.record_date || recordDate || getTodayDateInput());
+    setDailyRecordDate(resolvedDate);
     setDailyRecordsMsg("");
     setDailyRecordSaving(false);
     setDailyRecordModalOpen(true);
@@ -920,6 +928,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       is_holiday: nextHoliday,
       updated_at: new Date().toISOString(),
       created_by: session?.user?.id ?? null,
+      ...(nextHoliday ? { todays_content: "HOLIDAY" } : {}),
     };
     if (existingRecord?.id) {
       const { error } = await supabase
