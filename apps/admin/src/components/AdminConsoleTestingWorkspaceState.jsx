@@ -1094,6 +1094,12 @@ function getBangladeshDateInput(value) {
   return input ? input.slice(0, 10) : "";
 }
 
+function getBangladeshTimeInput(value) {
+  if (!value) return "";
+  const input = formatDateTimeInput(value);
+  return input ? input.slice(11, 16) : "";
+}
+
 function getBangladeshDateFromFormatted(formatted) {
   if (!formatted) return "";
   return formatted.slice(0, 10); // YYYY-MM-DD
