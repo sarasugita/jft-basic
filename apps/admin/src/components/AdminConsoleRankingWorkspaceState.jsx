@@ -9,6 +9,7 @@ import {
 import {
   buildLatestAttemptMapByStudentAndScope,
   isAnalyticsExcludedStudent,
+  getRowTimestamp,
 } from "../lib/adminAnalyticsHelpers";
 
 const SUPABASE_SAFE_PAGE_SIZE = 500;
@@ -70,6 +71,20 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
     return drafts;
   });
   const [rankingRefreshingId, setRankingRefreshingId] = useState("");
+  const [rankingDetailModal, setRankingDetailModal] = useState({
+    open: false,
+    loading: false,
+    error: "",
+    periodId: "",
+    periodLabel: "",
+    studentId: "",
+    studentName: "",
+    averageRate: null,
+    rankPosition: null,
+    startDate: "",
+    endDate: "",
+    usedAttempts: [],
+  });
 
   useEffect(() => {
     if (!cacheUserId || !activeSchoolId) return;
@@ -84,6 +99,10 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
   useEffect(() => {
     setRankingLoaded(false);
   }, [activeSchoolId, cacheUserId]);
+
+  useEffect(() => {
+    setRankingDetailModal((prev) => (prev.open ? { ...prev, open: false } : prev));
+  }, [activeSchoolId]);
 
   const rankingRowCount = useMemo(
     () => Math.max(0, ...rankingPeriods.map((period) => period.ranking_entries?.length ?? 0)),
@@ -369,6 +388,101 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
     await fetchRankingPeriods();
   }
 
+  async function openRankingEntryDetail(period, entry) {
+    if (!period?.id || !entry?.student_id) return;
+
+    const draft = rankingDrafts[period.id] ?? normalizeRankingDraft(period);
+    const periodLabel = String(period.label ?? draft.label ?? "Ranking period").trim() || "Ranking period";
+    const startDate = String(period.start_date ?? draft.start_date ?? "").trim();
+    const endDate = String(period.end_date ?? draft.end_date ?? "").trim();
+
+    setRankingDetailModal({
+      open: true,
+      loading: true,
+      error: "",
+      periodId: period.id,
+      periodLabel,
+      studentId: entry.student_id,
+      studentName: String(entry.student_name ?? "").trim() || entry.student_id,
+      averageRate: Number(entry.average_rate ?? 0),
+      rankPosition: Number(entry.rank_position ?? 0) || null,
+      startDate,
+      endDate,
+      usedAttempts: [],
+    });
+
+    if (!startDate || !endDate) {
+      setRankingDetailModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: "This period needs both start and end dates before we can load the score list.",
+      }));
+      return;
+    }
+
+    const { data: attemptsData, error } = await fetchAllPages((offset, pageSize) => (
+      supabase
+        .from("attempts")
+        .select("id, student_id, test_session_id, test_version, score_rate, correct, total, created_at, ended_at")
+        .eq("school_id", activeSchoolId)
+        .eq("student_id", entry.student_id)
+        .gte("created_at", new Date(`${startDate}T00:00:00`).toISOString())
+        .lte("created_at", new Date(`${endDate}T23:59:59`).toISOString())
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + pageSize - 1)
+    ));
+
+    if (error) {
+      console.error("ranking detail attempts fetch error:", error);
+      setRankingDetailModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: `Load failed: ${error.message}`,
+      }));
+      return;
+    }
+
+    const usedAttempts = Array.from(buildLatestAttemptMapByStudentAndScope(attemptsData).values())
+      .filter((attempt) => attempt?.student_id === entry.student_id)
+      .sort((a, b) => {
+        const timeDiff = getRowTimestamp(a) - getRowTimestamp(b);
+        if (timeDiff !== 0) return timeDiff;
+        return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+      })
+      .map((attempt) => {
+        const scoreRate = Number(attempt?.score_rate ?? (attempt?.total ? attempt.correct / attempt.total : 0));
+        return {
+          ...attempt,
+          scoreRate: Number.isFinite(scoreRate) ? scoreRate : 0,
+        };
+      });
+
+    setRankingDetailModal((prev) => ({
+      ...prev,
+      loading: false,
+      error: "",
+      usedAttempts,
+    }));
+  }
+
+  function closeRankingEntryDetail() {
+    setRankingDetailModal({
+      open: false,
+      loading: false,
+      error: "",
+      periodId: "",
+      periodLabel: "",
+      studentId: "",
+      studentName: "",
+      averageRate: null,
+      rankPosition: null,
+      startDate: "",
+      endDate: "",
+      usedAttempts: [],
+    });
+  }
+
   async function deleteRankingPeriod(period) {
     if (!period?.id) return;
     const label = String(period.label ?? "Ranking period").trim() || "Ranking period";
@@ -409,5 +523,8 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session }) 
     addRankingPeriod,
     refreshRankingPeriod,
     deleteRankingPeriod,
+    rankingDetailModal,
+    openRankingEntryDetail,
+    closeRankingEntryDetail,
   };
 }

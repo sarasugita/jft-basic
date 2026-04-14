@@ -13,12 +13,15 @@ export default function AdminConsoleRankingWorkspace() {
     rankingLoaded,
     rankingRefreshingId,
     rankingRowCount,
+    rankingDetailModal,
     fetchRankingPeriods,
     addRankingPeriod,
     updateRankingDraft,
     saveRankingPeriodLabel,
     refreshRankingPeriod,
     deleteRankingPeriod,
+    openRankingEntryDetail,
+    closeRankingEntryDetail,
   } = useRankingWorkspaceState({ supabase, activeSchoolId, session });
 
   useEffect(() => {
@@ -152,7 +155,20 @@ export default function AdminConsoleRankingWorkspace() {
                     const entry = period.ranking_entries?.[idx] ?? null;
                     return (
                       <Fragment key={`${period.id}-${idx + 1}`}>
-                        <td>{entry?.student_name || "-"}</td>
+                        <td>
+                          {entry ? (
+                            <button
+                              type="button"
+                              className="ranking-student-button"
+                              onClick={() => openRankingEntryDetail(period, entry)}
+                              title="View scores used for this ranking"
+                            >
+                              {entry.student_name || "-"}
+                            </button>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
                         <td>{entry ? `${(Number(entry.average_rate) * 100).toFixed(2)}%` : "-"}</td>
                       </Fragment>
                     );
@@ -170,6 +186,68 @@ export default function AdminConsoleRankingWorkspace() {
         </table>
       </div>
       <div className="admin-msg">{rankingMsg}</div>
+      {rankingDetailModal.open ? (
+        <div className="admin-modal-overlay" onClick={closeRankingEntryDetail}>
+          <div className="admin-modal ranking-detail-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="admin-modal-header">
+              <div className="admin-title">Ranking Details</div>
+              <button className="admin-modal-close" onClick={closeRankingEntryDetail} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <div className="ranking-detail-summary">
+              <div><strong>Period:</strong> {rankingDetailModal.periodLabel || "-"}</div>
+              <div><strong>Student:</strong> {rankingDetailModal.studentName || "-"}</div>
+              <div><strong>Rank:</strong> {rankingDetailModal.rankPosition != null ? `#${rankingDetailModal.rankPosition}` : "-"}</div>
+              <div><strong>Average:</strong> {Number.isFinite(rankingDetailModal.averageRate) ? `${(rankingDetailModal.averageRate * 100).toFixed(2)}%` : "-"}</div>
+              <div><strong>Range:</strong> {rankingDetailModal.startDate && rankingDetailModal.endDate ? `${rankingDetailModal.startDate} to ${rankingDetailModal.endDate}` : "-"}</div>
+            </div>
+            {rankingDetailModal.loading ? (
+              <div className="ranking-detail-state">Loading scores...</div>
+            ) : rankingDetailModal.error ? (
+              <div className="ranking-detail-state ranking-detail-error">{rankingDetailModal.error}</div>
+            ) : rankingDetailModal.usedAttempts.length ? (
+              <div className="admin-table-wrap ranking-detail-table-wrap" style={{ marginTop: 12 }}>
+                <table className="admin-table ranking-detail-table">
+                  <thead>
+                    <tr>
+                      <th>Scope</th>
+                      <th>Score</th>
+                      <th>Correct / Total</th>
+                      <th>Completed</th>
+                      <th>Attempt ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rankingDetailModal.usedAttempts.map((attempt) => {
+                      const scopeLabel = attempt.test_session_id
+                        ? `Session ${attempt.test_session_id}`
+                        : attempt.test_version
+                          ? `Set ${attempt.test_version}`
+                          : "Attempt";
+                      const scoreText = `${(Number(attempt.scoreRate ?? 0) * 100).toFixed(2)}%`;
+                      const totalText = `${attempt.correct ?? 0} / ${attempt.total ?? 0}`;
+                      const completedAtRaw = attempt.ended_at || attempt.created_at || "";
+                      const completedAt = completedAtRaw ? new Date(completedAtRaw).toLocaleString() : "-";
+                      return (
+                        <tr key={attempt.id}>
+                          <td>{scopeLabel}</td>
+                          <td>{scoreText}</td>
+                          <td>{totalText}</td>
+                          <td>{completedAt}</td>
+                          <td>{attempt.id}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="ranking-detail-state">No scores were found in this period for this student.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

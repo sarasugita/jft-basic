@@ -3919,6 +3919,71 @@ body { padding: 0; }
   vertical-align: top;
 }
 
+.ranking-table td {
+  vertical-align: middle;
+}
+
+.ranking-student-button {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: #111827;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.ranking-student-button:hover {
+  color: #0f172a;
+  text-decoration: underline;
+}
+
+.ranking-student-button:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.ranking-detail-modal {
+  max-width: 980px;
+  width: min(980px, 96vw);
+}
+
+.ranking-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 14px;
+  margin-top: 4px;
+  color: #111827;
+}
+
+.ranking-detail-state {
+  margin-top: 14px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.ranking-detail-error {
+  color: #b91c1c;
+}
+
+.ranking-detail-table-wrap {
+  max-height: 52vh;
+}
+
+.ranking-detail-table th,
+.ranking-detail-table td {
+  white-space: nowrap;
+}
+
 .ranking-period-head {
   display: flex;
   align-items: flex-start;
