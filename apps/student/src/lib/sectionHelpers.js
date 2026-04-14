@@ -30,7 +30,12 @@ export function getSectionQuestions(sectionKey) {
   const groups = [];
   const map = new Map();
   for (const question of list) {
-    const key = question.qid || question.id;
+    const sourceVersion = String(question.sourceVersion ?? "").trim();
+    const sourceQuestionId = String(question.sourceQuestionId ?? "").trim();
+    const localQuestionKey = String(question.qid ?? question.id ?? "").trim();
+    const key = sourceVersion
+      ? `${sourceVersion}::${sourceQuestionId || localQuestionKey || question.id}`
+      : localQuestionKey || String(question.id ?? "");
     let group = map.get(key);
     if (!group) {
       group = { key, items: [], orderIndex: question.orderIndex ?? 0 };

@@ -97,6 +97,8 @@ export function normalizeQuestionAssets(q, version) {
 
 export function mapDbQuestion(row, version) {
   const data = row.data ?? {};
+  const sourceVersion = String(data.sourceVersion ?? data.source_version ?? "").trim() || null;
+  const sourceQuestionId = String(data.sourceQuestionId ?? data.source_question_id ?? "").trim() || null;
   const stemAsset = [
     data.stemAsset,
     data.stem_asset,
@@ -121,6 +123,8 @@ export function mapDbQuestion(row, version) {
     answerIndex: row.answer_index,
     answerIndices: Array.isArray(data.answer_indices) ? data.answer_indices : null,
     orderIndex: row.order_index ?? 0,
+    sourceVersion,
+    sourceQuestionId,
     stemKind: normalizeStemKindValue(data.stemKind || data.stem_kind || row.media_type || null),
     stemText: data.stemText || null,
     stemAsset,

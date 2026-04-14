@@ -98,6 +98,7 @@ create table if not exists public.test_sessions (
   problem_set_id text not null references public.tests(version) on delete restrict,
   title text not null,
   session_category text,
+  source_set_ids jsonb not null default '[]'::jsonb,
   starts_at timestamptz,
   ends_at timestamptz,
   time_limit_min int,

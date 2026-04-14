@@ -861,7 +861,10 @@ function getProblemSetTitle(problemSetId, testsList) {
   return item?.title || problemSetId || "";
 }
 
-function getProblemSetDisplayId(problemSetId, testsList) {
+function getProblemSetDisplayId(problemSetId, testsList, sessionSourceSetIds = []) {
+  if (Array.isArray(sessionSourceSetIds) && sessionSourceSetIds.length) {
+    return sessionSourceSetIds.join(", ");
+  }
   const item = (testsList ?? []).find((t) => t.version === problemSetId);
   if (Array.isArray(item?.source_set_ids) && item.source_set_ids.length) {
     return item.source_set_ids.join(", ");
@@ -1005,6 +1008,9 @@ function buildDailySessionTitle({ category, setIds }) {
 
   const summary = buildDailySessionTitleLabel(normalizedSetIds);
   if (!summary) return normalizedCategory;
+  if (/^grammar$/i.test(normalizedCategory) && /^Grammar Book/i.test(summary)) {
+    return summary;
+  }
   if (/^weekly review$/i.test(normalizedCategory)) {
     return `Week Review (${summary})`;
   }
@@ -1294,6 +1300,7 @@ export function useTestingWorkspaceState({
     problem_set_ids: [],
     source_categories: [],
     session_category: "",
+    session_category_auto_generated: true,
     title: "",
     title_auto_generated: true,
     session_date: "",
@@ -1527,20 +1534,74 @@ export function useTestingWorkspaceState({
 
     const sourceMap = {};
     (data ?? []).forEach((row) => {
-      const sourceVersion = String(row.data?.sourceVersion ?? "").trim();
-      if (!sourceVersion) return;
+      const sourceSetIds = Array.isArray(row.data?.sourceSetIds)
+        ? row.data.sourceSetIds
+        : [];
+      const sourceVersions = sourceSetIds.length
+        ? sourceSetIds.map((value) => String(value ?? "").trim()).filter(Boolean)
+        : [String(row.data?.sourceVersion ?? "").trim()].filter(Boolean);
+      if (!sourceVersions.length) return;
       if (!Array.isArray(sourceMap[row.test_version])) {
         sourceMap[row.test_version] = [];
       }
-      if (!sourceMap[row.test_version].includes(sourceVersion)) {
-        sourceMap[row.test_version].push(sourceVersion);
-      }
+      sourceVersions.forEach((sourceVersion) => {
+        if (!sourceMap[row.test_version].includes(sourceVersion)) {
+          sourceMap[row.test_version].push(sourceVersion);
+        }
+      });
     });
 
     return (list ?? []).map((test) => (
       sourceMap[test.version]?.length
         ? { ...test, source_set_ids: sourceMap[test.version] }
         : test
+    ));
+  }, [supabase]);
+
+  const attachGeneratedDailySourceSetIdsToSessions = useCallback(async (list) => {
+    if (!supabase) return list;
+    const generatedVersions = (list ?? [])
+      .filter((session) => isGeneratedDailySessionVersion(session.problem_set_id))
+      .filter((session) => !Array.isArray(session.source_set_ids) || !session.source_set_ids.length)
+      .map((session) => session.problem_set_id)
+      .filter(Boolean);
+    if (!generatedVersions.length) return list;
+
+    const { data, error } = await supabase
+      .from("questions")
+      .select("test_version, order_index, data")
+      .in("test_version", generatedVersions)
+      .order("test_version", { ascending: true })
+      .order("order_index", { ascending: true });
+
+    if (error) {
+      console.error("generated daily session source lookup error:", error);
+      return list;
+    }
+
+    const sourceMap = {};
+    (data ?? []).forEach((row) => {
+      const sourceSetIds = Array.isArray(row.data?.sourceSetIds)
+        ? row.data.sourceSetIds
+        : [];
+      const sourceVersions = sourceSetIds.length
+        ? sourceSetIds.map((value) => String(value ?? "").trim()).filter(Boolean)
+        : [String(row.data?.sourceVersion ?? "").trim()].filter(Boolean);
+      if (!sourceVersions.length) return;
+      if (!Array.isArray(sourceMap[row.test_version])) {
+        sourceMap[row.test_version] = [];
+      }
+      sourceVersions.forEach((sourceVersion) => {
+        if (!sourceMap[row.test_version].includes(sourceVersion)) {
+          sourceMap[row.test_version].push(sourceVersion);
+        }
+      });
+    });
+
+    return (list ?? []).map((session) => (
+      sourceMap[session.problem_set_id]?.length
+        ? { ...session, source_set_ids: sourceMap[session.problem_set_id] }
+        : session
     ));
   }, [supabase]);
 
@@ -1852,6 +1913,11 @@ export function useTestingWorkspaceState({
     selectedDailySourceCategoryNames,
   ]);
 
+  const selectedDailySourceCategoryName = useMemo(
+    () => (selectedDailySourceCategoryNames.length === 1 ? selectedDailySourceCategoryNames[0] : ""),
+    [selectedDailySourceCategoryNames]
+  );
+
   const selectLatestQuestionSetVersions = useCallback((list, getKey) => {
     const latestByKey = new Map();
     (list ?? []).forEach((item) => {
@@ -1966,9 +2032,11 @@ export function useTestingWorkspaceState({
   const dailySessionCategories = useMemo(() => buildDailySessionCategoryGroups(dailySessions), [buildDailySessionCategoryGroups, dailySessions]);
 
   const dailySessionCategorySelectValue = useMemo(() => {
+    const currentCategory = String(dailySessionForm.session_category ?? "").trim();
+    if (!currentCategory) return "";
     if (!dailySessionCategories.length) return CUSTOM_CATEGORY_OPTION;
-    return dailySessionCategories.some((category) => category.name === dailySessionForm.session_category)
-      ? dailySessionForm.session_category
+    return dailySessionCategories.some((category) => category.name === currentCategory)
+      ? currentCategory
       : CUSTOM_CATEGORY_OPTION;
   }, [dailySessionCategories, dailySessionForm.session_category]);
 
@@ -2950,9 +3018,10 @@ export function useTestingWorkspaceState({
       setTestSessionsLoaded(false);
       return;
     }
-    setTestSessions(data ?? []);
+    const hydrated = await attachGeneratedDailySourceSetIdsToSessions(data ?? []);
+    setTestSessions(hydrated);
     setTestSessionsLoaded(true);
-  }, [supabase]);
+  }, [supabase, attachGeneratedDailySourceSetIdsToSessions]);
 
   const fetchAssets = useCallback(async () => {
     setAssetsMsg("Loading...");
@@ -3119,6 +3188,7 @@ export function useTestingWorkspaceState({
           itemId: nextQuestionId,
           sourceVersion: row.test_version ?? null,
           sourceQuestionId: row.question_id ?? null,
+          sourceSetIds: normalizedSetIds,
         },
       };
     });
@@ -3475,6 +3545,7 @@ export function useTestingWorkspaceState({
       problem_set_id: problemSetId,
       title,
       session_category: sessionCategory,
+      source_set_ids: selectedSetIds,
       starts_at: startsAtInput ? fromBangladeshInput(startsAtInput) : null,
       ends_at: endsAt ? fromBangladeshInput(endsAt) : null,
       time_limit_min: dailySessionForm.time_limit_min ? Number(dailySessionForm.time_limit_min) : null,
@@ -3487,11 +3558,27 @@ export function useTestingWorkspaceState({
         ? (dailySessionForm.retake_release_scope || "all")
         : "all"
     };
-    const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
-    if (error || !created?.id) {
-      console.error("daily test_sessions insert error:", error);
-      setDailySessionsMsg(`Create failed: ${error.message}`);
-      return;
+    let created = null;
+    let insertError = null;
+    ({ data: created, error: insertError } = await supabase.from("test_sessions").insert(payload).select().single());
+    if (insertError || !created?.id) {
+      const missingSourceSetIds = String(insertError?.message ?? "").includes("source_set_ids")
+        && String(insertError?.message ?? "").toLowerCase().includes("schema cache");
+      if (!missingSourceSetIds) {
+        console.error("daily test_sessions insert error:", insertError);
+        setDailySessionsMsg(`Create failed: ${insertError?.message || "Unknown error"}`);
+        return;
+      }
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.source_set_ids;
+      const fallbackResult = await supabase.from("test_sessions").insert(fallbackPayload).select().single();
+      if (fallbackResult.error || !fallbackResult.data?.id) {
+        console.error("daily test_sessions insert fallback error:", fallbackResult.error);
+        setDailySessionsMsg(`Create failed: ${fallbackResult.error?.message || "Unknown error"}`);
+        return;
+      }
+      console.warn("daily session insert retried without source_set_ids because schema cache has not refreshed yet.");
+      created = fallbackResult.data;
     }
     const { error: passRateError } = await supabase
       .from("tests")
@@ -3518,6 +3605,7 @@ export function useTestingWorkspaceState({
       ...s,
       source_categories: [],
       session_category: dailyConductCategory || "",
+      session_category_auto_generated: true,
       title: "",
       title_auto_generated: true,
       session_date: "",
@@ -5026,6 +5114,7 @@ export function useTestingWorkspaceState({
       problem_set_ids: session.problem_set_id ? [session.problem_set_id] : [],
       source_categories: [],
       session_category: sourceCategory || current.session_category || "",
+      session_category_auto_generated: true,
       title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
       title_auto_generated: false,
       session_date: session.ends_at
@@ -5199,6 +5288,54 @@ export function useTestingWorkspaceState({
   }, [dailyConductMode, generatedDailySessionTitle]);
 
   useEffect(() => {
+    if (!dailyConductOpen) return;
+    if (dailyConductMode === "retake") return;
+    if (dailySessionForm.selection_mode !== "multiple") return;
+    if (!selectedDailySourceCategoryName) return;
+    setDailySessionForm((current) => {
+      const currentCategory = String(current.session_category ?? "").trim();
+      if (current.session_category_auto_generated === false && currentCategory && currentCategory !== selectedDailySourceCategoryName) {
+        return current;
+      }
+      if (currentCategory === selectedDailySourceCategoryName && current.session_category_auto_generated) {
+        return current;
+      }
+      return {
+        ...current,
+        session_category: selectedDailySourceCategoryName,
+        session_category_auto_generated: true,
+      };
+    });
+  }, [
+    dailyConductMode,
+    dailyConductOpen,
+    dailySessionForm.selection_mode,
+    selectedDailySourceCategoryName,
+  ]);
+
+  useEffect(() => {
+    if (!dailyConductOpen) return;
+    if (dailyConductMode === "retake") return;
+    if (dailySessionForm.selection_mode !== "multiple") return;
+    if (selectedDailySourceCategoryNames.length <= 1) return;
+    setDailySessionForm((current) => {
+      const currentCategory = String(current.session_category ?? "").trim();
+      if (!currentCategory) return current;
+      if (current.session_category_auto_generated === false) return current;
+      return {
+        ...current,
+        session_category: "",
+        session_category_auto_generated: true,
+      };
+    });
+  }, [
+    dailyConductMode,
+    dailyConductOpen,
+    dailySessionForm.selection_mode,
+    selectedDailySourceCategoryNames,
+  ]);
+
+  useEffect(() => {
     if (dailyConductMode === "retake") return;
     if (dailySessionForm.selection_mode !== "single") return;
     const selectedSetId = selectedDailyProblemSetIds[0] ?? "";
@@ -5206,9 +5343,13 @@ export function useTestingWorkspaceState({
     const sourceCategory = String(testMetaByVersion[selectedSetId]?.category ?? "").trim();
     if (!sourceCategory) return;
     setDailySessionForm((current) => (
-      current.session_category === sourceCategory
+      current.session_category === sourceCategory && current.session_category_auto_generated
         ? current
-        : { ...current, session_category: sourceCategory }
+        : {
+          ...current,
+          session_category: sourceCategory,
+          session_category_auto_generated: true,
+        }
     ));
     if (dailyConductCategory !== sourceCategory) {
       setDailyConductCategory(sourceCategory);

@@ -395,7 +395,7 @@ export default function AdminConsoleTestingTabs({
                           <tr key={t.id} {...getSessionRowProps(t, "mock")}>
                             <td>{t.title ?? ""}</td>
                             <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
-                            <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
+                            <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
                             <td style={{ textAlign: "center" }}>{getQuestionCount(t.problem_set_id)}</td>
@@ -1418,7 +1418,7 @@ export default function AdminConsoleTestingTabs({
                             {showDailySessionCategories ? (
                               <td>{String(t.session_category ?? "").trim() || testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
                             ) : null}
-                            <td>{getProblemSetDisplayId(t.problem_set_id, tests)}</td>
+                            <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
                             <td style={{ textAlign: "center" }}>{getQuestionCount(t.problem_set_id)}</td>
@@ -1969,6 +1969,7 @@ export default function AdminConsoleTestingTabs({
                                       problem_set_id: nextId,
                                       problem_set_ids: nextId ? [nextId] : [],
                                       session_category: sourceCategory || s.session_category,
+                                      session_category_auto_generated: Boolean(sourceCategory),
                                     };
                                   })
                                 }
@@ -1994,18 +1995,32 @@ export default function AdminConsoleTestingTabs({
                                   value={dailySessionCategorySelectValue}
                                   onChange={(e) => {
                                     const next = e.target.value;
+                                    if (!next) {
+                                      setDailySessionForm((s) => ({
+                                        ...s,
+                                        session_category: "",
+                                        session_category_auto_generated: true,
+                                      }));
+                                      return;
+                                    }
                                     if (next === CUSTOM_CATEGORY_OPTION) {
                                       setDailySessionForm((s) => ({
                                         ...s,
                                         session_category: dailySessionCategories.some((category) => category.name === s.session_category)
                                           ? ""
                                           : s.session_category,
+                                        session_category_auto_generated: false,
                                       }));
                                       return;
                                     }
-                                    setDailySessionForm((s) => ({ ...s, session_category: next }));
+                                    setDailySessionForm((s) => ({
+                                      ...s,
+                                      session_category: next,
+                                      session_category_auto_generated: false,
+                                    }));
                                   }}
                                 >
+                                  <option value="">Select Session Category</option>
                                   {dailySessionCategories.map((category) => (
                                     <option key={`daily-session-category-${category.name}`} value={category.name}>
                                       {category.name}
@@ -2016,7 +2031,11 @@ export default function AdminConsoleTestingTabs({
                                 {dailySessionCategorySelectValue === CUSTOM_CATEGORY_OPTION ? (
                                   <input
                                     value={dailySessionForm.session_category}
-                                    onChange={(e) => setDailySessionForm((s) => ({ ...s, session_category: e.target.value }))}
+                                    onChange={(e) => setDailySessionForm((s) => ({
+                                      ...s,
+                                      session_category: e.target.value,
+                                      session_category_auto_generated: false,
+                                    }))}
                                     placeholder="Mixed Practice"
                                     style={{ marginTop: 6 }}
                                   />
@@ -2025,7 +2044,11 @@ export default function AdminConsoleTestingTabs({
                             ) : (
                               <input
                                 value={dailySessionForm.session_category}
-                                onChange={(e) => setDailySessionForm((s) => ({ ...s, session_category: e.target.value }))}
+                                onChange={(e) => setDailySessionForm((s) => ({
+                                  ...s,
+                                  session_category: e.target.value,
+                                  session_category_auto_generated: false,
+                                }))}
                                 placeholder="Mixed Practice"
                               />
                             )}
