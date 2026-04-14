@@ -2631,8 +2631,8 @@ export default function AdminConsoleTestingTabs({
                   description="Some model SetIDs already exist. Choose whether to update the existing sets or upload only the new SetIDs."
                   duplicateSetIds={modelUploadConflict?.duplicateVersions ?? []}
                   allSetIds={modelUploadConflict?.versions ?? []}
-                  allActionLabel="Upload All and Update Existing SetIDs"
-                  newOnlyActionLabel="Upload Only New SetIDs"
+                  allActionLabel="Update All Existing Versions"
+                  newOnlyActionLabel="Only Upload New Sets"
                   allActionHint="Existing SetIDs will be updated in place."
                   newOnlyActionHint="Existing SetIDs will be skipped."
                   onAll={() => resolveModelUploadConflict("all")}
@@ -2645,8 +2645,8 @@ export default function AdminConsoleTestingTabs({
                   description="Some daily SetIDs already exist. Choose whether to update the existing sets or upload only the new SetIDs."
                   duplicateSetIds={dailyUploadConflict?.duplicateVersions ?? []}
                   allSetIds={dailyUploadConflict?.versions ?? []}
-                  allActionLabel="Upload All and Update Existing SetIDs"
-                  newOnlyActionLabel="Upload Only New SetIDs"
+                  allActionLabel="Update All Existing Versions"
+                  newOnlyActionLabel="Only Upload New Sets"
                   allActionHint="Existing SetIDs will be updated in place."
                   newOnlyActionHint="Existing SetIDs will be skipped."
                   onAll={() => resolveDailyUploadConflict("all")}

@@ -1371,8 +1371,8 @@ export default function SuperTestsImportPage() {
         description="Some SetIDs in this upload already exist. Choose whether to create new versions for them or upload only the new SetIDs."
         duplicateSetIds={uploadConflict.duplicateSetIds}
         allSetIds={uploadConflict.allSetIds}
-        allActionLabel="Upload All and Update Existing SetIDs"
-        newOnlyActionLabel="Upload Only New SetIDs"
+        allActionLabel="Update All Existing Versions"
+        newOnlyActionLabel="Only Upload New Sets"
         allActionHint="Existing SetIDs will be imported as new versions."
         newOnlyActionHint="Existing SetIDs will be skipped."
         onAll={() => handleUploadConflictChoice("all")}

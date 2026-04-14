@@ -27,8 +27,8 @@ export default function QuestionSetUploadConflictModal({
   description,
   duplicateSetIds = [],
   allSetIds = [],
-  allActionLabel = "Upload All and Update Existing SetIDs",
-  newOnlyActionLabel = "Upload Only New SetIDs",
+  allActionLabel = "Update All Existing Versions",
+  newOnlyActionLabel = "Only Upload New Sets",
   cancelLabel = "Cancel",
   allActionHint = "",
   newOnlyActionHint = "",
@@ -66,6 +66,9 @@ export default function QuestionSetUploadConflictModal({
         </div>
 
         <div className="upload-question-actions" style={{ marginTop: 16, flexWrap: "wrap" }}>
+          <button className="btn" type="button" onClick={onCancel}>
+            {cancelLabel}
+          </button>
           <button className="btn btn-primary" type="button" onClick={onAll}>
             {allActionLabel}
           </button>
@@ -74,9 +77,6 @@ export default function QuestionSetUploadConflictModal({
             {newOnlyActionLabel}
           </button>
           {newOnlyActionHint ? <div className="admin-help" style={{ width: "100%" }}>{newOnlyActionHint}</div> : null}
-          <button className="btn" type="button" onClick={onCancel}>
-            {cancelLabel}
-          </button>
         </div>
       </div>
     </div>
