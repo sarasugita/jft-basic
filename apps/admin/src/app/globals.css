@@ -3923,13 +3923,27 @@ body { padding: 0; }
   vertical-align: middle;
 }
 
+.ranking-table tbody tr:hover {
+  background: transparent;
+  cursor: default;
+}
+
+.ranking-table tbody tr:hover > td {
+  background: transparent;
+}
+
+.ranking-table tbody tr:hover > td.ranking-entry-cell.is-hovered {
+  background: rgba(106, 163, 50, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(106, 163, 50, 0.18);
+}
+
 .ranking-entry-cell {
   transition: background-color 120ms ease, box-shadow 120ms ease;
 }
 
 .ranking-entry-cell.is-hovered {
-  background: #eef4ff;
-  box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.18);
+  background: rgba(106, 163, 50, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(106, 163, 50, 0.18);
 }
 
 .ranking-entry-button {
@@ -3952,7 +3966,7 @@ body { padding: 0; }
 
 .ranking-entry-button:hover {
   color: #0f172a;
-  text-decoration: underline;
+  text-decoration: none;
 }
 
 .ranking-entry-button:focus-visible {
