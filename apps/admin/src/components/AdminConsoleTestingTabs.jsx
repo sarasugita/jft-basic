@@ -1739,6 +1739,7 @@ export default function AdminConsoleTestingTabs({
                               <input
                                 type="checkbox"
                                 checked={dailySessionForm.random_order}
+                                disabled={dailySessionForm.question_count_mode === "specify"}
                                 onChange={(e) => setDailySessionForm((s) => ({ ...s, random_order: e.target.checked }))}
                               />
                               <span className="daily-session-create-switch-slider" />
@@ -2089,12 +2090,12 @@ export default function AdminConsoleTestingTabs({
                               </label>
                               <div className="daily-session-create-count-option">
                                 <label className="daily-session-create-choice">
-                                  <input
-                                    type="radio"
-                                    name="dailySessionQuestionMode"
-                                    checked={dailySessionForm.question_count_mode === "specify"}
-                                    onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "specify" }))}
-                                  />
+                                <input
+                                  type="radio"
+                                  name="dailySessionQuestionMode"
+                                  checked={dailySessionForm.question_count_mode === "specify"}
+                                  onChange={() => setDailySessionForm((s) => ({ ...s, question_count_mode: "specify", random_order: true }))}
+                                />
                                   <span className="daily-session-create-choice-copy">Specify</span>
                                 </label>
                                 <input
@@ -2280,6 +2281,7 @@ export default function AdminConsoleTestingTabs({
                               <input
                                 type="checkbox"
                                 checked={dailySessionForm.random_order}
+                                disabled={dailySessionForm.question_count_mode === "specify"}
                                 onChange={(e) => setDailySessionForm((s) => ({ ...s, random_order: e.target.checked }))}
                               />
                               <span className="daily-session-create-switch-slider" />

@@ -3112,6 +3112,7 @@ export function useTestingWorkspaceState({
     randomOrder = true,
   }) => {
     if (!supabase) throw new Error("Supabase not initialized.");
+    const effectiveRandomOrder = Boolean(randomOrder) || questionCountMode === "specify";
 
     const normalizedSetIds = Array.from(new Set((sourceSetIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean)));
     if (!normalizedSetIds.length) {
@@ -3119,7 +3120,7 @@ export function useTestingWorkspaceState({
     }
 
     const shouldCreateDerivedSet =
-      Boolean(randomOrder)
+      effectiveRandomOrder
       || normalizedSetIds.length > 1
       || questionCountMode === "specify";
 
@@ -3154,7 +3155,7 @@ export function useTestingWorkspaceState({
       throw new Error(`Only ${orderedQuestions.length} questions are available for the selected SetID values.`);
     }
 
-    const selectedQuestions = (randomOrder ? shuffleCopy(orderedQuestions) : [...orderedQuestions]).slice(0, requestedQuestionCount);
+    const selectedQuestions = (effectiveRandomOrder ? shuffleCopy(orderedQuestions) : [...orderedQuestions]).slice(0, requestedQuestionCount);
     const sourceQuestionIds = selectedQuestions.map((row) => row.id).filter(Boolean);
     const { data: sourceChoices, error: sourceChoicesError } = sourceQuestionIds.length
       ? await supabase
