@@ -526,8 +526,8 @@ export default function SuperTestsImportPage() {
         .select("id, name")
         .order("name", { ascending: true }),
       supabase
-        .from("question_set_questions")
-        .select("question_set_id"),
+        .from("questions")
+        .select("test_version"),
       supabase
         .from("tests")
         .select("version, title, type"),
@@ -544,7 +544,9 @@ export default function SuperTestsImportPage() {
     const schoolMap = Object.fromEntries((schoolsRes.data ?? []).map((school) => [school.id, school]));
     const questionCountBySet = {};
     for (const row of questionSetsRes.data ?? []) {
-      questionCountBySet[row.id] = 0;
+      const setId = String(row.title ?? row.version ?? "").trim();
+      if (!setId) continue;
+      questionCountBySet[setId] = 0;
     }
     const visibilityBySet = {};
     for (const row of visibilityRes.data ?? []) {
@@ -553,8 +555,9 @@ export default function SuperTestsImportPage() {
     }
 
     for (const row of (questionsRes.data ?? [])) {
-      if (!row?.question_set_id) continue;
-      questionCountBySet[row.question_set_id] = (questionCountBySet[row.question_set_id] ?? 0) + 1;
+      const setId = String(row?.test_version ?? "").trim();
+      if (!setId) continue;
+      questionCountBySet[setId] = (questionCountBySet[setId] ?? 0) + 1;
     }
     const legacyTestBySetId = Object.fromEntries((legacyTestsRes.data ?? []).map((row) => [row.version, row]));
 
@@ -563,7 +566,7 @@ export default function SuperTestsImportPage() {
       (questionSetsRes.data ?? []).map((item) => ({
         ...item,
         category: legacyTestBySetId[item.title]?.title ?? (item.test_type === "daily" ? "Vocabulary" : "Book Review"),
-        question_count: questionCountBySet[item.id] ?? 0,
+        question_count: questionCountBySet[String(item.title ?? item.version ?? "").trim()] ?? 0,
         visible_schools: visibilityBySet[item.id] ?? [],
       })),
     );
