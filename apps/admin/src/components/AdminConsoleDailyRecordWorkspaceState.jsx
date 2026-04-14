@@ -386,11 +386,16 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
   const [dailyRecordSyllabusAnnouncements, setDailyRecordSyllabusAnnouncements] = useState(() => cachedState?.dailyRecordSyllabusAnnouncements ?? []);
   const [dailyRecordPlanDrafts, setDailyRecordPlanDrafts] = useState(() => cachedState?.dailyRecordPlanDrafts ?? {});
   const [dailyRecordConfirmedDates, setDailyRecordConfirmedDates] = useState(() => cachedState?.dailyRecordConfirmedDates ?? []);
+  const [dailyRecordPlanInputEnabledDates, setDailyRecordPlanInputEnabledDates] = useState(() => new Set());
   const [dailyRecordPlanSavingDate, setDailyRecordPlanSavingDate] = useState("");
   const [dailyRecordHolidaySavingDate, setDailyRecordHolidaySavingDate] = useState("");
   const [todayBangladeshDate, setTodayBangladeshDate] = useState(() => getBangladeshDateInput(new Date()));
   const dailyRecordTableWrapRef = useRef(null);
   const dailyRecordDatePickerRef = useRef(null);
+
+  useEffect(() => {
+    setDailyRecordPlanInputEnabledDates(new Set());
+  }, [activeSchoolId]);
 
   useEffect(() => {
     function syncTodayBangladeshDate() {
@@ -884,8 +889,24 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       }
     }
     setDailyRecordPlanSavingDate("");
+    setDailyRecordPlanInputEnabledDates((prev) => {
+      if (!prev.has(recordDate)) return prev;
+      const next = new Set(prev);
+      next.delete(recordDate);
+      return next;
+    });
     setDailyRecordsMsg(`Saved plan for ${recordDate}.`);
     await fetchDailyRecords();
+  }
+
+  function enableDailyRecordPlanInput(recordDate) {
+    if (!recordDate) return;
+    setDailyRecordPlanInputEnabledDates((prev) => {
+      if (prev.has(recordDate)) return prev;
+      const next = new Set(prev);
+      next.add(recordDate);
+      return next;
+    });
   }
 
   async function saveDailyRecordHoliday(recordDate, nextHoliday) {
@@ -1323,6 +1344,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     dailyRecordSyllabusAnnouncements,
     dailyRecordPlanDrafts,
     dailyRecordConfirmedDates,
+    dailyRecordPlanInputEnabledDates,
     dailyRecordPlanSavingDate,
     dailyRecordHolidaySavingDate,
     dailyRecordTableWrapRef,
@@ -1344,6 +1366,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
     removeDailyRecordTextbookEntry,
     addDailyRecordCommentRow,
     removeDailyRecordCommentRow,
+    enableDailyRecordPlanInput,
     saveDailyRecord,
     saveDailyRecordPlan,
     saveDailyRecordHoliday,
