@@ -63,6 +63,66 @@ function getSessionDisplayTitle(session, tests = []) {
   return fallbackTitle || version;
 }
 
+function getRankingAttemptTimestamp(attempt) {
+  return getRowTimestamp(attempt);
+}
+
+function isRankingAttemptInPeriod(attempt, startIso, endIso) {
+  const timestamp = getRankingAttemptTimestamp(attempt);
+  if (!timestamp) return false;
+  const startTime = new Date(startIso).getTime();
+  const endTime = new Date(endIso).getTime();
+  return timestamp >= startTime && timestamp <= endTime;
+}
+
+async function fetchRankingPeriodAttempts({ supabase, schoolId, studentId = null, startIso, endIso }) {
+  const baseSelect = "id, student_id, test_session_id, test_version, score_rate, correct, total, created_at, ended_at";
+
+  const endedRows = await fetchAllPages((offset, pageSize) => {
+    let query = supabase
+      .from("attempts")
+      .select(baseSelect)
+      .eq("school_id", schoolId)
+      .gte("ended_at", startIso)
+      .lte("ended_at", endIso)
+      .order("ended_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (studentId) query = query.eq("student_id", studentId);
+    return query;
+  });
+
+  if (endedRows.error) return endedRows;
+
+  const createdFallbackRows = await fetchAllPages((offset, pageSize) => {
+    let query = supabase
+      .from("attempts")
+      .select(baseSelect)
+      .eq("school_id", schoolId)
+      .is("ended_at", null)
+      .gte("created_at", startIso)
+      .lte("created_at", endIso)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (studentId) query = query.eq("student_id", studentId);
+    return query;
+  });
+
+  if (createdFallbackRows.error) return createdFallbackRows;
+
+  const seenIds = new Set();
+  const merged = [];
+  for (const row of [...(endedRows.data ?? []), ...(createdFallbackRows.data ?? [])]) {
+    if (!row?.id || seenIds.has(row.id)) continue;
+    if (!isRankingAttemptInPeriod(row, startIso, endIso)) continue;
+    seenIds.add(row.id);
+    merged.push(row);
+  }
+
+  return { data: merged, error: null };
+}
+
 export function useRankingWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], tests = [] }) {
   const cacheUserId = session?.user?.id ?? "";
   const cachedState = cacheUserId && activeSchoolId ? readAdminConsoleDataCache(cacheUserId, activeSchoolId) : null;
@@ -267,6 +327,8 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session, te
       startDate: draft.start_date,
       endDate: draft.end_date,
     });
+    const startIso = new Date(`${draft.start_date}T00:00:00`).toISOString();
+    const endIso = new Date(`${draft.end_date}T23:59:59.999`).toISOString();
     const { error: periodError } = await supabase
       .from("ranking_periods")
       .update({
@@ -283,17 +345,12 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session, te
       return;
     }
 
-    const { data: attemptsData, error: attemptsError } = await fetchAllPages((offset, pageSize) => (
-      supabase
-        .from("attempts")
-        .select("id, student_id, test_session_id, test_version, score_rate, correct, total, created_at, ended_at")
-        .eq("school_id", activeSchoolId)
-        .gte("created_at", new Date(`${draft.start_date}T00:00:00`).toISOString())
-        .lte("created_at", new Date(`${draft.end_date}T23:59:59`).toISOString())
-        .order("created_at", { ascending: true })
-        .order("id", { ascending: true })
-        .range(offset, offset + pageSize - 1)
-    ));
+    const { data: attemptsData, error: attemptsError } = await fetchRankingPeriodAttempts({
+      supabase,
+      schoolId: activeSchoolId,
+      startIso,
+      endIso,
+    });
     if (attemptsError) {
       console.error("ranking attempts fetch error:", attemptsError);
       setRankingMsg(`Refresh failed: ${attemptsError.message}`);
@@ -429,18 +486,13 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session, te
       return;
     }
 
-    const { data: attemptsData, error } = await fetchAllPages((offset, pageSize) => (
-      supabase
-        .from("attempts")
-        .select("id, student_id, test_session_id, test_version, score_rate, correct, total, created_at, ended_at")
-        .eq("school_id", activeSchoolId)
-        .eq("student_id", entry.student_id)
-        .gte("created_at", new Date(`${startDate}T00:00:00`).toISOString())
-        .lte("created_at", new Date(`${endDate}T23:59:59`).toISOString())
-        .order("created_at", { ascending: true })
-        .order("id", { ascending: true })
-        .range(offset, offset + pageSize - 1)
-    ));
+    const { data: attemptsData, error } = await fetchRankingPeriodAttempts({
+      supabase,
+      schoolId: activeSchoolId,
+      studentId: entry.student_id,
+      startIso: new Date(`${startDate}T00:00:00`).toISOString(),
+      endIso: new Date(`${endDate}T23:59:59.999`).toISOString(),
+    });
 
     if (error) {
       console.error("ranking detail attempts fetch error:", error);
