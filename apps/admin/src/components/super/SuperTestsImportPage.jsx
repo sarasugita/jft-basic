@@ -845,7 +845,11 @@ export default function SuperTestsImportPage() {
     duplicateStrategy = null,
   }) {
     const uploadMetadata = duplicateStrategy
-      ? { ...metadataInput, duplicate_strategy: duplicateStrategy }
+      ? {
+          ...metadataInput,
+          duplicate_strategy: duplicateStrategy,
+          versioning_mode: duplicateStrategy,
+        }
       : metadataInput;
     const totalFiles = getUploadFiles(selectedCsvFile, selectedAssetFiles).length;
     setUploadProgress({ phase: "Uploading files", uploaded: 0, total: totalFiles });

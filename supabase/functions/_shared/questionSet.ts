@@ -131,6 +131,7 @@ export type UploadMetadata = {
   school_ids: string[];
   source_question_set_id: string | null;
   duplicate_strategy: "all" | "new_only" | null;
+  versioning_mode: "all" | "new_only" | null;
 };
 
 export async function parseUploadForm(req: Request): Promise<{ metadata: UploadMetadata; csvFile: File; assetFiles: File[] } | Response> {
@@ -191,6 +192,7 @@ export async function parseUploadForm(req: Request): Promise<{ metadata: UploadM
       school_ids: schoolIds,
       source_question_set_id: normalizeText(parsed.source_question_set_id),
       duplicate_strategy: normalizeText(parsed.duplicate_strategy) as "all" | "new_only" | null,
+      versioning_mode: normalizeText(parsed.versioning_mode) as "all" | "new_only" | null,
     },
     csvFile,
     assetFiles,

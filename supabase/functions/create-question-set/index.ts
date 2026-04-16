@@ -58,7 +58,7 @@ serve(async (req) => {
     .in("title", requestedSetIds);
   if (existingSetsError) return bad(existingSetsError.message);
 
-  const duplicateStrategy = parsed.metadata.duplicate_strategy ?? null;
+  const duplicateStrategy = parsed.metadata.versioning_mode ?? parsed.metadata.duplicate_strategy ?? null;
   const activeDuplicateSets = (existingSets ?? []).filter((item) => item.status !== "archived" && requestedSetIds.includes(item.title));
   const activeDuplicateSetIds = Array.from(new Set(activeDuplicateSets.map((item) => item.title)));
   const activeDuplicateSetMap = new Map<string, (typeof activeDuplicateSets)[number]>();
