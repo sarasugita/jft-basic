@@ -2735,6 +2735,28 @@ body { padding: 0; }
   border-radius: 2px;
 }
 
+.upload-question-conflict-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.upload-question-conflict-choice {
+  display: grid;
+  gap: 8px;
+}
+
+.upload-question-conflict-choice .btn {
+  width: 100%;
+  min-width: 0;
+}
+
+.upload-question-conflict-hint {
+  line-height: 1.4;
+}
+
 .daily-session-create-layout {
   display: grid;
   gap: 12px;
@@ -3892,6 +3914,22 @@ body { padding: 0; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
   vertical-align: middle !important;
+}
+
+.daily-record-holiday-action-cell {
+  width: 1%;
+  white-space: nowrap;
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+  text-align: center;
+}
+
+.daily-record-input-plan-btn {
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 6px;
 }
 
 .daily-record-holiday-switch {

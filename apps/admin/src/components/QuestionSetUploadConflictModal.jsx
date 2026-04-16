@@ -29,7 +29,6 @@ export default function QuestionSetUploadConflictModal({
   allSetIds = [],
   allActionLabel = "Update All Existing Versions",
   newOnlyActionLabel = "Only Upload New Sets",
-  cancelLabel = "Cancel",
   allActionHint = "",
   newOnlyActionHint = "",
   onAll,
@@ -65,18 +64,19 @@ export default function QuestionSetUploadConflictModal({
           </div>
         </div>
 
-        <div className="upload-question-actions" style={{ marginTop: 16, flexWrap: "wrap" }}>
-          <button className="btn" type="button" onClick={onCancel}>
-            {cancelLabel}
-          </button>
-          <button className="btn btn-primary" type="button" onClick={onAll}>
-            {allActionLabel}
-          </button>
-          {allActionHint ? <div className="admin-help" style={{ width: "100%" }}>{allActionHint}</div> : null}
-          <button className="btn" type="button" onClick={onNewOnly}>
-            {newOnlyActionLabel}
-          </button>
-          {newOnlyActionHint ? <div className="admin-help" style={{ width: "100%" }}>{newOnlyActionHint}</div> : null}
+        <div className="upload-question-conflict-actions" style={{ marginTop: 16 }}>
+          <div className="upload-question-conflict-choice">
+            <button className="btn btn-primary" type="button" onClick={onAll}>
+              {allActionLabel}
+            </button>
+            {allActionHint ? <div className="admin-help upload-question-conflict-hint">{allActionHint}</div> : null}
+          </div>
+          <div className="upload-question-conflict-choice">
+            <button className="btn" type="button" onClick={onNewOnly}>
+              {newOnlyActionLabel}
+            </button>
+            {newOnlyActionHint ? <div className="admin-help upload-question-conflict-hint">{newOnlyActionHint}</div> : null}
+          </div>
         </div>
       </div>
     </div>
