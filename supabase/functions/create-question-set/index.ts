@@ -5,6 +5,7 @@ import {
   logAuditEvent,
   ok,
   parseUploadForm,
+  resolveUniqueVersionLabel,
   replaceVisibility,
   requireSuperAdmin,
   syncLegacyTestCatalog,
@@ -108,12 +109,21 @@ serve(async (req) => {
               .reduce((max, item) => Math.max(max, Number(item.version ?? 0)), 0)
           ) + 1
         : 1;
+      const versionLabel = isVersionUpload
+        ? resolveUniqueVersionLabel(
+            (existingSets ?? [])
+              .filter((item) => item.library_key === existingSet?.library_key)
+              .map((item) => item.version_label),
+            parsed.metadata.version_label,
+            nextVersion,
+          )
+        : parsed.metadata.version_label;
       const questionSetPayload: Record<string, unknown> = {
         title: questionSetGroup.set_id,
         description: isVersionUpload ? parsed.metadata.description ?? existingSet?.description ?? null : parsed.metadata.description,
         test_type: parsed.metadata.test_type,
         version: nextVersion,
-        version_label: parsed.metadata.version_label,
+        version_label: versionLabel,
         status: parsed.metadata.status,
         visibility_scope: parsed.metadata.visibility_scope,
         created_by: context.callerUserId,
@@ -221,7 +231,7 @@ serve(async (req) => {
         metadata: {
           title: questionSetGroup.set_id,
           category: parsed.metadata.category,
-          version_label: parsed.metadata.version_label,
+          version_label: inserted.version_label,
           test_type: parsed.metadata.test_type,
           status: parsed.metadata.status,
           visibility_scope: parsed.metadata.visibility_scope,

@@ -199,6 +199,35 @@ export async function parseUploadForm(req: Request): Promise<{ metadata: UploadM
   };
 }
 
+export function resolveUniqueVersionLabel(
+  existingVersionLabels: Array<string | null | undefined>,
+  preferredVersionLabel: string | null | undefined,
+  fallbackVersionNumber: number,
+) {
+  const normalizedExisting = new Set(
+    (existingVersionLabels ?? [])
+      .map((value) => String(value ?? "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const preferred = String(preferredVersionLabel ?? "").trim();
+  if (preferred && !normalizedExisting.has(preferred.toLowerCase())) {
+    return preferred;
+  }
+
+  const baseVersion = Math.max(1, Number(fallbackVersionNumber) || 1);
+  const fallback = `v${baseVersion}`;
+  if (!normalizedExisting.has(fallback.toLowerCase())) {
+    return fallback;
+  }
+
+  let suffix = 2;
+  while (normalizedExisting.has(`${fallback}-${suffix}`.toLowerCase())) {
+    suffix += 1;
+  }
+  return `${fallback}-${suffix}`;
+}
+
 function splitCsvLine(line: string) {
   const out: string[] = [];
   let current = "";

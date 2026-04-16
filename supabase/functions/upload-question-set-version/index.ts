@@ -5,6 +5,7 @@ import {
   logAuditEvent,
   ok,
   parseUploadForm,
+  resolveUniqueVersionLabel,
   replaceVisibility,
   requireSuperAdmin,
   syncLegacyTestCatalog,
@@ -94,6 +95,16 @@ serve(async (req) => {
     .maybeSingle();
 
   const nextVersion = Number(maxVersionRow?.version ?? 0) + 1;
+  const { data: versionLabelRows, error: versionLabelError } = await context.adminClient
+    .from("question_sets")
+    .select("version_label")
+    .eq("library_key", sourceSet.library_key);
+  if (versionLabelError) return bad(versionLabelError.message);
+  const resolvedVersionLabel = resolveUniqueVersionLabel(
+    (versionLabelRows ?? []).map((item) => item.version_label),
+    parsed.metadata.version_label,
+    nextVersion,
+  );
 
   const { data: inserted, error: insertError } = await context.adminClient
     .from("question_sets")
@@ -104,7 +115,7 @@ serve(async (req) => {
       description: parsed.metadata.description ?? sourceSet.description,
       test_type: parsed.metadata.test_type || sourceSet.test_type,
       version: nextVersion,
-      version_label: parsed.metadata.version_label,
+      version_label: resolvedVersionLabel,
       status: parsed.metadata.status,
       visibility_scope: parsed.metadata.visibility_scope,
       created_by: context.callerUserId,
@@ -188,7 +199,7 @@ serve(async (req) => {
         library_key: sourceSet.library_key,
         root_visibility_scope: rootVisibilityScope,
         category: parsed.metadata.category,
-        version_label: parsed.metadata.version_label,
+        version_label: inserted.version_label,
         status: parsed.metadata.status,
         visibility_scope: parsed.metadata.visibility_scope,
         school_ids: parsed.metadata.school_ids,
