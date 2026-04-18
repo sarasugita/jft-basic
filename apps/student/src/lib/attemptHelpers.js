@@ -311,15 +311,16 @@ export function getVisibleAttemptScoreSummary(attempt) {
     total: Number(attempt?.total) || 0,
     rate: getScoreRateFromAttempt(attempt),
   };
+  if ((Number(fallback.total) || 0) > 0) return fallback;
   const version = String(attempt?.test_version ?? "").trim();
   if (!version) return fallback;
-  // If questions haven't loaded for this version yet, fall back to stored values.
-  // Also fall back when the questions array is empty (load failed or version has no
-  // questions in the DB) — calling buildAttemptScoreSummaryFromQuestions with []
-  // would produce "0 / N" which is misleading.
+  // Legacy rows can still be missing the stored total. In that case we only
+  // use loaded questions as a fallback, never to override a valid persisted
+  // score summary.
   const questions = resultDetailState.questionsByVersion[version];
   if (!questions?.length) return fallback;
-  return buildAttemptScoreSummaryFromQuestions(attempt, questions);
+  const summary = buildAttemptScoreSummaryFromQuestions(attempt, questions);
+  return summary.total > 0 ? summary : fallback;
 }
 
 export function formatAttemptScoreCell(attempt, scoreSummary = getVisibleAttemptScoreSummary(attempt)) {
