@@ -81,6 +81,10 @@ function getAttemptMeta(attempt) {
   return attempt?.answers_json?.__meta ?? {};
 }
 
+function getImportedResultsCategory(attempt) {
+  return String(getAttemptMeta(attempt)?.imported_category ?? "").trim();
+}
+
 function hasImportedCsvSummaryMeta(meta) {
   const source = String(meta?.imported_source ?? "").trim();
   if (source !== "daily_results_csv" && source !== "model_results_csv") {
@@ -459,7 +463,7 @@ export function renderImportedResultsSummaryDetail(attempt, mode = "daily") {
 
 export function shouldShowAttemptInStudentResults(attempt) {
   if (!attempt) return false;
-  if (isImportedResultsSummaryAttempt(attempt)) return true;
+  if (isImportedResultsSummaryAttempt(attempt)) return Boolean(getImportedResultsCategory(attempt));
   if (!attempt.test_session_id) return true;
   return Boolean(getAttemptSession(attempt, testSessionsState.list));
 }
