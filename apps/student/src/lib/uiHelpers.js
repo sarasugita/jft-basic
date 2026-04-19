@@ -4,7 +4,7 @@ import { state, saveState } from "../state/appState";
 import { resultDetailState, fetchStudentResults, refreshQuestionsForResultAttempts, studentResultsState } from "../state/resultsState";
 import { studentAttendanceState, fetchStudentAttendance } from "../state/attendanceState";
 import { rankingState, fetchStudentRanking } from "../state/rankingState";
-import { getCurrentSection, getQuestionProgress } from "./sectionHelpers";
+import { getCurrentSection, getQuestionProgress, getSectionQuestions } from "./sectionHelpers";
 import { getActiveTestType, getActiveTestTitle } from "./sessionHelpers";
 import { triggerRender } from "./renderBus";
 import { getTotalTimeLeftSec } from "./quizControls";
@@ -20,12 +20,15 @@ export function renderCandidateLabel() {
 export function topbarHTML({ rightButtonLabel = "Finish Test", rightButtonId = "finishBtn", hideTimer = false } = {}) {
   const sec = getCurrentSection();
   const questionProgress = getQuestionProgress();
+  const sectionQuestions = sec ? getSectionQuestions(sec.key) : [];
   const hideQA = state.phase === "intro" || state.phase === "sectionIntro" || state.phase === "result";
   const testType = getActiveTestType();
   const testTitle = getActiveTestTitle();
   const testLabel = testTitle?.trim() || (testType === "daily" ? "Daily Test" : "Model Test");
   const isDailyActive = testType === "daily" && !hideQA;
-  const questionLabel = isDailyActive ? `${questionProgress.current}/${questionProgress.total}` : `${state.questionIndexInSection + 1}`;
+  const questionLabel = isDailyActive
+    ? `${questionProgress.current}/${questionProgress.total}`
+    : `${Math.min(state.questionIndexInSection + 1, Math.max(sectionQuestions.length, 0))}/${sectionQuestions.length}`;
   const metaHtml = hideQA
     ? `<div><span class="muted">Question:</span> <b>—</b></div><div><span class="muted">Section:</span> <b>—</b></div>`
     : `<div class="${isDailyActive ? "topbar-question" : ""}"><span class="muted">Question:</span> <b>${questionLabel}</b></div><div class="${isDailyActive ? "topbar-section" : ""}"><span class="muted">Section:</span> <b>${sec?.title ?? "—"}</b></div>`;

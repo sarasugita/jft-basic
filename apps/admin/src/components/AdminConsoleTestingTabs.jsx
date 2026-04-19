@@ -1,12 +1,19 @@
 "use client";
 
 import { createPortal } from "react-dom";
+import { useEffect, useMemo, useState } from "react";
 import QuestionSetUploadConflictModal from "./QuestionSetUploadConflictModal";
+
+const STUDENT_CODE_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
 export default function AdminConsoleTestingTabs({
   activeTab,
+  activeSchoolId,
   modelSubTab,
   dailySubTab,
+  students,
+  studentsLoaded,
+  fetchStudents,
   sessionDetail,
   openModelConductModal,
   openDailyConductModal,
@@ -226,6 +233,179 @@ export default function AdminConsoleTestingTabs({
     );
   }
 
+  const [studentAudienceSearch, setStudentAudienceSearch] = useState("");
+  const shouldLoadAudienceStudents = Boolean(
+    (editingSessionId && editingSessionForm?.audience_mode !== "all")
+    || (modelConductOpen && testSessionForm?.audience_mode !== "all")
+    || (dailyConductOpen && dailySessionForm?.audience_mode !== "all")
+  );
+
+  useEffect(() => {
+    setStudentAudienceSearch("");
+  }, [activeSchoolId, editingSessionId, modelConductOpen, dailyConductOpen]);
+
+  useEffect(() => {
+    if (!shouldLoadAudienceStudents || studentsLoaded || typeof fetchStudents !== "function") return;
+    fetchStudents();
+  }, [fetchStudents, shouldLoadAudienceStudents, studentsLoaded]);
+
+  const sortedStudents = useMemo(() => {
+    const list = Array.isArray(students) ? [...students] : [];
+    return list.sort((left, right) => {
+      const leftCode = String(left?.student_code ?? "").trim();
+      const rightCode = String(right?.student_code ?? "").trim();
+      if (leftCode && rightCode) {
+        const codeCompare = STUDENT_CODE_COLLATOR.compare(leftCode, rightCode);
+        if (codeCompare !== 0) return codeCompare;
+      } else if (leftCode || rightCode) {
+        return leftCode ? -1 : 1;
+      }
+
+      const leftLabel = String(left?.display_name ?? left?.name ?? left?.email ?? left?.id ?? "");
+      const rightLabel = String(right?.display_name ?? right?.name ?? right?.email ?? right?.id ?? "");
+      const labelCompare = STUDENT_CODE_COLLATOR.compare(leftLabel, rightLabel);
+      if (labelCompare !== 0) return labelCompare;
+
+      return STUDENT_CODE_COLLATOR.compare(String(left?.id ?? ""), String(right?.id ?? ""));
+    });
+  }, [students]);
+  const filteredStudents = useMemo(() => {
+    const query = studentAudienceSearch.trim().toLowerCase();
+    if (!query) return sortedStudents;
+    return sortedStudents.filter((student) => {
+      const haystack = [
+        student?.display_name,
+        student?.name,
+        student?.student_code,
+        student?.email,
+        student?.section,
+        student?.class_section,
+        student?.id,
+      ]
+        .map((value) => String(value ?? "").toLowerCase())
+        .join(" ");
+      return haystack.includes(query);
+    });
+  }, [sortedStudents, studentAudienceSearch]);
+
+  function getStudentLabel(student) {
+    const name = String(student?.display_name ?? student?.name ?? student?.email ?? student?.id ?? "").trim();
+    const extras = [
+      String(student?.student_code ?? "").trim(),
+      String(student?.section ?? student?.class_section ?? "").trim(),
+    ].filter(Boolean);
+    if (!extras.length) return name;
+    return `${name} (${extras.join(" · ")})`;
+  }
+
+  function getSessionAudienceSummary(session) {
+    const mode = String(session?.audience_mode ?? "all").trim().toLowerCase();
+    const ids = Array.isArray(session?.audience_student_ids)
+      ? Array.from(new Set(session.audience_student_ids.map((id) => String(id ?? "").trim()).filter(Boolean)))
+      : [];
+    if (mode === "include") {
+      return ids.length ? `Only ${ids.length} student${ids.length === 1 ? "" : "s"}` : "Only selected students";
+    }
+    if (mode === "exclude") {
+      return ids.length ? `Exclude ${ids.length} student${ids.length === 1 ? "" : "s"}` : "All students";
+    }
+    return "All students";
+  }
+
+  function renderStudentAudiencePicker({ modeValue, selectedIds, onModeChange, onSelectedIdsChange, prefix }) {
+    const normalizedSelectedIds = Array.from(new Set((selectedIds ?? []).map((id) => String(id ?? "").trim()).filter(Boolean)));
+    const handleToggleStudent = (studentId) => {
+      onSelectedIdsChange((current) => {
+        const currentIds = Array.isArray(current) ? current : [];
+        const nextIds = currentIds.includes(studentId)
+          ? currentIds.filter((id) => id !== studentId)
+          : [...currentIds, studentId];
+        return nextIds;
+      });
+    };
+
+    return (
+      <div className="daily-session-create-field" style={{ gridColumn: "1 / -1" }}>
+        <label>Who can take this session?</label>
+        <select
+          value={modeValue}
+          onChange={(e) => {
+            setStudentAudienceSearch("");
+            onModeChange(e.target.value);
+          }}
+        >
+          <option value="all">All students in the school</option>
+          <option value="exclude">Exclude certain students</option>
+          <option value="include">Only certain students</option>
+        </select>
+        {modeValue !== "all" ? (
+          <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fafafa" }}>
+            <div className="admin-help" style={{ marginBottom: 8 }}>
+              {modeValue === "include"
+                ? "Select the students who should see and take this session."
+                : "Select the students who should be hidden from this session."}
+            </div>
+            <input
+              className="form-input"
+              value={studentAudienceSearch}
+              onChange={(e) => setStudentAudienceSearch(e.target.value)}
+              placeholder="Search students..."
+            />
+            <div className="session-audience-picker-list">
+              {!studentsLoaded && !sortedStudents.length ? (
+                <div className="admin-help">Loading students...</div>
+              ) : filteredStudents.length ? (
+                filteredStudents.map((student) => {
+                  const studentId = String(student?.id ?? "").trim();
+                  if (!studentId) return null;
+                  const checked = normalizedSelectedIds.includes(studentId);
+                  return (
+                    <label
+                      className="session-audience-picker-option"
+                      key={`${prefix}-${studentId}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => handleToggleStudent(studentId)}
+                      />
+                      <div className="session-audience-picker-copy">
+                        <div style={{ fontWeight: 600 }}>{getStudentLabel(student)}</div>
+                        {student?.email || student?.student_code ? (
+                          <div className="admin-help">
+                            {[
+                              student?.email,
+                              student?.student_code,
+                            ].filter(Boolean).join(" • ")}
+                          </div>
+                        ) : null}
+                      </div>
+                    </label>
+                  );
+                })
+              ) : (
+                <div className="admin-help">
+                  {studentAudienceSearch.trim()
+                    ? "No students match this search."
+                    : "No students found for this school."}
+                </div>
+              )}
+            </div>
+            <div className="admin-help" style={{ marginTop: 8 }}>
+              {modeValue === "include"
+                ? `${normalizedSelectedIds.length} student${normalizedSelectedIds.length === 1 ? "" : "s"} selected.`
+                : `${normalizedSelectedIds.length} student${normalizedSelectedIds.length === 1 ? "" : "s"} excluded.`}
+            </div>
+          </div>
+        ) : (
+          <div className="admin-help" style={{ marginTop: 6 }}>
+            Everyone in the school can see this session in the student panel.
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const showDailySessionCategories = dailySessions.length > 0;
 
   function getQuestionCount(problemSetId) {
@@ -365,6 +545,7 @@ export default function AdminConsoleTestingTabs({
                         <col />
                         <col />
                         <col />
+                        <col style={{ minWidth: 160 }} />
                         <col style={{ minWidth: 120 }} />
                         <col style={{ minWidth: 120 }} />
                         <col />
@@ -383,6 +564,7 @@ export default function AdminConsoleTestingTabs({
                           <th>Pass Rate</th>
                           <th>Show Answers</th>
                           <th style={{ minWidth: 102 }}>Multiple Attempts</th>
+                          <th>Audience</th>
                           <th style={{ minWidth: 100 }}>Created</th>
                           <th style={{ textAlign: "center" }}>Action</th>
                           <th style={{ textAlign: "center" }}>Preview</th>
@@ -403,6 +585,7 @@ export default function AdminConsoleTestingTabs({
                             <td>{`${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`}</td>
                             <td>{t.show_answers ? "Yes" : "No"}</td>
                             <td>{t.allow_multiple_attempts === false ? "Only once" : "Allow multiple"}</td>
+                            <td>{getSessionAudienceSummary(t)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.created_at)}</td>
                             <td style={{ textAlign: "center" }}>
                               {linkBySession[t.id]?.id ? (
@@ -706,6 +889,22 @@ export default function AdminConsoleTestingTabs({
                               <span className="daily-session-create-switch-slider" />
                             </label>
                           </div>
+                          {renderStudentAudiencePicker({
+                            modeValue: testSessionForm.audience_mode,
+                            selectedIds: testSessionForm.audience_student_ids,
+                            onModeChange: (nextMode) => setTestSessionForm((s) => ({
+                              ...s,
+                              audience_mode: nextMode,
+                              audience_student_ids: nextMode === "all" ? [] : s.audience_student_ids,
+                            })),
+                            onSelectedIdsChange: (updater) => setTestSessionForm((s) => ({
+                              ...s,
+                              audience_student_ids: typeof updater === "function"
+                                ? updater(s.audience_student_ids ?? [])
+                                : updater,
+                            })),
+                            prefix: "model-retake-audience",
+                          })}
                           <div className="daily-session-create-actions">
                             <button
                               className="btn btn-retake"
@@ -954,6 +1153,22 @@ export default function AdminConsoleTestingTabs({
                               <span className="daily-session-create-switch-slider" />
                             </label>
                           </div>
+                          {renderStudentAudiencePicker({
+                            modeValue: testSessionForm.audience_mode,
+                            selectedIds: testSessionForm.audience_student_ids,
+                            onModeChange: (nextMode) => setTestSessionForm((s) => ({
+                              ...s,
+                              audience_mode: nextMode,
+                              audience_student_ids: nextMode === "all" ? [] : s.audience_student_ids,
+                            })),
+                            onSelectedIdsChange: (updater) => setTestSessionForm((s) => ({
+                              ...s,
+                              audience_student_ids: typeof updater === "function"
+                                ? updater(s.audience_student_ids ?? [])
+                                : updater,
+                            })),
+                            prefix: "model-normal-audience",
+                          })}
                           <div className="daily-session-create-actions">
                             <button
                               className="btn btn-primary"
@@ -1386,6 +1601,7 @@ export default function AdminConsoleTestingTabs({
                         <col />
                         <col className="daily-sessions-col-show-answers" />
                         <col style={{ minWidth: 102 }} />
+                        <col style={{ minWidth: 160 }} />
                         <col style={{ minWidth: 100 }} />
                         <col />
                         <col />
@@ -1404,6 +1620,7 @@ export default function AdminConsoleTestingTabs({
                           <th>Pass Rate</th>
                           <th><span className="daily-sessions-show-answers-head">Show Answers</span></th>
                           <th style={{ minWidth: 102 }}>Multiple Attempts</th>
+                          <th>Audience</th>
                           <th style={{ minWidth: 100 }}>Created</th>
                           <th style={{ textAlign: "center" }}>Action</th>
                           <th style={{ textAlign: "center" }}>Preview</th>
@@ -1426,6 +1643,7 @@ export default function AdminConsoleTestingTabs({
                             <td>{`${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`}</td>
                             <td>{t.show_answers ? "Yes" : "No"}</td>
                             <td>{t.allow_multiple_attempts === false ? "Only once" : "Allow multiple"}</td>
+                            <td>{getSessionAudienceSummary(t)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.created_at)}</td>
                             <td style={{ textAlign: "center" }}>
                               {linkBySession[t.id]?.id ? (
@@ -1767,6 +1985,22 @@ export default function AdminConsoleTestingTabs({
                               <span className="daily-session-create-switch-slider" />
                             </label>
                           </div>
+                          {renderStudentAudiencePicker({
+                            modeValue: dailySessionForm.audience_mode,
+                            selectedIds: dailySessionForm.audience_student_ids,
+                            onModeChange: (nextMode) => setDailySessionForm((s) => ({
+                              ...s,
+                              audience_mode: nextMode,
+                              audience_student_ids: nextMode === "all" ? [] : s.audience_student_ids,
+                            })),
+                            onSelectedIdsChange: (updater) => setDailySessionForm((s) => ({
+                              ...s,
+                              audience_student_ids: typeof updater === "function"
+                                ? updater(s.audience_student_ids ?? [])
+                                : updater,
+                            })),
+                            prefix: "daily-retake-audience",
+                          })}
                           <div className="daily-session-create-actions">
                             <button
                               className="btn btn-retake"
@@ -2309,6 +2543,22 @@ export default function AdminConsoleTestingTabs({
                               <span className="daily-session-create-switch-slider" />
                             </label>
                           </div>
+                          {renderStudentAudiencePicker({
+                            modeValue: dailySessionForm.audience_mode,
+                            selectedIds: dailySessionForm.audience_student_ids,
+                            onModeChange: (nextMode) => setDailySessionForm((s) => ({
+                              ...s,
+                              audience_mode: nextMode,
+                              audience_student_ids: nextMode === "all" ? [] : s.audience_student_ids,
+                            })),
+                            onSelectedIdsChange: (updater) => setDailySessionForm((s) => ({
+                              ...s,
+                              audience_student_ids: typeof updater === "function"
+                                ? updater(s.audience_student_ids ?? [])
+                                : updater,
+                            })),
+                            prefix: "daily-normal-audience",
+                          })}
                           <div className="daily-session-create-actions">
                             <button
                               className="btn btn-primary"
@@ -2798,6 +3048,22 @@ export default function AdminConsoleTestingTabs({
                             <span className="daily-session-create-switch-slider" />
                           </label>
                         </div>
+                        {renderStudentAudiencePicker({
+                          modeValue: editingSessionForm.audience_mode,
+                          selectedIds: editingSessionForm.audience_student_ids,
+                          onModeChange: (nextMode) => setEditingSessionForm((s) => ({
+                            ...s,
+                            audience_mode: nextMode,
+                            audience_student_ids: nextMode === "all" ? [] : s.audience_student_ids,
+                          })),
+                          onSelectedIdsChange: (updater) => setEditingSessionForm((s) => ({
+                            ...s,
+                            audience_student_ids: typeof updater === "function"
+                              ? updater(s.audience_student_ids ?? [])
+                              : updater,
+                          })),
+                          prefix: "edit-session-top",
+                        })}
                       </div>
                       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px", borderTop: "1px solid #e5e7eb" }}>
                         <button className="btn" type="button" onClick={cancelEditSession}>
@@ -3019,6 +3285,22 @@ export default function AdminConsoleTestingTabs({
                   <span className="daily-session-create-switch-slider" />
                 </label>
               </div>
+              {renderStudentAudiencePicker({
+                modeValue: editingSessionForm.audience_mode,
+                selectedIds: editingSessionForm.audience_student_ids,
+                onModeChange: (nextMode) => setEditingSessionForm((s) => ({
+                  ...s,
+                  audience_mode: nextMode,
+                  audience_student_ids: nextMode === "all" ? [] : s.audience_student_ids,
+                })),
+                onSelectedIdsChange: (updater) => setEditingSessionForm((s) => ({
+                  ...s,
+                  audience_student_ids: typeof updater === "function"
+                    ? updater(s.audience_student_ids ?? [])
+                    : updater,
+                })),
+                prefix: "edit-session-bottom",
+              })}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px", borderTop: "1px solid #e5e7eb" }}>
               <button className="btn" type="button" onClick={cancelEditSession}>

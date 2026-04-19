@@ -83,6 +83,7 @@ async function saveAttemptIfNeeded(app) {
 }
 
 export function renderResult(app) {
+  window.scrollTo(0, 0);
   const { correct, total } = scoreAll();
   const rows = buildResultRows();
   const showAnswers = shouldShowAnswers(

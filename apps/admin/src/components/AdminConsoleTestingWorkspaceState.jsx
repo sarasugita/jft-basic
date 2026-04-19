@@ -164,6 +164,24 @@ function shuffleCopy(items) {
   return next;
 }
 
+const SESSION_AUDIENCE_MODES = new Set(["all", "exclude", "include"]);
+
+function normalizeSessionAudienceMode(value) {
+  const mode = String(value ?? "all").trim().toLowerCase();
+  return SESSION_AUDIENCE_MODES.has(mode) ? mode : "all";
+}
+
+function normalizeSessionAudienceStudentIds(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((studentId) => String(studentId ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 // Alias for readability in daily tests filtering
 const isDaily = isGeneratedDailySessionVersion;
 
@@ -366,7 +384,7 @@ function getImportedModelSectionSummaries(attempt) {
     });
 }
 
-function buildAttemptDetailRowsFromListForExport(answersJson, questionsList) {
+function buildAttemptDetailRowsFromListForExport(answersJson, questionsList, getQuestionSectionLabel) {
   const answers = answersJson ?? {};
   const rows = [];
   for (const question of questionsList ?? []) {
@@ -398,7 +416,7 @@ function buildAttemptDetailRowsFromListForExport(answersJson, questionsList) {
   return rows;
 }
 
-function buildMainSectionSummaryForExport(rows) {
+function buildMainSectionSummaryForExport(rows, getSectionTitle) {
   const summaryMap = new Map();
   for (const row of rows ?? []) {
     const key = row.sectionKey ? getSectionTitle(row.sectionKey) : (row.section || "Unknown");
@@ -1261,7 +1279,9 @@ export function useTestingWorkspaceState({
     time_limit_min: "",
     show_answers: false,
     allow_multiple_attempts: true,
-    pass_rate: ""
+    pass_rate: "",
+    audience_mode: "all",
+    audience_student_ids: [],
   });
   const [editingTestId, setEditingTestId] = useState("");
   const [editingTestMsg, setEditingTestMsg] = useState("");
@@ -1290,7 +1310,9 @@ export function useTestingWorkspaceState({
     show_answers: false,
     allow_multiple_attempts: false,
     pass_rate: "0.8",
-    retake_release_scope: "all"
+    retake_release_scope: "all",
+    audience_mode: "all",
+    audience_student_ids: [],
   });
 
   // Daily test session form
@@ -1316,7 +1338,9 @@ export function useTestingWorkspaceState({
     show_answers: false,
     allow_multiple_attempts: false,
     pass_rate: "0.8",
-    retake_release_scope: "all"
+    retake_release_scope: "all",
+    audience_mode: "all",
+    audience_student_ids: [],
   });
 
   const [dailySessionsMsg, setDailySessionsMsg] = useState("");
@@ -2759,14 +2783,17 @@ export function useTestingWorkspaceState({
         if (isImportedModelResultsSummaryAttempt(attempt)) {
           return getImportedModelSectionSummaries(attempt);
         }
-        return buildMainSectionSummaryForExport(buildAttemptDetailRowsFromListForExport(attempt.answers_json, questionsList));
+        return buildMainSectionSummaryForExport(
+          buildAttemptDetailRowsFromListForExport(attempt.answers_json, questionsList, getQuestionSectionLabel),
+          getSectionTitle
+        );
       };
 
       const sessionBlocks = exportSessions.map(({ session, sessionIndex }) => {
         const title = String(session?.title ?? session?.problem_set_id ?? "").trim() || session?.problem_set_id || "";
         const questionsList = questionsByVersion[session.problem_set_id] ?? [];
-        const baseRows = buildAttemptDetailRowsFromListForExport({}, questionsList);
-        const baseSummary = buildMainSectionSummaryForExport(baseRows);
+        const baseRows = buildAttemptDetailRowsFromListForExport({}, questionsList, getQuestionSectionLabel);
+        const baseSummary = buildMainSectionSummaryForExport(baseRows, getSectionTitle);
         const importedSectionRows = activeMatrixRows
           .map((row) => visibleAttemptAt(row, sessionIndex))
           .filter((attempt) => isImportedModelResultsSummaryAttempt(attempt))
@@ -2920,7 +2947,7 @@ export function useTestingWorkspaceState({
       console.error("model export failed:", error);
       setQuizMsg(`Export failed: ${error?.message || error}`);
     }
-  }, [attemptQuestionsByVersion, dailyResultsMatrix, formatRatePercent, getScoreRate, getSectionTitle, isAnalyticsExcludedStudent, modelResultsMatrix, sections, setQuizMsg, supabase]);
+  }, [attemptQuestionsByVersion, dailyResultsMatrix, formatRatePercent, getQuestionSectionLabel, getScoreRate, getSectionTitle, isAnalyticsExcludedStudent, modelResultsMatrix, sections, setQuizMsg, supabase]);
 
   // ========================================================================
   // useCallback functions (39+ callbacks)
@@ -3020,7 +3047,15 @@ export function useTestingWorkspaceState({
       return;
     }
     const hydrated = await attachGeneratedDailySourceSetIdsToSessions(data ?? []);
-    setTestSessions(hydrated);
+    setTestSessions((hydrated ?? []).map((session) => ({
+      audience_mode: "all",
+      audience_student_ids: [],
+      retake_source_session_id: null,
+      retake_release_scope: "all",
+      ...session,
+      audience_mode: normalizeSessionAudienceMode(session?.audience_mode),
+      audience_student_ids: normalizeSessionAudienceStudentIds(session?.audience_student_ids),
+    })));
     setTestSessionsLoaded(true);
   }, [supabase, attachGeneratedDailySourceSetIdsToSessions]);
 
@@ -3363,6 +3398,12 @@ export function useTestingWorkspaceState({
       setModelConductError("Pass rate must be between 0 and 1.");
       return;
     }
+    const audienceMode = normalizeSessionAudienceMode(testSessionForm.audience_mode);
+    const audienceStudentIds = normalizeSessionAudienceStudentIds(testSessionForm.audience_student_ids);
+    if (audienceMode === "include" && !audienceStudentIds.length) {
+      setModelConductError("Choose at least one student to include.");
+      return;
+    }
     try {
       if (await hasDuplicateSessionTitle(title)) {
         setModelConductError("That Test Title already exists.");
@@ -3386,7 +3427,9 @@ export function useTestingWorkspaceState({
       retake_source_session_id: modelConductMode === "retake" ? modelRetakeSourceId : null,
       retake_release_scope: modelConductMode === "retake"
         ? (testSessionForm.retake_release_scope || "all")
-        : "all"
+        : "all",
+      audience_mode: audienceMode,
+      audience_student_ids: audienceMode === "all" ? [] : audienceStudentIds,
     };
     const { data: created, error } = await supabase.from("test_sessions").insert(payload).select().single();
     if (error || !created?.id) {
@@ -3424,7 +3467,9 @@ export function useTestingWorkspaceState({
       show_answers: false,
       allow_multiple_attempts: false,
       pass_rate: "0.8",
-      retake_release_scope: "all"
+      retake_release_scope: "all",
+      audience_mode: "all",
+      audience_student_ids: [],
     }));
     setModelConductMode("normal");
     setModelRetakeSourceId("");
@@ -3520,6 +3565,12 @@ export function useTestingWorkspaceState({
       setDailyConductError("Pass rate must be between 0 and 1.");
       return;
     }
+    const audienceMode = normalizeSessionAudienceMode(dailySessionForm.audience_mode);
+    const audienceStudentIds = normalizeSessionAudienceStudentIds(dailySessionForm.audience_student_ids);
+    if (audienceMode === "include" && !audienceStudentIds.length) {
+      setDailyConductError("Choose at least one student to include.");
+      return;
+    }
     try {
       if (await hasDuplicateSessionTitle(title)) {
         setDailyConductError("That Test Title already exists.");
@@ -3561,7 +3612,9 @@ export function useTestingWorkspaceState({
       retake_source_session_id: dailyConductMode === "retake" ? dailyRetakeSourceId : null,
       retake_release_scope: dailyConductMode === "retake"
         ? (dailySessionForm.retake_release_scope || "all")
-        : "all"
+        : "all",
+      audience_mode: audienceMode,
+      audience_student_ids: audienceMode === "all" ? [] : audienceStudentIds,
     };
     let created = null;
     let insertError = null;
@@ -3625,6 +3678,8 @@ export function useTestingWorkspaceState({
       allow_multiple_attempts: false,
       pass_rate: "0.8",
       retake_release_scope: "all",
+      audience_mode: "all",
+      audience_student_ids: [],
     }));
     setDailyConductMode("normal");
     setDailyRetakeSourceId("");
@@ -3670,7 +3725,9 @@ export function useTestingWorkspaceState({
       time_limit_min: session.time_limit_min ?? "",
       show_answers: Boolean(session.show_answers),
       allow_multiple_attempts: session.allow_multiple_attempts !== false,
-      pass_rate: String(passRate)
+      pass_rate: String(passRate),
+      audience_mode: normalizeSessionAudienceMode(session.audience_mode),
+      audience_student_ids: normalizeSessionAudienceStudentIds(session.audience_student_ids),
     });
   }, [getDailySessionCategoryName, testMetaByVersion]);
 
@@ -3689,7 +3746,9 @@ export function useTestingWorkspaceState({
       time_limit_min: "",
       show_answers: false,
       allow_multiple_attempts: true,
-      pass_rate: ""
+      pass_rate: "",
+      audience_mode: "all",
+      audience_student_ids: [],
     });
   }, []);
 
@@ -3731,6 +3790,12 @@ export function useTestingWorkspaceState({
       setEditingSessionMsg("Pass rate must be between 0 and 1.");
       return;
     }
+    const audienceMode = normalizeSessionAudienceMode(editingSessionForm.audience_mode);
+    const audienceStudentIds = normalizeSessionAudienceStudentIds(editingSessionForm.audience_student_ids);
+    if (audienceMode === "include" && !audienceStudentIds.length) {
+      setEditingSessionMsg("Choose at least one student to include.");
+      return;
+    }
     try {
       if (await hasDuplicateSessionTitle(title, editingSessionId)) {
         setEditingSessionMsg("That Test Title already exists.");
@@ -3753,7 +3818,9 @@ export function useTestingWorkspaceState({
       time_limit_min: time_limit_min ? Number(time_limit_min) : null,
       show_answers: Boolean(show_answers),
       allow_multiple_attempts: Boolean(allow_multiple_attempts),
-      pass_rate: passRateValue
+      pass_rate: passRateValue,
+      audience_mode: audienceMode,
+      audience_student_ids: audienceMode === "all" ? [] : audienceStudentIds,
     };
     const { error } = await supabase.from("test_sessions").update(payload).eq("id", editingSessionId);
     if (error) {
@@ -5103,6 +5170,8 @@ export function useTestingWorkspaceState({
       allow_multiple_attempts: false,
       retake_release_scope: current.retake_release_scope || "all",
       pass_rate: "0.8",
+      audience_mode: "all",
+      audience_student_ids: [],
     }));
   }, [tests]);
 
@@ -5140,6 +5209,8 @@ export function useTestingWorkspaceState({
       allow_multiple_attempts: false,
       retake_release_scope: current.retake_release_scope || "all",
       pass_rate: "0.8",
+      audience_mode: "all",
+      audience_student_ids: [],
     }));
   }, [getDailySessionCategoryName, tests]);
 
@@ -5376,6 +5447,7 @@ export function useTestingWorkspaceState({
     if (mode !== "retake") {
       setModelRetakeSourceId("");
       setTestSessionForm((current) => ({
+        ...current,
         problem_set_id: "",
         title: "",
         session_date: "",
@@ -5387,6 +5459,8 @@ export function useTestingWorkspaceState({
         time_limit_min: "",
         pass_rate: "0.8",
         retake_release_scope: "all",
+        audience_mode: "all",
+        audience_student_ids: [],
       }));
       setModelConductCategory("");
       return;
@@ -5427,6 +5501,8 @@ export function useTestingWorkspaceState({
         allow_multiple_attempts: false,
         pass_rate: "0.8",
         retake_release_scope: "all",
+        audience_mode: "all",
+        audience_student_ids: [],
       });
       setDailyConductCategory("");
       return;

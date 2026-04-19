@@ -1,6 +1,6 @@
 import { supabase, publicSupabase } from "../supabaseClient";
 import { PASS_RATE_DEFAULT, TEST_VERSION } from "../lib/constants";
-import { getErrorMessage, logSupabaseError, logUnexpectedError, isMissingRetakeSessionFieldsError } from "../lib/errorHelpers";
+import { getErrorMessage, logSupabaseError, logUnexpectedError } from "../lib/errorHelpers";
 import { state, saveState } from "./appState";
 import { authState } from "./authState";
 
@@ -71,21 +71,13 @@ export async function fetchTestSessions() {
   testSessionsState.loading = true;
   testSessionsState.error = "";
   const hadData = testSessionsState.loaded && testSessionsState.list.length > 0;
-    try {
-    let { data, error } = await publicSupabase
+  try {
+    const { data, error } = await publicSupabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
+      .select("*")
       .eq("is_published", true)
       .order("created_at", { ascending: false })
       .limit(200);
-    if (error && isMissingRetakeSessionFieldsError(error)) {
-      ({ data, error } = await publicSupabase
-        .from("test_sessions")
-        .select("id, problem_set_id, title, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
-        .eq("is_published", true)
-        .order("created_at", { ascending: false })
-        .limit(200));
-    }
     if (error) {
       logSupabaseError("test_sessions fetch error", error);
       const msg = getErrorMessage(error, "Failed to load test sessions.");
@@ -100,6 +92,8 @@ export async function fetchTestSessions() {
       return;
     }
     const list = (data ?? []).map((session) => ({
+      audience_mode: "all",
+      audience_student_ids: [],
       retake_source_session_id: null,
       retake_release_scope: "all",
       ...session,

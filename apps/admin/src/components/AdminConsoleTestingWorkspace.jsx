@@ -19,6 +19,7 @@ export default function AdminConsoleTestingWorkspace() {
     dailySubTab,
     modelSubTab,
     students,
+    studentsLoaded,
     tests,
     testsLoaded,
     testSessions,
@@ -102,8 +103,12 @@ export default function AdminConsoleTestingWorkspace() {
   // Extract testing tab and results workspace props from hook state
   const testingTabProps = {
     activeTab,
+    activeSchoolId,
     modelSubTab,
     dailySubTab,
+    students,
+    studentsLoaded,
+    fetchStudents,
     // Include all hook state properties needed by AdminConsoleTestingTabs
     ...hookState,
   };

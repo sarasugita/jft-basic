@@ -44,7 +44,7 @@ export function renderTestSelect(app) {
   const showAttendanceHistory = showTabs && activeTab === "attendanceHistory";
   const showTakeTest = !showTabs;
   const visibleSessions = (testSessionsState.list ?? []).filter((session) => canAccessSession(session));
-  const canStart = activeSections.length > 0;
+  const canStart = activeSections.length > 0 && visibleSessions.length > 0;
 
   // --- Data prefetch triggers ---
   if (showAttendance && authState.session && !studentAttendanceState.loaded && !studentAttendanceState.loading) {
@@ -213,7 +213,7 @@ export function renderTestSelect(app) {
                   </label>
                 `;
               }).join("")
-            : `<div style="color:#666;">公開テストがありません。</div>`}
+            : `<div style="color:#666;">No test sessions are available.</div>`}
         </div>
         ${testsState.error ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(testsState.error)}</div>` : ""}
         ${questionsState.error ? `<div style="margin-top:6px;color:#b00;">${escapeHtml(questionsState.error)}</div>` : ""}
@@ -281,7 +281,7 @@ export function renderTestSelect(app) {
         await fetchSessionAttemptOverrides({ force: true });
       }
       if (!canAccessSession(session)) {
-        window.alert("You are not eligible to take this retake session.");
+        window.alert("You are not eligible to take this session.");
         return;
       }
       if (!hasRemainingAttemptsForSession(session)) {

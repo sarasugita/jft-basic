@@ -6,6 +6,24 @@ import { testsState, testSessionsState } from "../state/testsState";
 import { studentResultsState } from "../state/resultsState";
 import { sessionAttemptOverrideState } from "../state/sessionOverrideState";
 
+const SESSION_AUDIENCE_MODES = new Set(["all", "exclude", "include"]);
+
+function normalizeSessionAudienceMode(value) {
+  const mode = String(value ?? "all").trim().toLowerCase();
+  return SESSION_AUDIENCE_MODES.has(mode) ? mode : "all";
+}
+
+function getSessionAudienceStudentIds(session) {
+  if (!Array.isArray(session?.audience_student_ids)) return [];
+  return Array.from(
+    new Set(
+      session.audience_student_ids
+        .map((studentId) => String(studentId ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 export function getActiveTestVersion() {
   const sessionId = state.linkTestSessionId || state.selectedTestSessionId;
   if (sessionId) {
@@ -85,6 +103,17 @@ export function getBestAttemptForSession(sessionId) {
 
 export function canAccessSession(session) {
   if (!session) return false;
+  const audienceMode = normalizeSessionAudienceMode(session.audience_mode);
+  const audienceStudentIds = getSessionAudienceStudentIds(session);
+  const currentStudentId = String(authState.profile?.id ?? authState.session?.user?.id ?? "").trim();
+
+  if (audienceMode === "include") {
+    if (!currentStudentId || !audienceStudentIds.includes(currentStudentId)) return false;
+  } else if (audienceMode === "exclude") {
+    if (currentStudentId && audienceStudentIds.includes(currentStudentId)) return false;
+    if (!currentStudentId) return false;
+  }
+
   if (!isRetakeSession(session)) return true;
   const releaseScope = String(session.retake_release_scope || "all");
   if (releaseScope === "all") return true;
