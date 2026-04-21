@@ -4,6 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { sections } from "../../../../packages/shared/questions.js";
 import AdminConsoleDeferredFeatures from "./AdminConsoleDeferredFeatures";
 
+const ADMIN_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, "&amp;")
@@ -315,16 +317,70 @@ function isMissingColumnError(error, columnName) {
   return message.includes(columnName) && message.toLowerCase().includes("does not exist");
 }
 
+function resolveAdminAssetUrl(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  const baseUrl = ADMIN_SUPABASE_URL;
+  if (!baseUrl) return raw;
+  const encodedPath = raw
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${baseUrl}/storage/v1/object/public/test-assets/${encodedPath}`;
+}
+
+function normalizeAdminRenderableAsset(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/")) return raw;
+  if (raw.includes("/") && /\.(png|jpe?g|webp|gif|svg|mp3|wav|m4a|ogg)(\?.*)?$/i.test(raw)) {
+    return resolveAdminAssetUrl(raw);
+  }
+  return raw;
+}
+
+function normalizeAdminChoiceList(values) {
+  if (!Array.isArray(values)) return values;
+  return values.map((value) => normalizeAdminRenderableAsset(value));
+}
+
 function mapDbQuestion(row) {
   const data = row?.data ?? {};
+  const normalizedData = {
+    ...data,
+    stemAsset: normalizeAdminRenderableAsset(data.stemAsset),
+    stem_asset: normalizeAdminRenderableAsset(data.stem_asset),
+    stemAudio: normalizeAdminRenderableAsset(data.stemAudio),
+    stem_audio: normalizeAdminRenderableAsset(data.stem_audio),
+    stemImage: normalizeAdminRenderableAsset(data.stemImage),
+    stem_image: normalizeAdminRenderableAsset(data.stem_image),
+    choices: normalizeAdminChoiceList(data.choices),
+    choicesJa: normalizeAdminChoiceList(data.choicesJa),
+    choicesEn: normalizeAdminChoiceList(data.choicesEn),
+    choiceImages: Array.isArray(data.choiceImages)
+      ? data.choiceImages.map((value) => normalizeAdminRenderableAsset(value))
+      : data.choiceImages,
+    parts: Array.isArray(data.parts)
+      ? data.parts.map((part) => ({
+          ...part,
+          choices: normalizeAdminChoiceList(part?.choices),
+          choicesJa: normalizeAdminChoiceList(part?.choicesJa),
+          choicesEn: normalizeAdminChoiceList(part?.choicesEn),
+          choiceImages: Array.isArray(part?.choiceImages)
+            ? part.choiceImages.map((value) => normalizeAdminRenderableAsset(value))
+            : part?.choiceImages,
+        }))
+      : [],
+  };
   const stemAsset = [
-    row?.media_file,
-    data.stemAsset,
-    data.stem_asset,
-    data.stemAudio,
-    data.stem_audio,
-    data.stemImage,
-    data.stem_image,
+    normalizeAdminRenderableAsset(row?.media_file),
+    normalizedData.stemAsset,
+    normalizedData.stem_asset,
+    normalizedData.stemAudio,
+    normalizedData.stem_audio,
+    normalizedData.stemImage,
+    normalizedData.stem_image,
   ].filter(Boolean).join("|") || null;
   return {
     dbId: row?.id ?? null,
@@ -332,23 +388,23 @@ function mapDbQuestion(row) {
     questionId: row?.question_id ?? row?.id ?? "",
     testVersion: row?.test_version ?? "",
     sectionKey: row?.section_key ?? "",
-    sectionLabel: data.sectionLabel ?? data.section_label ?? null,
+    sectionLabel: normalizedData.sectionLabel ?? normalizedData.section_label ?? null,
     type: row?.type ?? "",
     promptEn: row?.prompt_en ?? "",
     promptBn: row?.prompt_bn ?? "",
     answerIndex: row?.answer_index,
-    answerIndices: row?.data?.answer_indices ?? null,
+    answerIndices: normalizedData.answer_indices ?? null,
     orderIndex: row?.order_index ?? 0,
-    rawData: data,
-    data,
-    sourceVersion: data.sourceVersion ?? null,
-    sourceQuestionId: data.sourceQuestionId ?? null,
+    rawData: normalizedData,
+    data: normalizedData,
+    sourceVersion: normalizedData.sourceVersion ?? null,
+    sourceQuestionId: normalizedData.sourceQuestionId ?? null,
     stemAsset,
-    choices: data.choices ?? data.choicesJa ?? data.choicesEn ?? [],
-    choicesJa: data.choicesJa ?? data.choices ?? [],
-    choicesEn: data.choicesEn ?? data.choices ?? [],
-    choiceImages: data.choiceImages ?? [],
-    parts: Array.isArray(data.parts) ? data.parts : [],
+    choices: normalizedData.choices ?? normalizedData.choicesJa ?? normalizedData.choicesEn ?? [],
+    choicesJa: normalizedData.choicesJa ?? normalizedData.choices ?? [],
+    choicesEn: normalizedData.choicesEn ?? normalizedData.choices ?? [],
+    choiceImages: normalizedData.choiceImages ?? [],
+    parts: normalizedData.parts,
   };
 }
 
@@ -1686,9 +1742,9 @@ export default function AdminConsoleResultsWorkspace(props) {
       const chosen = parseAnswerIndex(choiceIndex);
       if (chosen == null) return "";
       const direct = question?.choiceImages?.[chosen];
-      if (direct) return direct;
+      if (direct) return normalizeAdminRenderableAsset(direct);
       const value = getChoiceText(question, chosen);
-      return isImageAsset(value) ? value : "";
+      return isImageAsset(value) ? normalizeAdminRenderableAsset(value) : "";
     };
     const getPartChoiceText = (part, choiceIndex) => {
       if (isBlankAnswerChoice(choiceIndex)) return "No answer";
@@ -1702,9 +1758,9 @@ export default function AdminConsoleResultsWorkspace(props) {
       const chosen = parseAnswerIndex(choiceIndex);
       if (chosen == null) return "";
       const direct = part?.choiceImages?.[chosen];
-      if (direct) return direct;
+      if (direct) return normalizeAdminRenderableAsset(direct);
       const value = getPartChoiceText(part, chosen);
-      return isImageAsset(value) ? value : "";
+      return isImageAsset(value) ? normalizeAdminRenderableAsset(value) : "";
     };
 
     return (questionsList ?? []).flatMap((rawQuestion) => {
@@ -1725,7 +1781,7 @@ export default function AdminConsoleResultsWorkspace(props) {
         question.data?.stemAudio,
         question.data?.stem_audio,
       ].find(Boolean);
-      const stemAssets = splitAssetValues(stemAsset);
+      const stemAssets = splitAssetValues(stemAsset).map((value) => normalizeAdminRenderableAsset(value));
       const stemImages = stemAssets.filter((value) => isImageAsset(value));
       const stemAudios = stemAssets.filter((value) => isAudioAsset(value));
       if (Array.isArray(question.parts) && question.parts.length) {
@@ -2226,7 +2282,7 @@ export default function AdminConsoleResultsWorkspace(props) {
     const stemText = question.stemText;
     const stemExtra = question.stemExtra;
     const stemAsset = question.stemAsset;
-    const stemAssets = splitAssetValues(stemAsset);
+    const stemAssets = splitAssetValues(stemAsset).map((value) => normalizeAdminRenderableAsset(value));
     const imageAssets = stemAssets.filter((value) => isImageAsset(value));
     const audioAssets = stemAssets.filter((value) => isAudioAsset(value));
     const boxText = question.boxText;
@@ -2261,7 +2317,8 @@ export default function AdminConsoleResultsWorkspace(props) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
           {choices.map((choice, choiceIndex) => {
             const isSelected = effectiveAnswers.includes(choiceIndex);
-            const isImage = isImageAsset(choice);
+            const choiceValue = normalizeAdminRenderableAsset(choice);
+            const isImage = isImageAsset(choiceValue);
             return (
               <button
                 key={`choice-${question.id}-${choiceIndex}`}
@@ -2283,7 +2340,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                 }}
               >
                 {isImage ? (
-                  <img src={choice} alt="choice" style={{ maxWidth: "100%" }} />
+                  <img src={choiceValue} alt="choice" style={{ maxWidth: "100%" }} />
                 ) : (
                   choice
                 )}

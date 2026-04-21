@@ -38,12 +38,30 @@ export function getAssetBaseUrl(testVersion, assetType) {
   return `${SUPABASE_URL}/storage/v1/object/public/test-assets/${type}/${testVersion}/${assetType}/`;
 }
 
+function buildPublicAssetUrl(objectPath) {
+  const raw = String(objectPath ?? "").trim();
+  if (!raw || !SUPABASE_URL) return raw;
+  const encodedPath = raw
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${SUPABASE_URL}/storage/v1/object/public/test-assets/${encodedPath}`;
+}
+
+function isStorageObjectAssetPath(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/")) return false;
+  return raw.includes("/") && /\.(png|jpe?g|webp|gif|svg|mp3|wav|m4a|ogg)(\?.*)?$/i.test(raw);
+}
+
 export function resolveAssetUrl(value, testVersion) {
   const raw = String(value ?? "").trim();
   if (!raw) return raw;
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.includes("/")) return raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  if (isStorageObjectAssetPath(raw)) return buildPublicAssetUrl(raw);
+  if (raw.includes("/")) return raw;
   const isAudio = /\.(mp3|wav|m4a|ogg)$/i.test(raw);
-  const isImage = /\.(png|jpe?g|webp)$/i.test(raw);
+  const isImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(raw);
   if (!isAudio && !isImage) return raw;
   const assetType = isAudio ? "audio" : "image";
   const base = getAssetBaseUrl(testVersion, assetType);

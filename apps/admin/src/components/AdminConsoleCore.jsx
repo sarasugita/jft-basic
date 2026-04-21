@@ -246,6 +246,14 @@ function resolveAdminAssetUrl(value) {
   return `${baseUrl}/storage/v1/object/public/test-assets/${encodedPath}`;
 }
 
+function normalizeAdminRenderableAsset(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/")) return raw;
+  if (raw.includes("/") && (isImageAsset(raw) || isAudioAsset(raw))) return resolveAdminAssetUrl(raw);
+  return raw;
+}
+
 function isMissingColumnError(error, columnName) {
   const message = String(error?.message ?? "");
   return message.includes(columnName) && message.toLowerCase().includes("does not exist");
@@ -1784,13 +1792,13 @@ function getChoiceText(q, idx) {
 
 function getChoiceImage(q, idx) {
   if (idx == null) return "";
-  if (Array.isArray(q.choiceImages) && q.choiceImages[idx]) return q.choiceImages[idx];
+  if (Array.isArray(q.choiceImages) && q.choiceImages[idx]) return normalizeAdminRenderableAsset(q.choiceImages[idx]);
   const value =
     (Array.isArray(q.choices) && q.choices[idx] != null ? q.choices[idx] : null)
     ?? (Array.isArray(q.choicesJa) && q.choicesJa[idx] != null ? q.choicesJa[idx] : null)
     ?? (Array.isArray(q.choicesEn) && q.choicesEn[idx] != null ? q.choicesEn[idx] : null)
     ?? "";
-  return isImageAsset(value) ? value : "";
+  return isImageAsset(value) ? normalizeAdminRenderableAsset(value) : "";
 }
 
 function getPartChoiceText(part, idx) {
@@ -1801,12 +1809,12 @@ function getPartChoiceText(part, idx) {
 
 function getPartChoiceImage(part, idx) {
   if (idx == null) return "";
-  if (Array.isArray(part.choiceImages) && part.choiceImages[idx]) return part.choiceImages[idx];
+  if (Array.isArray(part.choiceImages) && part.choiceImages[idx]) return normalizeAdminRenderableAsset(part.choiceImages[idx]);
   const value =
     (Array.isArray(part.choices) && part.choices[idx] != null ? part.choices[idx] : null)
     ?? (Array.isArray(part.choicesJa) && part.choicesJa[idx] != null ? part.choicesJa[idx] : null)
     ?? "";
-  return isImageAsset(value) ? value : "";
+  return isImageAsset(value) ? normalizeAdminRenderableAsset(value) : "";
 }
 
 function getPromptText(q) {
@@ -2001,7 +2009,9 @@ function getQuestionIllustration(question) {
     question.stem_image ||
     question.stem_image_url ||
     null;
-  const imageAsset = splitAssetValues(stemAsset).find((value) => isImageAsset(value));
+  const imageAsset = splitAssetValues(stemAsset)
+    .map((value) => normalizeAdminRenderableAsset(value))
+    .find((value) => isImageAsset(value));
   if (imageAsset) return imageAsset;
   return null;
 }
@@ -2017,7 +2027,7 @@ function getQuestionStemMedia(question) {
     question?.stem_image,
     question?.stem_image_url
   );
-  const assets = splitAssetValues(stemValues);
+  const assets = splitAssetValues(stemValues).map((value) => normalizeAdminRenderableAsset(value));
   return {
     images: assets.filter((value) => isImageAsset(value)),
     audios: assets.filter((value) => isAudioAsset(value)),
@@ -2027,13 +2037,13 @@ function getQuestionStemMedia(question) {
 function mapDbQuestion(row) {
   const data = row.data ?? {};
   const stemAsset = joinAssetValues(
-    row.media_file,
-    data.stemAsset,
-    data.stem_asset,
-    data.stemAudio,
-    data.stem_audio,
-    data.stemImage,
-    data.stem_image
+    normalizeAdminRenderableAsset(row.media_file),
+    normalizeAdminRenderableAsset(data.stemAsset),
+    normalizeAdminRenderableAsset(data.stem_asset),
+    normalizeAdminRenderableAsset(data.stemAudio),
+    normalizeAdminRenderableAsset(data.stem_audio),
+    normalizeAdminRenderableAsset(data.stemImage),
+    normalizeAdminRenderableAsset(data.stem_image)
   ) || null;
   return {
     dbId: row.id ?? null,
@@ -10509,7 +10519,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
   function resolveAssetValue(value, assetMap) {
     const raw = String(value ?? "").trim();
     if (!raw) return raw;
-    if (raw.startsWith("http://") || raw.startsWith("https://") || raw.includes("/")) return raw;
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+    if (raw.includes("/") && (isImageAsset(raw) || isAudioAsset(raw))) return resolveAdminAssetUrl(raw);
+    if (raw.includes("/")) return raw;
     return assetMap[raw] ?? raw;
   }
 

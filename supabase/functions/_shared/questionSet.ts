@@ -1284,7 +1284,7 @@ export async function syncLegacyTestCatalog(
     const stemImage = normalizeLegacyOptionValue(question.metadata?.stem_image, uploadedAssets);
     const stemAudio = normalizeLegacyOptionValue(question.metadata?.stem_audio, uploadedAssets);
     const mediaUrl = question.media_file
-      ? getUploadedAssetPath(uploadedAssets, question.media_file) ?? normalizeLegacyOptionValue(question.media_file, uploadedAssets)
+      ? normalizeLegacyOptionValue(question.media_file, uploadedAssets) || null
       : null;
     const stemKind = String(question.metadata?.stem_kind ?? "").trim()
       || (stemAudio ? "audio" : stemImage ? "image" : question.media_type ?? "");

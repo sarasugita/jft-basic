@@ -188,14 +188,30 @@ const isDaily = isGeneratedDailySessionVersion;
 function mapQuestion(row) {
   // Transform database question row to UI format
   const data = row.data ?? {};
+  const normalizedData = {
+    ...data,
+    stemAsset: normalizeAdminRenderableAsset(data.stemAsset),
+    stem_asset: normalizeAdminRenderableAsset(data.stem_asset),
+    stemAudio: normalizeAdminRenderableAsset(data.stemAudio),
+    stem_audio: normalizeAdminRenderableAsset(data.stem_audio),
+    stemImage: normalizeAdminRenderableAsset(data.stemImage),
+    stem_image: normalizeAdminRenderableAsset(data.stem_image),
+    choices: normalizeAdminChoiceList(data.choices),
+    choicesJa: normalizeAdminChoiceList(data.choicesJa),
+    choicesEn: normalizeAdminChoiceList(data.choicesEn),
+    choiceImages: Array.isArray(data.choiceImages)
+      ? data.choiceImages.map((value) => normalizeAdminRenderableAsset(value))
+      : data.choiceImages,
+    parts: normalizeAdminParts(data.parts),
+  };
   const stemAsset = joinAssetValues(
-    null,
-    data.stemAsset,
-    data.stem_asset,
-    data.stemAudio,
-    data.stem_audio,
-    data.stemImage,
-    data.stem_image
+    normalizeAdminRenderableAsset(row.media_file),
+    normalizedData.stemAsset,
+    normalizedData.stem_asset,
+    normalizedData.stemAudio,
+    normalizedData.stem_audio,
+    normalizedData.stemImage,
+    normalizedData.stem_image
   ) || null;
   return {
     dbId: row.id ?? null,
@@ -203,19 +219,19 @@ function mapQuestion(row) {
     questionId: row.question_id,
     testVersion: row.test_version ?? "",
     sectionKey: row.section_key,
-    sectionLabel: data.sectionLabel ?? data.section_label ?? null,
+    sectionLabel: normalizedData.sectionLabel ?? normalizedData.section_label ?? null,
     type: row.type,
     promptEn: row.prompt_en,
     promptBn: row.prompt_bn,
     answerIndex: row.answer_index,
-    answerIndices: Array.isArray(data.answer_indices) ? data.answer_indices : null,
+    answerIndices: Array.isArray(normalizedData.answer_indices) ? normalizedData.answer_indices : null,
     orderIndex: row.order_index ?? 0,
-    rawData: data,
-    data,
-    sourceVersion: data.sourceVersion ?? null,
-    sourceQuestionId: data.sourceQuestionId ?? null,
-    ...data,
-    stemKind: normalizeModelCsvKind(data.stemKind ?? data.stem_kind ?? row.media_type ?? null) || null,
+    rawData: normalizedData,
+    data: normalizedData,
+    sourceVersion: normalizedData.sourceVersion ?? null,
+    sourceQuestionId: normalizedData.sourceQuestionId ?? null,
+    ...normalizedData,
+    stemKind: normalizeModelCsvKind(normalizedData.stemKind ?? normalizedData.stem_kind ?? row.media_type ?? null) || null,
     stemAsset,
   };
 }
@@ -704,7 +720,9 @@ function joinAssetValues(...values) {
 function resolveAssetValue(value, assetMap) {
   const raw = String(value ?? "").trim();
   if (!raw) return raw;
-  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.includes("/")) return raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  if (raw.includes("/") && (isImageAsset(raw) || isAudioAsset(raw))) return resolveAdminAssetUrl(raw);
+  if (raw.includes("/")) return raw;
   return assetMap[raw] ?? raw;
 }
 
@@ -794,6 +812,32 @@ function resolveAdminAssetUrl(value) {
     .map((part) => encodeURIComponent(part))
     .join("/");
   return `${baseUrl}/storage/v1/object/public/test-assets/${encodedPath}`;
+}
+
+function normalizeAdminRenderableAsset(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/")) return raw;
+  if (raw.includes("/") && (isImageAsset(raw) || isAudioAsset(raw))) return resolveAdminAssetUrl(raw);
+  return raw;
+}
+
+function normalizeAdminChoiceList(values) {
+  if (!Array.isArray(values)) return values;
+  return values.map((value) => normalizeAdminRenderableAsset(value));
+}
+
+function normalizeAdminParts(parts) {
+  if (!Array.isArray(parts)) return [];
+  return parts.map((part) => ({
+    ...part,
+    choices: normalizeAdminChoiceList(part?.choices),
+    choicesJa: normalizeAdminChoiceList(part?.choicesJa),
+    choicesEn: normalizeAdminChoiceList(part?.choicesEn),
+    choiceImages: Array.isArray(part?.choiceImages)
+      ? part.choiceImages.map((value) => normalizeAdminRenderableAsset(value))
+      : part?.choiceImages,
+  }));
 }
 
 function normalizeModelCsvKind(value) {
