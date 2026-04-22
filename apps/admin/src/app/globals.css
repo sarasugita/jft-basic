@@ -2266,6 +2266,13 @@ body { padding: 0; }
   gap: 10px;
 }
 
+.student-warning-history-title {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--admin-text);
+  line-height: 1.2;
+}
+
 .student-warning-history-head {
   display: flex;
   align-items: center;
@@ -2278,6 +2285,52 @@ body { padding: 0; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 10px;
+}
+
+.student-warning-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.student-warning-form-title {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+}
+
+.student-warning-form .field {
+  grid-column: span 1;
+}
+
+.student-warning-period-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.student-warning-criteria-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.student-warning-period-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.student-warning-date-range-field.is-disabled {
+  opacity: 0.7;
+}
+
+.student-warning-period-hint {
+  margin-top: 6px;
 }
 
 .student-warning-card {
@@ -2313,6 +2366,20 @@ body { padding: 0; }
   border-color: var(--admin-control-border);
   background: #f8fafc;
   outline: none;
+}
+
+@media (max-width: 620px) {
+  .student-warning-form {
+    grid-template-columns: 1fr;
+  }
+
+  .student-warning-form .field,
+  .student-warning-form-title,
+  .student-warning-period-row,
+  .student-warning-criteria-grid,
+  .student-warning-period-dates {
+    grid-template-columns: 1fr;
+  }
 }
 
 .student-list-primary-btn {
@@ -3616,6 +3683,13 @@ body { padding: 0; }
 
 .admin-modal-close:hover {
   color: #333333;
+}
+
+.student-warning-modal-title {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--admin-text);
+  margin-right: auto;
 }
 
 .student-info-panel {

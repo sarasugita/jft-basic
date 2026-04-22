@@ -49,6 +49,10 @@ export default function AdminConsoleStudentsWorkspace() {
     setStudentInfoUploadFiles: setCoreStudentInfoUploadFiles,
     setStudentInfoMsg: setCoreStudentInfoMsg,
     setStudentInfoOpen: setCoreStudentInfoOpen,
+    studentWarnings,
+    studentWarningsLoading,
+    studentWarningsLoaded,
+    studentWarningsMsg,
     hasStudentDetailFields,
     formatDateFull,
     calculateAge,
@@ -172,12 +176,6 @@ export default function AdminConsoleStudentsWorkspace() {
     setStudentReportExporting,
     studentAttendanceMonthKey,
     setStudentAttendanceMonthKey,
-    studentWarnings,
-    setStudentWarnings,
-    studentWarningsLoading,
-    studentWarningsLoaded,
-    studentWarningsMsg,
-    setStudentWarningsMsg,
     studentListRows,
     fetchStudentListMetrics,
     openStudentWarningsModalFn,
@@ -275,7 +273,10 @@ export default function AdminConsoleStudentsWorkspace() {
               </button>
               <button
                 className="btn student-list-primary-btn student-warning-launch-btn"
-                onClick={() => openStudentWarningsModalFn(getDefaultStudentWarningForm)}
+                onClick={() => {
+                  openStudentWarningsModalFn(getDefaultStudentWarningForm);
+                  void handleLoadStudentWarnings();
+                }}
               >
                 <svg viewBox="0 0 20 20" aria-hidden="true">
                   <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -997,16 +998,14 @@ export default function AdminConsoleStudentsWorkspace() {
         <div className="admin-modal-overlay" onClick={() => setStudentWarningIssueOpen(false)}>
           <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
             <div className="admin-modal-header">
-              <div className="admin-title">Warnings</div>
+              <div className="student-warning-modal-title">Create Warning</div>
               <button className="admin-modal-close" onClick={() => setStudentWarningIssueOpen(false)} aria-label="Close">
                 &times;
               </button>
             </div>
             <div className="student-warning-history" style={{ marginTop: 10 }}>
-              <div className="student-warning-history-head">
-                <div className="admin-title" style={{ fontSize: 18 }}>Issued Warnings</div>
-                {studentWarningsLoading ? <div className="admin-help">Loading warnings...</div> : null}
-              </div>
+              <div className="student-warning-history-title">Issued Warnings</div>
+              {studentWarningsLoading ? <div className="admin-help">Loading warnings...</div> : null}
               <div className="student-warning-history-list">
                 {studentWarnings.map((warning) => {
                   const summary = summarizeWarningCriteria(warning.criteria);
@@ -1028,35 +1027,70 @@ export default function AdminConsoleStudentsWorkspace() {
               </div>
               {studentWarningsMsg ? <div className="admin-msg">{studentWarningsMsg}</div> : null}
             </div>
-            <div className="admin-title" style={{ fontSize: 18, marginTop: 14 }}>Create Warning</div>
-            <div className="admin-form" style={{ marginTop: 10, gridTemplateColumns: "1fr" }}>
-              <div className="field">
+            <div className="admin-form student-warning-form" style={{ marginTop: 10 }}>
+              <div className="field student-warning-form-title">
                 <label>Title (optional)</label>
                 <input value={studentWarningForm.title} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, title: e.target.value }))} placeholder="Warning title" />
               </div>
-              <div className="field">
-                <label>Date From</label>
-                <input type="date" value={studentWarningForm.from} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, from: e.target.value }))} />
+              <div className="student-warning-period-row">
+                <div className="field">
+                  <label>Period</label>
+                  <select
+                    value={studentWarningForm.period ?? "all"}
+                    onChange={(e) => setStudentWarningForm((prev) => ({
+                      ...prev,
+                      period: e.target.value,
+                      from: e.target.value === "specified" ? prev.from : "",
+                      to: e.target.value === "specified" ? prev.to : "",
+                    }))}
+                  >
+                    <option value="all">All period</option>
+                    <option value="specified">Specify Dates</option>
+                  </select>
+                  <div className="admin-help student-warning-period-hint">
+                    Choose <b>Specify Dates</b> to enable the date range.
+                  </div>
+                </div>
+                <div className={`field student-warning-date-range-field${studentWarningForm.period !== "specified" ? " is-disabled" : ""}`}>
+                  <label>Date Range</label>
+                  <div className="student-warning-period-dates">
+                    <input
+                      type="date"
+                      value={studentWarningForm.from}
+                      disabled={studentWarningForm.period !== "specified"}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, from: e.target.value }))}
+                    />
+                    <input
+                      type="date"
+                      value={studentWarningForm.to}
+                      disabled={studentWarningForm.period !== "specified"}
+                      onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, to: e.target.value }))}
+                    />
+                  </div>
+                  <div className="admin-help student-warning-period-hint">
+                    {studentWarningForm.period === "specified"
+                      ? "Select the start and end dates for this warning."
+                      : "Date range is disabled until Specify Dates is selected."}
+                  </div>
+                </div>
               </div>
-              <div className="field">
-                <label>Date To</label>
-                <input type="date" value={studentWarningForm.to} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, to: e.target.value }))} />
-              </div>
-              <div className="field">
-                <label>Attendance % (≤)</label>
-                <input type="number" min="0" max="100" value={studentWarningForm.maxAttendance} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxAttendance: e.target.value }))} />
-              </div>
-              <div className="field">
-                <label>Unexcused (≥)</label>
-                <input type="number" min="0" value={studentWarningForm.minUnexcused} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, minUnexcused: e.target.value }))} />
-              </div>
-              <div className="field">
-                <label>Model Avg % (≤)</label>
-                <input type="number" min="0" max="100" value={studentWarningForm.maxModelAvg} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxModelAvg: e.target.value }))} />
-              </div>
-              <div className="field">
-                <label>Daily Avg % (≤)</label>
-                <input type="number" min="0" max="100" value={studentWarningForm.maxDailyAvg} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxDailyAvg: e.target.value }))} />
+              <div className="student-warning-criteria-grid">
+                <div className="field">
+                  <label>Attendance Rate (%) (≤)</label>
+                  <input type="number" min="0" max="100" value={studentWarningForm.maxAttendance} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxAttendance: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Unexcused Absences (≥)</label>
+                  <input type="number" min="0" value={studentWarningForm.minUnexcused} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, minUnexcused: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Model Test Average (%) (≤)</label>
+                  <input type="number" min="0" max="100" value={studentWarningForm.maxModelAvg} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxModelAvg: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>Daily Test Average (%) (≤)</label>
+                  <input type="number" min="0" max="100" value={studentWarningForm.maxDailyAvg} onChange={(e) => setStudentWarningForm((prev) => ({ ...prev, maxDailyAvg: e.target.value }))} />
+                </div>
               </div>
             </div>
             <div className="admin-help" style={{ marginTop: 10 }}>
@@ -1067,7 +1101,7 @@ export default function AdminConsoleStudentsWorkspace() {
               <button className="btn btn-primary" onClick={issueStudentWarningCtx} disabled={studentWarningIssueSaving}>
                 {studentWarningIssueSaving ? "Issuing..." : "Issue Warning"}
               </button>
-              <button className="btn" onClick={() => setStudentWarningForm(getDefaultStudentWarningForm(studentListFilters))}>
+              <button className="btn" onClick={() => setStudentWarningForm(getDefaultStudentWarningForm())}>
                 Reset
               </button>
             </div>
@@ -1080,7 +1114,7 @@ export default function AdminConsoleStudentsWorkspace() {
           <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
             <div className="admin-modal-header">
               <div>
-                <div className="admin-title">{selectedStudentWarning.title || "Warning"}</div>
+                <div className="student-warning-modal-title">{selectedStudentWarning.title || "Warning"}</div>
                 <div className="admin-help" style={{ marginTop: 6 }}>
                   {formatDateTime(selectedStudentWarning.created_at)} · {selectedStudentWarning.student_count || selectedStudentWarning.recipients?.length || 0} student{(selectedStudentWarning.student_count || selectedStudentWarning.recipients?.length || 0) === 1 ? "" : "s"}
                 </div>
@@ -1141,7 +1175,7 @@ export default function AdminConsoleStudentsWorkspace() {
           <div className="admin-modal invite-modal" onClick={(e) => e.stopPropagation()}>
             <div className="admin-modal-header">
               <div>
-                <div className="admin-title">Applied Warnings</div>
+                <div className="student-warning-modal-title">Applied Warnings</div>
                 <div className="admin-help" style={{ marginTop: 6 }}>
                   {studentWarningPreviewStudent?.display_name || studentWarningPreviewStudent?.email || studentWarningPreviewStudentId}
                 </div>

@@ -726,11 +726,12 @@ function summarizeDailyRecordComments(record) {
   return `${comments.length} comment${comments.length > 1 ? "s" : ""}${names.length ? `: ${names.join(", ")}${suffix}` : ""}`;
 }
 
-function getDefaultStudentWarningForm(filters = {}) {
+function getDefaultStudentWarningForm() {
   return {
     title: "",
-    from: filters.from ?? "",
-    to: filters.to ?? "",
+    period: "all",
+    from: "",
+    to: "",
     maxAttendance: "",
     minUnexcused: "",
     maxModelAvg: "",
@@ -747,6 +748,7 @@ function normalizeStudentWarningCriteria(criteria = {}) {
 
   return {
     title: String(criteria.title ?? "").trim(),
+    period: String(criteria.period ?? "all").trim() === "specified" ? "specified" : "all",
     from: String(criteria.from ?? "").trim(),
     to: String(criteria.to ?? "").trim(),
     maxAttendance: normalizeNumber(criteria.maxAttendance),
@@ -757,7 +759,7 @@ function normalizeStudentWarningCriteria(criteria = {}) {
 }
 
 function getStudentWarningMetricRangeKey(criteria = {}) {
-  return `${String(criteria.from ?? "").trim()}::${String(criteria.to ?? "").trim()}`;
+  return `${String(criteria.period ?? "all").trim()}::${String(criteria.from ?? "").trim()}::${String(criteria.to ?? "").trim()}`;
 }
 
 function normalizeWarningIssueList(list) {
@@ -880,20 +882,20 @@ function isMissingStudentWarningsTableError(error) {
 
 function summarizeWarningCriteria(criteria) {
   const items = [];
+  if (criteria?.period === "specified" && (criteria?.from || criteria?.to)) {
+    items.push(`Period: ${criteria.from || "Any"} to ${criteria.to || "Any"}`);
+  }
   if (criteria?.maxAttendance !== "" && criteria?.maxAttendance != null) {
-    items.push(`Attendance <= ${criteria.maxAttendance}%`);
+    items.push(`Attendance Rate (%) <= ${criteria.maxAttendance}%`);
   }
   if (criteria?.minUnexcused !== "" && criteria?.minUnexcused != null) {
-    items.push(`Unexcused >= ${criteria.minUnexcused}`);
+    items.push(`Unexcused Absences >= ${criteria.minUnexcused}`);
   }
   if (criteria?.maxModelAvg !== "" && criteria?.maxModelAvg != null) {
-    items.push(`Model Avg <= ${criteria.maxModelAvg}%`);
+    items.push(`Model Test Average (%) <= ${criteria.maxModelAvg}%`);
   }
   if (criteria?.maxDailyAvg !== "" && criteria?.maxDailyAvg != null) {
-    items.push(`Daily Avg <= ${criteria.maxDailyAvg}%`);
-  }
-  if (criteria?.from || criteria?.to) {
-    items.push(`Range: ${criteria.from || "Any"} to ${criteria.to || "Any"}`);
+    items.push(`Daily Test Average (%) <= ${criteria.maxDailyAvg}%`);
   }
   return items;
 }
@@ -907,18 +909,18 @@ function getStudentWarningIssues(row, criteria) {
 
   if (maxAttendance != null) {
     const rate = row.attendanceRate;
-    if (rate != null && rate <= maxAttendance) issues.push(`Attendance ${rate.toFixed(1)}% <= ${maxAttendance}%`);
+    if (rate != null && rate <= maxAttendance) issues.push(`Attendance Rate (${rate.toFixed(1)}%) <= ${maxAttendance}%`);
   }
   if (minUnexcused != null && (row.unexcused ?? 0) >= minUnexcused) {
-    issues.push(`Unexcused ${row.unexcused ?? 0} >= ${minUnexcused}`);
+    issues.push(`Unexcused Absences ${row.unexcused ?? 0} >= ${minUnexcused}`);
   }
   if (maxModelAvg != null) {
     const value = row.modelAvg ?? 0;
-    if (value <= maxModelAvg) issues.push(`Model Avg ${value.toFixed(1)}% <= ${maxModelAvg}%`);
+    if (value <= maxModelAvg) issues.push(`Model Test Average (${value.toFixed(1)}%) <= ${maxModelAvg}%`);
   }
   if (maxDailyAvg != null) {
     const value = row.dailyAvg ?? 0;
-    if (value <= maxDailyAvg) issues.push(`Daily Avg ${value.toFixed(1)}% <= ${maxDailyAvg}%`);
+    if (value <= maxDailyAvg) issues.push(`Daily Test Average (${value.toFixed(1)}%) <= ${maxDailyAvg}%`);
   }
   return issues;
 }
@@ -6640,6 +6642,7 @@ export default function AdminConsole({
       setStudentWarningsLoaded(false);
       return;
     }
+    if (studentWarningsLoading) return;
     setStudentWarningsLoading(true);
     setStudentWarningsMsg("");
     const { data: warningRows, error: warningError } = await supabase
