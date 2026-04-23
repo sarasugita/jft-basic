@@ -268,10 +268,12 @@ export default function AdminConsoleRankingWorkspace() {
                   <tbody>
                     {rankingDetailModal.usedAttempts.map((attempt) => {
                       const scopeLabel = attempt.scopeLabel || attempt.test_session_id || attempt.test_version || "Attempt";
-                      const scoreText = `${(Number(attempt.scoreRate ?? 0) * 100).toFixed(2)}%`;
-                      const totalText = `${attempt.correct ?? 0} / ${attempt.total ?? 0}`;
+                      const scoreText = attempt.absent ? "(absent)" : `${(Number(attempt.scoreRate ?? 0) * 100).toFixed(2)}%`;
+                      const totalText = attempt.absent ? "-" : `${attempt.correct ?? 0} / ${attempt.total ?? 0}`;
                       const completedAtRaw = attempt.ended_at || attempt.created_at || "";
-                      const completedAt = completedAtRaw ? new Date(completedAtRaw).toLocaleString() : "-";
+                      const completedAt = attempt.absent
+                        ? "-"
+                        : (completedAtRaw ? new Date(completedAtRaw).toLocaleString() : "-");
                       return (
                         <tr key={attempt.id}>
                           <td>{scopeLabel}</td>

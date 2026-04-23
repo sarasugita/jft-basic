@@ -5292,7 +5292,7 @@ export function useTestingWorkspaceState({
         return {
           ...current,
           [field]: nextValue,
-          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 30) : current.close_time,
+          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 15) : current.close_time,
           close_time_auto_filled: shouldAutoFillCloseTime,
         };
       }
@@ -5322,7 +5322,7 @@ export function useTestingWorkspaceState({
         return {
           ...current,
           [field]: nextValue,
-          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 30) : current.close_time,
+          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 15) : current.close_time,
           close_time_auto_filled: shouldAutoFillCloseTime,
         };
       }

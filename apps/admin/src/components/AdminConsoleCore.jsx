@@ -8613,7 +8613,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         return {
           ...current,
           [field]: nextValue,
-          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 30) : current.close_time,
+          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 15) : current.close_time,
           close_time_auto_filled: shouldAutoFillCloseTime,
         };
       }
@@ -8643,7 +8643,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         return {
           ...current,
           [field]: nextValue,
-          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 30) : current.close_time,
+          close_time: shouldAutoFillCloseTime ? addMinutesToTimeInput(nextValue, 15) : current.close_time,
           close_time_auto_filled: shouldAutoFillCloseTime,
         };
       }

@@ -7,12 +7,18 @@ import {
   writeAdminConsoleDataCache,
 } from "../lib/adminConsoleDataCache";
 import {
-  buildLatestAttemptMapByStudentAndScope,
   isAnalyticsExcludedStudent,
   getRowTimestamp,
 } from "../lib/adminAnalyticsHelpers";
 
 const SUPABASE_SAFE_PAGE_SIZE = 500;
+const SUPABASE_IN_FILTER_CHUNK = 100;
+const bangladeshDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Dhaka",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 async function fetchAllPages(buildPageQuery, pageSize = SUPABASE_SAFE_PAGE_SIZE) {
   const rows = [];
@@ -63,64 +69,310 @@ function getSessionDisplayTitle(session, tests = []) {
   return fallbackTitle || version;
 }
 
-function getRankingAttemptTimestamp(attempt) {
-  return getRowTimestamp(attempt);
+function normalizeLookupValue(value) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function isRankingAttemptInPeriod(attempt, startIso, endIso) {
-  const timestamp = getRankingAttemptTimestamp(attempt);
+function getBangladeshDateKey(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const time = new Date(text);
+  if (!Number.isFinite(time.getTime())) return "";
+  const parts = bangladeshDateFormatter.formatToParts(time);
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  return year && month && day ? `${year}-${month}-${day}` : "";
+}
+
+function getRankingSessionDateValue(session) {
+  return session?.starts_at || session?.ends_at || session?.created_at || "";
+}
+
+function getRankingSessionDateKey(session) {
+  return getBangladeshDateKey(getRankingSessionDateValue(session));
+}
+
+function getRankingSessionTimestamp(session) {
+  const value = getRankingSessionDateValue(session);
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function isRankingRetakeSession(session) {
+  return Boolean(session?.retake_source_session_id) || String(session?.title ?? "").trim().startsWith("[Retake]");
+}
+
+function isRankingSessionInPeriod(session, startIso, endIso) {
+  const timestamp = getRankingSessionTimestamp(session);
   if (!timestamp) return false;
   const startTime = new Date(startIso).getTime();
   const endTime = new Date(endIso).getTime();
   return timestamp >= startTime && timestamp <= endTime;
 }
 
-async function fetchRankingPeriodAttempts({ supabase, schoolId, studentId = null, startIso, endIso }) {
-  const baseSelect = "id, student_id, test_session_id, test_version, score_rate, correct, total, created_at, ended_at";
+function buildRankingPeriodSessions(testSessions, startIso, endIso) {
+  return (testSessions ?? [])
+    .filter((session) => session?.id && !isRankingRetakeSession(session) && isRankingSessionInPeriod(session, startIso, endIso))
+    .sort((left, right) => {
+      const timeDiff = getRankingSessionTimestamp(left) - getRankingSessionTimestamp(right);
+      if (timeDiff !== 0) return timeDiff;
+      return String(left?.title ?? left?.problem_set_id ?? left?.id ?? "").localeCompare(
+        String(right?.title ?? right?.problem_set_id ?? right?.id ?? "")
+      );
+    });
+}
 
-  const endedRows = await fetchAllPages((offset, pageSize) => {
-    let query = supabase
-      .from("attempts")
-      .select(baseSelect)
-      .eq("school_id", schoolId)
-      .gte("ended_at", startIso)
-      .lte("ended_at", endIso)
-      .order("ended_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
-    if (studentId) query = query.eq("student_id", studentId);
-    return query;
+function buildRankingSessionLookup(sessions) {
+  const byId = new Map();
+
+  (sessions ?? []).forEach((session) => {
+    if (!session?.id) return;
+    byId.set(session.id, session);
   });
 
-  if (endedRows.error) return endedRows;
+  return { byId };
+}
 
-  const createdFallbackRows = await fetchAllPages((offset, pageSize) => {
-    let query = supabase
-      .from("attempts")
-      .select(baseSelect)
-      .eq("school_id", schoolId)
-      .is("ended_at", null)
-      .gte("created_at", startIso)
-      .lte("created_at", endIso)
-      .order("created_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
-    if (studentId) query = query.eq("student_id", studentId);
-    return query;
-  });
+function getRankingAttemptSession(attempt, sessionLookup) {
+  if (!attempt?.test_session_id) return null;
+  return sessionLookup?.byId.get(attempt.test_session_id) ?? null;
+}
 
-  if (createdFallbackRows.error) return createdFallbackRows;
+function getRankingAttemptDisplayDateValue(attempt, sessionLookup) {
+  const meta = attempt?.answers_json?.__meta ?? {};
+  const importedDate = String(meta.imported_test_date ?? meta.imported_date_iso ?? meta.session_date ?? "").trim();
+  if (importedDate) return importedDate;
+  const session = getRankingAttemptSession(attempt, sessionLookup);
+  return session?.starts_at || session?.ends_at || attempt?.ended_at || attempt?.created_at || attempt?.started_at || "";
+}
 
-  const seenIds = new Set();
-  const merged = [];
-  for (const row of [...(endedRows.data ?? []), ...(createdFallbackRows.data ?? [])]) {
-    if (!row?.id || seenIds.has(row.id)) continue;
-    if (!isRankingAttemptInPeriod(row, startIso, endIso)) continue;
-    seenIds.add(row.id);
-    merged.push(row);
+function getRankingAttemptTimestamp(attempt, sessionLookup) {
+  const value = getRankingAttemptDisplayDateValue(attempt, sessionLookup);
+  if (!value) return getRowTimestamp(attempt);
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(String(value).trim()) ? `${value}T00:00:00` : value;
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? time : getRowTimestamp(attempt);
+}
+
+function getRankingAttemptDisplayDateKey(attempt, sessionLookup) {
+  return getBangladeshDateKey(getRankingAttemptDisplayDateValue(attempt, sessionLookup));
+}
+
+function getRankingAttemptTitle(attempt, sessionLookup, tests = []) {
+  const meta = attempt?.answers_json?.__meta ?? {};
+  const importedTitle = String(meta.imported_test_title ?? meta.session_title ?? "").trim();
+  if (importedTitle) return importedTitle;
+  const session = getRankingAttemptSession(attempt, sessionLookup);
+  if (session?.title) return session.title;
+  const version = String(attempt?.test_version ?? "").trim();
+  if (!version) return "Attempt";
+  const fallbackTitle = String((tests ?? []).find((test) => test.version === version)?.title ?? "").trim();
+  return fallbackTitle || version;
+}
+
+function shouldShowAttemptInRanking(attempt, sessionLookup) {
+  if (!attempt) return false;
+  if (!attempt.test_session_id) return true;
+  return Boolean(getRankingAttemptSession(attempt, sessionLookup));
+}
+
+function chunkValues(values, size = SUPABASE_IN_FILTER_CHUNK) {
+  const chunks = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function fetchRankingRelevantAttempts({
+  supabase,
+  schoolId,
+  studentId = null,
+  sessionIds = [],
+  testVersions = [],
+}) {
+  const baseSelect = "id, student_id, test_session_id, test_version, score_rate, correct, total, started_at, created_at, ended_at, answers_json";
+  const mergedById = new Map();
+
+  async function collectMatches(column, values) {
+    for (const chunk of chunkValues(values.filter(Boolean))) {
+      const result = await fetchAllPages((offset, pageSize) => {
+        let query = supabase
+          .from("attempts")
+          .select(baseSelect)
+          .eq("school_id", schoolId)
+          .in(column, chunk)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        if (studentId) query = query.eq("student_id", studentId);
+        return query;
+      });
+      if (result.error) return result;
+      (result.data ?? []).forEach((row) => {
+        if (row?.id) mergedById.set(row.id, row);
+      });
+    }
+    return { data: Array.from(mergedById.values()), error: null };
   }
 
-  return { data: merged, error: null };
+  const uniqueSessionIds = Array.from(new Set((sessionIds ?? []).filter(Boolean)));
+  if (uniqueSessionIds.length) {
+    const result = await collectMatches("test_session_id", uniqueSessionIds);
+    if (result.error) return result;
+  }
+
+  const uniqueVersions = Array.from(new Set((testVersions ?? []).filter(Boolean)));
+  if (uniqueVersions.length) {
+    const result = await collectMatches("test_version", uniqueVersions);
+    if (result.error) return result;
+  }
+
+  return { data: Array.from(mergedById.values()), error: null };
+}
+
+function buildRankingAttemptRow(session, attempt, sessionLookup, tests = []) {
+  const scoreRate = Number(attempt?.score_rate ?? (attempt?.total ? attempt.correct / attempt.total : 0));
+  const normalizedScore = Number.isFinite(scoreRate) ? scoreRate : 0;
+  return {
+    id: attempt?.id ?? `session:${session?.id ?? ""}`,
+    test_session_id: session?.id ?? attempt?.test_session_id ?? null,
+    test_version: String(attempt?.test_version ?? session?.problem_set_id ?? "").trim(),
+    scoreRate: normalizedScore,
+    correct: attempt?.correct ?? 0,
+    total: attempt?.total ?? 0,
+    ended_at: attempt?.ended_at ?? null,
+    created_at: attempt?.created_at ?? null,
+    scopeLabel: getSessionDisplayTitle(session, tests),
+    displayDateValue: getRankingAttemptDisplayDateValue(attempt, sessionLookup) || getRankingSessionDateValue(session),
+    absent: false,
+  };
+}
+
+function buildRankingAbsentRow(session, tests = []) {
+  return {
+    id: `absent:${session?.id ?? ""}`,
+    test_session_id: session?.id ?? null,
+    test_version: String(session?.problem_set_id ?? "").trim(),
+    scoreRate: 0,
+    correct: null,
+    total: null,
+    ended_at: null,
+    created_at: null,
+    scopeLabel: getSessionDisplayTitle(session, tests),
+    displayDateValue: getRankingSessionDateValue(session),
+    absent: true,
+  };
+}
+
+function findBestRankingAttemptForSession({
+  session,
+  attempts,
+  usedAttemptIds,
+  rankingSessionIds,
+  sessionLookup,
+  tests = [],
+}) {
+  const sessionTitle = normalizeLookupValue(getSessionDisplayTitle(session, tests));
+  const sessionVersion = String(session?.problem_set_id ?? "").trim();
+  const sessionDateKey = getRankingSessionDateKey(session);
+  let bestAttempt = null;
+  let bestScore = -1;
+
+  for (const attempt of attempts) {
+    if (!attempt?.id || usedAttemptIds.has(attempt.id)) continue;
+    const attemptSession = getRankingAttemptSession(attempt, sessionLookup);
+    if (attemptSession && isRankingRetakeSession(attemptSession)) continue;
+    if (attempt?.test_session_id && rankingSessionIds.has(attempt.test_session_id) && attempt.test_session_id !== session?.id) {
+      continue;
+    }
+
+    const attemptDateKey = getRankingAttemptDisplayDateKey(attempt, sessionLookup);
+    if (sessionDateKey && attemptDateKey && sessionDateKey !== attemptDateKey) continue;
+    if (sessionDateKey && !attemptDateKey) continue;
+
+    let score = 0;
+    if (sessionDateKey && attemptDateKey === sessionDateKey) score += 200;
+    if (sessionVersion && String(attempt?.test_version ?? "").trim() === sessionVersion) score += 40;
+    if (sessionTitle && normalizeLookupValue(getRankingAttemptTitle(attempt, sessionLookup, tests)) === sessionTitle) score += 80;
+
+    if (score <= 0) continue;
+
+    if (!bestAttempt) {
+      bestAttempt = attempt;
+      bestScore = score;
+      continue;
+    }
+
+    const timeDiff = getRankingAttemptTimestamp(attempt, sessionLookup) - getRankingAttemptTimestamp(bestAttempt, sessionLookup);
+    if (score > bestScore || (score === bestScore && timeDiff > 0)) {
+      bestAttempt = attempt;
+      bestScore = score;
+    }
+  }
+
+  return bestAttempt;
+}
+
+function buildRankingSessionRowsForStudent({
+  studentId,
+  rankingSessions,
+  attemptsList,
+  sessionLookup,
+  tests = [],
+}) {
+  const rankingSessionIds = new Set((rankingSessions ?? []).map((session) => session?.id).filter(Boolean));
+  const relevantAttempts = (attemptsList ?? [])
+    .filter((attempt) => attempt?.student_id === studentId)
+    .filter((attempt) => shouldShowAttemptInRanking(attempt, sessionLookup))
+    .filter((attempt) => {
+      const session = getRankingAttemptSession(attempt, sessionLookup);
+      return !isRankingRetakeSession(session);
+    })
+    .sort((left, right) => {
+      const timeDiff = getRankingAttemptTimestamp(right, sessionLookup) - getRankingAttemptTimestamp(left, sessionLookup);
+      if (timeDiff !== 0) return timeDiff;
+      return String(right?.id ?? "").localeCompare(String(left?.id ?? ""));
+    });
+
+  const exactAttemptBySessionId = new Map();
+  const fallbackAttempts = [];
+
+  for (const attempt of relevantAttempts) {
+    const attemptSessionId = String(attempt?.test_session_id ?? "").trim();
+    if (attemptSessionId && rankingSessionIds.has(attemptSessionId)) {
+      const existing = exactAttemptBySessionId.get(attemptSessionId);
+      if (!existing || getRankingAttemptTimestamp(attempt, sessionLookup) >= getRankingAttemptTimestamp(existing, sessionLookup)) {
+        exactAttemptBySessionId.set(attemptSessionId, attempt);
+      }
+      continue;
+    }
+    fallbackAttempts.push(attempt);
+  }
+
+  const usedAttemptIds = new Set(Array.from(exactAttemptBySessionId.values()).map((attempt) => attempt?.id).filter(Boolean));
+
+  return (rankingSessions ?? []).map((session) => {
+    const exactAttempt = exactAttemptBySessionId.get(session?.id) ?? null;
+    const matchedAttempt = exactAttempt || findBestRankingAttemptForSession({
+      session,
+      attempts: fallbackAttempts,
+      usedAttemptIds,
+      rankingSessionIds,
+      sessionLookup,
+      tests,
+    });
+
+    if (matchedAttempt?.id) {
+      usedAttemptIds.add(matchedAttempt.id);
+      return buildRankingAttemptRow(session, matchedAttempt, sessionLookup, tests);
+    }
+
+    return buildRankingAbsentRow(session, tests);
+  });
 }
 
 export function useRankingWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], tests = [] }) {
@@ -345,19 +597,6 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session, te
       return;
     }
 
-    const { data: attemptsData, error: attemptsError } = await fetchRankingPeriodAttempts({
-      supabase,
-      schoolId: activeSchoolId,
-      startIso,
-      endIso,
-    });
-    if (attemptsError) {
-      console.error("ranking attempts fetch error:", attemptsError);
-      setRankingMsg(`Refresh failed: ${attemptsError.message}`);
-      setRankingRefreshingId("");
-      return;
-    }
-
     const { data: studentRows, error: studentsError } = await supabase
       .from("profiles")
       .select("id, display_name, email, student_code, is_withdrawn, is_test_account")
@@ -371,6 +610,22 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session, te
       return;
     }
     const rankingStudents = (studentRows ?? []).filter((student) => !isAnalyticsExcludedStudent(student));
+    const rankingSessions = buildRankingPeriodSessions(testSessions, startIso, endIso);
+    const rankingSessionLookup = buildRankingSessionLookup(testSessions);
+    const rankingSessionIds = rankingSessions.map((session) => session.id).filter(Boolean);
+    const rankingVersions = rankingSessions.map((session) => session.problem_set_id).filter(Boolean);
+    const { data: attemptsData, error: attemptsError } = await fetchRankingRelevantAttempts({
+      supabase,
+      schoolId: activeSchoolId,
+      sessionIds: rankingSessionIds,
+      testVersions: rankingVersions,
+    });
+    if (attemptsError) {
+      console.error("ranking attempts fetch error:", attemptsError);
+      setRankingMsg(`Refresh failed: ${attemptsError.message}`);
+      setRankingRefreshingId("");
+      return;
+    }
 
     const studentMeta = new Map(
       rankingStudents.map((student) => [
@@ -378,44 +633,54 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session, te
         student.display_name || student.email || student.student_code || student.id
       ])
     );
-    const totalsByStudent = new Map();
-    Array.from(buildLatestAttemptMapByStudentAndScope(attemptsData).values()).forEach((row) => {
-      if (!row?.student_id || !studentMeta.has(row.student_id)) return;
-      const rate = Number(row.score_rate ?? (row.total ? row.correct / row.total : 0));
-      if (!Number.isFinite(rate)) return;
-      const current = totalsByStudent.get(row.student_id) ?? { sum: 0, count: 0 };
-      current.sum += rate;
-      current.count += 1;
-      totalsByStudent.set(row.student_id, current);
-    });
-    const rankings = Array.from(totalsByStudent.entries())
-      .map(([studentId, stats]) => ({
-        student_id: studentId,
-        student_name: studentMeta.get(studentId) ?? studentId,
-        average_rate: stats.count ? stats.sum / stats.count : 0,
-      }))
-      .sort((a, b) => {
-        if (b.average_rate !== a.average_rate) return b.average_rate - a.average_rate;
-        return String(a.student_name).localeCompare(String(b.student_name));
-      })
-      .map((item, index) => ({
-        period_id: period.id,
-        school_id: activeSchoolId,
-        student_id: item.student_id,
-        student_name: item.student_name,
-        average_rate: item.average_rate,
-        rank_position: index + 1,
-      }));
+    let rankings = [];
+    let rankingSlotsCount = 0;
+    if (rankingSessions.length) {
+      rankingSlotsCount = rankingSessions.length;
+      rankings = rankingStudents
+        .map((student) => {
+          const sessionRows = buildRankingSessionRowsForStudent({
+            studentId: student.id,
+            rankingSessions,
+            attemptsList: attemptsData,
+            sessionLookup: rankingSessionLookup,
+            tests,
+          });
+          const sum = sessionRows.reduce((acc, item) => acc + Number(item.scoreRate || 0), 0);
+
+          return {
+            student_id: student.id,
+            student_name: studentMeta.get(student.id) ?? student.id,
+            average_rate: rankingSlotsCount ? sum / rankingSlotsCount : 0,
+            usedAttempts: sessionRows,
+          };
+        })
+        .sort((a, b) => {
+          if (b.average_rate !== a.average_rate) return b.average_rate - a.average_rate;
+          return String(a.student_name).localeCompare(String(b.student_name));
+        })
+        .map((item, index) => ({
+          period_id: period.id,
+          school_id: activeSchoolId,
+          student_id: item.student_id,
+          student_name: item.student_name,
+          average_rate: item.average_rate,
+          rank_position: index + 1,
+        }));
+    } else {
+      rankings = [];
+    }
 
     const rankingRates = rankings.map((item) => Number(item.average_rate)).filter((value) => Number.isFinite(value));
     logAdminEvent("Ranking refresh debug", {
       schoolId: activeSchoolId,
       periodId: period.id,
       label: nextLabel,
+      rankingSessions: rankingSessions.length,
       attemptsFetched: attemptsData?.length ?? 0,
       studentsFetched: studentRows?.length ?? 0,
       rankingStudents: rankingStudents.length,
-      latestAttemptRows: totalsByStudent.size,
+      latestAttemptRows: rankings.length,
       rankingsCount: rankings.length,
       minRate: rankingRates.length ? Math.min(...rankingRates) : null,
       maxRate: rankingRates.length ? Math.max(...rankingRates) : null,
@@ -486,12 +751,16 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session, te
       return;
     }
 
-    const { data: attemptsData, error } = await fetchRankingPeriodAttempts({
+    const startIso = new Date(`${startDate}T00:00:00`).toISOString();
+    const endIso = new Date(`${endDate}T23:59:59.999`).toISOString();
+    const rankingSessions = buildRankingPeriodSessions(testSessions, startIso, endIso);
+    const sessionLookup = buildRankingSessionLookup(testSessions);
+    const { data: attemptsData, error } = await fetchRankingRelevantAttempts({
       supabase,
       schoolId: activeSchoolId,
       studentId: entry.student_id,
-      startIso: new Date(`${startDate}T00:00:00`).toISOString(),
-      endIso: new Date(`${endDate}T23:59:59.999`).toISOString(),
+      sessionIds: rankingSessions.map((session) => session.id).filter(Boolean),
+      testVersions: rankingSessions.map((session) => session.problem_set_id).filter(Boolean),
     });
 
     if (error) {
@@ -504,23 +773,13 @@ export function useRankingWorkspaceState({ supabase, activeSchoolId, session, te
       return;
     }
 
-    const testSessionsById = new Map((testSessions ?? []).map((item) => [item.id, item]));
-    const usedAttempts = Array.from(buildLatestAttemptMapByStudentAndScope(attemptsData).values())
-      .filter((attempt) => attempt?.student_id === entry.student_id)
-      .sort((a, b) => {
-        const timeDiff = getRowTimestamp(a) - getRowTimestamp(b);
-        if (timeDiff !== 0) return timeDiff;
-        return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
-      })
-      .map((attempt) => {
-        const scoreRate = Number(attempt?.score_rate ?? (attempt?.total ? attempt.correct / attempt.total : 0));
-        const sessionRecord = attempt?.test_session_id ? testSessionsById.get(attempt.test_session_id) ?? null : null;
-        return {
-          ...attempt,
-          scoreRate: Number.isFinite(scoreRate) ? scoreRate : 0,
-          scopeLabel: sessionRecord ? getSessionDisplayTitle(sessionRecord, tests) : (String(attempt?.test_version ?? "").trim() || "Attempt"),
-        };
-      });
+    const usedAttempts = buildRankingSessionRowsForStudent({
+      studentId: entry.student_id,
+      rankingSessions,
+      attemptsList: attemptsData,
+      sessionLookup,
+      tests,
+    });
 
     setRankingDetailModal((prev) => ({
       ...prev,
