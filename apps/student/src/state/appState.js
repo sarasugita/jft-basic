@@ -27,6 +27,8 @@ export const defaultState = {
   studentTab: "home",
   dailyResultsCategory: "",
   dailyResultsFailedOnly: false,
+  dailyResultsPage: 1,
+  modelResultsPage: 1,
   rankingSelectedPeriod: "",
   attendanceMonthKey: "",
   focusWarnings: 0,

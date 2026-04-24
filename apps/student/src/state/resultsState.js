@@ -6,7 +6,6 @@ import {
   buildLatestAttemptMapByStudent,
   getScoreRateFromAttempt,
   isImportedSummaryAttempt,
-  isImportedResultsSummaryAttempt,
 } from "../lib/attemptHelpers";
 import { authState } from "./authState";
 import { mapDbQuestion, fetchQuestionRowsWithFallback } from "./questionsState";
@@ -225,10 +224,10 @@ export async function fetchStudentResults() {
         })),
       });
     }
-    await refreshQuestionsForResultAttempts(
-      studentResultsState.list.filter((attempt) => !isImportedResultsSummaryAttempt(attempt)),
-      { force: true }
-    );
+    // Questions for individual attempts are fetched lazily when a student
+    // clicks into an attempt detail (see bindDailyResultsTabEvents /
+    // bindModelResultsTabEvents). Prefetching every version's questions here
+    // blocked the list render on slow connections and could fail silently.
     studentResultsState.loaded = true;
     await fetchSessionAttemptOverrides();
   } catch (error) {

@@ -1292,6 +1292,40 @@ body { overflow-x: hidden; }
   background: #f5f7fb;
 }
 
+.student-results-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 4px 0;
+}
+
+.student-results-pager-btn {
+  border: 0;
+  background: #f3f4f6;
+  border-radius: 999px;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.student-results-pager-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.student-results-pager-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
 .result-pass-cell {
   color: #1a7f37;
   font-weight: 700;

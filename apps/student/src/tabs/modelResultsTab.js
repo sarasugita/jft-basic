@@ -2,7 +2,7 @@ import { escapeHtml } from "../lib/escapeHtml.js";
 import { formatDateShort, formatOrdinal } from "../lib/formatters.js";
 import { buildRadarSvg, getSectionLabelLines } from "../lib/radarChart.js";
 import { getSectionTitle } from "../lib/sectionHelpers.js";
-import { state } from "../state/appState.js";
+import { state, saveState } from "../state/appState.js";
 import { authState } from "../state/authState.js";
 import { testsState, testSessionsState } from "../state/testsState.js";
 import {
@@ -28,6 +28,8 @@ import {
 } from "../lib/attemptHelpers.js";
 import { getPassRateForVersion } from "../lib/sessionHelpers.js";
 import { triggerRender } from "../lib/renderBus.js";
+
+const RESULTS_PAGE_SIZE = 20;
 
 export function buildModelResultsTabHTML() {
   if (!authState.session) {
@@ -289,6 +291,33 @@ export function buildModelResultsTabHTML() {
     return `<div class="text-muted">No model test results yet.</div>`;
   }
 
+  const totalPages = Math.max(1, Math.ceil(modelAttemptEntries.length / RESULTS_PAGE_SIZE));
+  const requestedPage = Number(state.modelResultsPage);
+  const currentPage = Math.min(
+    totalPages,
+    Math.max(1, Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1)
+  );
+  if (currentPage !== requestedPage) {
+    state.modelResultsPage = currentPage;
+    saveState();
+  }
+  const pageStart = (currentPage - 1) * RESULTS_PAGE_SIZE;
+  const pageEnd = pageStart + RESULTS_PAGE_SIZE;
+  const pageEntries = modelAttemptEntries.slice(pageStart, pageEnd);
+  const prevDisabled = currentPage <= 1;
+  const nextDisabled = currentPage >= totalPages;
+  const rangeStart = modelAttemptEntries.length ? pageStart + 1 : 0;
+  const rangeEnd = Math.min(pageEnd, modelAttemptEntries.length);
+  const pagerHtml = totalPages > 1
+    ? `
+      <div class="student-results-pager">
+        <button class="student-results-pager-btn" id="modelResultsPrev" type="button" ${prevDisabled ? "disabled" : ""} aria-label="Previous page">‹</button>
+        <span class="student-results-pager-label">${rangeStart}–${rangeEnd} of ${modelAttemptEntries.length} · Page ${currentPage} of ${totalPages}</span>
+        <button class="student-results-pager-btn" id="modelResultsNext" type="button" ${nextDisabled ? "disabled" : ""} aria-label="Next page">›</button>
+      </div>
+    `
+    : "";
+
   return `
     <div class="student-results-header">
       <div class="student-results-title">Model Test Results</div>
@@ -306,7 +335,7 @@ export function buildModelResultsTabHTML() {
           </tr>
         </thead>
         <tbody>
-          ${modelAttemptEntries
+          ${pageEntries
             .map((entry) => {
               const attempt = entry.attempt;
               const scoreSummary = getVisibleAttemptScoreSummary(attempt);
@@ -334,10 +363,26 @@ export function buildModelResultsTabHTML() {
         </tbody>
       </table>
     </div>
+    ${pagerHtml}
   `;
 }
 
 export function bindModelResultsTabEvents(app) {
+  app.querySelector("#modelResultsPrev")?.addEventListener("click", () => {
+    const current = Math.max(1, Number(state.modelResultsPage) || 1);
+    if (current <= 1) return;
+    state.modelResultsPage = current - 1;
+    saveState();
+    triggerRender();
+  });
+
+  app.querySelector("#modelResultsNext")?.addEventListener("click", () => {
+    const current = Math.max(1, Number(state.modelResultsPage) || 1);
+    state.modelResultsPage = current + 1;
+    saveState();
+    triggerRender();
+  });
+
   app.querySelectorAll("[data-model-attempt-id]").forEach((row) => {
     row.addEventListener("click", async () => {
       const attemptId = row.dataset.modelAttemptId;

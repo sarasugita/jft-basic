@@ -22,6 +22,8 @@ import {
 } from "../lib/attemptHelpers.js";
 import { triggerRender } from "../lib/renderBus.js";
 
+const RESULTS_PAGE_SIZE = 20;
+
 export function buildDailyResultsTabHTML() {
   if (!authState.session) {
     return `<div class="text-muted">Log in to see results.</div>`;
@@ -80,6 +82,33 @@ export function buildDailyResultsTabHTML() {
     return `<div class="text-muted">No daily test results yet.</div>`;
   }
 
+  const totalPages = Math.max(1, Math.ceil(filteredAttemptEntries.length / RESULTS_PAGE_SIZE));
+  const requestedPage = Number(state.dailyResultsPage);
+  const currentPage = Math.min(
+    totalPages,
+    Math.max(1, Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1)
+  );
+  if (currentPage !== requestedPage) {
+    state.dailyResultsPage = currentPage;
+    saveState();
+  }
+  const pageStart = (currentPage - 1) * RESULTS_PAGE_SIZE;
+  const pageEnd = pageStart + RESULTS_PAGE_SIZE;
+  const pageEntries = filteredAttemptEntries.slice(pageStart, pageEnd);
+  const prevDisabled = currentPage <= 1;
+  const nextDisabled = currentPage >= totalPages;
+  const rangeStart = filteredAttemptEntries.length ? pageStart + 1 : 0;
+  const rangeEnd = Math.min(pageEnd, filteredAttemptEntries.length);
+  const pagerHtml = totalPages > 1
+    ? `
+      <div class="student-results-pager">
+        <button class="student-results-pager-btn" id="dailyResultsPrev" type="button" ${prevDisabled ? "disabled" : ""} aria-label="Previous page">‹</button>
+        <span class="student-results-pager-label">${rangeStart}–${rangeEnd} of ${filteredAttemptEntries.length} · Page ${currentPage} of ${totalPages}</span>
+        <button class="student-results-pager-btn" id="dailyResultsNext" type="button" ${nextDisabled ? "disabled" : ""} aria-label="Next page">›</button>
+      </div>
+    `
+    : "";
+
   return `
     <div class="student-results-header">
       <div class="student-results-title">Daily Test Results</div>
@@ -112,7 +141,7 @@ export function buildDailyResultsTabHTML() {
           </tr>
         </thead>
         <tbody>
-          ${filteredAttemptEntries
+          ${pageEntries
             .map((entry) => {
               const attempt = entry.attempt;
               const scoreSummary = getVisibleAttemptScoreSummary(attempt);
@@ -136,6 +165,7 @@ export function buildDailyResultsTabHTML() {
         </tbody>
       </table>
     </div>
+    ${pagerHtml}
   `;
 }
 
@@ -143,6 +173,7 @@ export function bindDailyResultsTabEvents(app) {
   app.querySelector("#dailyCategorySelect")?.addEventListener("change", (event) => {
     if (!(event.target instanceof HTMLSelectElement)) return;
     state.dailyResultsCategory = event.target.value;
+    state.dailyResultsPage = 1;
     saveState();
     triggerRender();
   });
@@ -150,6 +181,22 @@ export function bindDailyResultsTabEvents(app) {
   app.querySelector("#dailyFailedOnlyToggle")?.addEventListener("change", (event) => {
     if (!(event.target instanceof HTMLInputElement)) return;
     state.dailyResultsFailedOnly = event.target.checked;
+    state.dailyResultsPage = 1;
+    saveState();
+    triggerRender();
+  });
+
+  app.querySelector("#dailyResultsPrev")?.addEventListener("click", () => {
+    const current = Math.max(1, Number(state.dailyResultsPage) || 1);
+    if (current <= 1) return;
+    state.dailyResultsPage = current - 1;
+    saveState();
+    triggerRender();
+  });
+
+  app.querySelector("#dailyResultsNext")?.addEventListener("click", () => {
+    const current = Math.max(1, Number(state.dailyResultsPage) || 1);
+    state.dailyResultsPage = current + 1;
     saveState();
     triggerRender();
   });

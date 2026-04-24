@@ -10,7 +10,7 @@ import { questionsState, ensureSessionQuestionsAvailable } from "../state/questi
 import { fetchSessionAttemptOverrides } from "../state/sessionOverrideState";
 import {
   studentResultsState, resultDetailState, modelRankState,
-  fetchStudentResults, fetchModelRanks, refreshQuestionsForResultAttempts,
+  fetchStudentResults, fetchModelRanks,
 } from "../state/resultsState";
 import { studentAttendanceState, absenceApplicationsState, fetchStudentAttendance, fetchAbsenceApplications } from "../state/attendanceState";
 import { rankingState, fetchStudentRanking } from "../state/rankingState";
@@ -26,8 +26,6 @@ import { buildModelResultsTabHTML, bindModelResultsTabEvents } from "../tabs/mod
 import { buildRankingTabHTML, bindRankingTabEvents } from "../tabs/rankingTab";
 import { buildAttendanceTabHTML, bindAttendanceTabEvents } from "../tabs/attendanceTab";
 import { buildAttendanceHistoryTabHTML, bindAttendanceHistoryTabEvents } from "../tabs/attendanceHistoryTab";
-
-let lastHydratedResultsTab = "";
 
 export function renderTestSelect(app) {
   const activeSections = getActiveSections();
@@ -67,13 +65,6 @@ export function renderTestSelect(app) {
   }
   if ((showDailyResults || showModelResults) && authState.session && !studentResultsState.loaded && !studentResultsState.loading) {
     fetchStudentResults().finally(triggerRender);
-  }
-  if ((showDailyResults || showModelResults) && studentResultsState.loaded && lastHydratedResultsTab !== activeTab) {
-    lastHydratedResultsTab = activeTab;
-    refreshQuestionsForResultAttempts(studentResultsState.list, { force: true }).finally(triggerRender);
-  }
-  if (!showDailyResults && !showModelResults) {
-    lastHydratedResultsTab = "";
   }
   if (showTabs && authState.profile?.school_id && !studentSchoolState.loading && (!studentSchoolState.loaded || studentSchoolState.schoolId !== authState.profile.school_id)) {
     fetchStudentSchool().finally(triggerRender);
