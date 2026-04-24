@@ -4,6 +4,17 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useRankingWorkspaceState } from "./AdminConsoleRankingWorkspaceState";
 
+const bangladeshDateTimeOptions = {
+  timeZone: "Asia/Dhaka",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+};
+
 export default function AdminConsoleRankingWorkspace() {
   const { supabase, activeSchoolId, session, testSessions, tests } = useAdminConsoleWorkspaceContext();
   const {
@@ -273,7 +284,7 @@ export default function AdminConsoleRankingWorkspace() {
                       const completedAtRaw = attempt.ended_at || attempt.created_at || "";
                       const completedAt = attempt.absent
                         ? "-"
-                        : (completedAtRaw ? new Date(completedAtRaw).toLocaleString() : "-");
+                        : (completedAtRaw ? new Date(completedAtRaw).toLocaleString("en-GB", bangladeshDateTimeOptions) : "-");
                       return (
                         <tr key={attempt.id}>
                           <td>{scopeLabel}</td>
