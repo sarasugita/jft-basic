@@ -24,3 +24,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code local state (per-user permissions, working copies)
+.claude/settings.local.json
+.claude/worktrees/
+
+# Supabase CLI machine-local state
+supabase/.temp/cli-latest
+supabase/.temp/linked-project.json
