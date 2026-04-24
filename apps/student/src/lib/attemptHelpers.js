@@ -189,6 +189,12 @@ export function getAttemptTest(attempt, testsList) {
 export function getAttemptTestType(attempt, testsList) {
   const test = getAttemptTest(attempt, testsList);
   if (test?.type) return test.type;
+  const session = getAttemptSession(attempt, testSessionsState.list);
+  if (session?.problem_set_id) {
+    const list = testsList ?? testsState.list;
+    const sessionTest = list.find((item) => item.version === session.problem_set_id) || null;
+    if (sessionTest?.type) return sessionTest.type;
+  }
   // For CSV-imported attempts whose test_version is a synthetic string
   // (e.g. "imported-daily-vocabulary-…") there is no matching entry in
   // the tests table.  Fall back to the import source flag stored in meta.
@@ -463,9 +469,18 @@ export function renderImportedResultsSummaryDetail(attempt, mode = "daily") {
 
 export function shouldShowAttemptInStudentResults(attempt) {
   if (!attempt) return false;
-  if (isImportedResultsSummaryAttempt(attempt)) return Boolean(getImportedResultsCategory(attempt));
+  if (isImportedResultsSummaryAttempt(attempt)) {
+    return Boolean(
+      getImportedResultsCategory(attempt)
+      || getAttemptTitle(attempt)
+      || String(attempt?.test_version ?? "").trim()
+    );
+  }
   if (!attempt.test_session_id) return true;
-  return Boolean(getAttemptSession(attempt, testSessionsState.list));
+  if (getAttemptSession(attempt, testSessionsState.list)) return true;
+  // Keep historical attempts visible even when the linked session was later
+  // removed, as long as the attempt can still be classified into a results tab.
+  return Boolean(getAttemptTestType(attempt, testsState.list));
 }
 
 export function buildResultAttemptEntries(testType, attemptsList = []) {

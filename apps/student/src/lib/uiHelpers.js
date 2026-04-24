@@ -1,7 +1,7 @@
 import { escapeHtml } from "./escapeHtml";
 import { formatTime } from "./formatters";
 import { state, saveState } from "../state/appState";
-import { resultDetailState, fetchStudentResults, refreshQuestionsForResultAttempts, studentResultsState } from "../state/resultsState";
+import { resultDetailState, fetchStudentResults, studentResultsState } from "../state/resultsState";
 import { studentAttendanceState, fetchStudentAttendance } from "../state/attendanceState";
 import { rankingState, fetchStudentRanking } from "../state/rankingState";
 import { getCurrentSection, getQuestionProgress, getSectionQuestions } from "./sectionHelpers";
@@ -114,10 +114,6 @@ export function registerStudentMenu() {
       closeStudentMenu();
       if ((nextTab === "dailyResults" || nextTab === "modelResults") && !studentResultsState.loaded) {
         fetchStudentResults().finally(triggerRender);
-        return;
-      }
-      if ((nextTab === "dailyResults" || nextTab === "modelResults") && studentResultsState.loaded) {
-        refreshQuestionsForResultAttempts(studentResultsState.list, { force: true }).finally(triggerRender);
         return;
       }
       if (nextTab === "ranking" && !rankingState.loaded) {
