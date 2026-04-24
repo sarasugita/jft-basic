@@ -140,6 +140,7 @@ export async function clearDailyResultsForCategoryAction(context, category) {
     fetchTestSessions,
     fetchTests,
     fetchStudentAttempts,
+    fetchAttempts,
     selectedStudentId,
     runSearch,
     recordAuditEvent,
@@ -213,7 +214,11 @@ export async function clearDailyResultsForCategoryAction(context, category) {
   if (typeof fetchStudentAttempts === "function" && selectedStudentId) {
     await fetchStudentAttempts(selectedStudentId);
   }
-  await runSearch("daily");
+  if (typeof fetchAttempts === "function") {
+    await fetchAttempts();
+  } else {
+    await runSearch("daily");
+  }
   await recordAuditEvent({
     actionType: "delete",
     entityType: "daily_results",
@@ -659,7 +664,11 @@ export async function importDailyResultsGoogleSheetsCsvAction(context, file, tar
     await fetchTestSessions();
     await fetchTests();
     setDailyResultsCategory(categoryName);
-    await runSearch("daily");
+    if (typeof fetchAttempts === "function") {
+      await fetchAttempts();
+    } else {
+      await runSearch("daily");
+    }
     const skippedExistingCount = duplicateTitles.length && !overwriteSessionIds.length
       ? duplicateTitles.length
       : 0;
@@ -1106,7 +1115,11 @@ export async function importModelResultsGoogleSheetsCsvAction(context, file, tar
     await fetchTestSessions();
     await fetchTests();
     setModelResultsCategory(categoryName);
-    await runSearch("mock");
+    if (typeof fetchAttempts === "function") {
+      await fetchAttempts();
+    } else {
+      await runSearch("mock");
+    }
     const skippedExistingCount = duplicateTitles.length && !overwriteSessionIds.length
       ? duplicateTitles.length
       : 0;

@@ -53,6 +53,7 @@ export default function AdminConsoleDeferredFeatures({
   setDailyResultsCategory,
   setModelResultsCategory,
   runSearch,
+  fetchAttempts,
   exportDailyGoogleSheetsCsv,
   exportModelGoogleSheetsCsv,
   openResultsImportStatus,
@@ -258,6 +259,10 @@ export default function AdminConsoleDeferredFeatures({
                       title="Refresh results"
                       onClick={(e) => {
                         e.preventDefault();
+                        if (typeof fetchAttempts === "function") {
+                          fetchAttempts();
+                          return;
+                        }
                         runSearch(resultContext.type);
                       }}
                     >

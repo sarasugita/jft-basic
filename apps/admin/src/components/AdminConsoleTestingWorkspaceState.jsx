@@ -4075,10 +4075,10 @@ export function useTestingWorkspaceState({
       closeSessionDetail();
     }
     await fetchTestSessions();
-    if (options?.refreshResults && options?.type && typeof runSearch === "function") {
-      await runSearch(options.type);
+    if (options?.refreshResults && options?.type) {
+      await fetchAttempts();
     }
-  }, [supabase, sessionDetail.sessionId, recordAuditEvent, fetchTestSessions, runSearch]);
+  }, [supabase, sessionDetail.sessionId, recordAuditEvent, fetchTestSessions, fetchAttempts]);
 
   const deleteTest = useCallback(async (testVersion) => {
     if (!testVersion || !supabase) return;
@@ -4419,8 +4419,8 @@ export function useTestingWorkspaceState({
     fetchTests();
     fetchTestSessions();
     fetchExamLinks();
-    if (activeTab === "daily" && dailySubTab === "results") runSearch("daily");
-    if (activeTab === "model" && modelSubTab === "results") runSearch("mock");
+    if (activeTab === "daily" && dailySubTab === "results") void fetchAttempts();
+    if (activeTab === "model" && modelSubTab === "results") void fetchAttempts();
   }, [
     activeTab,
     dailySubTab,
@@ -4429,8 +4429,8 @@ export function useTestingWorkspaceState({
     fetchExamLinks,
     fetchTestSessions,
     fetchTests,
+    fetchAttempts,
     modelSubTab,
-    runSearch,
     supabase,
     updateVersionInTable,
   ]);
