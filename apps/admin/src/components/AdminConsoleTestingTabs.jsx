@@ -577,7 +577,7 @@ export default function AdminConsoleTestingTabs({
                           <tr key={t.id} {...getSessionRowProps(t, "mock")}>
                             <td>{t.title ?? ""}</td>
                             <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
-                            <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids)}</td>
+                            <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids, t)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
                             <td style={{ textAlign: "center" }}>{getQuestionCount(t.problem_set_id)}</td>
@@ -1635,7 +1635,7 @@ export default function AdminConsoleTestingTabs({
                             {showDailySessionCategories ? (
                               <td>{String(t.session_category ?? "").trim() || testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
                             ) : null}
-                            <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids)}</td>
+                            <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids, t)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
                             <td style={{ textAlign: "center" }}>{getQuestionCount(t.problem_set_id)}</td>
