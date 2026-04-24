@@ -16,6 +16,36 @@ const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
 const ATTENDANCE_DAYS_PAGE_SIZE = 500;
 const ATTENDANCE_ENTRIES_PAGE_SIZE = 500;
 
+function getCurrentMonthStartDate() {
+  const now = new Date();
+  if (Number.isNaN(now.getTime())) return null;
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}-01`;
+}
+
+function getMonthStartOffset(baseYmd, monthsBack) {
+  const match = String(baseYmd ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match) return null;
+  const baseYear = Number(match[1]);
+  const baseMonth = Number(match[2]) - 1;
+  const date = new Date(Date.UTC(baseYear, baseMonth - monthsBack, 1));
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}-01`;
+}
+
+function getNextMonthStart(ymd) {
+  return getMonthStartOffset(ymd, -1);
+}
+
+function getMonthLabel(ymd) {
+  const match = String(ymd ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}`;
+}
+
 async function fetchAllPages(buildPageQuery, pageSize) {
   const rows = [];
   let offset = 0;
@@ -240,6 +270,10 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
   const [attendanceSheetNeedsInitialRefresh, setAttendanceSheetNeedsInitialRefresh] = useState(
     () => !hasAttendanceSheetAutoRefreshed(activeSchoolId) && !initialAttendanceSheet?.attendanceSheetHydrated
   );
+  const [attendanceViewMonth, setAttendanceViewMonth] = useState(
+    () => initialAttendanceSheet?.attendanceViewMonth ?? getCurrentMonthStartDate()
+  );
+  const [hasNextMonthAttendance, setHasNextMonthAttendance] = useState(false);
   const [attendanceDate, setAttendanceDate] = useState(() => {
     const today = new Date();
     if (Number.isNaN(today.getTime())) return "";
@@ -280,6 +314,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceSheetLoaded(Boolean(cached?.attendanceSheetHydrated));
     setAttendanceSheetRefreshing(false);
     setAttendanceSheetNeedsInitialRefresh(!hasAttendanceSheetAutoRefreshed(activeSchoolId) && !cached?.attendanceSheetHydrated);
+    setAttendanceViewMonth(cached?.attendanceViewMonth ?? getCurrentMonthStartDate());
   }, [activeSchoolId]);
 
   useEffect(() => {
@@ -290,8 +325,9 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       attendanceMsg,
       attendanceFilter,
       attendanceSheetHydrated,
+      attendanceViewMonth,
     });
-  }, [activeSchoolId, attendanceDays, attendanceEntries, attendanceMsg, attendanceFilter, attendanceSheetHydrated]);
+  }, [activeSchoolId, attendanceDays, attendanceEntries, attendanceMsg, attendanceFilter, attendanceSheetHydrated, attendanceViewMonth]);
 
   // Memos - derived attendance data
   const attendanceEntriesByDay = useMemo(() => attendanceEntries || {}, [attendanceEntries]);
@@ -437,7 +473,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     fetchAbsenceApplications();
   }
 
-  function applyAttendanceSheetSnapshot(schoolIdSnapshot, nextAttendanceDays, nextAttendanceEntries, nextAttendanceMsg = "") {
+  function applyAttendanceSheetSnapshot(schoolIdSnapshot, nextAttendanceDays, nextAttendanceEntries, nextAttendanceMsg = "", nextViewMonth) {
     if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
     setAttendanceDays(nextAttendanceDays);
     setAttendanceEntries(nextAttendanceEntries);
@@ -445,17 +481,21 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAttendanceSheetHydrated(true);
     setAttendanceSheetLoaded(true);
     setAttendanceSheetRefreshing(false);
+    if (nextViewMonth !== undefined) {
+      setAttendanceViewMonth(nextViewMonth);
+    }
     writeAttendanceSheetCache(schoolIdSnapshot, {
       attendanceDays: nextAttendanceDays,
       attendanceEntries: nextAttendanceEntries,
       attendanceMsg: nextAttendanceMsg,
       attendanceFilter,
       attendanceSheetHydrated: true,
+      attendanceViewMonth: nextViewMonth !== undefined ? nextViewMonth : attendanceViewMonth,
     });
   }
 
   async function fetchAttendanceDays(options = {}) {
-    const { force = false, initialRefresh = false } = options;
+    const { force = false, initialRefresh = false, viewMonth: explicitViewMonth } = options;
     const schoolIdSnapshot = activeSchoolIdRef.current;
     if (!schoolIdSnapshot || !supabase) {
       setAttendanceDays([]);
@@ -466,28 +506,41 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       setAttendanceSheetRefreshing(false);
       return;
     }
+    const viewMonth = explicitViewMonth !== undefined
+      ? explicitViewMonth
+      : (attendanceViewMonth ?? getCurrentMonthStartDate());
+    const nextMonthStart = getNextMonthStart(viewMonth);
+
     const cached = readAttendanceSheetCache(schoolIdSnapshot);
-    if (!force && cached) {
+    if (!force && cached && cached.attendanceViewMonth === viewMonth) {
       applyAttendanceSheetSnapshot(
         schoolIdSnapshot,
         cached.attendanceDays,
         cached.attendanceEntries,
-        cached.attendanceMsg
+        cached.attendanceMsg,
+        viewMonth
       );
       return;
     }
 
     setAttendanceSheetRefreshing(true);
     setAttendanceMsg(cached ? "Refreshing attendance..." : "Loading attendance...");
-    const { data: rows, error } = await fetchAllPages((offset, pageSize) => (
-      supabase
+    const { data: rows, error } = await fetchAllPages((offset, pageSize) => {
+      let query = supabase
         .from("attendance_days")
         .select("id, day_date, created_at")
-        .eq("school_id", schoolIdSnapshot)
+        .eq("school_id", schoolIdSnapshot);
+      if (viewMonth) {
+        query = query.gte("day_date", viewMonth);
+      }
+      if (nextMonthStart) {
+        query = query.lt("day_date", nextMonthStart);
+      }
+      return query
         .order("day_date", { ascending: true })
         .order("id", { ascending: true })
-        .range(offset, offset + pageSize - 1)
-    ), ATTENDANCE_DAYS_PAGE_SIZE);
+        .range(offset, offset + pageSize - 1);
+    }, ATTENDANCE_DAYS_PAGE_SIZE);
 
     if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
     if (error) {
@@ -521,12 +574,46 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
       schoolIdSnapshot,
       list,
       nextEntries,
-      list.length ? "" : "No attendance days yet."
+      list.length ? "" : "No attendance days for this month.",
+      viewMonth
     );
     if (initialRefresh) {
       markAttendanceSheetAutoRefreshed(schoolIdSnapshot);
       setAttendanceSheetNeedsInitialRefresh(false);
     }
+
+    if (nextMonthStart) {
+      const monthAfterNext = getNextMonthStart(nextMonthStart);
+      let probe = supabase
+        .from("attendance_days")
+        .select("id", { head: true, count: "exact" })
+        .eq("school_id", schoolIdSnapshot)
+        .gte("day_date", nextMonthStart);
+      if (monthAfterNext) {
+        probe = probe.lt("day_date", monthAfterNext);
+      }
+      const { count: nextCount, error: nextError } = await probe.limit(1);
+      if (schoolIdSnapshot !== activeSchoolIdRef.current) return;
+      if (!nextError) {
+        setHasNextMonthAttendance((nextCount ?? 0) > 0);
+      }
+    } else {
+      setHasNextMonthAttendance(false);
+    }
+  }
+
+  async function goToPreviousMonth() {
+    const current = attendanceViewMonth ?? getCurrentMonthStartDate();
+    const prev = getMonthStartOffset(current, 1);
+    if (!prev) return;
+    await fetchAttendanceDays({ force: true, viewMonth: prev });
+  }
+
+  async function goToNextMonth() {
+    const current = attendanceViewMonth ?? getCurrentMonthStartDate();
+    const next = getMonthStartOffset(current, -1);
+    if (!next) return;
+    await fetchAttendanceDays({ force: true, viewMonth: next });
   }
 
   async function fetchAttendanceEntries(dayIds, schoolIdSnapshot = activeSchoolIdRef.current, options = {}) {
@@ -922,6 +1009,11 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     attendanceImportChoiceResolverRef,
     fetchAttendanceDays,
     fetchAttendanceEntries,
+    goToPreviousMonth,
+    goToNextMonth,
+    attendanceViewMonth,
+    attendanceViewMonthLabel: getMonthLabel(attendanceViewMonth),
+    hasNextMonthAttendance,
     openAttendanceDay,
     saveAttendanceDay,
     deleteAttendanceDay,

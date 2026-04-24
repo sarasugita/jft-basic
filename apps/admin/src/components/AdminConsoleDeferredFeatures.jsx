@@ -157,6 +157,11 @@ export default function AdminConsoleDeferredFeatures({
   attemptDetailWrongOnly,
   setAttemptDetailWrongOnly,
   renderUnderlinesHtml,
+  goToPreviousAttemptsMonth,
+  goToNextAttemptsMonth,
+  attemptsViewMonthLabel,
+  hasNextMonthAttempts,
+  attemptsRefreshing,
 }) {
   const isImportedSummaryAttemptFn = typeof isImportedSummaryAttempt === "function"
     ? isImportedSummaryAttempt
@@ -366,6 +371,51 @@ export default function AdminConsoleDeferredFeatures({
                   {!(resultContext.type === "daily" ? dailyResultCategories : modelResultCategories).length ? (
                     <div className="admin-msg">No test categories yet.</div>
                   ) : null}
+
+                  <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginTop: 12, marginBottom: 6, minHeight: 36 }}>
+                    {attemptsRefreshing ? (
+                      <div
+                        style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 8, color: "var(--admin-text)" }}
+                        aria-live="polite"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 50 50" aria-hidden="true">
+                          <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" strokeDasharray="90 60" opacity="0.85">
+                            <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.9s" repeatCount="indefinite" />
+                          </circle>
+                        </svg>
+                        <span style={{ fontWeight: 600 }}>Loading...</span>
+                      </div>
+                    ) : null}
+                    <button
+                      className="btn admin-icon-action-btn"
+                      type="button"
+                      aria-label="Previous month"
+                      title="Previous month"
+                      disabled={attemptsRefreshing || typeof goToPreviousAttemptsMonth !== "function"}
+                      aria-busy={attemptsRefreshing}
+                      onClick={() => goToPreviousAttemptsMonth?.()}
+                    >
+                      ◀
+                    </button>
+                    <div style={{ fontWeight: 800, fontSize: 16, minWidth: 90, textAlign: "center", color: "var(--admin-text)" }}>
+                      {attemptsViewMonthLabel || "—"}
+                    </div>
+                    {hasNextMonthAttempts ? (
+                      <button
+                        className="btn admin-icon-action-btn"
+                        type="button"
+                        aria-label="Next month"
+                        title="Next month"
+                        disabled={attemptsRefreshing || typeof goToNextAttemptsMonth !== "function"}
+                        aria-busy={attemptsRefreshing}
+                        onClick={() => goToNextAttemptsMonth?.()}
+                      >
+                        ▶
+                      </button>
+                    ) : (
+                      <div style={{ width: 40 }} aria-hidden="true" />
+                    )}
+                  </div>
 
                   <div className="admin-table-wrap results-matrix-table-wrap" style={{ marginTop: 10 }}>
                     <table

@@ -40,6 +40,10 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceFilter,
     setAttendanceFilter,
     fetchAttendanceDays,
+    goToPreviousMonth,
+    goToNextMonth,
+    attendanceViewMonthLabel,
+    hasNextMonthAttendance,
     attendanceSheetRefreshing,
     attendanceSheetNeedsInitialRefresh,
     setAttendanceSheetNeedsInitialRefresh,
@@ -203,7 +207,7 @@ export default function AdminConsoleAttendanceWorkspace() {
             Open Day
           </button>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", justifyContent: "flex-end", marginLeft: "auto", alignSelf: "flex-start", flex: "0 0 auto" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", justifyContent: "flex-end", marginLeft: "auto", alignSelf: "flex-start", flex: "0 0 auto", alignItems: "center" }}>
           <button
             className="btn admin-icon-action-btn"
             type="button"
@@ -269,8 +273,6 @@ export default function AdminConsoleAttendanceWorkspace() {
         </div>
       </div>
 
-      {attendanceMsg ? <div className="admin-msg" style={{ marginTop: 12, marginBottom: 12 }}>{attendanceMsg}</div> : null}
-
       <div style={{ marginTop: 18 }}>
         <div className="admin-form attendance-filter-box">
           <div className="field small">
@@ -332,6 +334,57 @@ export default function AdminConsoleAttendanceWorkspace() {
           <span className="att-legend-item">N/A: Not Counted</span>
         </div>
       </div>
+
+      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginTop: 12, marginBottom: 6, minHeight: 36 }}>
+        {attendanceSheetRefreshing ? (
+          <div
+            style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 8, color: "var(--admin-text)" }}
+            aria-live="polite"
+          >
+            <svg width="16" height="16" viewBox="0 0 50 50" aria-hidden="true">
+              <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" strokeDasharray="90 60" opacity="0.85">
+                <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.9s" repeatCount="indefinite" />
+              </circle>
+            </svg>
+            <span style={{ fontWeight: 600 }}>Loading...</span>
+          </div>
+        ) : null}
+        <button
+          className="btn admin-icon-action-btn"
+          type="button"
+          aria-label="Previous month"
+          title="Previous month"
+          disabled={attendanceSheetRefreshing}
+          aria-busy={attendanceSheetRefreshing}
+          onClick={() => goToPreviousMonth()}
+        >
+          ◀
+        </button>
+        <div style={{ fontWeight: 800, fontSize: 16, minWidth: 90, textAlign: "center", color: "var(--admin-text)" }}>
+          {attendanceViewMonthLabel || "—"}
+        </div>
+        {hasNextMonthAttendance ? (
+          <button
+            className="btn admin-icon-action-btn"
+            type="button"
+            aria-label="Next month"
+            title="Next month"
+            disabled={attendanceSheetRefreshing}
+            aria-busy={attendanceSheetRefreshing}
+            onClick={() => goToNextMonth()}
+          >
+            ▶
+          </button>
+        ) : (
+          <div style={{ width: 40 }} aria-hidden="true" />
+        )}
+      </div>
+
+      {!attendanceSheetRefreshing && attendanceMsg ? (
+        <div className="admin-msg" style={{ textAlign: "center", marginTop: 4, marginBottom: 8 }}>
+          {attendanceMsg}
+        </div>
+      ) : null}
 
       <div className="admin-table-wrap" style={{ marginTop: 2 }}>
         <table className="admin-table attendance-table">

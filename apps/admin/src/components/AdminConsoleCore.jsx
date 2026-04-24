@@ -5898,11 +5898,11 @@ export default function AdminConsole({
   ]);
 
   useEffect(() => {
-    if (!canUseAdminConsole || !activeSchoolId) return;
+    if (!canUseAdminConsole || !activeSchoolId || !supabase) return;
     if (!studentsLoaded) {
       fetchStudents();
     }
-  }, [activeSchoolId, canUseAdminConsole, studentsLoaded]);
+  }, [activeSchoolId, canUseAdminConsole, studentsLoaded, supabase]);
 
   useEffect(() => {
     if (!selectedSessionDetail?.id) return;

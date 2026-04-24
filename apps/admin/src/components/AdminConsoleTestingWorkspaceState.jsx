@@ -923,7 +923,7 @@ function getProblemSetTitle(problemSetId, testsList) {
   return item?.title || problemSetId || "";
 }
 
-function getProblemSetDisplayId(problemSetId, testsList, sessionSourceSetIds = []) {
+function getProblemSetDisplayIdFallback(problemSetId, testsList, sessionSourceSetIds = []) {
   if (Array.isArray(sessionSourceSetIds) && sessionSourceSetIds.length) {
     return sessionSourceSetIds.join(", ");
   }
@@ -1285,6 +1285,16 @@ export function useTestingWorkspaceState({
   const [attempts, setAttempts] = useState(externalAttempts ?? []);
   const [attemptsLoaded, setAttemptsLoaded] = useState(Boolean(externalAttemptsLoaded));
   const [attemptsMsg, setAttemptsMsg] = useState("");
+  const [attemptsViewMonthIso, setAttemptsViewMonthIso] = useState(() => {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  });
+  const attemptsViewMonthIsoRef = useRef(null);
+  useEffect(() => {
+    attemptsViewMonthIsoRef.current = attemptsViewMonthIso;
+  }, [attemptsViewMonthIso]);
+  const [attemptsRefreshing, setAttemptsRefreshing] = useState(false);
+  const [hasNextMonthAttempts, setHasNextMonthAttempts] = useState(false);
   const [examLinks, setExamLinks] = useState([]);
   const [examLinksLoaded, setExamLinksLoaded] = useState(false);
   const [linkMsg, setLinkMsg] = useState("");
@@ -1910,6 +1920,37 @@ export function useTestingWorkspaceState({
 
   const testSessionsById = useMemo(() => new Map(testSessions.map((s) => [s.id, s])), [testSessions]);
 
+  const getProblemSetDisplayId = useCallback((problemSetId, testsList, sessionSourceSetIds = [], sessionItem = null) => {
+    const formatDisplayId = (nextProblemSetId, nextSourceSetIds = []) => (
+      getProblemSetDisplayIdFallback(nextProblemSetId, testsList, nextSourceSetIds)
+    );
+
+    if (Array.isArray(sessionSourceSetIds) && sessionSourceSetIds.length) {
+      return formatDisplayId(problemSetId, sessionSourceSetIds);
+    }
+
+    if (sessionItem) {
+      let originalSession = null;
+      if (sessionItem.retake_source_session_id) {
+        originalSession = testSessionsById.get(sessionItem.retake_source_session_id) ?? null;
+      }
+      if (!originalSession && isRetakeSessionTitle(sessionItem.title)) {
+        const baseTitle = getRetakeBaseTitle(sessionItem.title);
+        originalSession = (testSessions ?? []).find((candidate) => (
+          candidate?.id !== sessionItem.id
+          && !candidate?.retake_source_session_id
+          && !isRetakeSessionTitle(candidate?.title)
+          && String(candidate?.title ?? "").trim() === baseTitle
+        )) ?? null;
+      }
+      if (originalSession) {
+        return formatDisplayId(originalSession.problem_set_id, originalSession.source_set_ids);
+      }
+    }
+
+    return formatDisplayId(problemSetId, sessionSourceSetIds);
+  }, [testSessions, testSessionsById]);
+
   const sessionDetailStudentOptions = useMemo(() => {
     return (sessionDetailAttempts ?? [])
       .map((attempt) => ({
@@ -2461,7 +2502,7 @@ export function useTestingWorkspaceState({
       return;
     }
 
-    await fetchAttempts();
+    await fetchAttempts({ viewMonthIso: attemptsViewMonthIsoRef.current });
     await fetchTestSessions();
     await recordAuditEvent({
       actionType: dailyManualEntryModal.hasImportedAttempt ? "update" : "create",
@@ -2500,7 +2541,7 @@ export function useTestingWorkspaceState({
       }));
       return;
     }
-    await fetchAttempts();
+    await fetchAttempts({ viewMonthIso: attemptsViewMonthIsoRef.current });
     await fetchTestSessions();
     await recordAuditEvent({
       actionType: "delete",
@@ -2689,7 +2730,7 @@ export function useTestingWorkspaceState({
     }
 
     await fetchTestSessions();
-    await fetchAttempts();
+    await fetchAttempts({ viewMonthIso: attemptsViewMonthIsoRef.current });
     setDailyResultsCategory(selectedDailyCategory?.name ?? dailyResultsCategory);
     await recordAuditEvent({
       actionType: "create_session",
@@ -3077,14 +3118,18 @@ export function useTestingWorkspaceState({
 
   const fetchTestSessions = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await fetchAllPages((offset, pageSize) => (
-      supabase
+    const { data, error } = await fetchAllPages((offset, pageSize) => {
+      let query = supabase
         .from("test_sessions")
-        .select("*")
+        .select("*");
+      if (activeSchoolId) {
+        query = query.eq("school_id", activeSchoolId);
+      }
+      return query
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
-        .range(offset, offset + pageSize - 1)
-    ));
+        .range(offset, offset + pageSize - 1);
+    });
     if (error) {
       console.error("test_sessions fetch error:", error);
       setTestSessionsLoaded(false);
@@ -3101,7 +3146,7 @@ export function useTestingWorkspaceState({
       audience_student_ids: normalizeSessionAudienceStudentIds(session?.audience_student_ids),
     })));
     setTestSessionsLoaded(true);
-  }, [supabase, attachGeneratedDailySourceSetIdsToSessions]);
+  }, [supabase, activeSchoolId, attachGeneratedDailySourceSetIdsToSessions]);
 
   const fetchAssets = useCallback(async () => {
     setAssetsMsg("Loading...");
@@ -3145,32 +3190,133 @@ export function useTestingWorkspaceState({
     setExamLinksLoaded(true);
   }, [supabase]);
 
-  const fetchAttempts = useCallback(async () => {
+  const fetchAttempts = useCallback(async (options = {}) => {
     if (!supabase || !activeSchoolId) return;
+    const { viewMonthIso: explicitViewMonthIso } = options;
+    const viewMonthIso = explicitViewMonthIso !== undefined
+      ? explicitViewMonthIso
+      : (attemptsViewMonthIsoRef.current ?? (() => {
+          const now = new Date();
+          return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+        })());
+
+    const monthDate = viewMonthIso ? new Date(viewMonthIso) : null;
+    const nextMonthIso = monthDate && !Number.isNaN(monthDate.getTime())
+      ? new Date(Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth() + 1, 1)).toISOString()
+      : null;
+
+    setAttemptsRefreshing(true);
     setAttemptsMsg("Loading results...");
 
-    const { data, error } = await fetchAllPages((offset, pageSize) => (
-      supabase
-        .from("attempts")
-        .select("id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json")
-        .eq("school_id", activeSchoolId)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .range(offset, offset + pageSize - 1)
-    ));
+    // Filter by the exam date (test_sessions.starts_at, or created_at when
+    // starts_at is null). This ensures CSV-imported attempts line up with the
+    // month of the test they represent, not the month they were imported.
+    const applyMonthSessionFilter = (q) => {
+      if (!viewMonthIso || !nextMonthIso) return q;
+      return q.or(
+        `and(starts_at.gte.${viewMonthIso},starts_at.lt.${nextMonthIso}),`
+        + `and(starts_at.is.null,created_at.gte.${viewMonthIso},created_at.lt.${nextMonthIso})`
+      );
+    };
 
-    if (error) {
-      console.error("attempts fetch error:", error);
+    const { data: sessionRows, error: sessionError } = await fetchAllPages((offset, pageSize) => {
+      let q = supabase
+        .from("test_sessions")
+        .select("id")
+        .eq("school_id", activeSchoolId);
+      q = applyMonthSessionFilter(q);
+      return q
+        .order("starts_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+    });
+
+    if (sessionError) {
+      console.error("test_sessions fetch (for attempts range) error:", sessionError);
       setAttempts([]);
-      setAttemptsMsg(`Load failed: ${error.message}`);
+      setAttemptsMsg(`Load failed: ${sessionError.message}`);
       setAttemptsLoaded(false);
+      setAttemptsRefreshing(false);
       return;
     }
 
-    setAttempts(data ?? []);
+    const sessionIds = (sessionRows ?? []).map((row) => row?.id).filter(Boolean);
+
+    let attemptsData = [];
+    if (sessionIds.length) {
+      const { data, error } = await fetchAllPages((offset, pageSize) => (
+        supabase
+          .from("attempts")
+          .select("id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json")
+          .eq("school_id", activeSchoolId)
+          .in("test_session_id", sessionIds)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(offset, offset + pageSize - 1)
+      ));
+      if (error) {
+        console.error("attempts fetch error:", error);
+        setAttempts([]);
+        setAttemptsMsg(`Load failed: ${error.message}`);
+        setAttemptsLoaded(false);
+        setAttemptsRefreshing(false);
+        return;
+      }
+      attemptsData = data ?? [];
+    }
+
+    setAttempts(attemptsData);
+    setAttemptsViewMonthIso(viewMonthIso ?? null);
+    attemptsViewMonthIsoRef.current = viewMonthIso ?? null;
     setAttemptsMsg("");
     setAttemptsLoaded(true);
+    setAttemptsRefreshing(false);
+
+    if (nextMonthIso) {
+      const monthAfterNext = new Date(Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth() + 2, 1)).toISOString();
+      const { count: nextCount, error: nextError } = await supabase
+        .from("test_sessions")
+        .select("id", { head: true, count: "exact" })
+        .eq("school_id", activeSchoolId)
+        .or(
+          `and(starts_at.gte.${nextMonthIso},starts_at.lt.${monthAfterNext}),`
+          + `and(starts_at.is.null,created_at.gte.${nextMonthIso},created_at.lt.${monthAfterNext})`
+        )
+        .limit(1);
+      if (!nextError) {
+        setHasNextMonthAttempts((nextCount ?? 0) > 0);
+      }
+    } else {
+      setHasNextMonthAttempts(false);
+    }
   }, [supabase, activeSchoolId]);
+
+  const goToPreviousAttemptsMonth = useCallback(async () => {
+    const current = attemptsViewMonthIsoRef.current;
+    if (!current) return;
+    const date = new Date(current);
+    if (Number.isNaN(date.getTime())) return;
+    const prev = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1)).toISOString();
+    await fetchAttempts({ viewMonthIso: prev });
+  }, [fetchAttempts]);
+
+  const goToNextAttemptsMonth = useCallback(async () => {
+    const current = attemptsViewMonthIsoRef.current;
+    if (!current) return;
+    const date = new Date(current);
+    if (Number.isNaN(date.getTime())) return;
+    const next = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1)).toISOString();
+    await fetchAttempts({ viewMonthIso: next });
+  }, [fetchAttempts]);
+
+  const attemptsViewMonthLabel = (() => {
+    if (!attemptsViewMonthIso) return "";
+    const date = new Date(attemptsViewMonthIso);
+    if (Number.isNaN(date.getTime())) return "";
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    return `${year}-${month}`;
+  })();
 
   const buildGeneratedDailySessionTitle = useCallback(({ category, setIds }) => (
     buildDailySessionTitle({ category, setIds })
@@ -5737,61 +5883,16 @@ export function useTestingWorkspaceState({
     if (activeTab !== "model" && activeTab !== "daily") return;
     if (attemptsLoaded) return;
     if (!supabase || !activeSchoolId) return;
-    void fetchAttempts();
+    const now = new Date();
+    const currentMonthStartIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+    void fetchAttempts({ viewMonthIso: currentMonthStartIso });
   }, [activeTab, attemptsLoaded, supabase, activeSchoolId, fetchAttempts]);
 
-  useEffect(() => {
-    const isDailyResults = activeTab === "daily" && dailySubTab === "results";
-    const isModelResults = activeTab === "model" && modelSubTab === "results";
-    if (!isDailyResults && !isModelResults) return;
-    if (!supabase) return;
-    const matrix = isDailyResults ? dailyResultsMatrix : modelResultsMatrix;
-    const versions = Array.from(
-      new Set(
-        (matrix?.rows ?? [])
-          .flatMap((row) => row?.cells ?? [])
-          .flatMap((attemptList) => attemptList ?? [])
-          .filter((attempt) => attempt && !isImportedResultsSummaryAttempt(attempt))
-          .map((attempt) => String(attempt?.test_version ?? "").trim())
-          .filter(Boolean)
-      )
-    );
-    const missing = versions.filter((version) => !attemptQuestionsByVersion[version]);
-    if (!missing.length) return;
-
-    let cancelled = false;
-    void (async () => {
-      const { data, error } = await fetchQuestionsForVersionsWithFallback(supabase, missing);
-      if (cancelled || error) {
-        if (error) console.error("results matrix question preload error:", error);
-        return;
-      }
-      const grouped = {};
-      (data ?? []).forEach((row) => {
-        const version = String(row?.test_version ?? "").trim();
-        if (!version) return;
-        if (!grouped[version]) grouped[version] = [];
-        const mapped = mapQuestion(row);
-        if (mapped) grouped[version].push(mapped);
-      });
-      if (!cancelled && Object.keys(grouped).length) {
-        setAttemptQuestionsByVersion((current) => ({ ...(current ?? {}), ...grouped }));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeTab,
-    dailySubTab,
-    modelSubTab,
-    dailyResultsMatrix,
-    modelResultsMatrix,
-    attemptQuestionsByVersion,
-    supabase,
-    fetchQuestionsForVersionsWithFallback,
-  ]);
+  // Note: questions for attempts are loaded on-demand — when the user opens an
+  // attempt detail modal (see AdminConsoleCore attempt-detail effect) or triggers
+  // a CSV export (which fetches questions itself). A prior eager preload fired
+  // for every version in the results matrix and fetched tens of thousands of
+  // question rows on initial load, adding 5-10s of needless latency.
 
   // ========================================================================
   // Return statement
@@ -6062,6 +6163,12 @@ export function useTestingWorkspaceState({
     fetchAssets,
     fetchExamLinks,
     fetchAttempts,
+    goToPreviousAttemptsMonth,
+    goToNextAttemptsMonth,
+    attemptsViewMonthIso,
+    attemptsViewMonthLabel,
+    hasNextMonthAttempts,
+    attemptsRefreshing,
     buildGeneratedDailySessionTitle,
     materializeDailyProblemSet,
     ensureTestRecord,
