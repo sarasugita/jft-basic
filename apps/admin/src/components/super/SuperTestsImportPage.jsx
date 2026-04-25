@@ -1345,8 +1345,16 @@ export default function SuperTestsImportPage() {
                 </div>
               ) : null}
               <div className="upload-question-actions">
-                <button className="btn btn-primary" onClick={saveUpload} disabled={saving}>
-                  {saving ? "Uploading..." : uploadForm.mode === "version" ? "Upload New Version" : "Create Question Sets"}
+                <button className="btn btn-primary upload-question-submit-btn" onClick={saveUpload} disabled={saving}>
+                  {saving ? (
+                    <>
+                      <span
+                        className="attendance-import-status-spinner admin-loading-spinner upload-question-submit-spinner"
+                        aria-hidden="true"
+                      />
+                      <span>Uploading...</span>
+                    </>
+                  ) : uploadForm.mode === "version" ? "Upload New Version" : "Create Question Sets"}
                 </button>
               </div>
               {uploadProgress.total > 0 ? (
