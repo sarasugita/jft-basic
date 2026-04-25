@@ -934,6 +934,22 @@ function getProblemSetDisplayIdFallback(problemSetId, testsList, sessionSourceSe
   return problemSetId || "";
 }
 
+function getLinkedSourceSetIdsForSession(session, testsList) {
+  const directSourceSetIds = Array.isArray(session?.source_set_ids)
+    ? session.source_set_ids.map((value) => String(value ?? "").trim()).filter(Boolean)
+    : [];
+  if (directSourceSetIds.length) return directSourceSetIds;
+
+  const linkedTest = (testsList ?? []).find((test) => test.version === session?.problem_set_id);
+  const linkedSourceSetIds = Array.isArray(linkedTest?.source_set_ids)
+    ? linkedTest.source_set_ids.map((value) => String(value ?? "").trim()).filter(Boolean)
+    : [];
+  if (linkedSourceSetIds.length) return linkedSourceSetIds;
+
+  const fallbackProblemSetId = String(session?.problem_set_id ?? "").trim();
+  return fallbackProblemSetId ? [fallbackProblemSetId] : [];
+}
+
 function parseDailySessionSetId(setId) {
   const raw = String(setId ?? "").trim();
   if (!raw) return null;
@@ -1961,7 +1977,11 @@ export function useTestingWorkspaceState({
       getProblemSetDisplayIdFallback(nextProblemSetId, testsList, nextSourceSetIds)
     );
 
-    if (Array.isArray(sessionSourceSetIds) && sessionSourceSetIds.length) {
+    const linkedTest = (testsList ?? []).find((test) => test.version === problemSetId);
+    if (
+      (Array.isArray(sessionSourceSetIds) && sessionSourceSetIds.length)
+      || (Array.isArray(linkedTest?.source_set_ids) && linkedTest.source_set_ids.length)
+    ) {
       return formatDisplayId(problemSetId, sessionSourceSetIds);
     }
 
@@ -3730,7 +3750,7 @@ export function useTestingWorkspaceState({
     }
     const isMultipleSelection = dailySessionForm.selection_mode === "multiple";
     const selectedSetIds = dailyConductMode === "retake"
-      ? [dailySessionForm.problem_set_id].filter(Boolean)
+      ? (dailySessionForm.problem_set_ids ?? []).filter(Boolean)
       : selectedDailyProblemSetIds;
     const sessionDate = dailySessionForm.session_date;
     const startTime = dailySessionForm.start_time;
@@ -3806,7 +3826,9 @@ export function useTestingWorkspaceState({
       setDailyConductError(`Check failed: ${error.message}`);
       return;
     }
-    let problemSetId = selectedSetIds[0] ?? "";
+    let problemSetId = dailyConductMode === "retake"
+      ? String(dailySessionForm.problem_set_id ?? "").trim()
+      : (selectedSetIds[0] ?? "");
     if (dailyConductMode !== "retake") {
       try {
         problemSetId = await materializeDailyProblemSet({
@@ -5377,22 +5399,21 @@ export function useTestingWorkspaceState({
 
   const applySourceSessionToForm = useCallback((session, setForm) => {
     if (!session) return;
-    const rootSession = resolveRootRetakeSession(session) ?? session;
     setForm((current) => ({
       ...current,
-      problem_set_id: rootSession.problem_set_id ?? current.problem_set_id,
-      title: buildRetakeTitle(rootSession.title || getProblemSetTitle(rootSession.problem_set_id, tests)),
-      session_date: rootSession.ends_at
-        ? getBangladeshDateInput(rootSession.ends_at)
-        : rootSession.starts_at
-          ? getBangladeshDateInput(rootSession.starts_at)
+      problem_set_id: session.problem_set_id ?? current.problem_set_id,
+      title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
+      session_date: session.ends_at
+        ? getBangladeshDateInput(session.ends_at)
+        : session.starts_at
+          ? getBangladeshDateInput(session.starts_at)
           : current.session_date,
       start_time: "",
       close_time: "",
       close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
-      time_limit_min: rootSession.time_limit_min != null ? String(rootSession.time_limit_min) : current.time_limit_min,
+      time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
       show_answers: false,
       allow_multiple_attempts: false,
       retake_release_scope: current.retake_release_scope || "all",
@@ -5400,11 +5421,11 @@ export function useTestingWorkspaceState({
       audience_mode: "all",
       audience_student_ids: [],
     }));
-  }, [resolveRootRetakeSession, tests]);
+  }, [tests]);
 
   const applyDailyRetakeSourceSession = useCallback((session) => {
     if (!session) return;
-    const rootSession = resolveRootRetakeSession(session) ?? session;
+    const linkedSourceSetIds = getLinkedSourceSetIdsForSession(session, tests);
     const sourceCategory = getDailySessionCategoryName(session);
     if (sourceCategory) {
       setDailyRetakeCategory(sourceCategory);
@@ -5413,26 +5434,26 @@ export function useTestingWorkspaceState({
     setDailySessionForm((current) => ({
       ...current,
       selection_mode: "single",
-      problem_set_id: rootSession.problem_set_id ?? current.problem_set_id,
-      problem_set_ids: rootSession.problem_set_id ? [rootSession.problem_set_id] : [],
+      problem_set_id: session.problem_set_id ?? current.problem_set_id,
+      problem_set_ids: linkedSourceSetIds,
       source_categories: [],
       session_category: sourceCategory || current.session_category || "",
       session_category_auto_generated: true,
-      title: buildRetakeTitle(rootSession.title || getProblemSetTitle(rootSession.problem_set_id, tests)),
+      title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
       title_auto_generated: false,
-      session_date: rootSession.ends_at
-        ? getBangladeshDateInput(rootSession.ends_at)
-        : rootSession.starts_at
-          ? getBangladeshDateInput(rootSession.starts_at)
+      session_date: session.ends_at
+        ? getBangladeshDateInput(session.ends_at)
+        : session.starts_at
+          ? getBangladeshDateInput(session.starts_at)
           : current.session_date,
-      start_time: rootSession.starts_at ? getBangladeshTimeInput(rootSession.starts_at) : current.start_time,
-      close_time: rootSession.ends_at ? getBangladeshTimeInput(rootSession.ends_at) : current.close_time,
+      start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
+      close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
       close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
       question_count_mode: "all",
       question_count: "",
-      time_limit_min: rootSession.time_limit_min != null ? String(rootSession.time_limit_min) : current.time_limit_min,
+      time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
       show_answers: false,
       allow_multiple_attempts: false,
       retake_release_scope: current.retake_release_scope || "all",
@@ -5440,7 +5461,7 @@ export function useTestingWorkspaceState({
       audience_mode: "all",
       audience_student_ids: [],
     }));
-  }, [getDailySessionCategoryName, resolveRootRetakeSession, tests]);
+  }, [getDailySessionCategoryName, tests]);
 
   const selectModelRetakeSource = useCallback((sessionId) => {
     setModelRetakeSourceId(sessionId);
