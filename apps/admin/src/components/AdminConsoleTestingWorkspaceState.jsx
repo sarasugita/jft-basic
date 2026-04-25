@@ -1920,6 +1920,42 @@ export function useTestingWorkspaceState({
 
   const testSessionsById = useMemo(() => new Map(testSessions.map((s) => [s.id, s])), [testSessions]);
 
+  const resolveRootRetakeSession = useCallback((session) => {
+    if (!session) return null;
+    const visited = new Set();
+    let current = session;
+
+    while (current && current.id && !visited.has(current.id)) {
+      visited.add(current.id);
+
+      const sourceSessionId = String(current.retake_source_session_id ?? "").trim();
+      if (sourceSessionId) {
+        const sourceSession = testSessionsById.get(sourceSessionId) ?? null;
+        if (sourceSession) {
+          current = sourceSession;
+          continue;
+        }
+      }
+
+      if (isRetakeSessionTitle(current.title)) {
+        const baseTitle = getRetakeBaseTitle(current.title);
+        const matchingSession = (testSessions ?? []).find((candidate) => (
+          candidate?.id !== current.id
+          && !visited.has(candidate?.id)
+          && String(candidate?.title ?? "").trim() === baseTitle
+        )) ?? null;
+        if (matchingSession) {
+          current = matchingSession;
+          continue;
+        }
+      }
+
+      return current;
+    }
+
+    return current ?? null;
+  }, [testSessions, testSessionsById]);
+
   const getProblemSetDisplayId = useCallback((problemSetId, testsList, sessionSourceSetIds = [], sessionItem = null) => {
     const formatDisplayId = (nextProblemSetId, nextSourceSetIds = []) => (
       getProblemSetDisplayIdFallback(nextProblemSetId, testsList, nextSourceSetIds)
@@ -5341,21 +5377,22 @@ export function useTestingWorkspaceState({
 
   const applySourceSessionToForm = useCallback((session, setForm) => {
     if (!session) return;
+    const rootSession = resolveRootRetakeSession(session) ?? session;
     setForm((current) => ({
       ...current,
-      problem_set_id: session.problem_set_id ?? current.problem_set_id,
-      title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
-      session_date: session.ends_at
-        ? getBangladeshDateInput(session.ends_at)
-        : session.starts_at
-          ? getBangladeshDateInput(session.starts_at)
+      problem_set_id: rootSession.problem_set_id ?? current.problem_set_id,
+      title: buildRetakeTitle(rootSession.title || getProblemSetTitle(rootSession.problem_set_id, tests)),
+      session_date: rootSession.ends_at
+        ? getBangladeshDateInput(rootSession.ends_at)
+        : rootSession.starts_at
+          ? getBangladeshDateInput(rootSession.starts_at)
           : current.session_date,
       start_time: "",
       close_time: "",
       close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
-      time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
+      time_limit_min: rootSession.time_limit_min != null ? String(rootSession.time_limit_min) : current.time_limit_min,
       show_answers: false,
       allow_multiple_attempts: false,
       retake_release_scope: current.retake_release_scope || "all",
@@ -5363,10 +5400,11 @@ export function useTestingWorkspaceState({
       audience_mode: "all",
       audience_student_ids: [],
     }));
-  }, [tests]);
+  }, [resolveRootRetakeSession, tests]);
 
   const applyDailyRetakeSourceSession = useCallback((session) => {
     if (!session) return;
+    const rootSession = resolveRootRetakeSession(session) ?? session;
     const sourceCategory = getDailySessionCategoryName(session);
     if (sourceCategory) {
       setDailyRetakeCategory(sourceCategory);
@@ -5375,26 +5413,26 @@ export function useTestingWorkspaceState({
     setDailySessionForm((current) => ({
       ...current,
       selection_mode: "single",
-      problem_set_id: session.problem_set_id ?? current.problem_set_id,
-      problem_set_ids: session.problem_set_id ? [session.problem_set_id] : [],
+      problem_set_id: rootSession.problem_set_id ?? current.problem_set_id,
+      problem_set_ids: rootSession.problem_set_id ? [rootSession.problem_set_id] : [],
       source_categories: [],
       session_category: sourceCategory || current.session_category || "",
       session_category_auto_generated: true,
-      title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
+      title: buildRetakeTitle(rootSession.title || getProblemSetTitle(rootSession.problem_set_id, tests)),
       title_auto_generated: false,
-      session_date: session.ends_at
-        ? getBangladeshDateInput(session.ends_at)
-        : session.starts_at
-          ? getBangladeshDateInput(session.starts_at)
+      session_date: rootSession.ends_at
+        ? getBangladeshDateInput(rootSession.ends_at)
+        : rootSession.starts_at
+          ? getBangladeshDateInput(rootSession.starts_at)
           : current.session_date,
-      start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
-      close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
+      start_time: rootSession.starts_at ? getBangladeshTimeInput(rootSession.starts_at) : current.start_time,
+      close_time: rootSession.ends_at ? getBangladeshTimeInput(rootSession.ends_at) : current.close_time,
       close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
       question_count_mode: "all",
       question_count: "",
-      time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
+      time_limit_min: rootSession.time_limit_min != null ? String(rootSession.time_limit_min) : current.time_limit_min,
       show_answers: false,
       allow_multiple_attempts: false,
       retake_release_scope: current.retake_release_scope || "all",
@@ -5402,7 +5440,7 @@ export function useTestingWorkspaceState({
       audience_mode: "all",
       audience_student_ids: [],
     }));
-  }, [getDailySessionCategoryName, tests]);
+  }, [getDailySessionCategoryName, resolveRootRetakeSession, tests]);
 
   const selectModelRetakeSource = useCallback((sessionId) => {
     setModelRetakeSourceId(sessionId);
