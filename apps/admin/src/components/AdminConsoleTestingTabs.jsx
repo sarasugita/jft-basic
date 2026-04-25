@@ -684,7 +684,10 @@ export default function AdminConsoleTestingTabs({
                               {pastModelSessions.length ? (
                                 pastModelSessions.map((session) => (
                                   <option key={`model-retake-${session.id}`} value={session.id}>
-                                    {session.title || session.problem_set_id} ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
+                                    {getProblemSetDisplayId(session.problem_set_id, tests, session.source_set_ids, session)}
+                                    {session.title ? ` · ${session.title}` : ""}
+                                    {" "}
+                                    ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
                                   </option>
                                 ))
                               ) : (
@@ -1766,7 +1769,10 @@ export default function AdminConsoleTestingTabs({
                               {filteredPastDailySessions.length ? (
                                 filteredPastDailySessions.map((session) => (
                                   <option key={`daily-retake-${session.id}`} value={session.id}>
-                                    {session.title || session.problem_set_id} ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
+                                    {getProblemSetDisplayId(session.problem_set_id, tests, session.source_set_ids, session)}
+                                    {session.title ? ` · ${session.title}` : ""}
+                                    {" "}
+                                    ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
                                   </option>
                                 ))
                               ) : (
