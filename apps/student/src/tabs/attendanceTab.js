@@ -1,5 +1,6 @@
 import { escapeHtml } from "../lib/escapeHtml";
 import { formatDateShort, formatWeekday } from "../lib/formatters";
+import { renderLoadingIndicator } from "../lib/loadingIndicator";
 import { buildAttendanceSummary, getAttendanceStatusClassSuffix } from "../lib/attendanceHelpers";
 import { state, saveState } from "../state/appState";
 import { authState } from "../state/authState";
@@ -12,7 +13,7 @@ export function buildAttendanceTabHTML() {
     return `<div class="text-muted">Log in to see attendance.</div>`;
   }
   if (studentAttendanceState.loading) {
-    return `<div class="text-muted">Loading attendance...</div>`;
+    return renderLoadingIndicator("Loading attendance...");
   }
   if (studentAttendanceState.error) {
     return `<div class="text-error">${escapeHtml(studentAttendanceState.error)}</div>`;

@@ -1,5 +1,6 @@
 import { escapeHtml } from "../lib/escapeHtml";
 import { formatDateFull } from "../lib/formatters";
+import { renderLoadingIndicator } from "../lib/loadingIndicator";
 import { authState } from "../state/authState";
 import { rankingState } from "../state/rankingState";
 
@@ -11,7 +12,7 @@ export function buildRankingTabHTML() {
     return `<div class="text-error">${escapeHtml(authState.profileError || "School information is missing.")}</div>`;
   }
   if (rankingState.loading) {
-    return `<div class="text-muted">Loading ranking...</div>`;
+    return renderLoadingIndicator("Loading ranking...");
   }
   if (rankingState.error) {
     return `<div class="text-error">${escapeHtml(rankingState.error)}</div>`;

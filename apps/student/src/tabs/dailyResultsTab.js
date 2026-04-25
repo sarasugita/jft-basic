@@ -2,6 +2,7 @@ import { escapeHtml } from "../lib/escapeHtml.js";
 import { state, saveState } from "../state/appState.js";
 import { authState } from "../state/authState.js";
 import { testsState, testSessionsState } from "../state/testsState.js";
+import { renderLoadingIndicator } from "../lib/loadingIndicator.js";
 import {
   studentResultsState,
   resultDetailState,
@@ -29,7 +30,7 @@ export function buildDailyResultsTabHTML() {
     return `<div class="text-muted">Log in to see results.</div>`;
   }
   if (studentResultsState.loading) {
-    return `<div class="text-muted">Loading results...</div>`;
+    return renderLoadingIndicator("Loading results...");
   }
   if (studentResultsState.error) {
     return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
@@ -63,7 +64,7 @@ export function buildDailyResultsTabHTML() {
           const showAnswers = shouldShowAnswers(attempt, testSessionsState.list, testsState.list);
           const questionsList = resultDetailState.questionsByVersion[attempt.test_version] || [];
           const detailRows = buildAttemptDetailRows(attempt, questionsList);
-          if (resultDetailState.loading) return `<div class="text-muted">Loading details...</div>`;
+          if (resultDetailState.loading) return renderLoadingIndicator("Loading details...");
           if (resultDetailState.error) return `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`;
           return renderDetailTable(detailRows, showAnswers);
         })();

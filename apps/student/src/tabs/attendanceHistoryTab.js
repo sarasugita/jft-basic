@@ -1,5 +1,6 @@
 import { escapeHtml } from "../lib/escapeHtml";
 import { formatDateShort } from "../lib/formatters";
+import { renderLoadingIndicator } from "../lib/loadingIndicator";
 import { state, saveState } from "../state/appState";
 import { authState } from "../state/authState";
 import { absenceApplicationsState } from "../state/attendanceState";
@@ -11,7 +12,7 @@ export function buildAttendanceHistoryTabHTML() {
   }
 
   const bodyHtml = absenceApplicationsState.loading
-    ? `<div class="text-muted">Loading applications...</div>`
+    ? renderLoadingIndicator("Loading applications...")
     : absenceApplicationsState.error
       ? `<div class="text-error">${escapeHtml(absenceApplicationsState.error)}</div>`
       : absenceApplicationsState.list.length

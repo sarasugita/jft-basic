@@ -2,6 +2,7 @@ import { escapeHtml } from "../lib/escapeHtml.js";
 import { formatDateShort, formatOrdinal } from "../lib/formatters.js";
 import { buildRadarSvg, getSectionLabelLines } from "../lib/radarChart.js";
 import { getSectionTitle } from "../lib/sectionHelpers.js";
+import { renderLoadingIndicator } from "../lib/loadingIndicator.js";
 import { state, saveState } from "../state/appState.js";
 import { authState } from "../state/authState.js";
 import { testsState, testSessionsState } from "../state/testsState.js";
@@ -36,7 +37,7 @@ export function buildModelResultsTabHTML() {
     return `<div class="text-muted">Log in to see results.</div>`;
   }
   if (studentResultsState.loading) {
-    return `<div class="text-muted">Loading results...</div>`;
+    return renderLoadingIndicator("Loading results...");
   }
   if (studentResultsState.error) {
     return `<div class="text-error">${escapeHtml(studentResultsState.error)}</div>`;
@@ -136,7 +137,7 @@ export function buildModelResultsTabHTML() {
 
     let detailBody = "";
     if (resultDetailState.loading) {
-      detailBody = `<div class="text-muted">Loading details...</div>`;
+      detailBody = renderLoadingIndicator("Loading details...");
     } else if (resultDetailState.error) {
       detailBody = `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`;
     } else if (subTab === "score") {

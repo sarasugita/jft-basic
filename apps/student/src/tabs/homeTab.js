@@ -1,5 +1,6 @@
 import { escapeHtml } from "../lib/escapeHtml";
 import { formatTimeBdt, formatDateShort, getBdtDateKey } from "../lib/formatters";
+import { renderLoadingIndicator } from "../lib/loadingIndicator";
 import { state, saveState } from "../state/appState";
 import { authState } from "../state/authState";
 import { testSessionsState } from "../state/testsState";
@@ -30,7 +31,7 @@ export function buildHomeTabHTML() {
 
   const homeHtml = (() => {
     if (!testSessionsState.loaded) {
-      return `<div class="text-muted">Loading today's tests...</div>`;
+      return renderLoadingIndicator("Loading today's tests...");
     }
     const todayKey = getBdtDateKey(new Date());
     const sessions = (testSessionsState.list ?? [])
@@ -93,7 +94,7 @@ export function buildHomeTabHTML() {
 
   const announcementHtml = (() => {
     if (!announcementsState.loaded) {
-      return `<div class="text-muted">Loading announcements...</div>`;
+      return renderLoadingIndicator("Loading announcements...");
     }
     if (announcementsState.error) {
       return `<div class="text-error">${escapeHtml(announcementsState.error)}</div>`;

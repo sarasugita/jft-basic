@@ -1,5 +1,6 @@
 import { escapeHtml } from "../lib/escapeHtml";
 import { topbarHTML } from "../lib/uiHelpers";
+import { renderLoadingIndicator } from "../lib/loadingIndicator";
 import { getActiveTestVersion } from "../lib/sessionHelpers";
 import { questionsState } from "../state/questionsState";
 import { goIntro, resetAll } from "../state/appState";
@@ -9,7 +10,7 @@ export function renderLoading(app) {
     <div class="app has-topbar app-result">
       ${topbarHTML({ rightButtonLabel: "Loading", rightButtonId: "disabledBtn" })}
       <main class="content" style="margin:12px;">
-        <h1 class="prompt">Loading...</h1>
+        ${renderLoadingIndicator("Loading...")}
       </main>
     </div>
   `;
