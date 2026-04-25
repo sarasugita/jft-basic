@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useSuperAdmin } from "./super/SuperAdminShell";
 import { preloadAdminConsole } from "./adminConsoleLoader";
+import AdminLoadingState from "./AdminLoadingState";
 
 function emptyForm() {
   return {
@@ -490,7 +491,7 @@ export default function SuperSchoolsPage() {
       <section className="super-flat-section super-schools-list-section">
         <div className="super-schools-list-head">
           <div className="super-section-title">Schools List</div>
-          {metricsLoading ? <div className="admin-help">Loading school metrics...</div> : null}
+          {metricsLoading ? <AdminLoadingState compact label="Loading school metrics..." /> : null}
           <button className="btn btn-primary super-create-school-btn" onClick={openCreateModal}>
             <span className="super-btn-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24">

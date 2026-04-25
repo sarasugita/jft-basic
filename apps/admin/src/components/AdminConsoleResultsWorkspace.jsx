@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sections } from "../../../../packages/shared/questions.js";
 import AdminConsoleDeferredFeatures from "./AdminConsoleDeferredFeatures";
+import AdminLoadingState from "./AdminLoadingState";
 
 const ADMIN_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
@@ -2714,7 +2715,7 @@ export default function AdminConsoleResultsWorkspace(props) {
           </div>
         </div>
 
-        {sessionDetailLoading ? <div className="admin-msg">Loading...</div> : null}
+        {sessionDetailLoading ? <AdminLoadingState compact label="Loading..." /> : null}
         {!sessionDetailLoading && sessionDetailMsg ? <div className="admin-msg">{sessionDetailMsg}</div> : null}
 
         {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "questions" ? (

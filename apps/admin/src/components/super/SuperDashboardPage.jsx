@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSuperAdmin } from "./SuperAdminShell";
+import AdminLoadingState from "../AdminLoadingState";
 
 function MetricCard({ label, value, help }) {
   return (
@@ -119,22 +120,22 @@ export default function SuperDashboardPage() {
       <div className="admin-grid super-metrics-grid">
         <MetricCard
           label="Total schools"
-          value={loading ? "..." : stats.total_schools ?? "N/A"}
+          value={loading ? <AdminLoadingState compact label="Loading..." /> : stats.total_schools ?? "N/A"}
           help="All registered schools."
         />
         <MetricCard
           label="Total students"
-          value={loading ? "..." : stats.total_students ?? "N/A"}
+          value={loading ? <AdminLoadingState compact label="Loading..." /> : stats.total_students ?? "N/A"}
           help="Student profiles across every school."
         />
         <MetricCard
           label="Total tests taken"
-          value={loading ? "..." : stats.total_tests_taken ?? "N/A"}
+          value={loading ? <AdminLoadingState compact label="Loading..." /> : stats.total_tests_taken ?? "N/A"}
           help="Attempts recorded inside the selected range."
         />
         <MetricCard
           label="Avg score"
-          value={loading ? "..." : formatPercent(stats.avg_score)}
+          value={loading ? <AdminLoadingState compact label="Loading..." /> : formatPercent(stats.avg_score)}
           help="Overall average score across recorded attempts."
         />
       </div>
@@ -147,7 +148,7 @@ export default function SuperDashboardPage() {
         <div className="admin-kpi" style={{ marginTop: 12 }}>
           <div className="box">
             <div className="label">Attendance Avg</div>
-            <div className="value">{loading ? "..." : formatPercent(stats.attendance_avg)}</div>
+            <div className="value">{loading ? <AdminLoadingState compact label="Loading..." /> : formatPercent(stats.attendance_avg)}</div>
           </div>
         </div>
         {msg ? <div className="admin-msg">{msg}</div> : null}

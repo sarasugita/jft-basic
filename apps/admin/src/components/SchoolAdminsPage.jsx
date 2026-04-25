@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSuperAdmin } from "./super/SuperAdminShell";
+import AdminLoadingState from "./AdminLoadingState";
 
 function generateTempPassword(length = 12) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
@@ -321,9 +322,7 @@ export default function SchoolAdminsPage({ schoolId }) {
 
   if (loading || !school) {
     return (
-      <div className="admin-login">
-        <h2>Loading...</h2>
-      </div>
+      <AdminLoadingState centered label="Loading..." />
     );
   }
 
@@ -453,9 +452,11 @@ export default function SchoolAdminsPage({ schoolId }) {
                   </div>
                 </div>
                 <div className="admin-help" style={{ marginTop: 10 }}>
-                  {existingAdminsLoading
-                    ? "Loading available admins..."
-                    : "Select an existing admin from another school to add them here as a shared admin."}
+                  {existingAdminsLoading ? (
+                    <AdminLoadingState compact label="Loading available admins..." />
+                  ) : (
+                    "Select an existing admin from another school to add them here as a shared admin."
+                  )}
                 </div>
               </>
             ) : (

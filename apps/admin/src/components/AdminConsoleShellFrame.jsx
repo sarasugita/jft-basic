@@ -1,5 +1,7 @@
 "use client";
 
+import AdminLoadingState from "./AdminLoadingState";
+
 const NAV_ITEMS = [
   { key: "announcements", label: "Announcements" },
   { key: "students", label: "Student List" },
@@ -57,7 +59,7 @@ export default function AdminConsoleShellFrame({
           ))}
         </div>
         <div className="admin-sidebar-footer">
-          <div className="admin-email">{displayName || "Loading user..."}</div>
+          <div className="admin-email">{displayName || <AdminLoadingState compact label="Loading user..." />}</div>
         </div>
       </aside>
 
@@ -69,7 +71,7 @@ export default function AdminConsoleShellFrame({
               {schoolSelector || (
                 <div className="admin-school-switcher admin-topbar-school-switcher">
                   <label>School</label>
-                  <div className="admin-topbar-school-label">{schoolName || "Loading school..."}</div>
+                  <div className="admin-topbar-school-label">{schoolName || <AdminLoadingState compact label="Loading school..." />}</div>
                 </div>
               )}
               {changeSchoolHref ? (
@@ -87,7 +89,7 @@ export default function AdminConsoleShellFrame({
                   <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z" fill="currentColor" />
                   <path d="M4 20a8 8 0 0 1 16 0Z" fill="currentColor" />
                 </svg>
-                <span>{displayName || "Loading user..."}</span>
+                <span>{displayName || <AdminLoadingState compact label="Loading user..." />}</span>
               </div>
             </div>
           </div>

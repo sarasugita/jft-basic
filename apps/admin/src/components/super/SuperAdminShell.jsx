@@ -11,6 +11,7 @@ import {
 import { createAdminTrace, isAbortLikeError, logAdminEvent, logAdminRequestFailure } from "../../lib/adminDiagnostics";
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout } from "../../lib/requestTimeout";
 import { syncAdminAuthCookie } from "../../lib/authCookies";
+import AdminLoadingState from "../AdminLoadingState";
 
 const SuperAdminContext = createContext(null);
 const ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY = "jft_admin_sidebar_collapsed_v1";
@@ -768,9 +769,7 @@ export default function SuperAdminShell({ children }) {
     content = children;
   } else if (loading) {
     content = (
-      <div className="admin-login">
-        <h2>Loading...</h2>
-      </div>
+      <AdminLoadingState centered label="Loading..." />
     );
   } else if (startupError) {
     content = (

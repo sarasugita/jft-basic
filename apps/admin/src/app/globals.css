@@ -10,6 +10,12 @@ body { padding: 0; }
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
+@keyframes admin-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 900px) {
   .admin-shell {
     flex-direction: column;
@@ -121,6 +127,46 @@ body { padding: 0; }
   width: 13px;
   height: 13px;
   flex: 0 0 auto;
+}
+
+.admin-loading-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--admin-text);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.admin-loading-state.centered {
+  min-height: 84px;
+  justify-content: center;
+  width: 100%;
+}
+
+.admin-loading-state.compact {
+  min-height: 0;
+}
+
+.admin-loading-state-inline-left {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.admin-loading-state-spaced {
+  margin-top: 12px;
+}
+
+.admin-loading-spinner {
+  width: 18px;
+  height: 18px;
+  animation: admin-loading-spin 0.8s linear infinite;
+}
+
+.admin-loading-text {
+  font-size: 14px;
 }
 
 .admin-shell {

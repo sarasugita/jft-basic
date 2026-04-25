@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { createPortal } from "react-dom";
+import AdminLoadingState from "./AdminLoadingState";
 
 function formatAttemptDetailDateTime(value) {
   if (!value) return "";
@@ -379,17 +380,7 @@ export default function AdminConsoleDeferredFeatures({
 
                   <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginTop: 12, marginBottom: 6, minHeight: 36 }}>
                     {attemptsRefreshing ? (
-                      <div
-                        style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 8, color: "var(--admin-text)" }}
-                        aria-live="polite"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 50 50" aria-hidden="true">
-                          <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" strokeDasharray="90 60" opacity="0.85">
-                            <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.9s" repeatCount="indefinite" />
-                          </circle>
-                        </svg>
-                        <span style={{ fontWeight: 600 }}>Loading...</span>
-                      </div>
+                      <AdminLoadingState compact label="Loading..." className="admin-loading-state-inline-left" />
                     ) : null}
                     <button
                       className="btn admin-icon-action-btn"
@@ -611,7 +602,7 @@ export default function AdminConsoleDeferredFeatures({
                       </tbody>
                     </table>
                   </div>
-                  <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+                  <div className="admin-msg">{loading ? <AdminLoadingState compact label="Loading..." /> : msg}</div>
                   {dailyManualEntryModal?.open && typeof document !== "undefined" ? createPortal((
                     <div
                       className="admin-modal-overlay"
@@ -1008,7 +999,7 @@ export default function AdminConsoleDeferredFeatures({
                       </tbody>
                     </table>
                   </div>
-                  <div className="admin-msg">{loading ? "Loading..." : msg}</div>
+                  <div className="admin-msg">{loading ? <AdminLoadingState compact label="Loading..." /> : msg}</div>
                 </>
               )}
             </>
@@ -1255,7 +1246,7 @@ export default function AdminConsoleDeferredFeatures({
                 </div>
               </div>
               <div className="attempt-detail-top-divider" />
-              {attemptQuestionsLoading ? <div className="admin-help">Loading questions...</div> : null}
+              {attemptQuestionsLoading ? <AdminLoadingState compact label="Loading questions..." /> : null}
               {attemptQuestionsError ? <div className="admin-msg">{attemptQuestionsError}</div> : null}
 
               <div className="admin-top-tabs attempt-detail-tabs" style={{ marginBottom: 12 }}>

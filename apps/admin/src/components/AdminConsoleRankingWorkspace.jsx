@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useRankingWorkspaceState } from "./AdminConsoleRankingWorkspaceState";
+import AdminLoadingState from "./AdminLoadingState";
 
 const bangladeshDateTimeOptions = {
   timeZone: "Asia/Dhaka",
@@ -262,7 +263,7 @@ export default function AdminConsoleRankingWorkspace() {
               <div><strong>Range:</strong> {rankingDetailModal.startDate && rankingDetailModal.endDate ? `${rankingDetailModal.startDate} to ${rankingDetailModal.endDate}` : "-"}</div>
             </div>
             {rankingDetailModal.loading ? (
-              <div className="ranking-detail-state">Loading scores...</div>
+              <AdminLoadingState compact label="Loading scores..." />
             ) : rankingDetailModal.error ? (
               <div className="ranking-detail-state ranking-detail-error">{rankingDetailModal.error}</div>
             ) : rankingDetailModal.usedAttempts.length ? (

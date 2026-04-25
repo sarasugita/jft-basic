@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSuperAdmin } from "./SuperAdminShell";
+import AdminLoadingState from "../AdminLoadingState";
 
 function toDateInput(date) {
   return date.toISOString().slice(0, 10);
@@ -468,7 +469,7 @@ export default function SuperQuestionSetComparisonPage({ questionSetId }) {
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={3}>Loading question-set comparison...</td>
+                  <td colSpan={3}><AdminLoadingState compact label="Loading question-set comparison..." /></td>
                 </tr>
               ) : null}
             </tbody>
@@ -519,7 +520,7 @@ export default function SuperQuestionSetComparisonPage({ questionSetId }) {
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={4 + Math.max(schoolRows.length, 1)}>Loading question accuracy comparison...</td>
+                  <td colSpan={4 + Math.max(schoolRows.length, 1)}><AdminLoadingState compact label="Loading question accuracy comparison..." /></td>
                 </tr>
               ) : null}
             </tbody>

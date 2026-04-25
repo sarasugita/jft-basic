@@ -2,6 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useState } from "react";
+import AdminLoadingState from "./AdminLoadingState";
 import QuestionSetUploadConflictModal from "./QuestionSetUploadConflictModal";
 
 const STUDENT_CODE_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
@@ -353,7 +354,7 @@ export default function AdminConsoleTestingTabs({
             />
             <div className="session-audience-picker-list">
               {!studentsLoaded && !sortedStudents.length ? (
-                <div className="admin-help">Loading students...</div>
+                <AdminLoadingState compact label="Loading students..." />
               ) : filteredStudents.length ? (
                 filteredStudents.map((student) => {
                   const studentId = String(student?.id ?? "").trim();

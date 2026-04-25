@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useStudentsWorkspaceState } from "./AdminConsoleStudentsWorkspaceState";
+import AdminLoadingState from "./AdminLoadingState";
 
 const LazyAdminConsoleResultsWorkspace = dynamic(() => import("./AdminConsoleResultsWorkspace"));
 
@@ -477,8 +478,8 @@ export default function AdminConsoleStudentsWorkspace() {
               Warnings are not loaded yet. Click <b>Load Warnings</b> to show warning badges and warning history.
             </div>
           ) : null}
-          {studentListLoading ? <div className="admin-help" style={{ marginTop: 6 }}>Loading metrics...</div> : null}
-          {studentWarningsLoading ? <div className="admin-help" style={{ marginTop: 6 }}>Loading warnings...</div> : null}
+          {studentListLoading ? <AdminLoadingState compact label="Loading metrics..." /> : null}
+          {studentWarningsLoading ? <AdminLoadingState compact label="Loading warnings..." /> : null}
           <div className="admin-msg">{studentMsg}</div>
 
           <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -639,7 +640,7 @@ export default function AdminConsoleStudentsWorkspace() {
                   Edit Information
                 </button>
               </div>
-              {studentDetailLoading ? <div className="admin-help" style={{ marginTop: 10 }}>Loading full student details...</div> : null}
+              {studentDetailLoading ? <AdminLoadingState compact label="Loading full student details..." /> : null}
               {studentDetailMsg ? <div className="admin-msg">{studentDetailMsg}</div> : null}
               <div className="student-info-grid admin-student-info-grid">
                 {[
@@ -1005,7 +1006,7 @@ export default function AdminConsoleStudentsWorkspace() {
             </div>
             <div className="student-warning-history" style={{ marginTop: 10 }}>
               <div className="student-warning-history-title">Issued Warnings</div>
-              {studentWarningsLoading ? <div className="admin-help">Loading warnings...</div> : null}
+              {studentWarningsLoading ? <AdminLoadingState compact label="Loading warnings..." /> : null}
               <div className="student-warning-history-list">
                 {studentWarnings.map((warning) => {
                   const summary = summarizeWarningCriteria(warning.criteria);

@@ -14,6 +14,7 @@ import {
   loadAdminConsole,
 } from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
+import AdminLoadingState from "./AdminLoadingState";
 import LoadableAdminModule from "./LoadableAdminModule";
 
 export default function SchoolScopedAdminPage({
@@ -235,9 +236,7 @@ export default function SchoolScopedAdminPage({
 
   if (authLoading || loading) {
     return (
-      <div className="admin-login">
-        <h2>Loading...</h2>
-      </div>
+      <AdminLoadingState centered label="Loading..." />
     );
   }
 

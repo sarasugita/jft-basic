@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getAdminDiagnosticsReport, logAdminEvent, logAdminRequestFailure } from "../lib/adminDiagnostics";
 import { ADMIN_CONSOLE_IMPORT_TIMEOUT_MS } from "./adminConsoleLoader";
+import AdminLoadingState from "./AdminLoadingState";
 
 function resolveModuleExport(mod) {
   if (!mod) return null;
@@ -11,9 +12,7 @@ function resolveModuleExport(mod) {
 
 function LoadingFallback({ label }) {
   return (
-    <div className="admin-login">
-      <h2>{label}</h2>
-    </div>
+    <AdminLoadingState centered label={label} />
   );
 }
 

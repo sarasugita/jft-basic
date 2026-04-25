@@ -16,6 +16,7 @@ import {
   loadAdminConsole,
 } from "./adminConsoleLoader";
 import AdminConsoleBoundary from "./AdminConsoleBoundary";
+import AdminLoadingState from "./AdminLoadingState";
 import LoadableAdminModule from "./LoadableAdminModule";
 
 function PasswordVisibilityIcon({ visible }) {
@@ -530,9 +531,7 @@ export default function AdminEntryPage() {
 
   if (!authReady) {
     return (
-      <div className="admin-login">
-        <h2>Loading...</h2>
-      </div>
+      <AdminLoadingState centered label="Loading..." />
     );
   }
 
@@ -592,17 +591,18 @@ export default function AdminEntryPage() {
 
   if (profileLoading) {
     return (
-      <div className="admin-login">
-        <h2>Loading...</h2>
-      </div>
+      <AdminLoadingState centered label="Loading..." />
     );
   }
 
   if (!profile) {
     const unresolvedProfile = Boolean(session) && !loginMsg;
+    if (!loginMsg && !unresolvedProfile) {
+      return <AdminLoadingState centered label="Loading..." />;
+    }
     return (
       <div className="admin-login">
-        <h2>{loginMsg || unresolvedProfile ? "Startup Error" : "Loading..."}</h2>
+        <h2>Startup Error</h2>
         {(loginMsg || unresolvedProfile) ? (
           <div className="admin-msg">
             {loginMsg || "The admin session was restored, but the admin profile could not be loaded. Sign out and try again."}
@@ -707,9 +707,7 @@ export default function AdminEntryPage() {
     && profile.account_status === "active"
   ) {
     return (
-      <div className="admin-login">
-        <h2>Redirecting...</h2>
-      </div>
+      <AdminLoadingState centered label="Redirecting..." />
     );
   }
 

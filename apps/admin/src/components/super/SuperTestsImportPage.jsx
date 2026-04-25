@@ -5,6 +5,7 @@ import { useSuperAdmin } from "./SuperAdminShell";
 import { getAdminSupabaseConfig } from "../../lib/adminSupabase";
 import { notifyQuestionSetLibraryUpdated } from "../../lib/questionSetLibraryRefresh";
 import QuestionSetUploadConflictModal from "../QuestionSetUploadConflictModal";
+import AdminLoadingState from "../AdminLoadingState";
 
 const DEFAULT_DAILY_CATEGORY = "Vocabulary";
 const DEFAULT_MODEL_CATEGORY = "Book Review";
@@ -1227,7 +1228,7 @@ export default function SuperTestsImportPage() {
 
         {msg ? <div className="admin-msg">{msg}</div> : null}
 
-        {loading ? <div className="admin-help" style={{ marginTop: 12 }}>Loading sets...</div> : null}
+        {loading ? <AdminLoadingState compact label="Loading sets..." className="admin-loading-state-spaced" /> : null}
         {!loading && groupedQuestionSets.length === 0 ? (
           <div className="admin-help" style={{ marginTop: 12 }}>No sets to show yet.</div>
         ) : null}

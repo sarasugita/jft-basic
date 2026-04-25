@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSuperAdmin } from "./SuperAdminShell";
+import AdminLoadingState from "../AdminLoadingState";
 
 function toDateInput(date) {
   return date.toISOString().slice(0, 10);
@@ -217,7 +218,7 @@ export default function SuperAuditPage() {
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={4}>Loading audit logs...</td>
+                  <td colSpan={4}><AdminLoadingState compact label="Loading audit logs..." /></td>
                 </tr>
               ) : null}
             </tbody>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSuperAdmin } from "./SuperAdminShell";
+import AdminLoadingState from "../AdminLoadingState";
 
 function toDateInput(date) {
   return date.toISOString().slice(0, 10);
@@ -235,7 +236,7 @@ export default function SuperTestsAnalyticsPage() {
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={6}>Loading analytics...</td>
+                  <td colSpan={6}><AdminLoadingState compact label="Loading analytics..." /></td>
                 </tr>
               ) : null}
             </tbody>
@@ -284,7 +285,7 @@ export default function SuperTestsAnalyticsPage() {
               ) : null}
               {loading ? (
                 <tr>
-                  <td colSpan={7}>Loading question sets...</td>
+                  <td colSpan={7}><AdminLoadingState compact label="Loading question sets..." /></td>
                 </tr>
               ) : null}
             </tbody>
