@@ -106,7 +106,7 @@ create table if not exists public.test_sessions (
   show_answers boolean not null default true,
   allow_multiple_attempts boolean not null default true,
   retake_source_session_id uuid references public.test_sessions(id) on delete set null,
-  retake_release_scope text not null default 'all' check (retake_release_scope in ('all', 'failed_only')),
+  retake_release_scope text not null default 'all' check (retake_release_scope in ('all', 'failed_only', 'failed_and_absent', 'absent_only')),
   audience_mode text not null default 'all' check (audience_mode in ('all', 'exclude', 'include')),
   audience_student_ids jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()

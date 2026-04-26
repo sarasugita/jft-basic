@@ -7,4 +7,4 @@ alter table public.test_sessions
 
 alter table public.test_sessions
   add constraint test_sessions_retake_release_scope_check
-  check (retake_release_scope in ('all', 'failed_only'));
+  check (retake_release_scope in ('all', 'failed_only', 'failed_and_absent', 'absent_only'));

@@ -1,22 +1,11 @@
--- Phase 31: add session audience controls for student visibility
--- Apply after phase14_student_session_based_legacy_access.sql
+-- Phase 33: expand retake release scope so absent students can be included
 
 alter table public.test_sessions
-  add column if not exists audience_mode text not null default 'all',
-  add column if not exists audience_student_ids jsonb not null default '[]'::jsonb;
+  drop constraint if exists test_sessions_retake_release_scope_check;
 
 alter table public.test_sessions
-  drop constraint if exists test_sessions_audience_mode_check;
-
-alter table public.test_sessions
-  add constraint test_sessions_audience_mode_check
-  check (audience_mode in ('all', 'exclude', 'include'));
-
-create index if not exists test_sessions_audience_mode_idx
-  on public.test_sessions (audience_mode);
-
-create index if not exists test_sessions_audience_student_ids_idx
-  on public.test_sessions using gin (audience_student_ids);
+  add constraint test_sessions_retake_release_scope_check
+  check (retake_release_scope in ('all', 'failed_only', 'failed_and_absent', 'absent_only'));
 
 create or replace function public.can_access_test_session(p_test_session_id uuid)
 returns boolean

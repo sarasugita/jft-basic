@@ -8485,11 +8485,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
       ...current,
       problem_set_id: session.problem_set_id ?? current.problem_set_id,
       title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
-      session_date: session.ends_at
-        ? getBangladeshDateInput(session.ends_at)
-        : session.starts_at
-          ? getBangladeshDateInput(session.starts_at)
-          : current.session_date,
+      session_date: "",
       start_time: "",
       close_time: "",
       close_time_auto_filled: false,
@@ -8521,13 +8517,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
       session_category_auto_generated: true,
       title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
       title_auto_generated: false,
-      session_date: session.ends_at
-        ? getBangladeshDateInput(session.ends_at)
-        : session.starts_at
-          ? getBangladeshDateInput(session.starts_at)
-          : current.session_date,
-      start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
-      close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
+      session_date: "",
+      start_time: "",
+      close_time: "",
       close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",

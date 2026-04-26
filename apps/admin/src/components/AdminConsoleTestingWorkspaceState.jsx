@@ -26,6 +26,7 @@ const QUESTION_SELECT_WITH_MEDIA = QUESTION_SELECT_BASE;
 const SET_ID_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const SUPABASE_SAFE_PAGE_SIZE = 500;
 const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
+const DEFAULT_RETAKE_RELEASE_SCOPE = "failed_and_absent";
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -92,6 +93,18 @@ async function fetchAllPages(buildPageQuery, pageSize = SUPABASE_SAFE_PAGE_SIZE)
 function normalizePassRate(value, fallback = 0.8) {
   const rate = Number(value);
   return Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate : fallback;
+}
+
+function normalizeRetakeReleaseScope(value) {
+  const scope = String(value ?? "").trim().toLowerCase();
+  if (scope === "failed_only") return DEFAULT_RETAKE_RELEASE_SCOPE;
+  if (["all", "failed_and_absent", "absent_only"].includes(scope)) return scope;
+  return DEFAULT_RETAKE_RELEASE_SCOPE;
+}
+
+function getDefaultRetakeReleaseScope(value) {
+  const scope = normalizeRetakeReleaseScope(value);
+  return scope === "all" ? DEFAULT_RETAKE_RELEASE_SCOPE : scope;
 }
 
 function compareSetIds(left, right) {
@@ -5403,11 +5416,7 @@ export function useTestingWorkspaceState({
       ...current,
       problem_set_id: session.problem_set_id ?? current.problem_set_id,
       title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
-      session_date: session.ends_at
-        ? getBangladeshDateInput(session.ends_at)
-        : session.starts_at
-          ? getBangladeshDateInput(session.starts_at)
-          : current.session_date,
+      session_date: "",
       start_time: "",
       close_time: "",
       close_time_auto_filled: false,
@@ -5416,7 +5425,7 @@ export function useTestingWorkspaceState({
       time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
       show_answers: false,
       allow_multiple_attempts: false,
-      retake_release_scope: current.retake_release_scope || "all",
+      retake_release_scope: current.retake_release_scope || DEFAULT_RETAKE_RELEASE_SCOPE,
       pass_rate: "0.8",
       audience_mode: "all",
       audience_student_ids: [],
@@ -5441,13 +5450,9 @@ export function useTestingWorkspaceState({
       session_category_auto_generated: true,
       title: buildRetakeTitle(session.title || getProblemSetTitle(session.problem_set_id, tests)),
       title_auto_generated: false,
-      session_date: session.ends_at
-        ? getBangladeshDateInput(session.ends_at)
-        : session.starts_at
-          ? getBangladeshDateInput(session.starts_at)
-          : current.session_date,
-      start_time: session.starts_at ? getBangladeshTimeInput(session.starts_at) : current.start_time,
-      close_time: session.ends_at ? getBangladeshTimeInput(session.ends_at) : current.close_time,
+      session_date: "",
+      start_time: "",
+      close_time: "",
       close_time_auto_filled: false,
       starts_at: "",
       ends_at: "",
@@ -5456,7 +5461,7 @@ export function useTestingWorkspaceState({
       time_limit_min: session.time_limit_min != null ? String(session.time_limit_min) : current.time_limit_min,
       show_answers: false,
       allow_multiple_attempts: false,
-      retake_release_scope: current.retake_release_scope || "all",
+      retake_release_scope: current.retake_release_scope || DEFAULT_RETAKE_RELEASE_SCOPE,
       pass_rate: "0.8",
       audience_mode: "all",
       audience_student_ids: [],
@@ -5717,6 +5722,10 @@ export function useTestingWorkspaceState({
     const source = pastModelSessions[0] ?? null;
     setModelRetakeSourceId(source?.id ?? "");
     if (source) applySourceSessionToForm(source, setTestSessionForm);
+    setTestSessionForm((current) => ({
+      ...current,
+      retake_release_scope: getDefaultRetakeReleaseScope(current.retake_release_scope),
+    }));
   }, [pastModelSessions, applySourceSessionToForm]);
 
   const openDailyConductModal = useCallback((mode = "normal") => {
@@ -5761,6 +5770,10 @@ export function useTestingWorkspaceState({
     const source = pastDailySessionCategories[0]?.sessions?.[0] ?? null;
     setDailyRetakeSourceId(source?.id ?? "");
     if (source) applyDailyRetakeSourceSession(source);
+    setDailySessionForm((current) => ({
+      ...current,
+      retake_release_scope: getDefaultRetakeReleaseScope(current.retake_release_scope),
+    }));
   }, [pastDailySessionCategories, applyDailyRetakeSourceSession]);
 
   const openModelUploadModal = useCallback(() => {

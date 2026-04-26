@@ -6,6 +6,14 @@ import AdminLoadingState from "./AdminLoadingState";
 import QuestionSetUploadConflictModal from "./QuestionSetUploadConflictModal";
 
 const STUDENT_CODE_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+const DEFAULT_RETAKE_RELEASE_SCOPE = "failed_and_absent";
+
+function normalizeRetakeReleaseScope(value) {
+  const scope = String(value ?? "").trim().toLowerCase();
+  if (scope === "failed_only") return DEFAULT_RETAKE_RELEASE_SCOPE;
+  if (["all", "failed_and_absent", "absent_only"].includes(scope)) return scope;
+  return DEFAULT_RETAKE_RELEASE_SCOPE;
+}
 
 export default function AdminConsoleTestingTabs({
   activeTab,
@@ -698,11 +706,12 @@ export default function AdminConsoleTestingTabs({
                           <div className="daily-session-create-field">
                             <label>Release To</label>
                             <select
-                              value={testSessionForm.retake_release_scope}
+                              value={normalizeRetakeReleaseScope(testSessionForm.retake_release_scope)}
                               onChange={(e) => setTestSessionForm((s) => ({ ...s, retake_release_scope: e.target.value }))}
                             >
                               <option value="all">All students</option>
-                              <option value="failed_only">Only students who failed</option>
+                              <option value="failed_and_absent">Failed / Absent</option>
+                              <option value="absent_only">Absent</option>
                             </select>
                           </div>
                           <div className="daily-session-create-field">
@@ -893,22 +902,6 @@ export default function AdminConsoleTestingTabs({
                               <span className="daily-session-create-switch-slider" />
                             </label>
                           </div>
-                          {renderStudentAudiencePicker({
-                            modeValue: testSessionForm.audience_mode,
-                            selectedIds: testSessionForm.audience_student_ids,
-                            onModeChange: (nextMode) => setTestSessionForm((s) => ({
-                              ...s,
-                              audience_mode: nextMode,
-                              audience_student_ids: nextMode === "all" ? [] : s.audience_student_ids,
-                            })),
-                            onSelectedIdsChange: (updater) => setTestSessionForm((s) => ({
-                              ...s,
-                              audience_student_ids: typeof updater === "function"
-                                ? updater(s.audience_student_ids ?? [])
-                                : updater,
-                            })),
-                            prefix: "model-retake-audience",
-                          })}
                           <div className="daily-session-create-actions">
                             <button
                               className="btn btn-retake"
@@ -1785,11 +1778,12 @@ export default function AdminConsoleTestingTabs({
                           <div className="daily-session-create-field">
                             <label>Release To</label>
                             <select
-                              value={dailySessionForm.retake_release_scope}
+                              value={normalizeRetakeReleaseScope(dailySessionForm.retake_release_scope)}
                               onChange={(e) => setDailySessionForm((s) => ({ ...s, retake_release_scope: e.target.value }))}
                             >
                               <option value="all">All students</option>
-                              <option value="failed_only">Only students who failed</option>
+                              <option value="failed_and_absent">Failed / Absent</option>
+                              <option value="absent_only">Absent</option>
                             </select>
                           </div>
                           <div className="daily-session-create-field">
@@ -1992,22 +1986,6 @@ export default function AdminConsoleTestingTabs({
                               <span className="daily-session-create-switch-slider" />
                             </label>
                           </div>
-                          {renderStudentAudiencePicker({
-                            modeValue: dailySessionForm.audience_mode,
-                            selectedIds: dailySessionForm.audience_student_ids,
-                            onModeChange: (nextMode) => setDailySessionForm((s) => ({
-                              ...s,
-                              audience_mode: nextMode,
-                              audience_student_ids: nextMode === "all" ? [] : s.audience_student_ids,
-                            })),
-                            onSelectedIdsChange: (updater) => setDailySessionForm((s) => ({
-                              ...s,
-                              audience_student_ids: typeof updater === "function"
-                                ? updater(s.audience_student_ids ?? [])
-                                : updater,
-                            })),
-                            prefix: "daily-retake-audience",
-                          })}
                           <div className="daily-session-create-actions">
                             <button
                               className="btn btn-retake"
