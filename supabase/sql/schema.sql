@@ -5,6 +5,7 @@ alter table public.profiles
   add column if not exists email text,
   add column if not exists force_password_change boolean not null default false,
   add column if not exists is_withdrawn boolean not null default false,
+  add column if not exists withdrawal_date date,
   add column if not exists is_test_account boolean not null default false,
   add column if not exists phone_number text,
   add column if not exists date_of_birth date,

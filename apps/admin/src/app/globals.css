@@ -129,6 +129,78 @@ body { padding: 0; }
   flex: 0 0 auto;
 }
 
+.attendance-filter-toggle-btn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  border: 1px solid var(--admin-control-border);
+  background: #fff;
+  color: #334155;
+  box-shadow: none;
+}
+
+.attendance-filter-toggle-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.attendance-filter-toggle-btn:hover,
+.attendance-filter-toggle-btn:focus-visible {
+  background: #f8fafc;
+  border-color: var(--admin-control-border);
+  outline: none;
+}
+
+.attendance-filter-toggle-btn.active {
+  background: #e8f4df;
+  border-color: #5e8a34;
+  color: #25420b;
+  box-shadow: 0 0 0 1px rgba(94, 138, 52, 0.12);
+}
+
+.attendance-filter-toggle-indicator {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.attendance-month-nav-btn {
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  min-width: 0;
+  height: auto;
+  color: var(--admin-text);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.attendance-month-nav-btn:hover,
+.attendance-month-nav-btn:focus-visible {
+  color: #111827;
+  outline: none;
+}
+
+.attendance-month-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.results-month-label {
+  font-weight: 800;
+  font-size: 18px;
+  min-width: 108px;
+  text-align: center;
+  color: var(--admin-text);
+}
+
 .admin-loading-state {
   display: inline-flex;
   align-items: center;
@@ -1115,6 +1187,138 @@ body { padding: 0; }
   color: var(--admin-text);
 }
 
+.student-detail-status-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.student-detail-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  border: 1px solid transparent;
+}
+
+.student-detail-status-pill-test {
+  background: rgba(29, 78, 216, 0.1);
+  color: #1d4ed8;
+  border-color: rgba(29, 78, 216, 0.18);
+}
+
+.student-detail-status-pill-withdrawn {
+  background: rgba(75, 85, 99, 0.12);
+  color: #374151;
+  border-color: rgba(75, 85, 99, 0.18);
+}
+
+.student-detail-shell {
+  transition: filter 0.18s ease;
+}
+
+.student-detail-shell-withdrawn {
+  filter: brightness(0.94) saturate(0.82);
+}
+
+.student-actions-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.student-actions-list {
+  display: grid;
+  gap: 12px;
+}
+
+.student-actions-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border: 1px solid var(--admin-control-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.student-actions-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #111827;
+}
+
+.student-actions-help {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.student-actions-switch-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.student-actions-toggle-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 72px;
+  justify-content: flex-end;
+}
+
+.student-actions-saving-indicator {
+  width: 14px;
+  height: 14px;
+}
+
+.student-actions-withdrawal-controls {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.student-actions-date-field {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.student-actions-date-input-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.student-actions-date-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.student-actions-date-field input {
+  min-width: 180px;
+}
+
+.student-actions-danger {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.student-actions-delete-btn {
+  min-width: 180px;
+}
+
 .admin-top-tabs {
   display: flex;
   border: 1px solid var(--admin-control-border);
@@ -1816,6 +2020,35 @@ body { padding: 0; }
   background: #ffffff;
   color: #111827;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+}
+
+@media (max-width: 720px) {
+  .student-actions-row {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+  }
+
+  .student-actions-switch-row,
+  .student-actions-withdrawal-controls,
+  .student-actions-date-field,
+  .student-actions-danger {
+    justify-items: start;
+    justify-content: flex-start;
+  }
+
+  .student-actions-date-field input,
+  .student-actions-delete-btn {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .student-actions-date-input-row {
+    width: 100%;
+  }
+
+  .student-actions-date-input-row .btn {
+    flex: 0 0 auto;
+  }
 }
 
 .attempt-detail-tabs .admin-top-tab {
@@ -4532,12 +4765,16 @@ body { padding: 0; }
 .attendance-table-header {
   display: flex;
   justify-content: flex-end;
-  margin-top: 8px;
+  margin-top: 2px;
   margin-bottom: 0;
 }
 
 .attendance-table-header .admin-help {
   margin-top: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 @media (max-width: 960px) {
@@ -4576,18 +4813,21 @@ body { padding: 0; }
   }
   .attendance-table th,
   .attendance-table td { font-size: 12px; padding: 8px 8px; }
-  .attendance-table-header { justify-content: flex-start; }
+  .attendance-table-header { justify-content: flex-end; }
+  .attendance-table-header .admin-help {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
 }
 
 .att-legend-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 4px 8px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  margin-right: 6px;
   background: #f3f4f6;
 }
 
