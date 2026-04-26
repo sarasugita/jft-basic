@@ -30,6 +30,12 @@ import {
 import { getPassRateForVersion } from "../lib/sessionHelpers.js";
 import { triggerRender } from "../lib/renderBus.js";
 
+const closeIconSvg = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M6 6l12 12M18 6l-12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+  </svg>
+`;
+
 const RESULTS_PAGE_SIZE = 20;
 
 export function buildModelResultsTabHTML() {
@@ -125,7 +131,7 @@ export function buildModelResultsTabHTML() {
                 <div class="result-modal-title" id="resultDetailPopupTitle">${escapeHtml(resultDetailState.popupTitle || "Questions")}</div>
                 <div class="result-modal-meta">${popupRows.length} question${popupRows.length === 1 ? "" : "s"}</div>
               </div>
-              <button class="student-modal-close" type="button" id="resultDetailPopupClose" aria-label="Close">×</button>
+              <button class="student-modal-close" type="button" id="resultDetailPopupClose" aria-label="Close">${closeIconSvg}</button>
             </div>
             <div class="detail-section">
               ${renderDetailTable(popupRows, showAnswers)}

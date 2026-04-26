@@ -17,6 +17,12 @@ import { authState } from "../state/authState";
 import { supabase } from "../supabaseClient";
 import { triggerRender } from "../lib/renderBus";
 
+const closeIconSvg = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M6 6l12 12M18 6l-12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+  </svg>
+`;
+
 export function buildPersonalInfoTabHTML() {
   const profile = authState.profile ?? {};
   const profileUploads = getProfileUploads(profile.profile_uploads);
@@ -80,7 +86,7 @@ export function buildPersonalInfoTabHTML() {
       <div class="student-modal student-info-modal" role="dialog" aria-modal="true" aria-labelledby="personalInfoTitle">
         <div class="student-modal-header">
           <div class="student-modal-title" id="personalInfoTitle">Edit Personal Information</div>
-          <button class="btn" type="button" id="personalInfoClose">Close</button>
+          <button class="student-modal-close" type="button" id="personalInfoClose" aria-label="Close">${closeIconSvg}</button>
         </div>
         <div class="student-modal-body">
           <div class="student-info-form-grid">

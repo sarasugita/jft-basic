@@ -87,7 +87,7 @@ export async function fetchAbsenceApplications() {
   try {
     const { data, error } = await supabase
       .from("absence_applications")
-      .select("id, type, day_date, status, reason, catch_up, late_type, time_value, created_at")
+      .select("id, type, day_date, status, reason, catch_up, late_type, time_value, admin_comment, created_at")
       .eq("student_id", authState.session.user.id)
       .order("created_at", { ascending: false })
       .limit(200);

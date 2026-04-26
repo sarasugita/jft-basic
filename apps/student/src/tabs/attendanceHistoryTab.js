@@ -3,13 +3,20 @@ import { formatDateShort } from "../lib/formatters";
 import { renderLoadingIndicator } from "../lib/loadingIndicator";
 import { state, saveState } from "../state/appState";
 import { authState } from "../state/authState";
-import { absenceApplicationsState } from "../state/attendanceState";
+import { absenceApplicationsState, fetchAbsenceApplications } from "../state/attendanceState";
 import { triggerRender } from "../lib/renderBus";
+
+const closeIconSvg = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M6 6l12 12M18 6l-12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+  </svg>
+`;
 
 export function buildAttendanceHistoryTabHTML() {
   if (!authState.session) {
     return `<div class="text-muted">Log in to see attendance history.</div>`;
   }
+  const isRefreshing = absenceApplicationsState.loading;
 
   const bodyHtml = absenceApplicationsState.loading
     ? renderLoadingIndicator("Loading applications...")
@@ -85,6 +92,25 @@ export function buildAttendanceHistoryTabHTML() {
           </svg>
         </button>
         <h2 class="student-home-title">Application History</h2>
+        <button class="application-history-refresh" type="button" id="attendanceHistoryRefresh" aria-label="Refresh history" ${isRefreshing ? "disabled" : ""}>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path
+              d="M16 10a6 6 0 1 1-1.76-4.24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            />
+            <path
+              d="M16 4.5v3.75h-3.75"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
       </div>
       ${bodyHtml}
     </section>
@@ -92,7 +118,7 @@ export function buildAttendanceHistoryTabHTML() {
       <div class="student-modal" role="dialog" aria-modal="true" aria-labelledby="applicationDetailTitle">
         <div class="student-modal-header">
           <div class="student-modal-title" id="applicationDetailTitle">Application Details</div>
-          <button class="btn" type="button" id="applicationDetailClose">Close</button>
+          <button class="student-modal-close" type="button" id="applicationDetailClose" aria-label="Close">${closeIconSvg}</button>
         </div>
         <div class="student-modal-body" id="applicationDetailBody"></div>
       </div>
@@ -108,6 +134,12 @@ export function bindAttendanceHistoryTabEvents(app) {
     state.studentTab = "attendance";
     saveState();
     triggerRender();
+  });
+
+  app.querySelector("#attendanceHistoryRefresh")?.addEventListener("click", () => {
+    const refresh = fetchAbsenceApplications();
+    triggerRender();
+    refresh.finally(triggerRender);
   });
 
   app.querySelector("#applicationDetailClose")?.addEventListener("click", () => {
@@ -172,6 +204,16 @@ export function bindAttendanceHistoryTabEvents(app) {
           <div class="application-detail-label">Catch Up</div>
           <div class="application-detail-value">${escapeHtml(appItem.catch_up || "")}</div>
         </div>
+        ${
+          appItem.admin_comment
+            ? `
+              <div class="application-detail-row">
+                <div class="application-detail-label">Admin Comment</div>
+                <div class="application-detail-value">${escapeHtml(appItem.admin_comment || "")}</div>
+              </div>
+            `
+            : ""
+        }
       `;
       detailModal.hidden = false;
     });

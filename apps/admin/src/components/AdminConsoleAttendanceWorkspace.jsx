@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceState";
 
@@ -50,6 +51,11 @@ export default function AdminConsoleAttendanceWorkspace() {
     fetchAbsenceApplications,
     absenceApplications,
     decideAbsenceApplication,
+    openDenyAbsenceApplication,
+    closeDenyAbsenceApplication,
+    confirmDenyAbsenceApplication,
+    denyApplicationModal,
+    setDenyApplicationModal,
     absenceApplicationsMsg,
     buildAttendanceStats,
     getAttendanceStatusClassName,
@@ -146,23 +152,23 @@ export default function AdminConsoleAttendanceWorkspace() {
                     <td>{typeLabel}</td>
                     <td>{a.day_date}</td>
                     <td>{timeLabel}</td>
-                    <td>{a.reason || ""}</td>
-                    <td>{a.catch_up || ""}</td>
-                    <td>{a.status}</td>
-                    <td>
-                      {a.status === "pending" ? (
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button className="btn btn-primary" onClick={() => decideAbsenceApplication(a.id, "approved")}>
-                            Approve
-                          </button>
-                          <button className="btn btn-danger" onClick={() => decideAbsenceApplication(a.id, "denied")}>
-                            Deny
-                          </button>
-                        </div>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
+                        <td>{a.reason || ""}</td>
+                        <td>{a.catch_up || ""}</td>
+                        <td>{a.status}</td>
+                        <td>
+                          {a.status === "pending" ? (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              <button className="btn btn-primary" onClick={() => decideAbsenceApplication(a.id, "approved")}>
+                                Approve
+                              </button>
+                              <button className="btn btn-danger" onClick={() => openDenyAbsenceApplication(a)}>
+                                Deny
+                              </button>
+                            </div>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
                   </tr>
                 );
               })}
@@ -170,6 +176,81 @@ export default function AdminConsoleAttendanceWorkspace() {
           </table>
         </div>
         <div className="admin-msg">{absenceApplicationsMsg}</div>
+        {denyApplicationModal.open && typeof document !== "undefined"
+          ? createPortal(
+            <div
+              className="admin-modal-overlay"
+              onClick={closeDenyAbsenceApplication}
+              role="presentation"
+            >
+              <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="admin-modal-header">
+                  <div className="admin-title">Deny Application</div>
+                  <button
+                    className="admin-modal-close"
+                    type="button"
+                    aria-label="Close"
+                    onClick={closeDenyAbsenceApplication}
+                    disabled={denyApplicationModal.saving}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div className="admin-subtitle">
+                    Comment is optional and will be shown to the student.
+                  </div>
+                  <div className="admin-help">
+                    <div>
+                      <strong>Student:</strong>{" "}
+                      {String(denyApplicationModal.application?.profiles?.display_name || denyApplicationModal.application?.student_id || "Student")}
+                    </div>
+                    <div>
+                      <strong>Date:</strong> {String(denyApplicationModal.application?.day_date || "")}
+                    </div>
+                  </div>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span className="admin-help">Comment (optional)</span>
+                    <textarea
+                      value={denyApplicationModal.comment}
+                      onChange={(e) =>
+                        setDenyApplicationModal((current) => ({
+                          ...current,
+                          comment: e.target.value,
+                        }))
+                      }
+                      rows={4}
+                      placeholder="Add a note for the student, or leave blank."
+                      style={{
+                        width: "100%",
+                        minHeight: 110,
+                        resize: "vertical",
+                        border: "1px solid var(--admin-control-border)",
+                        borderRadius: 8,
+                        padding: "10px 12px",
+                        font: "inherit",
+                        fontSize: 14,
+                      }}
+                      disabled={denyApplicationModal.saving}
+                    />
+                  </label>
+                  {denyApplicationModal.msg ? (
+                    <div className="admin-msg">{denyApplicationModal.msg}</div>
+                  ) : null}
+                </div>
+                <div className="admin-modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+                  <button className="btn" type="button" onClick={closeDenyAbsenceApplication} disabled={denyApplicationModal.saving}>
+                    Cancel
+                  </button>
+                  <button className="btn btn-danger" type="button" onClick={confirmDenyAbsenceApplication} disabled={denyApplicationModal.saving}>
+                    {denyApplicationModal.saving ? "Denying..." : "Deny"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+          : null}
       </div>
     );
   }

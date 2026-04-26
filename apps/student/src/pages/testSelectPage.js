@@ -27,6 +27,12 @@ import { buildRankingTabHTML, bindRankingTabEvents } from "../tabs/rankingTab";
 import { buildAttendanceTabHTML, bindAttendanceTabEvents } from "../tabs/attendanceTab";
 import { buildAttendanceHistoryTabHTML, bindAttendanceHistoryTabEvents } from "../tabs/attendanceHistoryTab";
 
+const closeIconSvg = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M6 6l12 12M18 6l-12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+  </svg>
+`;
+
 export function renderTestSelect(app) {
   const activeSections = getActiveSections();
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId;
@@ -100,7 +106,7 @@ export function renderTestSelect(app) {
         <div class="student-menu-overlay" id="studentMenuOverlay" hidden>
           <nav class="student-menu-panel" id="studentMenu" aria-label="Student menu">
             <div class="student-menu-header">
-              <button class="student-menu-close" type="button" data-student-menu-close aria-label="Close menu">×</button>
+              <button class="student-menu-close" type="button" data-student-menu-close aria-label="Close menu">${closeIconSvg}</button>
             </div>
             <button class="student-menu-item" data-student-tab="home">
               <span class="student-menu-icon" aria-hidden="true">

@@ -156,6 +156,7 @@ create table if not exists public.absence_applications (
   catch_up text,
   late_type text, -- 'late' or 'leave_early'
   time_value text,
+  admin_comment text,
   created_at timestamptz not null default now(),
   decided_at timestamptz,
   decided_by uuid references public.profiles(id) on delete set null

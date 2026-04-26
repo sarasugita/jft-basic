@@ -8,6 +8,12 @@ import { studentAttendanceState } from "../state/attendanceState";
 import { supabase } from "../supabaseClient";
 import { triggerRender } from "../lib/renderBus";
 
+const closeIconSvg = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M6 6l12 12M18 6l-12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+  </svg>
+`;
+
 export function buildAttendanceTabHTML() {
   if (!authState.session) {
     return `<div class="text-muted">Log in to see attendance.</div>`;
@@ -191,7 +197,7 @@ export function buildAttendanceTabHTML() {
       <div class="student-modal" role="dialog" aria-modal="true" aria-labelledby="excusedTitle">
         <div class="student-modal-header">
           <div class="student-modal-title" id="excusedTitle">Excused Absence</div>
-          <button class="btn" type="button" id="excusedClose">Close</button>
+          <button class="student-modal-close" type="button" id="excusedClose" aria-label="Close">${closeIconSvg}</button>
         </div>
         <div class="student-modal-body">
           <label class="form-label">Date</label>
@@ -211,7 +217,7 @@ export function buildAttendanceTabHTML() {
       <div class="student-modal" role="dialog" aria-modal="true" aria-labelledby="lateTitle">
         <div class="student-modal-header">
           <div class="student-modal-title" id="lateTitle">Late / Leave Early</div>
-          <button class="btn" type="button" id="lateClose">Close</button>
+          <button class="student-modal-close" type="button" id="lateClose" aria-label="Close">${closeIconSvg}</button>
         </div>
         <div class="student-modal-body">
           <label class="form-label">Date</label>

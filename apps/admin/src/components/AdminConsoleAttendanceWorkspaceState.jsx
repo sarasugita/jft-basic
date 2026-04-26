@@ -295,6 +295,13 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
   });
   const [absenceApplications, setAbsenceApplications] = useState([]);
   const [absenceApplicationsMsg, setAbsenceApplicationsMsg] = useState("");
+  const [denyApplicationModal, setDenyApplicationModal] = useState({
+    open: false,
+    application: null,
+    comment: "",
+    saving: false,
+    msg: "",
+  });
 
   const attendanceImportInputRef = useRef(null);
   const attendanceImportChoiceResolverRef = useRef(null);
@@ -428,7 +435,7 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAbsenceApplicationsMsg("Loading...");
     const { data, error } = await supabase
       .from("absence_applications")
-      .select("id, student_id, type, day_date, status, reason, catch_up, late_type, time_value, created_at, decided_at, profiles:student_id (display_name, student_code, email)")
+      .select("id, student_id, type, day_date, status, reason, catch_up, late_type, time_value, admin_comment, created_at, decided_at, profiles:student_id (display_name, student_code, email)")
       .eq("school_id", activeSchoolId)
       .order("created_at", { ascending: false })
       .limit(200);
@@ -442,21 +449,47 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAbsenceApplicationsMsg(data?.length ? "" : "No applications.");
   }
 
-  async function decideAbsenceApplication(id, nextStatus) {
+  function openDenyAbsenceApplication(application) {
+    if (!application?.id) return;
+    setDenyApplicationModal({
+      open: true,
+      application,
+      comment: String(application.admin_comment ?? ""),
+      saving: false,
+      msg: "",
+    });
+  }
+
+  function closeDenyAbsenceApplication() {
+    setDenyApplicationModal((current) => (current.saving ? current : {
+      open: false,
+      application: null,
+      comment: "",
+      saving: false,
+      msg: "",
+    }));
+  }
+
+  async function decideAbsenceApplication(id, nextStatus, options = {}) {
     if (!id) return;
     const targetApplication = (absenceApplications ?? []).find((item) => item.id === id) ?? null;
+    const adminComment = String(options?.adminComment ?? options?.comment ?? "").trim();
+    const updatePayload = {
+      status: nextStatus,
+      decided_at: new Date().toISOString(),
+      decided_by: session?.user?.id ?? null,
+    };
+    if (nextStatus === "denied") {
+      updatePayload.admin_comment = adminComment || null;
+    }
     const { error } = await supabase
       .from("absence_applications")
-      .update({
-        status: nextStatus,
-        decided_at: new Date().toISOString(),
-        decided_by: session?.user?.id ?? null
-      })
+      .update(updatePayload)
       .eq("id", id);
     if (error) {
       console.error("absence application update error:", error);
       setAbsenceApplicationsMsg(`Update failed: ${error.message}`);
-      return;
+      return { ok: false, error: error.message };
     }
     await recordAdminAuditEvent(supabase, {
       actionType: nextStatus === "approved" ? "approve" : "deny",
@@ -468,9 +501,35 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
         application_type: targetApplication?.type ?? null,
         day_date: targetApplication?.day_date ?? null,
         status: nextStatus,
+        admin_comment: nextStatus === "denied" ? (adminComment || null) : null,
       },
     });
     fetchAbsenceApplications();
+    return { ok: true };
+  }
+
+  async function confirmDenyAbsenceApplication() {
+    const current = denyApplicationModal.application;
+    if (!current?.id) return;
+    setDenyApplicationModal((prev) => ({ ...prev, saving: true, msg: "" }));
+    const result = await decideAbsenceApplication(current.id, "denied", {
+      adminComment: denyApplicationModal.comment,
+    });
+    if (result?.ok) {
+      setDenyApplicationModal({
+        open: false,
+        application: null,
+        comment: "",
+        saving: false,
+        msg: "",
+      });
+      return;
+    }
+    setDenyApplicationModal((prev) => ({
+      ...prev,
+      saving: false,
+      msg: `Deny failed: ${result?.error || "Unknown error"}`,
+    }));
   }
 
   function applyAttendanceSheetSnapshot(schoolIdSnapshot, nextAttendanceDays, nextAttendanceEntries, nextAttendanceMsg = "", nextViewMonth) {
@@ -1005,6 +1064,8 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     setAbsenceApplications,
     absenceApplicationsMsg,
     setAbsenceApplicationsMsg,
+    denyApplicationModal,
+    setDenyApplicationModal,
     attendanceImportInputRef,
     attendanceImportChoiceResolverRef,
     fetchAttendanceDays,
@@ -1020,6 +1081,9 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
     clearAllAttendanceValues,
     cleanupInvalidAttendanceDates,
     fetchAbsenceApplications,
+    openDenyAbsenceApplication,
+    closeDenyAbsenceApplication,
+    confirmDenyAbsenceApplication,
     decideAbsenceApplication,
     buildAttendanceStats,
     buildAttendancePieData,
