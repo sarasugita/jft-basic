@@ -3040,6 +3040,21 @@ function normalizeCsvValue(value) {
   return raw;
 }
 
+function findDuplicateOptionValues(options) {
+  const counts = new Map();
+  const labels = new Map();
+  for (const option of options ?? []) {
+    const label = String(option ?? "").trim();
+    if (!label) continue;
+    const normalized = label.normalize("NFKC");
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    if (!labels.has(normalized)) labels.set(normalized, label);
+  }
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([label]) => labels.get(label) ?? label);
+}
+
 function parseAnswerIndex(value) {
   const raw = normalizeCsvValue(value).toUpperCase();
   const map = { A: 0, B: 1, C: 2, D: 3 };
@@ -8077,15 +8092,16 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   async function fetchTestSessions() {
     setTestSessionsMsg("Loading...");
+    const testSessionSelect = "id, problem_set_id, title, session_category, source_set_ids, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, audience_mode, audience_student_ids, created_at";
     let { data, error } = await supabase
       .from("test_sessions")
-      .select("id, problem_set_id, title, session_category, source_set_ids, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, retake_source_session_id, retake_release_scope, created_at")
+      .select(testSessionSelect)
       .order("created_at", { ascending: false })
       .limit(500);
     if (error && isMissingRetakeSessionFieldsError(error)) {
       ({ data, error } = await supabase
         .from("test_sessions")
-        .select("id, problem_set_id, title, session_category, starts_at, ends_at, time_limit_min, is_published, show_answers, allow_multiple_attempts, created_at")
+        .select(testSessionSelect)
         .order("created_at", { ascending: false })
         .limit(500));
     }
@@ -10300,6 +10316,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
           errors.push(`Row ${r + 1} (${rawQid}): choices are required.`);
           continue;
         }
+        const duplicateOptions = findDuplicateOptionValues(choicesList);
+        if (duplicateOptions.length) {
+          errors.push(
+            `Row ${r + 1} (${rawQid}): duplicate answer option(s) found: ${duplicateOptions.join(", ")}. ` +
+            "Each question must have unique choices.",
+          );
+          continue;
+        }
 
         const type = inferModelQuestionType({
           sectionKey,
@@ -10389,6 +10413,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
       }
       if (choicesList.length === 0) {
         errors.push(`Row ${r + 1} (${questionId}): choices are required.`);
+        continue;
+      }
+      const duplicateOptions = findDuplicateOptionValues(choicesList);
+      if (duplicateOptions.length) {
+        errors.push(
+          `Row ${r + 1} (${questionId}): duplicate answer option(s) found: ${duplicateOptions.join(", ")}. ` +
+          "Each question must have unique choices.",
+        );
         continue;
       }
       if (answerIndex >= choicesList.length) {
@@ -10506,6 +10538,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
       const choicesList = [correct, ...wrongs].filter(Boolean);
       if (choicesList.length === 0) {
         errors.push(`Row ${r + 1} (${questionId}): choices are required.`);
+        continue;
+      }
+      const duplicateOptions = findDuplicateOptionValues(choicesList);
+      if (duplicateOptions.length) {
+        errors.push(
+          `Row ${r + 1} (${questionId}): duplicate answer option(s) found: ${duplicateOptions.join(", ")}. ` +
+          "Each question must have unique choices.",
+        );
         continue;
       }
       const answerIndex = 0;

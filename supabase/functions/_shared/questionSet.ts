@@ -305,6 +305,21 @@ function normalizeCsvCellValue(value: unknown) {
   return raw;
 }
 
+function findDuplicateOptionValues(options: unknown[]) {
+  const counts = new Map<string, number>();
+  const labels = new Map<string, string>();
+  for (const option of options) {
+    const label = String(option ?? "").trim();
+    if (!label) continue;
+    const normalized = label.normalize("NFKC");
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    if (!labels.has(normalized)) labels.set(normalized, label);
+  }
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([label]) => labels.get(label) ?? label);
+}
+
 function hashSeed(str: string) {
   let h = 0;
   for (let i = 0; i < str.length; i += 1) {
@@ -623,6 +638,14 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Ques
       errors.push(`Row ${rowIndex + 1} (${qid}): choices are required.`);
       continue;
     }
+    const duplicateOptions = findDuplicateOptionValues(options);
+    if (duplicateOptions.length) {
+      errors.push(
+        `Row ${rowIndex + 1} (${qid}): duplicate answer option(s) found: ${duplicateOptions.join(", ")}. ` +
+        `Each question must have unique choices.`,
+      );
+      continue;
+    }
     const answerIndex = 0;
 
     const mediaType = illustration ? inferMediaType(illustration) : null;
@@ -748,6 +771,14 @@ function validateFlatModelQuestionSetCsv(rows: string[][], assetFiles: File[]): 
     const options = [correct, ...wrongs].filter(Boolean);
     if (!options.length) {
       errors.push(`Row ${rowIndex + 1} (${rawQid}): choices are required.`);
+      continue;
+    }
+    const duplicateOptions = findDuplicateOptionValues(options);
+    if (duplicateOptions.length) {
+      errors.push(
+        `Row ${rowIndex + 1} (${rawQid}): duplicate answer option(s) found: ${duplicateOptions.join(", ")}. ` +
+        `Each question must have unique choices.`,
+      );
       continue;
     }
 
@@ -922,6 +953,14 @@ function validateSingleQuestionSetCsv(rows: string[][], assetFiles: File[], test
       } catch {
         errors.push(`Row ${rowIndex + 1} (${qid}): options must be valid JSON or pipe-separated text.`);
       }
+    }
+    const duplicateOptions = findDuplicateOptionValues(options);
+    if (duplicateOptions.length) {
+      errors.push(
+        `Row ${rowIndex + 1} (${qid}): duplicate answer option(s) found: ${duplicateOptions.join(", ")}. ` +
+        `Each question must have unique choices.`,
+      );
+      continue;
     }
 
     let correctAnswer: unknown = correctAnswerRaw;

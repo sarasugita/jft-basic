@@ -13,6 +13,32 @@ import {
   validateQuestionSetCsv,
 } from "../_shared/questionSet.ts";
 
+function findDuplicateOptionErrors(validation: Awaited<ReturnType<typeof validateQuestionSetCsv>>) {
+  const errors: string[] = [];
+  for (const questionSet of validation.question_sets ?? []) {
+    for (const question of questionSet.questions ?? []) {
+      const seen = new Set<string>();
+      const duplicates: string[] = [];
+      for (const option of question.options ?? []) {
+        const label = String(option ?? "").trim();
+        if (!label) continue;
+        const normalized = label.normalize("NFKC");
+        if (seen.has(normalized)) {
+          if (!duplicates.includes(label)) duplicates.push(label);
+          continue;
+        }
+        seen.add(normalized);
+      }
+      if (duplicates.length) {
+        errors.push(
+          `[${questionSet.set_id}] Row ${question.qid}: duplicate answer option(s) found: ${duplicates.join(", ")}. Each question must have unique choices.`,
+        );
+      }
+    }
+  }
+  return errors;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return ok({ ok: true });
   if (req.method !== "POST") return bad("Use POST");
@@ -49,6 +75,10 @@ serve(async (req) => {
   });
   if (!validation.valid) {
     return bad("Validation failed", { validation });
+  }
+  const duplicateOptionErrors = findDuplicateOptionErrors(validation);
+  if (duplicateOptionErrors.length) {
+    return bad("Validation failed", { validation: { ...validation, valid: false, errors: [...validation.errors, ...duplicateOptionErrors] } });
   }
 
   const requestedSetIds = validation.question_sets.map((group) => group.set_id);

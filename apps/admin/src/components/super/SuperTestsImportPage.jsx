@@ -85,6 +85,203 @@ function splitCsvLine(line) {
   return out;
 }
 
+function normalizeHeaderName(value) {
+  return String(value ?? "").trim().toLowerCase().replace(/^\uFEFF/, "");
+}
+
+function normalizeCsvValue(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw.toUpperCase() === "N/A") return "";
+  return raw;
+}
+
+function detectDelimiter(text) {
+  const sample = String(text ?? "").split(/\r?\n/).find((line) => line.trim().length) ?? "";
+  const commaCount = (sample.match(/,/g) ?? []).length;
+  const tabCount = (sample.match(/\t/g) ?? []).length;
+  return tabCount > commaCount ? "\t" : ",";
+}
+
+function parseSeparatedRows(text, delimiter) {
+  const rows = [];
+  let current = "";
+  let inQuotes = false;
+  const source = String(text ?? "");
+
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    const next = source[i + 1];
+
+    if (char === "\"") {
+      current += char;
+      if (inQuotes && next === "\"") {
+        current += next;
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") i += 1;
+      if (current.trim().length > 0) {
+        rows.push(splitCsvLine(current).map((value) => value.trim().replace(/^\uFEFF/, "")));
+      }
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim().length > 0) {
+    rows.push(splitCsvLine(current).map((value) => value.trim().replace(/^\uFEFF/, "")));
+  }
+
+  return rows;
+}
+
+function findDuplicateOptionValues(options) {
+  const counts = new Map();
+  const labels = new Map();
+  for (const option of options ?? []) {
+    const label = String(option ?? "").trim();
+    if (!label) continue;
+    const normalized = label.normalize("NFKC");
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    if (!labels.has(normalized)) labels.set(normalized, label);
+  }
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([label]) => labels.get(label) ?? label);
+}
+
+function inspectCsvForDuplicateOptions(text, testType) {
+  const rows = parseSeparatedRows(text, detectDelimiter(text));
+  if (rows.length === 0) {
+    return ["CSV is empty."];
+  }
+
+  const header = rows[0].map(normalizeHeaderName);
+  const findIdx = (names) => {
+    for (const name of names) {
+      const idx = header.indexOf(normalizeHeaderName(name));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+
+  const errors = [];
+  const isDaily = String(testType ?? "daily") === "daily";
+  const isFlatModel = !isDaily && findIdx(["qid"]) !== -1 && findIdx(["sub_section", "sub section"]) !== -1 && findIdx(["correct_option", "correct option"]) !== -1;
+
+  if (isDaily) {
+    const idxNo = findIdx(["qid", "q_id", "q id", "no", "no.", "number"]);
+    const idxQuestion = findIdx(["question"]);
+    const idxCorrect = findIdx(["correct_option", "correct option", "correct_answer", "correct answer", "correct"]);
+    const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1", "wrong1", "wrong option1"]);
+    const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2", "wrong2", "wrong option2"]);
+    const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3", "wrong3", "wrong option3"]);
+    const getCell = (row, idx) => (idx === -1 ? "" : normalizeCsvValue(row[idx]));
+
+    for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      const noValue = getCell(row, idxNo);
+      const questionText = getCell(row, idxQuestion);
+      const correct = getCell(row, idxCorrect);
+      const wrongs = [getCell(row, idxWrong1), getCell(row, idxWrong2), getCell(row, idxWrong3)].filter(Boolean);
+      if (!noValue && !questionText && !correct) continue;
+      const qid = noValue || `daily-${rowIndex}`;
+      const options = [correct, ...wrongs].filter(Boolean);
+      const duplicateOptions = findDuplicateOptionValues(options);
+      if (duplicateOptions.length) {
+        errors.push(`[${qid}] duplicate answer option(s) found: ${duplicateOptions.join(", ")}. Each question must have unique choices.`);
+      }
+    }
+    return errors;
+  }
+
+  if (isFlatModel) {
+    const idxQid = findIdx(["qid"]);
+    const idxSubSection = findIdx(["sub_section", "sub section"]);
+    const idxCorrect = findIdx(["correct_option", "correct option"]);
+    const idxWrong1 = findIdx(["wrong_option_1", "wrong option 1"]);
+    const idxWrong2 = findIdx(["wrong_option_2", "wrong option 2"]);
+    const idxWrong3 = findIdx(["wrong_option_3", "wrong option 3"]);
+    const getCell = (row, idx) => (idx === -1 ? "" : normalizeCsvValue(row[idx]));
+
+    for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      const qid = getCell(row, idxQid);
+      const subSection = getCell(row, idxSubSection);
+      const correct = getCell(row, idxCorrect);
+      const wrongs = [getCell(row, idxWrong1), getCell(row, idxWrong2), getCell(row, idxWrong3)].filter(Boolean);
+      if (!qid && !subSection && !correct) continue;
+      const options = [correct, ...wrongs].filter(Boolean);
+      const duplicateOptions = findDuplicateOptionValues(options);
+      if (duplicateOptions.length) {
+        errors.push(`[${qid || `row-${rowIndex}`}] duplicate answer option(s) found: ${duplicateOptions.join(", ")}. Each question must have unique choices.`);
+      }
+    }
+    return errors;
+  }
+
+  const idxQid = findIdx(["qid"]);
+  const idxQuestionText = findIdx(["question_text", "question"]);
+  const idxQuestionType = findIdx(["question_type", "type"]);
+  const idxCorrectAnswer = findIdx(["correct_answer", "answer"]);
+  const idxOptions = findIdx(["options"]);
+
+  if (idxQid === -1 || idxQuestionText === -1 || idxQuestionType === -1 || idxCorrectAnswer === -1) {
+    return errors;
+  }
+
+  for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    const qid = idxQid === -1 ? "" : normalizeCsvValue(row[idxQid]);
+    const optionsRaw = idxOptions === -1 ? "" : String(row[idxOptions] ?? "").trim();
+    if (!qid || !optionsRaw) continue;
+    const options = optionsRaw.trim().startsWith("[")
+      ? (() => {
+          try {
+            const parsed = JSON.parse(optionsRaw);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })()
+      : optionsRaw.split("|").map((value) => value.trim()).filter(Boolean);
+    const duplicateOptions = findDuplicateOptionValues(options);
+    if (duplicateOptions.length) {
+      errors.push(`[${qid}] duplicate answer option(s) found: ${duplicateOptions.join(", ")}. Each question must have unique choices.`);
+    }
+  }
+
+  return errors;
+}
+
+function buildDuplicateOptionValidation(errors) {
+  return {
+    valid: false,
+    summary: {
+      set_count: 0,
+      question_count: 0,
+      asset_reference_count: 0,
+    },
+    question_sets: [],
+    errors,
+    warnings: [],
+  };
+}
+
+async function inspectCsvFileForDuplicateOptions(file, testType) {
+  if (!file) return [];
+  const text = await file.text();
+  return inspectCsvForDuplicateOptions(text, testType);
+}
+
 function getUploadFiles(csvFile, assetFiles) {
   const files = [];
   const seen = new Set();
@@ -824,6 +1021,14 @@ export default function SuperTestsImportPage() {
 
     setValidationMsg("");
     try {
+      const localDuplicateErrors = await inspectCsvFileForDuplicateOptions(csvFile, uploadForm.test_type);
+      if (localDuplicateErrors.length) {
+        const report = buildDuplicateOptionValidation(localDuplicateErrors);
+        setValidation(report);
+        setValidationMsg("Validation found errors.");
+        return report;
+      }
+
       const totalFiles = getUploadFiles(csvFile, assetFiles).length;
       setUploadProgress({ phase: "Validating files", uploaded: 0, total: totalFiles });
       const result = await invokeUploadFunction("validate-question-set-upload", uploadForm, csvFile, assetFiles, setUploadProgress);
@@ -991,6 +1196,14 @@ export default function SuperTestsImportPage() {
           mode: "version",
           source_question_set_id: metaForm.question_set_id,
         };
+        const localDuplicateErrors = await inspectCsvFileForDuplicateOptions(metaCsvFile, metaForm.test_type);
+        if (localDuplicateErrors.length) {
+          const report = buildDuplicateOptionValidation(localDuplicateErrors);
+          setMetaValidation(report);
+          setMetaValidationMsg("Validation found errors.");
+          return;
+        }
+
         const totalFiles = getUploadFiles(metaCsvFile, metaAssetFiles).length;
         setMetaValidationMsg("");
         setMetaUploadProgress({ phase: "Validating files", uploaded: 0, total: totalFiles });
