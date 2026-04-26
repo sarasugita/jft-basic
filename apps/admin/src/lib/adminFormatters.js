@@ -44,3 +44,68 @@ export function getBangladeshDateInput(value) {
   const input = toBangladeshInput(value);
   return input ? input.slice(0, 10) : "";
 }
+
+function addBangladeshDateDays(dateInput, offsetDays) {
+  const match = String(dateInput ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return "";
+  date.setUTCDate(date.getUTCDate() + Number(offsetDays || 0));
+  const nextYear = date.getUTCFullYear();
+  const nextMonth = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const nextDay = String(date.getUTCDate()).padStart(2, "0");
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function formatBangladeshMonthDay(dateInput) {
+  const match = String(dateInput ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  return `${Number(match[2])}/${Number(match[3])}`;
+}
+
+function getBangladeshWeekdayIndex(dateInput) {
+  const match = String(dateInput ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0));
+  if (Number.isNaN(date.getTime())) return null;
+  const weekday = date.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    weekday: "short",
+  });
+  const weekdayMap = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return weekdayMap[weekday] ?? null;
+}
+
+export function getLatestCompletedSundayThursdayRange(referenceValue = new Date()) {
+  const currentDate = getBangladeshDateInput(referenceValue);
+  if (!currentDate) return null;
+  const weekdayIndex = getBangladeshWeekdayIndex(currentDate);
+  if (weekdayIndex == null) return null;
+
+  const endOffset = weekdayIndex >= 5 ? -(weekdayIndex - 4) : -(weekdayIndex + 3);
+  const endDate = addBangladeshDateDays(currentDate, endOffset);
+  const startDate = addBangladeshDateDays(endDate, -4);
+  if (!startDate || !endDate) return null;
+
+  return {
+    startDate,
+    endDate,
+    label: `${formatBangladeshMonthDay(startDate)}~${formatBangladeshMonthDay(endDate)}`,
+  };
+}
+
+export function buildWeeklyReviewTitle(referenceValue = new Date()) {
+  const range = getLatestCompletedSundayThursdayRange(referenceValue);
+  return range?.label ? `Weekly Review (${range.label})` : "Weekly Review";
+}

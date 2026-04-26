@@ -3,7 +3,10 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
-import { useDailyRecordWorkspaceState } from "./AdminConsoleDailyRecordWorkspaceState";
+import {
+  IRODORI_BOOK_OPTIONS,
+  useDailyRecordWorkspaceState,
+} from "./AdminConsoleDailyRecordWorkspaceState";
 
 // Constants for candos
 const IRODORI_CANDO_BY_BOOK = {
@@ -623,9 +626,11 @@ export default function AdminConsoleDailyRecordWorkspace() {
                                 value={entry.book || "starter"}
                                 onChange={(e) => updateDailyRecordTextbookEntry(entry.tempId, { book: e.target.value })}
                               >
-                                <option value="starter">Starter</option>
-                                <option value="beginner_1">Beginner 1</option>
-                                <option value="beginner_2">Beginner 2</option>
+                                {IRODORI_BOOK_OPTIONS.map((bookOption) => (
+                                  <option key={bookOption.value} value={bookOption.value}>
+                                    {bookOption.optionLabel}
+                                  </option>
+                                ))}
                               </select>
                             </div>
                             <div>

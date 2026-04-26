@@ -11,12 +11,14 @@ import {
 // Constants - Irodori textbook and lessons
 const DAILY_RECORD_CONTENT_FORMAT = "daily_record_content_v1";
 const IRODORI_TEXTBOOK_VALUE = "irodori";
-const IRODORI_BOOK_OPTIONS = [
-  { value: "starter", label: "Starter" },
-  { value: "beginner_1", label: "Beginner 1" },
-  { value: "beginner_2", label: "Beginner 2" },
+export const IRODORI_BOOK_OPTIONS = [
+  { value: "starter", optionLabel: "Book 1 (Starter)", displayLabel: "Book 1" },
+  { value: "beginner_1", optionLabel: "Book 2 (Beginner 1)", displayLabel: "Book 2" },
+  { value: "beginner_2", optionLabel: "Book 3 (Beginner 2)", displayLabel: "Book 3" },
 ];
-const IRODORI_BOOK_LABELS = Object.fromEntries(IRODORI_BOOK_OPTIONS.map((option) => [option.value, option.label]));
+const IRODORI_BOOK_VALUES = new Set(IRODORI_BOOK_OPTIONS.map((option) => option.value));
+const IRODORI_BOOK_OPTION_LABELS = Object.fromEntries(IRODORI_BOOK_OPTIONS.map((option) => [option.value, option.optionLabel]));
+const IRODORI_BOOK_DISPLAY_LABELS = Object.fromEntries(IRODORI_BOOK_OPTIONS.map((option) => [option.value, option.displayLabel]));
 const IRODORI_BOOK_ORDER = Object.fromEntries(IRODORI_BOOK_OPTIONS.map((option, index) => [option.value, index]));
 const IRODORI_LESSON_OPTIONS = Array.from({ length: 18 }, (_, index) => String(index + 1));
 const DAILY_RECORD_COMMENT_FIELDS = "id, student_id, comment, profiles(display_name, student_code)";
@@ -144,8 +146,16 @@ function getIrodoriCanDoOptions(book, lesson) {
   return IRODORI_CANDO_BY_BOOK?.[book]?.[String(lesson)] ?? [];
 }
 
+export function getIrodoriBookOptionLabel(book) {
+  return IRODORI_BOOK_OPTION_LABELS[book] || book || "";
+}
+
+export function getIrodoriBookDisplayLabel(book) {
+  return IRODORI_BOOK_DISPLAY_LABELS[book] || getIrodoriBookOptionLabel(book);
+}
+
 function sanitizeDailyRecordTextbookRow(value) {
-  const book = IRODORI_BOOK_LABELS[value?.book] ? value.book : "starter";
+  const book = IRODORI_BOOK_VALUES.has(value?.book) ? value.book : "starter";
   const lesson = IRODORI_LESSON_OPTIONS.includes(String(value?.lesson ?? "")) ? String(value.lesson) : "1";
   const options = new Set(getIrodoriCanDoOptions(book, lesson));
   const candoIds = Array.from(
@@ -208,7 +218,7 @@ function summarizeDailyRecordContent(value) {
   const content = parseDailyRecordContent(value);
   const textbookSummary = (content.textbook_entries ?? [])
     .filter((entry) => entry.cando_ids.length)
-    .map((entry) => `${IRODORI_BOOK_LABELS[entry.book] || entry.book} Lesson ${entry.lesson}: Can-do ${entry.cando_ids.join(", ")}`);
+    .map((entry) => `${getIrodoriBookDisplayLabel(entry.book)} Lesson ${entry.lesson}: Can-do ${entry.cando_ids.join(", ")}`);
   const parts = [];
   if (textbookSummary.length) parts.push(`Irodori - ${textbookSummary.join(" | ")}`);
   if (content.free_writing.trim()) parts.push(content.free_writing.trim());

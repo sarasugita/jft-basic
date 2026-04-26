@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
+import { buildWeeklyReviewTitle } from "../lib/adminFormatters";
 
 // ============================================================================
 // IMPORTS & CONSTANTS
@@ -1077,8 +1078,30 @@ function buildDailySessionTitleLabel(setIds) {
   return [...groupedLabels, ...rawLabels].join(", ");
 }
 
+function buildVocabularySessionTitle(setIds) {
+  const vocabSetNumbers = [];
+  for (const setId of setIds ?? []) {
+    const parsed = parseDailySessionSetId(setId);
+    if (!parsed || parsed.kind !== "vocab") return "";
+    if (Number.isFinite(parsed.setNumber)) {
+      vocabSetNumbers.push(parsed.setNumber);
+    }
+  }
+  const uniqueSetNumbers = Array.from(new Set(vocabSetNumbers)).sort((left, right) => left - right);
+  if (uniqueSetNumbers.length <= 1) return "";
+  const setRange = formatDailySessionNumberRanges(uniqueSetNumbers);
+  return setRange ? `Vocabulary Set ${setRange}` : "";
+}
+
 function buildDailySessionTitle({ category, setIds }) {
   const normalizedCategory = String(category ?? "").trim() || "Daily Test";
+  if (normalizedCategory.toLowerCase() === "weekly review") {
+    return buildWeeklyReviewTitle();
+  }
+  if (normalizedCategory.toLowerCase().startsWith("vocabulary")) {
+    const vocabularyTitle = buildVocabularySessionTitle(setIds);
+    if (vocabularyTitle) return vocabularyTitle;
+  }
   const normalizedSetIds = Array.from(new Set((setIds ?? []).map((setId) => String(setId ?? "").trim()).filter(Boolean)))
     .sort((left, right) => compareSetIds(left, right));
   if (!normalizedSetIds.length) return normalizedCategory;
