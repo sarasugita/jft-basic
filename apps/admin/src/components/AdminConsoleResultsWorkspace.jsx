@@ -184,6 +184,23 @@ function formatSourceQuestionLabel(sourceVersion, sourceQuestionId) {
   return version || questionNumber || "";
 }
 
+function orderPreviewChoices(choices, effectiveAnswers) {
+  const list = Array.isArray(choices) ? choices.map((choice, index) => ({ choice, index })) : [];
+  const answerOrder = Array.isArray(effectiveAnswers)
+    ? effectiveAnswers.filter((value) => Number.isFinite(Number(value))).map((value) => Number(value))
+    : [];
+  const answerRank = new Map(answerOrder.map((value, index) => [value, index]));
+  return list.sort((left, right) => {
+    const leftIsCorrect = answerRank.has(left.index);
+    const rightIsCorrect = answerRank.has(right.index);
+    if (leftIsCorrect !== rightIsCorrect) return leftIsCorrect ? -1 : 1;
+    if (leftIsCorrect && rightIsCorrect) {
+      return (answerRank.get(left.index) ?? 0) - (answerRank.get(right.index) ?? 0);
+    }
+    return left.index - right.index;
+  });
+}
+
 function isGeneratedDailySessionVersion(version) {
   return String(version ?? "").startsWith("daily_session_");
 }
@@ -2312,11 +2329,12 @@ export default function AdminConsoleResultsWorkspace(props) {
     const hasMultipleAnswers = effectiveAnswers.length > 1;
     const hasBlankAnswer = effectiveAnswers.includes(BLANK_ANSWER_INDEX);
     const isMultiSelect = multiSelectMode || hasMultipleAnswers;
+    const displayChoices = orderPreviewChoices(choices, effectiveAnswers);
 
     const renderChoices = () => (
       <div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-          {choices.map((choice, choiceIndex) => {
+          {displayChoices.map(({ choice, index: choiceIndex }) => {
             const isSelected = effectiveAnswers.includes(choiceIndex);
             const choiceValue = normalizeAdminRenderableAsset(choice);
             const isImage = isImageAsset(choiceValue);

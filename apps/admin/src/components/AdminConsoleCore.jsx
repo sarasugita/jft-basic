@@ -10496,23 +10496,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
         continue;
       }
       seenQuestionIds.add(questionId);
-      const items = [
-        ...wrongs.map((text) => ({ text, correct: false })),
-        { text: correct, correct: true }
-      ].filter((i) => i.text);
-      if (items.length === 0) {
+      const choicesList = [correct, ...wrongs].filter(Boolean);
+      if (choicesList.length === 0) {
         errors.push(`Row ${r + 1} (${questionId}): choices are required.`);
         continue;
       }
-
-      const shuffled = shuffleWithSeed(items, `${testVersion}-${questionId}`);
-      const choicesList = shuffled.map((i) => i.text);
-      const answerIndex = shuffled.findIndex((i) => i.correct);
-
-      if (answerIndex < 0) {
-        errors.push(`Row ${r + 1} (${questionId}): correct answer not found in choices.`);
-        continue;
-      }
+      const answerIndex = 0;
 
       const data = {
         itemId: questionId,

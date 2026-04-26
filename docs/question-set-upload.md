@@ -83,7 +83,7 @@ Headers used:
 `correct_option` and `wrong_option_1..3`
 
 - define the answer choices
-- preview/import keeps this order
+- uploads and version uploads keep this order in storage
 - student test delivery shuffles choice order while still storing the canonical answer correctly
 
 ## Asset Referencing

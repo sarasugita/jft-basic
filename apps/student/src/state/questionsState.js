@@ -9,7 +9,7 @@ import { getErrorMessage, logSupabaseError, logUnexpectedError } from "../lib/er
 import { triggerRender } from "../lib/renderBus";
 import { state } from "./appState";
 import { authState } from "./authState";
-import { testsState, getActiveTestVersion, getActiveTestSession, getActiveTestType, getSessionTestType } from "./testsState";
+import { testsState, getActiveTestVersion, getActiveTestSession, getSessionTestType } from "./testsState";
 
 export let questionsState = {
   loaded: false,
@@ -279,14 +279,31 @@ export function getQuestions() {
 
 export function getChoiceDisplayOrder(question) {
   const choices = Array.isArray(question?.choices) ? question.choices : [];
-  if (getActiveTestType() !== "mock" || choices.length <= 1) {
+  if (choices.length <= 1) {
     return choices.map((_, index) => index);
   }
-  const sessionId = state.linkTestSessionId || state.selectedTestSessionId || "";
-  if (!sessionId) return choices.map((_, index) => index);
+  const studentId = String(
+    authState.profile?.student_code
+    || state.user?.id
+    || authState.session?.user?.id
+    || state.user?.name
+    || ""
+  ).trim();
+  const sessionId = String(
+    state.linkTestSessionId
+    || state.selectedTestSessionId
+    || getActiveTestVersion()
+    || ""
+  ).trim();
+  const seed = [
+    studentId || "student",
+    sessionId || "session",
+    String(question?.sectionKey ?? "").trim(),
+    String(question?.id ?? "").trim(),
+  ].join(":");
   return shuffleWithSeed(
     choices.map((_, index) => index),
-    `${sessionId}:${question.sectionKey}:${question.id}:choices`,
+    `${seed}:choices`,
   );
 }
 

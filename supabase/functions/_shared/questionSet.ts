@@ -618,23 +618,12 @@ function validateDailyQuestionSetCsv(rows: string[][], assetFiles: File[]): Ques
       continue;
     }
     seenQids.add(qid);
-    const items = [
-      ...wrongs.map((text) => ({ text, correct: false })),
-      { text: correct, correct: true },
-    ].filter((item) => item.text);
-
-    if (!items.length) {
+    const options = [correct, ...wrongs].filter(Boolean);
+    if (!options.length) {
       errors.push(`Row ${rowIndex + 1} (${qid}): choices are required.`);
       continue;
     }
-
-    const shuffled = shuffleWithSeed(items, `daily-${qid}`);
-    const options = shuffled.map((item) => item.text);
-    const answerIndex = shuffled.findIndex((item) => item.correct);
-    if (answerIndex < 0) {
-      errors.push(`Row ${rowIndex + 1} (${qid}): correct answer not found in choices.`);
-      continue;
-    }
+    const answerIndex = 0;
 
     const mediaType = illustration ? inferMediaType(illustration) : null;
     if (illustration) {
