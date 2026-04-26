@@ -172,10 +172,6 @@ export default function AdminConsoleDeferredFeatures({
   const handleOpenResultsImportStatus = typeof openResultsImportStatus === "function"
     ? openResultsImportStatus
     : null;
-  const handleClearDailyResultsForCategory = typeof clearDailyResultsForCategory === "function"
-    ? clearDailyResultsForCategory
-    : null;
-  const [clearDailyResultsConfirmOpen, setClearDailyResultsConfirmOpen] = useState(false);
 
   const canAttemptOpenDetail = (attempt) => (
     typeof attemptCanOpenDetail === "function"
@@ -193,18 +189,6 @@ export default function AdminConsoleDeferredFeatures({
       total,
       rate: getScoreRate(attempt),
     };
-  };
-
-  const openClearDailyResultsConfirm = () => {
-    if (!selectedDailyCategory || !handleClearDailyResultsForCategory) return;
-    setClearDailyResultsConfirmOpen(true);
-  };
-
-  const confirmClearDailyResults = async () => {
-    const category = selectedDailyCategory;
-    if (!category || !handleClearDailyResultsForCategory) return;
-    setClearDailyResultsConfirmOpen(false);
-    await handleClearDailyResultsForCategory(category);
   };
 
   return (
@@ -311,34 +295,13 @@ export default function AdminConsoleDeferredFeatures({
                     </button>
                     {resultContext.type === "daily" ? (
                       <button
-                        className={`btn results-page-action-btn ${dailyManualEntryMode ? "active" : ""}`}
-                        type="button"
-                        onClick={() => setDailyManualEntryMode((current) => !current)}
-                        disabled={!selectedDailyCategory}
-                      >
-                        <span className="results-page-action-icon" aria-hidden="true">M</span>
-                        <span>{dailyManualEntryMode ? "Manual Entry On" : "Manual Entry"}</span>
-                      </button>
-                    ) : null}
-                    {resultContext.type === "daily" ? (
-                      <button
                         className="btn results-page-action-btn"
                         type="button"
                         onClick={() => openDailyManualColumnModal?.()}
                         disabled={!selectedDailyCategory || !openDailyManualColumnModal}
                       >
                         <span className="results-page-action-icon" aria-hidden="true">+</span>
-                        <span>New Manual Column</span>
-                      </button>
-                    ) : null}
-                    {resultContext.type === "daily" ? (
-                      <button
-                        className="btn btn-danger results-page-action-btn"
-                        type="button"
-                        onClick={openClearDailyResultsConfirm}
-                        disabled={!selectedDailyCategory || !handleClearDailyResultsForCategory}
-                      >
-                        <span>Clear All Results</span>
+                        <span>New Column</span>
                       </button>
                     ) : null}
                     <input
@@ -367,7 +330,7 @@ export default function AdminConsoleDeferredFeatures({
                 ) : null}
                 {resultContext.type === "daily" ? (
                   <div className="admin-help" style={{ marginTop: 6 }}>
-                    Use “New Manual Column” to create a new test session column from scores you enter here.
+                    Use “New Column” to create a new test session column from scores you enter here.
                   </div>
                 ) : null}
               </div>
@@ -383,7 +346,7 @@ export default function AdminConsoleDeferredFeatures({
                       <AdminLoadingState compact label="Loading..." className="admin-loading-state-inline-left" />
                     ) : null}
                     <button
-                      className="btn admin-icon-action-btn"
+                      className="attendance-month-nav-btn"
                       type="button"
                       aria-label="Previous month"
                       title="Previous month"
@@ -393,12 +356,12 @@ export default function AdminConsoleDeferredFeatures({
                     >
                       ◀
                     </button>
-                    <div style={{ fontWeight: 800, fontSize: 16, minWidth: 90, textAlign: "center", color: "var(--admin-text)" }}>
+                    <div className="results-month-label">
                       {attemptsViewMonthLabel || "—"}
                     </div>
                     {hasNextMonthAttempts ? (
                       <button
-                        className="btn admin-icon-action-btn"
+                        className="attendance-month-nav-btn"
                         type="button"
                         aria-label="Next month"
                         title="Next month"
@@ -1598,49 +1561,6 @@ export default function AdminConsoleDeferredFeatures({
           </div>
         ), document.body);
       })() : null}
-      {clearDailyResultsConfirmOpen && typeof document !== "undefined" ? createPortal((
-        <div className="admin-modal-overlay" onClick={() => setClearDailyResultsConfirmOpen(false)}>
-          <div
-            className="admin-modal"
-            onClick={(event) => event.stopPropagation()}
-            style={{ maxWidth: 560, width: "min(560px, calc(100vw - 28px))" }}
-          >
-            <div className="admin-modal-header">
-              <div className="admin-title">Clear All Results</div>
-              <button
-                className="admin-modal-close"
-                onClick={() => setClearDailyResultsConfirmOpen(false)}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="admin-help" style={{ marginTop: 12, color: "#b91c1c" }}>
-              Warning: this will permanently delete every result and session in <b>{selectedDailyCategory?.name ?? ""}</b>.
-            </div>
-            <div className="admin-help" style={{ marginTop: 8 }}>
-              This cannot be undone.
-            </div>
-            <div className="upload-question-actions" style={{ marginTop: 16 }}>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => setClearDailyResultsConfirmOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-danger"
-                type="button"
-                onClick={confirmClearDailyResults}
-                disabled={!selectedDailyCategory || !handleClearDailyResultsForCategory}
-              >
-                Clear All Results
-              </button>
-            </div>
-          </div>
-        </div>
-      ), document.body) : null}
     </>
   );
 }

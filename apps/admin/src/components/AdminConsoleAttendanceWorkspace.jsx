@@ -33,14 +33,14 @@ export default function AdminConsoleAttendanceWorkspace() {
     studentId: "all",
     type: "all",
   });
+  const [absenceApplicationFilterOpen, setAbsenceApplicationFilterOpen] = useState(false);
+  const [attendanceFilterOpen, setAttendanceFilterOpen] = useState(false);
 
   const {
     attendanceMsg,
     attendanceDate,
     setAttendanceDate,
     openAttendanceDay,
-    clearAllAttendanceValues,
-    attendanceClearing,
     attendanceImportInputRef,
     attendanceFilter,
     setAttendanceFilter,
@@ -80,6 +80,8 @@ export default function AdminConsoleAttendanceWorkspace() {
       studentId: "all",
       type: "all",
     });
+    setAbsenceApplicationFilterOpen(false);
+    setAttendanceFilterOpen(false);
   }, [activeSchoolId]);
 
   const absenceApplicationStudentOptions = useMemo(() => {
@@ -112,6 +114,22 @@ export default function AdminConsoleAttendanceWorkspace() {
     });
   }, [absenceApplications, absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
 
+  const hasAttendanceFilterValue = useMemo(() => (
+    Boolean(
+      attendanceFilter.minRate
+      || attendanceFilter.minAbsences
+      || attendanceFilter.startDate
+      || attendanceFilter.endDate
+    )
+  ), [attendanceFilter.endDate, attendanceFilter.minAbsences, attendanceFilter.minRate, attendanceFilter.startDate]);
+
+  const hasAbsenceApplicationFilterValue = useMemo(() => (
+    Boolean(
+      absenceApplicationFilter.studentId !== "all"
+      || absenceApplicationFilter.type !== "all"
+    )
+  ), [absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
+
   useEffect(() => {
     if (!activeSchoolId) return;
     if (attendanceSubTab === "sheet") {
@@ -135,86 +153,131 @@ export default function AdminConsoleAttendanceWorkspace() {
             <div className="admin-title">Absence Applications</div>
             <div className="admin-subtitle">Review and approve/deny student applications.</div>
           </div>
-          <button
-            className="btn admin-icon-action-btn"
-            aria-label="Refresh absence applications"
-            title="Refresh absence applications"
-            onClick={() => fetchAbsenceApplications()}
-          >
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path
-                d="M16 10a6 6 0 1 1-1.76-4.24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
-              <path
-                d="M16 4.5v3.75h-3.75"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
-
-        <div style={{ marginTop: 18 }}>
-          <div className="admin-form attendance-filter-box">
-            <div className="field small">
-              <label className="attendance-filter-label">Student Name</label>
-              <select
-                value={absenceApplicationFilter.studentId}
-                onChange={(event) =>
-                  setAbsenceApplicationFilter((current) => ({
-                    ...current,
-                    studentId: event.target.value,
-                  }))
-                }
-              >
-                <option value="all">All</option>
-                {absenceApplicationStudentOptions.map((student) => (
-                  <option key={student.value} value={student.value}>
-                    {student.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field small">
-              <label className="attendance-filter-label">Type</label>
-              <select
-                value={absenceApplicationFilter.type}
-                onChange={(event) =>
-                  setAbsenceApplicationFilter((current) => ({
-                    ...current,
-                    type: event.target.value,
-                  }))
-                }
-              >
-                <option value="all">All</option>
-                <option value="excused">Excused Absence</option>
-                <option value="late">Late/Leave Early</option>
-              </select>
-            </div>
-            <div className="field small">
-              <label>&nbsp;</label>
-              <button
-                className="btn"
-                type="button"
-                onClick={() =>
-                  setAbsenceApplicationFilter({
-                    studentId: "all",
-                    type: "all",
-                  })
-                }
-              >
-                Clear Filter
-              </button>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              className={`btn admin-icon-action-btn attendance-filter-toggle-btn ${absenceApplicationFilterOpen || hasAbsenceApplicationFilterValue ? "active" : ""}`}
+              type="button"
+              aria-label={absenceApplicationFilterOpen ? "Hide absence application filters" : "Show absence application filters"}
+              aria-expanded={absenceApplicationFilterOpen}
+              title={absenceApplicationFilterOpen ? "Hide filters" : hasAbsenceApplicationFilterValue ? "Show filters (active)" : "Show filters"}
+              onClick={() => setAbsenceApplicationFilterOpen((current) => !current)}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M4 5.5h12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="8" cy="5.5" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+                <path
+                  d="M4 10h12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="12.25" cy="10" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+                <path
+                  d="M4 14.5h12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="6.5" cy="14.5" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+              </svg>
+              {(absenceApplicationFilterOpen || hasAbsenceApplicationFilterValue) ? (
+                <span className="attendance-filter-toggle-indicator" aria-hidden="true" />
+              ) : null}
+            </button>
+            <button
+              className="btn admin-icon-action-btn"
+              aria-label="Refresh absence applications"
+              title="Refresh absence applications"
+              onClick={() => fetchAbsenceApplications()}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M16 10a6 6 0 1 1-1.76-4.24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M16 4.5v3.75h-3.75"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
           </div>
         </div>
+
+        {absenceApplicationFilterOpen ? (
+          <div style={{ marginTop: 18 }}>
+            <div className="admin-form attendance-filter-box">
+              <div className="field small">
+                <label className="attendance-filter-label">Student Name</label>
+                <select
+                  value={absenceApplicationFilter.studentId}
+                  onChange={(event) =>
+                    setAbsenceApplicationFilter((current) => ({
+                      ...current,
+                      studentId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="all">All</option>
+                  {absenceApplicationStudentOptions.map((student) => (
+                    <option key={student.value} value={student.value}>
+                      {student.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field small">
+                <label className="attendance-filter-label">Type</label>
+                <select
+                  value={absenceApplicationFilter.type}
+                  onChange={(event) =>
+                    setAbsenceApplicationFilter((current) => ({
+                      ...current,
+                      type: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="all">All</option>
+                  <option value="excused">Excused Absence</option>
+                  <option value="late">Late/Leave Early</option>
+                </select>
+              </div>
+              <div className="field small">
+                <label>&nbsp;</label>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() =>
+                    setAbsenceApplicationFilter({
+                      studentId: "all",
+                      type: "all",
+                    })
+                  }
+                >
+                  Clear Filter
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="admin-table-wrap" style={{ marginTop: 12 }}>
           <table className="admin-table" style={{ minWidth: 900 }}>
@@ -388,6 +451,47 @@ export default function AdminConsoleAttendanceWorkspace() {
           }}>
             Open Day
           </button>
+          <button
+            className={`btn admin-icon-action-btn attendance-filter-toggle-btn ${attendanceFilterOpen || hasAttendanceFilterValue ? "active" : ""}`}
+            type="button"
+            aria-label={attendanceFilterOpen ? "Hide attendance filters" : "Show attendance filters"}
+            aria-expanded={attendanceFilterOpen}
+            title={attendanceFilterOpen ? "Hide filters" : hasAttendanceFilterValue ? "Show filters (active)" : "Show filters"}
+            onClick={() => setAttendanceFilterOpen((current) => !current)}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M4 5.5h12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="8" cy="5.5" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+              <path
+                d="M4 10h12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="12.25" cy="10" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+              <path
+                d="M4 14.5h12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="6.5" cy="14.5" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+            </svg>
+            {(attendanceFilterOpen || hasAttendanceFilterValue) ? (
+              <span className="attendance-filter-toggle-indicator" aria-hidden="true" />
+            ) : null}
+          </button>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", justifyContent: "flex-end", marginLeft: "auto", alignSelf: "flex-start", flex: "0 0 auto", alignItems: "center" }}>
           <button
@@ -434,14 +538,6 @@ export default function AdminConsoleAttendanceWorkspace() {
             <span className="results-page-action-icon" aria-hidden="true">↑</span>
             <span>Import CSV</span>
           </button>
-          <button
-            className="btn btn-danger results-page-action-btn"
-            type="button"
-            onClick={clearAllAttendanceValues}
-            disabled={attendanceClearing}
-          >
-            <span>{attendanceClearing ? "Clearing..." : "Clear All Attendance"}</span>
-          </button>
           <input
             ref={attendanceImportInputRef}
             type="file"
@@ -455,69 +551,61 @@ export default function AdminConsoleAttendanceWorkspace() {
         </div>
       </div>
 
-      <div style={{ marginTop: 18 }}>
-        <div className="admin-form attendance-filter-box">
-          <div className="field small">
-            <label className="attendance-filter-label">Filter (Rate &lt;)</label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              placeholder="e.g. 80"
-              value={attendanceFilter.minRate}
-              onChange={(e) => setAttendanceFilter((s) => ({ ...s, minRate: e.target.value }))}
-            />
-          </div>
-          <div className="field small">
-            <label className="attendance-filter-label">Filter (Unexcused ≥)</label>
-            <input
-              type="number"
-              min="0"
-              placeholder="e.g. 3"
-              value={attendanceFilter.minAbsences}
-              onChange={(e) => setAttendanceFilter((s) => ({ ...s, minAbsences: e.target.value }))}
-            />
-          </div>
-          <div className="field small">
-            <label className="attendance-filter-label">Range From</label>
-            <input
-              type="date"
-              value={attendanceFilter.startDate}
-              onChange={(e) => setAttendanceFilter((s) => ({ ...s, startDate: e.target.value }))}
-            />
-          </div>
-          <div className="field small">
-            <label className="attendance-filter-label">Range To</label>
-            <input
-              type="date"
-              value={attendanceFilter.endDate}
-              onChange={(e) => setAttendanceFilter((s) => ({ ...s, endDate: e.target.value }))}
-            />
-          </div>
-          <div className="field small">
-            <label>&nbsp;</label>
-            <button
-              className="btn"
-              type="button"
-              onClick={() => setAttendanceFilter({ minRate: "", minAbsences: "", startDate: "", endDate: "" })}
-            >
-              Clear Filter
-            </button>
+      {attendanceFilterOpen ? (
+        <div style={{ marginTop: 18 }}>
+          <div className="admin-form attendance-filter-box">
+            <div className="field small">
+              <label className="attendance-filter-label">Filter (Rate &lt;)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="e.g. 80"
+                value={attendanceFilter.minRate}
+                onChange={(e) => setAttendanceFilter((s) => ({ ...s, minRate: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label className="attendance-filter-label">Filter (Unexcused ≥)</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="e.g. 3"
+                value={attendanceFilter.minAbsences}
+                onChange={(e) => setAttendanceFilter((s) => ({ ...s, minAbsences: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label className="attendance-filter-label">Range From</label>
+              <input
+                type="date"
+                value={attendanceFilter.startDate}
+                onChange={(e) => setAttendanceFilter((s) => ({ ...s, startDate: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label className="attendance-filter-label">Range To</label>
+              <input
+                type="date"
+                value={attendanceFilter.endDate}
+                onChange={(e) => setAttendanceFilter((s) => ({ ...s, endDate: e.target.value }))}
+              />
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => setAttendanceFilter({ minRate: "", minAbsences: "", startDate: "", endDate: "" })}
+              >
+                Clear Filter
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="attendance-table-header">
-        <div className="admin-help">
-          <span className="att-legend-item att-legend-present">P: Present</span>
-          <span className="att-legend-item att-legend-late">L: Late/Leave Early</span>
-          <span className="att-legend-item att-legend-excused">E: Excused Absence</span>
-          <span className="att-legend-item att-legend-absent">A: Unexcused Absence</span>
-          <span className="att-legend-item">N/A: Not Counted</span>
-        </div>
-      </div>
-
-      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginTop: 12, marginBottom: 6, minHeight: 36 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", gap: 18, marginTop: 12, marginBottom: 3, minHeight: 38 }}>
         {attendanceSheetRefreshing ? (
           <div
             style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 8, color: "var(--admin-text)" }}
@@ -532,7 +620,7 @@ export default function AdminConsoleAttendanceWorkspace() {
           </div>
         ) : null}
         <button
-          className="btn admin-icon-action-btn"
+          className="attendance-month-nav-btn"
           type="button"
           aria-label="Previous month"
           title="Previous month"
@@ -542,12 +630,12 @@ export default function AdminConsoleAttendanceWorkspace() {
         >
           ◀
         </button>
-        <div style={{ fontWeight: 800, fontSize: 16, minWidth: 90, textAlign: "center", color: "var(--admin-text)" }}>
+        <div className="results-month-label">
           {attendanceViewMonthLabel || "—"}
         </div>
         {hasNextMonthAttendance ? (
           <button
-            className="btn admin-icon-action-btn"
+            className="attendance-month-nav-btn"
             type="button"
             aria-label="Next month"
             title="Next month"
@@ -568,7 +656,17 @@ export default function AdminConsoleAttendanceWorkspace() {
         </div>
       ) : null}
 
-      <div className="admin-table-wrap" style={{ marginTop: 2 }}>
+      <div className="attendance-table-header">
+        <div className="admin-help">
+          <span className="att-legend-item att-legend-present">P: Present</span>
+          <span className="att-legend-item att-legend-late">L: Late/Leave Early</span>
+          <span className="att-legend-item att-legend-excused">E: Excused Absence</span>
+          <span className="att-legend-item att-legend-absent">A: Unexcused Absence</span>
+          <span className="att-legend-item">N/A: Not Counted</span>
+        </div>
+      </div>
+
+      <div className="admin-table-wrap" style={{ marginTop: 0 }}>
         <table className="admin-table attendance-table">
           <thead>
             <tr>

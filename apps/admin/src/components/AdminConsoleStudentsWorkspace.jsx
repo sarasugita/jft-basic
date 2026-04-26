@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getStudentWithdrawalDate, getTodayYmd } from "../lib/studentWithdrawal";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useStudentsWorkspaceState } from "./AdminConsoleStudentsWorkspaceState";
 import AdminLoadingState from "./AdminLoadingState";
@@ -212,6 +213,11 @@ export default function AdminConsoleStudentsWorkspace() {
     }
     return selectedStudentSummary;
   }, [contextSelectedStudent, selectedStudentDetail, selectedStudentId, students]);
+  const selectedStudentWithdrawalDate = getStudentWithdrawalDate(selectedStudent);
+  const [withdrawalSaving, setWithdrawalSaving] = useState(false);
+  const [withdrawalDateDraft, setWithdrawalDateDraft] = useState("");
+  const [withdrawalDateEditing, setWithdrawalDateEditing] = useState(false);
+  const [studentListFilterOpen, setStudentListFilterOpen] = useState(false);
 
   const autoLoadSchoolIdRef = useRef("");
 
@@ -259,6 +265,62 @@ export default function AdminConsoleStudentsWorkspace() {
     setContextSelectedStudentId(selectedStudentId || "");
   }, [selectedStudentId, setContextSelectedStudentId]);
 
+  useEffect(() => {
+    setWithdrawalSaving(false);
+    setWithdrawalDateDraft(selectedStudentWithdrawalDate || getTodayYmd());
+    setWithdrawalDateEditing(false);
+  }, [selectedStudentId, selectedStudentWithdrawalDate]);
+
+  useEffect(() => {
+    setStudentListFilterOpen(false);
+  }, [activeSchoolId]);
+
+  const hasStudentListFilterValue = useMemo(() => (
+    Boolean(
+      studentListFilters.maxAttendance
+      || studentListFilters.minUnexcused
+      || studentListFilters.minModelAvg
+      || studentListFilters.minDailyAvg
+      || studentListFilters.from
+      || studentListFilters.to
+    )
+  ), [
+    studentListFilters.from,
+    studentListFilters.maxAttendance,
+    studentListFilters.minDailyAvg,
+    studentListFilters.minModelAvg,
+    studentListFilters.minUnexcused,
+    studentListFilters.to,
+  ]);
+
+  const handleWithdrawnToggle = useCallback(async (nextValue) => {
+    if (!selectedStudent) return;
+    setWithdrawalSaving(true);
+    try {
+      await toggleWithdrawn(selectedStudent, nextValue, {
+        withdrawalDate: nextValue
+          ? (selectedStudentWithdrawalDate || getTodayYmd())
+          : null,
+      });
+      if (!nextValue) {
+        setWithdrawalDateEditing(false);
+      }
+    } finally {
+      setWithdrawalSaving(false);
+    }
+  }, [selectedStudent, selectedStudentWithdrawalDate, toggleWithdrawn]);
+
+  const handleWithdrawalDateSave = useCallback(async () => {
+    if (!selectedStudent || !selectedStudent.is_withdrawn || !withdrawalDateDraft) return;
+    setWithdrawalSaving(true);
+    try {
+      await toggleWithdrawn(selectedStudent, true, { withdrawalDate: withdrawalDateDraft });
+      setWithdrawalDateEditing(false);
+    } finally {
+      setWithdrawalSaving(false);
+    }
+  }, [selectedStudent, toggleWithdrawn, withdrawalDateDraft]);
+
   return (
     <div style={{ marginBottom: 12 }}>
       {!studentDetailOpen ? (
@@ -283,6 +345,47 @@ export default function AdminConsoleStudentsWorkspace() {
                   <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                 </svg>
                 <span>Warnings</span>
+              </button>
+              <button
+                className={`btn admin-icon-action-btn attendance-filter-toggle-btn ${studentListFilterOpen || hasStudentListFilterValue ? "active" : ""}`}
+                type="button"
+                aria-label={studentListFilterOpen ? "Hide student filters" : "Show student filters"}
+                aria-expanded={studentListFilterOpen}
+                title={studentListFilterOpen ? "Hide filters" : hasStudentListFilterValue ? "Show filters (active)" : "Show filters"}
+                onClick={() => setStudentListFilterOpen((current) => !current)}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M4 5.5h12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="8" cy="5.5" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+                  <path
+                    d="M4 10h12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="12.25" cy="10" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+                  <path
+                    d="M4 14.5h12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="6.5" cy="14.5" r="1.7" fill="#fff" stroke="currentColor" strokeWidth="1.4" />
+                </svg>
+                {(studentListFilterOpen || hasStudentListFilterValue) ? (
+                  <span className="attendance-filter-toggle-indicator" aria-hidden="true" />
+                ) : null}
               </button>
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", marginLeft: "auto" }}>
@@ -343,69 +446,71 @@ export default function AdminConsoleStudentsWorkspace() {
             </div>
           </div>
 
-          <div className="attendance-filter-box" style={{ marginTop: 14 }}>
-            <div className="admin-form" style={{ marginTop: 0 }}>
-              <div className="field small">
-                <label className="student-list-filter-label">Filter<br />(Attendance Rate ≤)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  placeholder="e.g. 80"
-                  value={studentListFilters.maxAttendance}
-                  onChange={(e) => setStudentListFilters((s) => ({ ...s, maxAttendance: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label className="student-list-filter-label">Filter<br />(Unexcused ≥)</label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="e.g. 3"
-                  value={studentListFilters.minUnexcused}
-                  onChange={(e) => setStudentListFilters((s) => ({ ...s, minUnexcused: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label className="student-list-filter-label">Filter<br />(Model Avg Rate ≥)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  placeholder="e.g. 60"
-                  value={studentListFilters.minModelAvg}
-                  onChange={(e) => setStudentListFilters((s) => ({ ...s, minModelAvg: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label className="student-list-filter-label">Filter<br />(Daily Avg Rate ≥)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  placeholder="e.g. 60"
-                  value={studentListFilters.minDailyAvg}
-                  onChange={(e) => setStudentListFilters((s) => ({ ...s, minDailyAvg: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label className="student-list-filter-label">Filter<br />Date From</label>
-                <input
-                  type="date"
-                  value={studentListFilters.from}
-                  onChange={(e) => setStudentListFilters((s) => ({ ...s, from: e.target.value }))}
-                />
-              </div>
-              <div className="field small">
-                <label className="student-list-filter-label">Filter<br />Date To</label>
-                <input
-                  type="date"
-                  value={studentListFilters.to}
-                  onChange={(e) => setStudentListFilters((s) => ({ ...s, to: e.target.value }))}
-                />
+          {studentListFilterOpen ? (
+            <div className="attendance-filter-box" style={{ marginTop: 14 }}>
+              <div className="admin-form" style={{ marginTop: 0 }}>
+                <div className="field small">
+                  <label className="student-list-filter-label">Filter<br />(Attendance Rate ≤)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="e.g. 80"
+                    value={studentListFilters.maxAttendance}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, maxAttendance: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label className="student-list-filter-label">Filter<br />(Unexcused ≥)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="e.g. 3"
+                    value={studentListFilters.minUnexcused}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minUnexcused: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label className="student-list-filter-label">Filter<br />(Model Avg Rate ≥)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="e.g. 60"
+                    value={studentListFilters.minModelAvg}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minModelAvg: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label className="student-list-filter-label">Filter<br />(Daily Avg Rate ≥)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="e.g. 60"
+                    value={studentListFilters.minDailyAvg}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, minDailyAvg: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label className="student-list-filter-label">Filter<br />Date From</label>
+                  <input
+                    type="date"
+                    value={studentListFilters.from}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, from: e.target.value }))}
+                  />
+                </div>
+                <div className="field small">
+                  <label className="student-list-filter-label">Filter<br />Date To</label>
+                  <input
+                    type="date"
+                    value={studentListFilters.to}
+                    onChange={(e) => setStudentListFilters((s) => ({ ...s, to: e.target.value }))}
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          ) : null}
           <div className="admin-table-wrap" style={{ marginTop: 10 }}>
             <table className="admin-table" style={{ minWidth: 960 }}>
               <thead>
@@ -497,7 +602,10 @@ export default function AdminConsoleStudentsWorkspace() {
       ) : null}
 
       {selectedStudentId && studentDetailOpen ? (
-        <div style={{ marginTop: 16 }}>
+        <div
+          className={`student-detail-shell ${selectedStudent?.is_withdrawn ? "student-detail-shell-withdrawn" : ""}`}
+          style={{ marginTop: 16 }}
+        >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -525,63 +633,13 @@ export default function AdminConsoleStudentsWorkspace() {
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                className="btn student-detail-action-btn"
-                onClick={exportStudentReportPdf}
-                disabled={studentReportExporting || studentDetailLoading}
-              >
-                <svg viewBox="0 0 20 20" aria-hidden="true">
-                  <path d="M10 3v8m0 0 3-3m-3 3-3-3M4 13.5v1.25C4 15.44 4.56 16 5.25 16h9.5c.69 0 1.25-.56 1.25-1.25V13.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                {studentReportExporting ? "Exporting..." : "Export PDF"}
-              </button>
-              <button
-                className="btn student-detail-action-btn"
-                onClick={() => {
-                  if (!selectedStudent) return;
-                  setReissueStudent(selectedStudent);
-                  setReissuePassword("");
-                  setReissueIssuedPassword("");
-                  setReissueLoading(false);
-                  setReissueMsg("");
-                  setReissueOpen(true);
-                }}
-              >
-                Reissue Temp Pass
-              </button>
-              <div className="student-detail-toggle-card">
-                <span className="student-detail-toggle-label">Test Account</span>
-                <label className="daily-session-create-switch" aria-label="Test Account">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(selectedStudent?.is_test_account)}
-                    onChange={(event) => {
-                      if (!selectedStudent) return;
-                      toggleTestAccount(selectedStudent, event.target.checked);
-                    }}
-                  />
-                  <span className="daily-session-create-switch-slider" />
-                </label>
-              </div>
-              <button
-                className={`btn student-detail-action-btn student-detail-withdraw-btn ${selectedStudent?.is_withdrawn ? "btn-withdrawn" : ""}`}
-                onClick={() => {
-                  if (!selectedStudent) return;
-                  toggleWithdrawn(selectedStudent, !selectedStudent.is_withdrawn);
-                }}
-              >
-                {selectedStudent?.is_withdrawn ? "Withdrawn" : "Withdraw"}
-              </button>
-              <button
-                className="btn btn-danger student-detail-action-btn"
-                onClick={() => {
-                  if (!selectedStudent) return;
-                  deleteStudent(selectedStudent.id, selectedStudent.email);
-                }}
-              >
-                Delete
-              </button>
+            <div className="student-detail-status-badges">
+              {selectedStudent?.is_test_account ? (
+                <span className="student-detail-status-pill student-detail-status-pill-test">Test Account</span>
+              ) : null}
+              {selectedStudent?.is_withdrawn ? (
+                <span className="student-detail-status-pill student-detail-status-pill-withdrawn">Withdrawn</span>
+              ) : null}
             </div>
           </div>
 
@@ -616,6 +674,12 @@ export default function AdminConsoleStudentsWorkspace() {
                 }}
               >
                 Model Test
+              </button>
+              <button
+                className={`admin-top-tab ${selectedStudentTab === "actions" ? "active" : ""}`}
+                onClick={() => setSelectedStudentTab("actions")}
+              >
+                Actions
               </button>
             </div>
           </div>
@@ -991,6 +1055,155 @@ export default function AdminConsoleStudentsWorkspace() {
               </div>
               <div className="admin-msg">{studentAttendanceMsg}</div>
             </>
+          ) : null}
+
+          {selectedStudentTab === "actions" ? (
+            <div className="student-actions-panel" style={{ marginTop: 12 }}>
+              <div className="student-actions-list">
+                <div className="student-actions-row">
+                  <div>
+                    <div className="student-actions-title">Export PDF</div>
+                    <div className="student-actions-help">Download the student report with profile, attendance, and test data.</div>
+                  </div>
+                  <button
+                    className="btn student-detail-action-btn"
+                    onClick={exportStudentReportPdf}
+                    disabled={studentReportExporting || studentDetailLoading}
+                  >
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M10 3v8m0 0 3-3m-3 3-3-3M4 13.5v1.25C4 15.44 4.56 16 5.25 16h9.5c.69 0 1.25-.56 1.25-1.25V13.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    {studentReportExporting ? "Exporting..." : "Export PDF"}
+                  </button>
+                </div>
+
+                <div className="student-actions-row">
+                  <div>
+                    <div className="student-actions-title">Reissue Temp Pass</div>
+                    <div className="student-actions-help">Generate a new temporary password for this student.</div>
+                  </div>
+                  <button
+                    className="btn student-detail-action-btn"
+                    onClick={() => {
+                      if (!selectedStudent) return;
+                      setReissueStudent(selectedStudent);
+                      setReissuePassword("");
+                      setReissueIssuedPassword("");
+                      setReissueLoading(false);
+                      setReissueMsg("");
+                      setReissueOpen(true);
+                    }}
+                  >
+                    Reissue Temp Pass
+                  </button>
+                </div>
+
+                <div className="student-actions-row">
+                  <div>
+                    <div className="student-actions-title">Test Account</div>
+                    <div className="student-actions-help">Exclude this student from live analytics and treat the account as a test profile.</div>
+                  </div>
+                  <div className="student-actions-switch-row">
+                    <span className="student-detail-toggle-label">{selectedStudent?.is_test_account ? "On" : "Off"}</span>
+                    <label className="daily-session-create-switch" aria-label="Test Account">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedStudent?.is_test_account)}
+                        onChange={(event) => {
+                          if (!selectedStudent) return;
+                          toggleTestAccount(selectedStudent, event.target.checked);
+                        }}
+                      />
+                      <span className="daily-session-create-switch-slider" />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="student-actions-row student-actions-row-withdrawal">
+                  <div>
+                    <div className="student-actions-title">Withdrawal</div>
+                    <div className="student-actions-help">
+                      Exclude the student from attendance totals after the selected withdrawal date.
+                    </div>
+                  </div>
+                  <div className="student-actions-withdrawal-controls">
+                    <div className="student-actions-switch-row">
+                      <span className="student-detail-toggle-label student-actions-toggle-state">
+                        {withdrawalSaving ? (
+                          <>
+                            <span className="attendance-import-status-spinner admin-loading-spinner student-actions-saving-indicator" aria-hidden="true" />
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <span>{selectedStudent?.is_withdrawn ? "On" : "Off"}</span>
+                        )}
+                      </span>
+                      <label className="daily-session-create-switch" aria-label="Withdrawn">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedStudent?.is_withdrawn)}
+                          disabled={withdrawalSaving}
+                          onChange={(event) => {
+                            void handleWithdrawnToggle(event.target.checked);
+                          }}
+                        />
+                        <span className="daily-session-create-switch-slider" />
+                      </label>
+                    </div>
+                    <div className="student-actions-date-field">
+                      <span className="student-actions-date-label">Withdrawal Date</span>
+                      <div className="student-actions-date-input-row">
+                        <input
+                          type="date"
+                          value={selectedStudent?.is_withdrawn ? withdrawalDateDraft : ""}
+                          disabled={!selectedStudent?.is_withdrawn || withdrawalSaving}
+                          onFocus={() => {
+                            if (!selectedStudent?.is_withdrawn) return;
+                            setWithdrawalDateEditing(true);
+                          }}
+                          onClick={() => {
+                            if (!selectedStudent?.is_withdrawn) return;
+                            setWithdrawalDateEditing(true);
+                          }}
+                          onChange={(event) => {
+                            setWithdrawalDateEditing(true);
+                            setWithdrawalDateDraft(event.target.value);
+                          }}
+                        />
+                        {selectedStudent?.is_withdrawn && withdrawalDateEditing ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={
+                              withdrawalSaving
+                              || !withdrawalDateDraft
+                              || withdrawalDateDraft === (selectedStudentWithdrawalDate || getTodayYmd())
+                            }
+                            onClick={() => {
+                              void handleWithdrawalDateSave();
+                            }}
+                          >
+                            Save
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="student-actions-danger">
+                <button
+                  className="btn btn-danger student-actions-delete-btn"
+                  onClick={() => {
+                    if (!selectedStudent) return;
+                    deleteStudent(selectedStudent.id, selectedStudent.email);
+                  }}
+                >
+                  Delete Student
+                </button>
+              </div>
+            </div>
           ) : null}
         </div>
       ) : null}

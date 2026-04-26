@@ -20,6 +20,14 @@ import {
 import { subscribeQuestionSetLibraryUpdated } from "../lib/questionSetLibraryRefresh";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
 import { buildWeeklyReviewTitle } from "../lib/adminFormatters";
+import {
+  getAttendanceStatusForDisplay,
+  getAttendanceStatusForSummary,
+  getStudentWithdrawalDate,
+  getTodayYmd,
+  mapAttendanceRowsForSummary,
+  normalizeYmdDate,
+} from "../lib/studentWithdrawal";
 import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
 import { AdminConsoleWorkspaceProvider } from "./AdminConsoleWorkspaceContext";
 import { readAttendanceSheetCache } from "./adminAttendanceSheetCache";
@@ -72,6 +80,7 @@ const STUDENT_LIST_SELECT_FIELDS = [
   "phone_number",
   "created_at",
   "is_withdrawn",
+  "withdrawal_date",
   "is_test_account"
 ].join(", ");
 const STUDENT_DETAIL_SELECT_FIELDS = [
@@ -93,8 +102,22 @@ const STUDENT_DETAIL_SELECT_FIELDS = [
   "profile_uploads",
   "created_at",
   "is_withdrawn",
+  "withdrawal_date",
   "is_test_account"
 ].join(", ");
+
+function removeSelectField(selectFields, fieldName) {
+  return String(selectFields ?? "")
+    .split(",")
+    .map((field) => field.trim())
+    .filter((field) => field && field !== fieldName)
+    .join(", ");
+}
+
+function isMissingProfilesColumnError(error, columnName) {
+  const text = `${error?.message ?? ""} ${error?.details ?? ""} ${error?.hint ?? ""}`;
+  return text.includes(columnName) && /column/i.test(text) && (/does not exist/i.test(text) || /schema cache/i.test(text));
+}
 const CERTIFICATE_STATUS_OPTIONS = [
   { value: "ongoing", label: "Ongoing" },
   { value: "completed", label: "Completed" }
@@ -4393,10 +4416,10 @@ export default function AdminConsole({
   );
 
   const filteredStudentAttendance = useMemo(() => {
-    if (!studentAttendanceRange.from && !studentAttendanceRange.to) return studentAttendance;
     return (studentAttendance ?? []).filter((row) => {
       if (studentAttendanceRange.from && row.day_date < studentAttendanceRange.from) return false;
       if (studentAttendanceRange.to && row.day_date > studentAttendanceRange.to) return false;
+      if (String(row.status ?? "").trim().toUpperCase() === "W") return false;
       return true;
     });
   }, [studentAttendance, studentAttendanceRange]);
@@ -4979,7 +5002,11 @@ export default function AdminConsole({
   const selectedAttemptScoreRate = selectedAttemptDerivedScoreRate ?? (selectedAttempt ? getScoreRate(selectedAttempt) : 0);
   const selectedAttemptIsPass = selectedAttemptScoreRate >= selectedAttemptPassRate;
 
-  const attendanceSummary = useMemo(() => buildAttendanceSummary(studentAttendance), [studentAttendance]);
+  const attendanceSummaryRows = useMemo(
+    () => mapAttendanceRowsForSummary(studentAttendance, selectedStudent),
+    [selectedStudent, studentAttendance]
+  );
+  const attendanceSummary = useMemo(() => buildAttendanceSummary(attendanceSummaryRows), [attendanceSummaryRows]);
 
   const studentAttendanceMonthOptions = useMemo(() => {
     const months = attendanceSummary.months.map((month) => {
@@ -6500,13 +6527,22 @@ export default function AdminConsole({
       setStudentDetailMsg("");
     }
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select(STUDENT_DETAIL_SELECT_FIELDS)
-        .eq("id", studentId)
-        .eq("role", "student")
-        .eq("school_id", activeSchoolId)
-        .single();
+      const buildDetailQuery = (selectFields) => (
+        supabase
+          .from("profiles")
+          .select(selectFields)
+          .eq("id", studentId)
+          .eq("role", "student")
+          .eq("school_id", activeSchoolId)
+          .single()
+      );
+      let { data, error } = await buildDetailQuery(STUDENT_DETAIL_SELECT_FIELDS);
+      if (error && isMissingProfilesColumnError(error, "withdrawal_date")) {
+        ({ data, error } = await buildDetailQuery(removeSelectField(STUDENT_DETAIL_SELECT_FIELDS, "withdrawal_date")));
+        if (data && !Object.prototype.hasOwnProperty.call(data, "withdrawal_date")) {
+          data = { ...data, withdrawal_date: null };
+        }
+      }
       if (error) {
         console.error("student detail fetch error:", error);
         if (!silent) {
@@ -6589,13 +6625,26 @@ export default function AdminConsole({
     let hasMore = true;
 
     while (hasMore) {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select(STUDENT_LIST_SELECT_FIELDS)
-        .eq("role", "student")
-        .eq("school_id", activeSchoolId)
-        .order("created_at", { ascending: false })
-        .range(offset, offset + pageSize - 1);
+      const buildStudentsQuery = (selectFields) => (
+        supabase
+          .from("profiles")
+          .select(selectFields)
+          .eq("role", "student")
+          .eq("school_id", activeSchoolId)
+          .order("created_at", { ascending: false })
+          .range(offset, offset + pageSize - 1)
+      );
+      let { data, error } = await buildStudentsQuery(STUDENT_LIST_SELECT_FIELDS);
+      if (error && isMissingProfilesColumnError(error, "withdrawal_date")) {
+        ({ data, error } = await buildStudentsQuery(removeSelectField(STUDENT_LIST_SELECT_FIELDS, "withdrawal_date")));
+        if (Array.isArray(data)) {
+          data = data.map((row) => (
+            Object.prototype.hasOwnProperty.call(row, "withdrawal_date")
+              ? row
+              : { ...row, withdrawal_date: null }
+          ));
+        }
+      }
 
       if (error) {
         finishTrace("failed", {
@@ -7022,19 +7071,58 @@ export default function AdminConsole({
     }
   }
 
-  async function toggleWithdrawn(student, nextValue) {
+  async function toggleWithdrawn(student, nextValue, options = {}) {
     if (!student?.id) return;
     setStudentMsg("");
-    const { error } = await supabase
+    const isWithdrawn = Boolean(nextValue);
+    const requestedDate = Object.prototype.hasOwnProperty.call(options, "withdrawalDate")
+      ? normalizeYmdDate(options.withdrawalDate)
+      : "";
+    const withdrawalDate = isWithdrawn
+      ? (requestedDate || getStudentWithdrawalDate(student) || getTodayYmd() || null)
+      : null;
+    let { error } = await supabase
       .from("profiles")
-      .update({ is_withdrawn: Boolean(nextValue) })
+      .update({
+        is_withdrawn: isWithdrawn,
+        withdrawal_date: withdrawalDate,
+      })
       .eq("id", student.id);
+    let usedWithdrawalDateFallback = false;
+    if (error && isMissingProfilesColumnError(error, "withdrawal_date")) {
+      usedWithdrawalDateFallback = true;
+      ({ error } = await supabase
+        .from("profiles")
+        .update({ is_withdrawn: isWithdrawn })
+        .eq("id", student.id));
+    }
     if (error) {
       console.error("withdrawn update error:", error);
       setStudentMsg(`Update failed: ${error.message}`);
       return;
     }
-    mergeStudentIntoState({ id: student.id, is_withdrawn: Boolean(nextValue) });
+    setStudentMsg(
+      `${student.display_name || student.email || "Student"} ${isWithdrawn
+        ? `is now withdrawn${withdrawalDate ? ` from ${withdrawalDate}` : ""}.`
+        : "is no longer withdrawn."}${usedWithdrawalDateFallback ? " Apply the latest Supabase migration to save the withdrawal date." : ""}`
+    );
+    await recordAuditEvent({
+      actionType: "update",
+      entityType: "student",
+      entityId: student.id,
+      summary: `${isWithdrawn ? "Marked withdrawn" : "Removed withdrawn status"}: ${student.display_name || student.email || student.id}`,
+      metadata: {
+        student_id: student.id,
+        email: student.email || null,
+        is_withdrawn: isWithdrawn,
+        withdrawal_date: withdrawalDate,
+      },
+    });
+    mergeStudentIntoState({
+      id: student.id,
+      is_withdrawn: isWithdrawn,
+      withdrawal_date: usedWithdrawalDateFallback ? (student.withdrawal_date ?? null) : withdrawalDate,
+    });
     fetchStudents();
   }
 
@@ -9853,7 +9941,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
       const questionMap = { ...(attemptQuestionsByVersion ?? {}), ...(attemptResult?.hydratedQuestions ?? {}) };
       const rankMap = attemptResult?.rankMap ?? {};
       const attendanceRows = attendanceList ?? [];
-      const attendanceSummaryData = buildAttendanceSummary(attendanceRows);
+      const attendanceSummaryData = buildAttendanceSummary(
+        mapAttendanceRowsForSummary(attendanceRows, detailedStudent)
+      );
 
       const modelAttempts = attemptsList.filter((attempt) => testMetaByVersion[attempt.test_version]?.type === "mock");
       const dailyAttempts = attemptsList.filter((attempt) => testMetaByVersion[attempt.test_version]?.type !== "mock");
@@ -10989,9 +11079,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
           "",
           ...allColumns.map((day) => {
             const statuses = sortedStudents
-              .filter((student) => !isAnalyticsExcludedStudent(student))
-              .map((student) => exportAttendanceEntriesByDay?.[day.id]?.[student.id]?.status || "")
-              .filter((status) => status && status !== "W");
+              .filter((student) => !student?.is_test_account)
+              .map((student) => getAttendanceStatusForSummary(
+                student,
+                day.day_date,
+                exportAttendanceEntriesByDay?.[day.id]?.[student.id]?.status || ""
+              ));
             const stats = buildAttendanceStats(statuses);
             return stats.rate == null ? "N/A" : formatRatePercent(stats.rate);
           }),
@@ -11001,16 +11094,20 @@ function openDailyRecordModal(record = null, recordDate = "") {
     ];
 
     sortedStudents.forEach((student, index) => {
-      const allStatuses = allColumns.map((day) => {
+      const allSummaryStatuses = allColumns.map((day) => {
         const status = exportAttendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
-        return status || (student.is_withdrawn ? "W" : "");
+        return getAttendanceStatusForSummary(student, day.day_date, status);
       });
-      const rangeStatuses = exportColumns.map((day) => {
+      const rangeSummaryStatuses = exportColumns.map((day) => {
         const status = exportAttendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
-        return status || (student.is_withdrawn ? "W" : "");
+        return getAttendanceStatusForSummary(student, day.day_date, status);
       });
-      const overallStats = buildAttendanceStats(allStatuses);
-      const rangeStats = buildAttendanceStats(rangeStatuses);
+      const rangeDisplayStatuses = exportColumns.map((day) => {
+        const status = exportAttendanceEntriesByDay?.[day.id]?.[student.id]?.status || "";
+        return getAttendanceStatusForDisplay(student, day.day_date, status);
+      });
+      const overallStats = buildAttendanceStats(allSummaryStatuses);
+      const rangeStats = buildAttendanceStats(rangeSummaryStatuses);
       csvRows.push(
         padCsvRow(
           [
@@ -11024,7 +11121,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
             rangeStats.rate == null ? "N/A" : formatRatePercent(rangeStats.rate),
             overallStats.unexcused ?? 0,
             formatBooleanCsv(student.is_withdrawn),
-            ...rangeStatuses.map((status) => status || ""),
+            ...rangeDisplayStatuses.map((status) => status || ""),
           ],
           totalColumns
         )

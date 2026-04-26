@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useMemo } from "react";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
+import { getAttendanceStatusForSummary } from "../lib/studentWithdrawal";
 import {
   clearAttendanceSheetCache,
   hasAttendanceSheetAutoRefreshed,
@@ -412,14 +413,20 @@ export function useAttendanceWorkspaceState({ supabase, activeSchoolId, session,
   }, [activeStudents, attendanceFilter, attendanceStudentRowsById]);
 
   const attendanceAnalyticsStudents = useMemo(
-    () => attendanceFilteredStudents.filter((student) => !isAnalyticsExcludedStudent(student)),
-    [attendanceFilteredStudents, isAnalyticsExcludedStudent]
+    () => (students ?? []).filter((student) => !student?.is_test_account),
+    [students]
   );
 
   const attendanceDayRates = useMemo(() => {
     const rates = {};
     attendanceDayColumns.forEach((day) => {
-      const statuses = attendanceAnalyticsStudents.map((student) => attendanceEntriesByDay?.[day.id]?.[student.id]?.status || "");
+      const statuses = attendanceAnalyticsStudents.map((student) => (
+        getAttendanceStatusForSummary(
+          student,
+          day.day_date,
+          attendanceEntriesByDay?.[day.id]?.[student.id]?.status || ""
+        )
+      ));
       rates[day.id] = buildAttendanceStats(statuses).rate;
     });
     return rates;
