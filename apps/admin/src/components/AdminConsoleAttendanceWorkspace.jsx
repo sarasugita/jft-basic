@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceState";
@@ -29,6 +29,10 @@ function formatWeekdayFn(d) {
 
 export default function AdminConsoleAttendanceWorkspace() {
   const { activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime, isAnalyticsExcludedStudent, attendanceSubTab, setAttendanceSubTab, openAttendanceDay: openAttendanceDayCtx } = useAdminConsoleWorkspaceContext();
+  const [absenceApplicationFilter, setAbsenceApplicationFilter] = useState({
+    studentId: "all",
+    type: "all",
+  });
 
   const {
     attendanceMsg,
@@ -70,6 +74,43 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceStudentRowsById,
     attendanceSheetHydrated,
   } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: formatDateShortFn, formatWeekday: formatWeekdayFn, openAttendanceDayCtx });
+
+  useEffect(() => {
+    setAbsenceApplicationFilter({
+      studentId: "all",
+      type: "all",
+    });
+  }, [activeSchoolId]);
+
+  const absenceApplicationStudentOptions = useMemo(() => {
+    const seen = new Map();
+    (absenceApplications ?? []).forEach((application) => {
+      const student = application?.profiles || {};
+      const studentId = String(application?.student_id ?? "").trim();
+      if (!studentId || seen.has(studentId)) return;
+      const name = String(student.display_name || student.email || studentId || "Student").trim();
+      const code = student.student_code ? ` (${student.student_code})` : "";
+      seen.set(studentId, {
+        value: studentId,
+        label: `${name}${code}`,
+      });
+    });
+    return Array.from(seen.values()).sort((left, right) => left.label.localeCompare(right.label));
+  }, [absenceApplications]);
+
+  const filteredAbsenceApplications = useMemo(() => {
+    const selectedStudentId = absenceApplicationFilter.studentId;
+    const selectedType = absenceApplicationFilter.type;
+    return (absenceApplications ?? []).filter((application) => {
+      if (selectedStudentId !== "all" && String(application?.student_id ?? "") !== selectedStudentId) {
+        return false;
+      }
+      if (selectedType !== "all" && String(application?.type ?? "") !== selectedType) {
+        return false;
+      }
+      return true;
+    });
+  }, [absenceApplications, absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
 
   useEffect(() => {
     if (!activeSchoolId) return;
@@ -120,6 +161,61 @@ export default function AdminConsoleAttendanceWorkspace() {
           </button>
         </div>
 
+        <div style={{ marginTop: 18 }}>
+          <div className="admin-form attendance-filter-box">
+            <div className="field small">
+              <label className="attendance-filter-label">Student Name</label>
+              <select
+                value={absenceApplicationFilter.studentId}
+                onChange={(event) =>
+                  setAbsenceApplicationFilter((current) => ({
+                    ...current,
+                    studentId: event.target.value,
+                  }))
+                }
+              >
+                <option value="all">All</option>
+                {absenceApplicationStudentOptions.map((student) => (
+                  <option key={student.value} value={student.value}>
+                    {student.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field small">
+              <label className="attendance-filter-label">Type</label>
+              <select
+                value={absenceApplicationFilter.type}
+                onChange={(event) =>
+                  setAbsenceApplicationFilter((current) => ({
+                    ...current,
+                    type: event.target.value,
+                  }))
+                }
+              >
+                <option value="all">All</option>
+                <option value="excused">Excused Absence</option>
+                <option value="late">Late/Leave Early</option>
+              </select>
+            </div>
+            <div className="field small">
+              <label>&nbsp;</label>
+              <button
+                className="btn"
+                type="button"
+                onClick={() =>
+                  setAbsenceApplicationFilter({
+                    studentId: "all",
+                    type: "all",
+                  })
+                }
+              >
+                Clear Filter
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="admin-table-wrap" style={{ marginTop: 12 }}>
           <table className="admin-table" style={{ minWidth: 900 }}>
             <thead>
@@ -136,7 +232,7 @@ export default function AdminConsoleAttendanceWorkspace() {
               </tr>
             </thead>
             <tbody>
-              {absenceApplications.map((a) => {
+              {filteredAbsenceApplications.map((a) => {
                 const student = a.profiles || {};
                 const name = student.display_name || student.email || a.student_id;
                 const code = student.student_code ? ` (${student.student_code})` : "";
@@ -168,10 +264,15 @@ export default function AdminConsoleAttendanceWorkspace() {
                           ) : (
                             "-"
                           )}
-                        </td>
+                    </td>
                   </tr>
                 );
               })}
+              {!absenceApplicationsMsg && absenceApplications.length > 0 && filteredAbsenceApplications.length === 0 ? (
+                <tr>
+                  <td colSpan={9}>No absence applications match the selected filters.</td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
