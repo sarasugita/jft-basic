@@ -32,6 +32,7 @@ export default function AdminConsoleAttendanceWorkspace() {
   const [absenceApplicationFilter, setAbsenceApplicationFilter] = useState({
     studentId: "all",
     type: "all",
+    dayDate: "",
   });
   const [absenceApplicationFilterOpen, setAbsenceApplicationFilterOpen] = useState(false);
   const [attendanceFilterOpen, setAttendanceFilterOpen] = useState(false);
@@ -79,6 +80,7 @@ export default function AdminConsoleAttendanceWorkspace() {
     setAbsenceApplicationFilter({
       studentId: "all",
       type: "all",
+      dayDate: "",
     });
     setAbsenceApplicationFilterOpen(false);
     setAttendanceFilterOpen(false);
@@ -103,6 +105,7 @@ export default function AdminConsoleAttendanceWorkspace() {
   const filteredAbsenceApplications = useMemo(() => {
     const selectedStudentId = absenceApplicationFilter.studentId;
     const selectedType = absenceApplicationFilter.type;
+    const selectedDayDate = absenceApplicationFilter.dayDate;
     return (absenceApplications ?? []).filter((application) => {
       if (selectedStudentId !== "all" && String(application?.student_id ?? "") !== selectedStudentId) {
         return false;
@@ -110,9 +113,12 @@ export default function AdminConsoleAttendanceWorkspace() {
       if (selectedType !== "all" && String(application?.type ?? "") !== selectedType) {
         return false;
       }
+      if (selectedDayDate && String(application?.day_date ?? "") !== selectedDayDate) {
+        return false;
+      }
       return true;
     });
-  }, [absenceApplications, absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
+  }, [absenceApplications, absenceApplicationFilter.dayDate, absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
 
   const hasAttendanceFilterValue = useMemo(() => (
     Boolean(
@@ -127,8 +133,9 @@ export default function AdminConsoleAttendanceWorkspace() {
     Boolean(
       absenceApplicationFilter.studentId !== "all"
       || absenceApplicationFilter.type !== "all"
+      || absenceApplicationFilter.dayDate
     )
-  ), [absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
+  ), [absenceApplicationFilter.dayDate, absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
 
   useEffect(() => {
     if (!activeSchoolId) return;
@@ -261,6 +268,19 @@ export default function AdminConsoleAttendanceWorkspace() {
                 </select>
               </div>
               <div className="field small">
+                <label className="attendance-filter-label">Date</label>
+                <input
+                  type="date"
+                  value={absenceApplicationFilter.dayDate}
+                  onChange={(event) =>
+                    setAbsenceApplicationFilter((current) => ({
+                      ...current,
+                      dayDate: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="field small">
                 <label>&nbsp;</label>
                 <button
                   className="btn"
@@ -269,6 +289,7 @@ export default function AdminConsoleAttendanceWorkspace() {
                     setAbsenceApplicationFilter({
                       studentId: "all",
                       type: "all",
+                      dayDate: "",
                     })
                   }
                 >
