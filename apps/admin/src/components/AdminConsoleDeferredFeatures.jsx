@@ -1176,20 +1176,6 @@ export default function AdminConsoleDeferredFeatures({
                     <span>Export Attempt Detail (csv)</span>
                   </button>
                   <button
-                    className="attempt-detail-action-button"
-                    type="button"
-                    disabled
-                  >
-                    <span className="attempt-detail-action-icon" aria-hidden="true">
-                      <svg viewBox="0 0 20 20" focusable="false">
-                        <path d="M10 3v8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                        <path d="M6.5 8.5 10 12l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M4 15h12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                      </svg>
-                    </span>
-                    <span>Export Overview (PDF)</span>
-                  </button>
-                  <button
                     className="attempt-detail-action-button attempt-detail-action-button-danger"
                     type="button"
                     onClick={async () => {

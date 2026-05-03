@@ -68,7 +68,7 @@ export function buildDailyResultsTabHTML() {
           if (resultDetailState.error) return `<div class="text-error">${escapeHtml(resultDetailState.error)}</div>`;
           return renderDetailTable(detailRows, showAnswers);
         })();
-    return `
+      return `
       <div class="student-detail-topbar">
         <button class="student-detail-back" id="dailyResultBack" aria-label="Back">←</button>
         <div class="student-detail-title">${escapeHtml(title)}</div>

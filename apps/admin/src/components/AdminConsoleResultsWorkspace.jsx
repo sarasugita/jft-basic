@@ -25,8 +25,7 @@ function renderUnderlinesHtml(text) {
   return escaped
     .replace(/【(.*?)】/g, (_, inner) => (String(inner ?? "").replace(/[\s\u3000]/g, "").length
       ? `<span class="u">${inner}</span>`
-      : renderBlankBoxHtml()))
-    .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, renderBlankBoxHtml());
+      : renderBlankBoxHtml()));
 }
 
 function splitStemLines(text) {
@@ -162,6 +161,121 @@ function buildSectionRadarSvg(data) {
       {axes}
       <polygon points={points} className="session-radar-shape" />
       {labels}
+    </svg>
+  );
+}
+
+const DEFAULT_SESSION_EXPORT_OPTIONS = {
+  resultsSummary: true,
+  questions: true,
+  studentRanking: true,
+};
+
+function formatCompactExportText(value, maxLength = 110) {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function formatSessionExportQuestionId(questionId, setId = "") {
+  const raw = String(questionId ?? "").trim();
+  if (!raw) return "";
+  const prefix = String(setId ?? "").trim();
+  const withoutPrefix = prefix && raw.startsWith(prefix)
+    ? raw.slice(prefix.length).replace(/^[-_]+/, "")
+    : raw;
+  const match = withoutPrefix.match(/(\d+)/);
+  return match ? match[1] : raw;
+}
+
+function buildDistributionChartSvg({
+  labels = [],
+  counts = [],
+  ticks = [],
+  max = 1,
+  passRate = 0.8,
+}) {
+  if (!labels.length) return null;
+  const width = 640;
+  const height = 260;
+  const margin = {
+    top: 16,
+    right: 16,
+    bottom: 46,
+    left: 42,
+  };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const safeMax = Math.max(1, Number(max) || 1);
+  const barGap = 14;
+  const barWidth = Math.max(24, (plotWidth - (barGap * (labels.length - 1))) / Math.max(labels.length, 1));
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="session-export-distribution-svg"
+      role="img"
+      aria-label="Grade distribution chart"
+    >
+      <g transform={`translate(${margin.left}, ${margin.top})`}>
+        {ticks.map((tick, index) => {
+          const y = plotHeight - ((Number(tick) || 0) / safeMax) * plotHeight;
+          return (
+            <g key={`export-dist-tick-${tick}-${index}`}>
+              <line
+                x1="0"
+                y1={y}
+                x2={plotWidth}
+                y2={y}
+                className="session-export-distribution-gridline"
+              />
+              <text
+                x="-8"
+                y={y + 4}
+                textAnchor="end"
+                className="session-export-distribution-axis-label"
+              >
+                {tick}
+              </text>
+            </g>
+          );
+        })}
+        {labels.map((label, index) => {
+          const count = Number(counts[index] ?? 0);
+          const x = index * (barWidth + barGap);
+          const barHeight = safeMax > 0 ? (count / safeMax) * plotHeight : 0;
+          const y = plotHeight - barHeight;
+          const isFailBucket = index * 10 < passRate * 100;
+          return (
+            <g key={`export-dist-bar-${label}`}>
+              <rect
+                x={x}
+                y={y}
+                width={barWidth}
+                height={barHeight}
+                className={`session-export-distribution-bar ${isFailBucket ? "fail" : "pass"}`}
+              />
+              <text
+                x={x + barWidth / 2}
+                y={plotHeight + 20}
+                textAnchor="middle"
+                className="session-export-distribution-axis-label"
+              >
+                {label}
+              </text>
+              <text
+                x={x + barWidth / 2}
+                y={Math.max(12, y - 6)}
+                textAnchor="middle"
+                className="session-export-distribution-value"
+              >
+                {count}
+              </text>
+            </g>
+          );
+        })}
+      </g>
     </svg>
   );
 }
@@ -1275,6 +1389,109 @@ export default function AdminConsoleResultsWorkspace(props) {
   const sessionDetailNestedSectionAverages = sessionDetailDerived.sessionDetailNestedSectionAverages;
   const sessionDetailStudentRankingRows = sessionDetailDerived.sessionDetailStudentRankingRows;
   const sessionDetailRankingSections = sessionDetailDerived.sessionDetailRankingSections;
+  const sessionDetailBestQuestions = useMemo(
+    () => sessionDetailQuestionAnalysis.slice(0, 5),
+    [sessionDetailQuestionAnalysis]
+  );
+  const sessionDetailWorstQuestions = useMemo(
+    () => [...sessionDetailQuestionAnalysis]
+      .sort((a, b) => {
+        if (a.rate !== b.rate) return a.rate - b.rate;
+        return String(a.qid).localeCompare(String(b.qid));
+      })
+      .slice(0, 5),
+    [sessionDetailQuestionAnalysis]
+  );
+  const [sessionExportModalOpen, setSessionExportModalOpen] = useState(false);
+  const [sessionExportOptions, setSessionExportOptions] = useState(DEFAULT_SESSION_EXPORT_OPTIONS);
+  const sessionQuestionExportRows = useMemo(() => {
+    const accuracyByQuestionId = new Map(
+      sessionDetailQuestionAnalysis.map((row) => [String(row.qid), row])
+    );
+    const getChoiceImage = (item, choiceIndex) => {
+      if (isBlankAnswerChoice(choiceIndex)) return "";
+      const chosen = parseAnswerIndex(choiceIndex);
+      if (chosen == null) return "";
+      const direct = item?.choiceImages?.[chosen];
+      if (direct) return normalizeAdminRenderableAsset(direct);
+      const choiceText = formatAnswerChoiceLabel(item, chosen);
+      return isImageAsset(choiceText) ? normalizeAdminRenderableAsset(choiceText) : "";
+    };
+
+    return (sessionDetailQuestions ?? []).flatMap((rawQuestion) => {
+      const question = mergeQuestionData(rawQuestion);
+      const answerKey = question.questionId ?? question.id;
+      const stemAsset = [
+        question.stemAsset,
+        question.mediaFile,
+        question.media_file,
+        question.stemImage,
+        question.stemAudio,
+        question.image,
+        question.data?.stemAsset,
+        question.data?.stem_asset,
+        question.data?.stemImage,
+        question.data?.stem_image,
+        question.data?.stemAudio,
+        question.data?.stem_audio,
+      ].find(Boolean);
+      const stemImages = splitAssetValues(stemAsset)
+        .map((value) => normalizeAdminRenderableAsset(value))
+        .filter((value) => isImageAsset(value));
+
+      if (Array.isArray(question.parts) && question.parts.length) {
+        return question.parts.map((part, index) => {
+          const qid = `${answerKey}-${index + 1}`;
+          const displayId = formatSessionExportQuestionId(answerKey, selectedSessionDetail?.problem_set_id);
+          const correctIndices = getEffectiveAnswerIndices(part);
+          const accuracy = accuracyByQuestionId.get(String(qid));
+          return {
+            qid,
+            displayId,
+            prompt: `${question.promptEn ?? question.promptBn ?? ""} ${part?.partLabel ?? ""} ${part?.questionJa ?? part?.promptEn ?? ""}`.trim(),
+            stemImages,
+            correct: correctIndices.map((value) => formatAnswerChoiceLabel(part, value)).filter(Boolean).join(" / ") || "—",
+            correctImage: getChoiceImage(part, correctIndices[0]),
+            rate: Number(accuracy?.rate ?? 0),
+          };
+        });
+      }
+
+      const correctIndices = getEffectiveAnswerIndices(question);
+      const accuracy = accuracyByQuestionId.get(String(answerKey));
+      const displayId = formatSessionExportQuestionId(answerKey, selectedSessionDetail?.problem_set_id);
+      return [{
+        qid: String(answerKey),
+        displayId,
+        prompt: getQuestionPrompt(question),
+        stemImages,
+        correct: correctIndices.map((value) => formatAnswerChoiceLabel(question, value)).filter(Boolean).join(" / ") || "—",
+        correctImage: getChoiceImage(question, correctIndices[0]),
+        rate: Number(accuracy?.rate ?? 0),
+      }];
+    });
+  }, [isImageAsset, sessionDetailQuestionAnalysis, sessionDetailQuestions, splitAssetValues]);
+  const sessionExportHasSelections = Object.values(sessionExportOptions).some(Boolean);
+  const sessionExportQuestionsDisabled = !sessionQuestionExportRows.length;
+  const sessionExportRankingDisabled = !sessionDetailStudentRankingRows.length;
+
+  useEffect(() => {
+    setSessionExportOptions((current) => {
+      const next = {
+        ...current,
+        questions: sessionExportQuestionsDisabled ? false : current.questions,
+        studentRanking: sessionExportRankingDisabled ? false : current.studentRanking,
+      };
+      if (
+        next.questions === current.questions
+        && next.studentRanking === current.studentRanking
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, [sessionExportQuestionsDisabled, sessionExportRankingDisabled]);
+
   const formatOrdinal = typeof formatOrdinalProp === "function" ? formatOrdinalProp : formatOrdinalFallback;
   const renderTwoLineHeader = typeof renderTwoLineHeaderProp === "function"
     ? renderTwoLineHeaderProp
@@ -1308,6 +1525,12 @@ export default function AdminConsoleResultsWorkspace(props) {
   const runSearchRef = useRef(runSearch);
   const selectedSessionDetailRef = useRef(selectedSessionDetail);
   const unscopedSupabaseRef = useRef(null);
+
+  useEffect(() => {
+    setSessionExportModalOpen(false);
+    setSessionExportOptions(DEFAULT_SESSION_EXPORT_OPTIONS);
+  }, [selectedSessionDetail?.id]);
+
   const attemptDetailOpen = canUseExternalAttemptDetail ? Boolean(attemptDetailOpenProp) : attemptDetailOpenState;
   const selectedAttempt = canUseExternalAttemptDetail ? (selectedAttemptProp ?? null) : selectedAttemptObjState;
   const attemptDetailSource = canUseExternalAttemptDetail ? (attemptDetailSourceProp ?? "default") : attemptDetailSourceState;
@@ -2313,7 +2536,10 @@ export default function AdminConsoleResultsWorkspace(props) {
     const useSpeakerLayout = shouldUseSpeakerLayout(question, stemSourceText);
     const speakerLines = useSpeakerLayout ? splitTextBoxStemLines(stemSourceText) : [];
     const sectionLabel = getQuestionSectionLabel(question) || question.sectionKey;
-    const displayQuestionId = formatSourceQuestionLabel(
+    const displayQuestionId = formatSessionExportQuestionId(
+      question.sourceQuestionId || question.questionId || question.id,
+      question.sourceVersion || question.testVersion || selectedSessionDetail?.problem_set_id
+    ) || formatSourceQuestionLabel(
       question.sourceVersion || question.testVersion,
       question.sourceQuestionId || question.questionId
     ) || String(question.sourceQuestionId ?? "").trim()
@@ -2630,6 +2856,355 @@ export default function AdminConsoleResultsWorkspace(props) {
     );
   }
 
+  async function triggerPdfPrint(bodyClass = "") {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    const { body } = document;
+    const cleanup = () => {
+      if (bodyClass) body.classList.remove(bodyClass);
+    };
+    if (bodyClass) body.classList.add(bodyClass);
+    window.addEventListener("afterprint", cleanup, { once: true });
+    if (document.fonts?.ready) {
+      try {
+        await document.fonts.ready;
+      } catch {
+        // Continue even if fonts do not resolve in time.
+      }
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    try {
+      window.print();
+    } finally {
+      cleanup();
+    }
+  }
+
+  function openSessionExportModal() {
+    setSessionExportModalOpen(true);
+  }
+
+  function closeSessionExportModal() {
+    setSessionExportModalOpen(false);
+  }
+
+  function toggleSessionExportOption(key) {
+    setSessionExportOptions((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  }
+
+  async function exportSessionDetailPdf() {
+    setSessionExportModalOpen(false);
+    if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await triggerPdfPrint("admin-print-session-detail");
+  }
+
+  function renderSessionExportSheet() {
+    if (!selectedSessionDetail) return null;
+    const isMockSessionDetail = sessionDetail.type === "mock";
+    const isImportedSummarySession = sessionDetailUsesImportedResultsSummary;
+    const isImportedModelSummarySession = sessionDetailUsesImportedModelSummary;
+    const selectedSessionDetailTitle = String(selectedSessionDetail.title ?? "").trim();
+    const sessionDetailDisplayTitle = isImportedSummarySession
+      ? (selectedSessionDetailTitle && !isSyntheticImportedSessionLabel(selectedSessionDetailTitle)
+        ? selectedSessionDetailTitle
+        : "Imported Result")
+      : (selectedSessionDetail.title || selectedSessionDetail.problem_set_id);
+
+    return (
+      <div className="session-export-sheet">
+        <div className="session-export-header">
+          <div className="session-export-title">{sessionDetailDisplayTitle}</div>
+          <div className="session-export-meta">
+            {!isMockSessionDetail && !isImportedSummarySession ? (
+              <>
+                SetID: <b>{selectedSessionDetail.problem_set_id}</b>
+                {" · "}
+              </>
+            ) : null}
+            Start: <b>{formatCompactDateTime(selectedSessionDetail.starts_at) || "—"}</b>
+            {" · "}
+            End: <b>{formatCompactDateTime(selectedSessionDetail.ends_at) || "—"}</b>
+          </div>
+        </div>
+
+        {sessionExportOptions.resultsSummary ? (
+          <section className="session-export-section">
+            <div className="session-export-section-title">Results Summary</div>
+            <div className="session-export-summary-grid">
+              <table className="session-export-table session-export-summary-table">
+                <tbody>
+                  <tr>
+                    <th>No. of Pass</th>
+                    <td>{sessionDetailAnalysisSummary.passCount}/{sessionDetailAnalysisSummary.attendedCount}</td>
+                  </tr>
+                  <tr>
+                    <th>No. of Fail</th>
+                    <td>{sessionDetailAnalysisSummary.failCount}/{sessionDetailAnalysisSummary.attendedCount}</td>
+                  </tr>
+                  <tr>
+                    <th>Average score</th>
+                    <td>
+                      {sessionDetailUsesImportedResultsSummaryRaw
+                        ? "—"
+                        : `${sessionDetailAnalysisSummary.averageCorrect.toFixed(2)}/${sessionDetailAnalysisSummary.totalQuestions || 0}`}
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Average %</th>
+                    <td>{(sessionDetailAnalysisSummary.averageRate * 100).toFixed(2)}%</td>
+                  </tr>
+                  <tr>
+                    <th>Absent</th>
+                    <td>{sessionDetailAnalysisSummary.absentCount}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {buildDistributionChartSvg({
+                labels: sessionDetailAnalysisSummary.bucketLabels,
+                counts: sessionDetailAnalysisSummary.bucketCounts,
+                ticks: sessionDetailDistributionTicks,
+                max: sessionDetailDistributionMax,
+                passRate: sessionDetailPassRate,
+              })}
+            </div>
+
+            {isMockSessionDetail && (isImportedModelSummarySession || sessionDetailNestedSectionAverages.length) ? (
+              <section className="session-export-section">
+                <div className="session-export-section-title">Average Section Performance</div>
+                <div className="session-export-performance-grid">
+                  {sessionDetailMainSectionAverages.length ? buildSectionRadarSvg(
+                    sessionDetailMainSectionAverages.map((row) => ({
+                      label: row.section,
+                      value: row.averageRate ?? 0,
+                    }))
+                  ) : (
+                    <div className="admin-help">No section average data yet.</div>
+                  )}
+                  <div>
+                    {isImportedModelSummarySession ? (
+                      <table className="session-export-table session-export-section-table">
+                        <thead>
+                          <tr>
+                            <th>Section</th>
+                            <th>Total</th>
+                            <th>Average</th>
+                            <th>Average %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessionDetailMainSectionAverages.map((row) => (
+                            <tr key={`session-export-main-${row.section}`}>
+                              <td>{row.section}</td>
+                              <td>{row.total}</td>
+                              <td>{row.averageCorrect.toFixed(2)}</td>
+                              <td>{(row.averageRate * 100).toFixed(1)}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <table className="session-export-table session-export-section-table">
+                        <thead>
+                          <tr>
+                            <th>Section</th>
+                            <th>Sub-section</th>
+                            <th>Total</th>
+                            <th>Average</th>
+                            <th>Average %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessionDetailNestedSectionAverages.map((group) => (
+                            <Fragment key={`session-export-nested-${group.mainSection}`}>
+                              <tr>
+                                <td>{group.mainSection}</td>
+                                <td>Total</td>
+                                <td>{group.total}</td>
+                                <td>{group.averageCorrect.toFixed(2)}</td>
+                                <td>{(group.averageRate * 100).toFixed(1)}%</td>
+                              </tr>
+                              {group.subSections.map((subSection) => (
+                                <tr key={`session-export-sub-${group.mainSection}-${subSection.section}`}>
+                                  <td>{group.mainSection}</td>
+                                  <td>{subSection.section}</td>
+                                  <td>{subSection.total}</td>
+                                  <td>{subSection.averageCorrect.toFixed(2)}</td>
+                                  <td>{(subSection.averageRate * 100).toFixed(1)}%</td>
+                                </tr>
+                              ))}
+                            </Fragment>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {!isImportedSummarySession ? (
+              <div className="session-export-question-stack">
+                <div className="session-export-panel-title">Top 5 Best Questions</div>
+                <table className="session-export-table session-export-mini-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Question</th>
+                      <th>Accuracy</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionDetailBestQuestions.map((row) => (
+                      <tr key={`session-export-best-${row.qid}`}>
+                        <td>{formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}</td>
+                        <td>{formatCompactExportText(row.prompt)}</td>
+                        <td>{(row.rate * 100).toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                    {!sessionDetailBestQuestions.length ? (
+                      <tr>
+                        <td colSpan={3}>No question data yet.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+
+                <div className="session-export-panel-title">Top 5 Worst Questions</div>
+                <table className="session-export-table session-export-mini-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Question</th>
+                      <th>Accuracy</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionDetailWorstQuestions.map((row) => (
+                      <tr key={`session-export-worst-${row.qid}`}>
+                        <td>{formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}</td>
+                        <td>{formatCompactExportText(row.prompt)}</td>
+                        <td>{(row.rate * 100).toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                    {!sessionDetailWorstQuestions.length ? (
+                      <tr>
+                        <td colSpan={3}>No question data yet.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {sessionExportOptions.questions ? (
+          <section className="session-export-section">
+            <div className="session-export-section-title">Questions</div>
+            <table className="session-export-table session-export-question-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Question</th>
+                  <th>Correct Answer</th>
+                  <th>Correct %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessionQuestionExportRows.map((row) => (
+                  <tr key={`session-export-question-${row.qid}`}>
+                    <td>{row.displayId || formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}</td>
+                    <td>
+                      <div className="session-export-question-text">{row.prompt || "Question"}</div>
+                      {row.stemImages?.length ? (
+                        <div className="session-export-image-strip">
+                          {row.stemImages.map((imageSrc, index) => (
+                            <img
+                              key={`session-export-question-image-${row.qid}-${index}`}
+                              src={imageSrc}
+                              alt={`Question ${row.qid}`}
+                              className="session-export-inline-image"
+                            />
+                          ))}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>
+                      <div>{row.correct}</div>
+                      {row.correctImage ? (
+                        <img
+                          src={row.correctImage}
+                          alt={`Correct answer ${row.qid}`}
+                          className="session-export-inline-image answer"
+                        />
+                      ) : null}
+                    </td>
+                    <td>{(row.rate * 100).toFixed(1)}%</td>
+                  </tr>
+                ))}
+                {!sessionQuestionExportRows.length ? (
+                  <tr>
+                    <td colSpan={4}>No question data available.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </section>
+        ) : null}
+
+        {sessionExportOptions.studentRanking ? (
+          <section className="session-export-section">
+            <div className="session-export-section-title">Student Ranking</div>
+            <table className="session-export-table session-export-ranking-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Student</th>
+                  <th>Student No.</th>
+                  <th>Total Score</th>
+                  <th>Total %</th>
+                  {sessionDetailRankingSections.map((section) => (
+                    <th key={`session-export-ranking-head-${section.section}`}>{section.section}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sessionDetailStudentRankingRows.map((row) => {
+                  const isImportedAttempt = isImportedSummaryAttempt(row.attempt);
+                  return (
+                    <tr key={`session-export-ranking-${row.student_id}`}>
+                      <td>{formatOrdinal(row.rank)}</td>
+                      <td>{row.display_name}</td>
+                      <td>{row.student_code || "—"}</td>
+                      <td>{isImportedAttempt ? "—" : `${row.totalCorrect}/${row.totalQuestions}`}</td>
+                      <td>{(row.totalRate * 100).toFixed(1)}%</td>
+                      {sessionDetailRankingSections.map((section) => (
+                        <td key={`session-export-ranking-${row.student_id}-${section.section}`}>
+                          {((row.sectionRates?.[section.section] ?? 0) * 100).toFixed(1)}%
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+                {!sessionDetailStudentRankingRows.length ? (
+                  <tr>
+                    <td colSpan={Math.max(5, 5 + sessionDetailRankingSections.length)}>No ranking data available.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </section>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderSessionDetailView() {
     if (!selectedSessionDetail) return null;
     const isMockSessionDetail = sessionDetail.type === "mock";
@@ -2644,14 +3219,6 @@ export default function AdminConsoleResultsWorkspace(props) {
     const analysisPopupQuestions = Array.isArray(sessionDetailAnalysisPopup.questions)
       ? sessionDetailAnalysisPopup.questions
       : [];
-
-    const bestQuestions = sessionDetailQuestionAnalysis.slice(0, 5);
-    const worstQuestions = [...sessionDetailQuestionAnalysis]
-      .sort((a, b) => {
-        if (a.rate !== b.rate) return a.rate - b.rate;
-        return String(a.qid).localeCompare(String(b.qid));
-      })
-      .slice(0, 5);
     const sessionDetailTabs = isImportedSummarySession
       ? [
         ["analysis", "Result Analysis"],
@@ -2670,6 +3237,7 @@ export default function AdminConsoleResultsWorkspace(props) {
 
     return (
       <div className="session-detail-page">
+        <div className="session-detail-screen">
         <div className="session-detail-header">
           <div className="session-detail-head-main">
             <div className="session-detail-head-top">
@@ -2691,18 +3259,28 @@ export default function AdminConsoleResultsWorkspace(props) {
                   />
                 </svg>
               </button>
-              <button
-                className="btn btn-danger"
-                type="button"
-                onClick={() => deleteTestSession(selectedSessionDetail.id, {
-                  title: selectedSessionDetail.title || selectedSessionDetail.problem_set_id,
-                  type: sessionDetail.type,
-                  refreshResults: true,
-                  surface: "results",
-                })}
-              >
-                Delete test
-              </button>
+              <div className="session-detail-head-actions">
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={openSessionExportModal}
+                >
+                  <span aria-hidden="true" style={{ marginRight: 6 }}>⎙</span>
+                  <span>Export PDF</span>
+                </button>
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  onClick={() => deleteTestSession(selectedSessionDetail.id, {
+                    title: selectedSessionDetail.title || selectedSessionDetail.problem_set_id,
+                    type: sessionDetail.type,
+                    refreshResults: true,
+                    surface: "results",
+                  })}
+                >
+                  Delete test
+                </button>
+              </div>
             </div>
             <div className="admin-title session-detail-title">
               {sessionDetailDisplayTitle}
@@ -3133,32 +3711,36 @@ export default function AdminConsoleResultsWorkspace(props) {
                   <div className="admin-panel">
                     <div className="session-analysis-heading">Top 5 Best Questions</div>
                     <div className="session-analysis-list">
-                      {bestQuestions.map((row) => (
+                      {sessionDetailBestQuestions.map((row) => (
                         <div key={`best-${row.qid}`} className="session-analysis-item">
                           <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
                           <div>
                             <div className="session-analysis-question-prompt">{row.prompt || "Question"}</div>
-                            <div className="session-analysis-question-id">{row.qid}</div>
+                            <div className="session-analysis-question-id">
+                              {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
+                            </div>
                           </div>
                         </div>
                       ))}
-                      {!bestQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
+                      {!sessionDetailBestQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
                     </div>
                   </div>
 
                   <div className="admin-panel">
                     <div className="session-analysis-heading">Top 5 Worst Questions</div>
                     <div className="session-analysis-list">
-                      {worstQuestions.map((row) => (
+                      {sessionDetailWorstQuestions.map((row) => (
                         <div key={`worst-${row.qid}`} className="session-analysis-item">
                           <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
                           <div>
                             <div className="session-analysis-question-prompt">{row.prompt || "Question"}</div>
-                            <div className="session-analysis-question-id">{row.qid}</div>
+                            <div className="session-analysis-question-id">
+                              {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
+                            </div>
                           </div>
                         </div>
                       ))}
-                      {!worstQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
+                      {!sessionDetailWorstQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
                     </div>
                   </div>
                 </div>
@@ -3194,7 +3776,9 @@ export default function AdminConsoleResultsWorkspace(props) {
                         {sessionDetailQuestionAnalysis.map((row) => (
                           <tr key={`analysis-row-${row.qid}`}>
                             <td>
-                              <div style={{ fontWeight: 800 }}>{row.qid}</div>
+                              <div style={{ fontWeight: 800 }}>
+                                {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
+                              </div>
                               <div className="admin-help">{row.prompt}</div>
                             </td>
                             <td>{(row.rate * 100).toFixed(1)}%</td>
@@ -3219,6 +3803,70 @@ export default function AdminConsoleResultsWorkspace(props) {
                 ) : null}
               </>
             ) : null}
+          </div>
+        ) : null}
+        </div>
+
+        {renderSessionExportSheet()}
+
+        {sessionExportModalOpen ? (
+          <div className="admin-modal-overlay" onClick={closeSessionExportModal}>
+            <div className="admin-modal session-export-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="admin-modal-header">
+                <div>
+                  <div className="admin-title">Export PDF</div>
+                  <div className="admin-help">Select which sections to include in the PDF.</div>
+                </div>
+                <button className="admin-modal-close" onClick={closeSessionExportModal} aria-label="Close">
+                  ×
+                </button>
+              </div>
+              <div className="session-export-modal-body">
+                <label className="session-export-option">
+                  <input
+                    type="checkbox"
+                    checked={sessionExportOptions.resultsSummary}
+                    onChange={() => toggleSessionExportOption("resultsSummary")}
+                  />
+                  <span>Results summary</span>
+                </label>
+                <label className={`session-export-option ${sessionExportQuestionsDisabled ? "disabled" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={sessionExportOptions.questions}
+                    onChange={() => toggleSessionExportOption("questions")}
+                    disabled={sessionExportQuestionsDisabled}
+                  />
+                  <span>Questions</span>
+                </label>
+                <label className={`session-export-option ${sessionExportRankingDisabled ? "disabled" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={sessionExportOptions.studentRanking}
+                    onChange={() => toggleSessionExportOption("studentRanking")}
+                    disabled={sessionExportRankingDisabled}
+                  />
+                  <span>Student Ranking</span>
+                </label>
+                {sessionExportQuestionsDisabled ? (
+                  <div className="admin-help">Questions export is unavailable because no question data is loaded for this session.</div>
+                ) : null}
+                {sessionExportRankingDisabled ? (
+                  <div className="admin-help">Student ranking export is unavailable because there is no ranking data yet.</div>
+                ) : null}
+              </div>
+              <div className="session-export-modal-actions">
+                <button className="btn" type="button" onClick={closeSessionExportModal}>Cancel</button>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={exportSessionDetailPdf}
+                  disabled={!sessionExportHasSelections}
+                >
+                  Continue to PDF
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
 

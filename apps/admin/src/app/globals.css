@@ -980,6 +980,205 @@ body { padding: 0; }
   cursor: default;
 }
 
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+  }
+
+  .admin-shell {
+    display: block !important;
+    min-height: 0 !important;
+  }
+
+  .admin-sidebar {
+    display: none !important;
+  }
+
+  .admin-main {
+    width: 100% !important;
+  }
+
+  .admin-wrap {
+    padding: 0 !important;
+  }
+
+  .admin-page-topbar {
+    margin: 0 0 14px !important;
+    padding: 0 0 10px !important;
+    width: 100% !important;
+    border: 0 !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+  }
+
+  .admin-page-topbar-meta,
+  .results-page-actions,
+  .admin-topbar-link,
+  .admin-icon-action-btn,
+  .results-page-action-btn,
+  .attempt-detail-action-button,
+  .admin-modal-close,
+  .admin-nav,
+  .admin-sidebar-footer {
+    display: none !important;
+  }
+
+  .admin-panel.admin-console-panel {
+    padding: 0 !important;
+  }
+
+  .results-page-header {
+    margin-bottom: 10px !important;
+  }
+
+  .results-page-header-row {
+    align-items: flex-start;
+  }
+
+  .results-page-title-wrap {
+    justify-content: flex-start;
+  }
+
+  .admin-title {
+    font-size: 22px !important;
+  }
+
+  .admin-table-wrap {
+    overflow: visible !important;
+  }
+
+  .admin-table {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    font-size: 11px !important;
+    padding: 6px 6px !important;
+  }
+
+  .attempt-detail-top,
+  .attempt-detail-overview-grid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .session-radar-wrap,
+  .attempt-detail-summary-card,
+  .attempt-detail-pane,
+  .attempt-question-sections {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .session-radar-wrap svg {
+    width: 180px !important;
+    height: auto !important;
+  }
+
+  body.admin-print-attempt-detail .admin-shell {
+    display: none !important;
+  }
+
+  body.admin-print-attempt-detail .admin-modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  body.admin-print-attempt-detail .admin-modal {
+    position: static !important;
+    transform: none !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  body.admin-print-attempt-detail .daily-session-create-modal {
+    width: 100% !important;
+  }
+
+  body.admin-print-attempt-detail .daily-session-create-body {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  body.admin-print-attempt-detail .admin-modal-header,
+  body.admin-print-attempt-detail .attempt-detail-actions,
+  body.admin-print-attempt-detail .admin-modal-close {
+    display: none !important;
+  }
+
+  body.admin-print-session-detail .admin-shell {
+    display: block !important;
+    min-height: 0 !important;
+  }
+
+  body.admin-print-session-detail .admin-modal-overlay {
+    display: none !important;
+  }
+
+  body.admin-print-session-detail .admin-sidebar,
+  body.admin-print-session-detail .admin-page-topbar,
+  body.admin-print-session-detail .admin-nav,
+  body.admin-print-session-detail .admin-sidebar-footer,
+  body.admin-print-session-detail .admin-topbar-link,
+  body.admin-print-session-detail .admin-icon-action-btn,
+  body.admin-print-session-detail .results-page-actions,
+  body.admin-print-session-detail .results-page-action-btn,
+  body.admin-print-session-detail .attempt-detail-action-button,
+  body.admin-print-session-detail .admin-modal-close,
+  body.admin-print-session-detail .session-detail-back-btn,
+  body.admin-print-session-detail .session-detail-head-actions,
+  body.admin-print-session-detail .session-detail-tabs,
+  body.admin-print-session-detail .session-detail-actions {
+    display: none !important;
+  }
+
+  body.admin-print-session-detail .admin-main {
+    width: 100% !important;
+  }
+
+  body.admin-print-session-detail .admin-wrap {
+    padding: 0 !important;
+  }
+
+  body.admin-print-session-detail .admin-panel.admin-console-panel {
+    padding: 0 !important;
+  }
+
+  body.admin-print-session-detail .session-detail-page {
+    margin-top: 0 !important;
+  }
+
+  body.admin-print-session-detail .session-detail-screen {
+    display: none !important;
+  }
+
+  body.admin-print-session-detail .session-export-sheet {
+    display: block !important;
+  }
+
+  body.admin-print-session-detail .session-export-distribution-svg,
+  body.admin-print-session-detail .session-export-distribution-svg *,
+  body.admin-print-session-detail .session-radar-chart,
+  body.admin-print-session-detail .session-radar-chart * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
 .admin-model-results-link {
   border: 0;
   background: transparent;
@@ -1385,6 +1584,11 @@ body { padding: 0; }
   margin-top: 12px;
 }
 
+.session-detail-screen {
+  display: grid;
+  gap: 14px;
+}
+
 .session-detail-header {
   display: grid;
   gap: 10px;
@@ -1402,6 +1606,13 @@ body { padding: 0; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.session-detail-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .session-detail-back-btn {
@@ -1480,6 +1691,230 @@ body { padding: 0; }
 .session-detail-analysis-summary {
   display: grid;
   gap: 12px;
+}
+
+.session-export-sheet {
+  display: none;
+  color: #0f172a;
+}
+
+.session-export-header {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.session-export-title {
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.session-export-meta {
+  font-size: 13px;
+  color: #475569;
+}
+
+.session-export-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.session-export-section-title {
+  font-size: 18px;
+  font-weight: 900;
+  color: #111827;
+}
+
+.session-export-summary-grid,
+.session-export-performance-grid,
+.session-export-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.session-export-panel-title {
+  font-size: 15px;
+  font-weight: 900;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.session-export-performance-grid .session-radar-chart {
+  width: min(100%, 260px);
+  height: auto;
+  justify-self: center;
+}
+
+.session-export-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 12px;
+}
+
+.session-export-table th,
+.session-export-table td {
+  border: 1px solid #d7dee7;
+  padding: 8px 10px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.session-export-table th {
+  background: #f8fafc;
+  font-weight: 900;
+  color: #1f2937;
+}
+
+.session-export-summary-table th {
+  width: 42%;
+}
+
+.session-export-question-table {
+  table-layout: fixed;
+}
+
+.session-export-question-table th:nth-child(1),
+.session-export-question-table td:nth-child(1) {
+  width: 72px;
+  text-align: center;
+}
+
+.session-export-question-table th:nth-child(3),
+.session-export-question-table td:nth-child(3) {
+  width: 130px;
+}
+
+.session-export-question-table th:nth-child(4),
+.session-export-question-table td:nth-child(4) {
+  width: 88px;
+  text-align: center;
+}
+
+.session-export-question-table th:nth-child(2),
+.session-export-question-table td:nth-child(2) {
+  word-break: break-word;
+}
+
+.session-export-mini-table th:last-child,
+.session-export-mini-table td:last-child,
+.session-export-question-table th:last-child,
+.session-export-question-table td:last-child,
+.session-export-ranking-table th:nth-child(1),
+.session-export-ranking-table td:nth-child(1),
+.session-export-ranking-table th:nth-child(4),
+.session-export-ranking-table td:nth-child(4),
+.session-export-ranking-table th:nth-child(5),
+.session-export-ranking-table td:nth-child(5) {
+  text-align: center;
+}
+
+.session-export-question-text {
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.session-export-question-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.session-export-image-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.session-export-inline-image {
+  display: block;
+  max-width: 180px;
+  max-height: 120px;
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  object-fit: contain;
+  background: #fff;
+}
+
+.session-export-inline-image.answer {
+  margin-top: 8px;
+  max-width: 120px;
+  max-height: 80px;
+}
+
+.session-export-distribution-svg {
+  width: 100%;
+  height: auto;
+}
+
+.session-export-distribution-gridline {
+  stroke: #cbd5e1;
+  stroke-width: 1;
+}
+
+.session-export-distribution-axis-label {
+  fill: #475569;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.session-export-distribution-value {
+  fill: #334155;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.session-export-distribution-bar {
+  stroke-width: 1;
+}
+
+.session-export-distribution-bar.fail {
+  fill: #ef4444;
+  stroke: #dc2626;
+}
+
+.session-export-distribution-bar.pass {
+  fill: #5b7cfa;
+  stroke: #3b5bdb;
+}
+
+.session-export-modal {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.session-export-modal-body {
+  display: grid;
+  gap: 12px;
+  padding: 6px 0 0;
+}
+
+.session-export-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.session-export-option.disabled {
+  color: #94a3b8;
+}
+
+.session-export-option input {
+  width: 16px;
+  height: 16px;
+}
+
+.session-export-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .session-analysis-top-grid {

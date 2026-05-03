@@ -20,8 +20,7 @@ export function renderStemMarkup(text) {
   return escaped
     .replace(/【(.*?)】/g, (_, inner) => (String(inner ?? "").replace(/[\s\u3000]/g, "").length
       ? `<span class="u">${inner}</span>`
-      : '<span class="blank-red"></span>'))
-    .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, '<span class="blank-red"></span>');
+      : '<span class="blank-red"></span>'));
 }
 
 export function renderUnderlines(text) {

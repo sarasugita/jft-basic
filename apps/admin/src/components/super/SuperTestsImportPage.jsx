@@ -517,8 +517,26 @@ function renderUnderlinesHtml(text) {
   return escaped
     .replace(/【(.*?)】/g, (_, inner) => (String(inner ?? "").replace(/[\s\u3000]/g, "").length
       ? `<span class="u">${inner}</span>`
-      : renderBlankBoxHtml()))
-    .replace(/［[\s\u3000]*］|\[[\s\u3000]*\]/g, renderBlankBoxHtml());
+      : renderBlankBoxHtml()));
+}
+
+function getPreviewChoiceOrder(question, choices) {
+  const list = Array.isArray(choices) ? choices.map((choice, index) => ({ choice, index })) : [];
+  if (list.length <= 1) return list;
+  const answerIndices = Array.isArray(question?.answerIndices)
+    ? question.answerIndices
+    : question?.answerIndex != null
+      ? [question.answerIndex]
+      : [];
+  const correctSet = new Set(
+    answerIndices
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+  );
+  return [
+    ...list.filter((item) => correctSet.has(item.index)),
+    ...list.filter((item) => !correctSet.has(item.index)),
+  ];
 }
 
 function splitStemLines(text) {
@@ -1857,11 +1875,17 @@ export default function SuperTestsImportPage() {
                       <div style={{ fontSize: 12, color: "#333333", fontWeight: 700 }}>
                         {question.id} {question.sectionKey ? `(${question.sectionKey})` : ""}
                       </div>
-                      {prompt ? <div style={{ marginTop: 6, fontSize: 16, fontWeight: 600, whiteSpace: "pre-wrap" }}>{prompt}</div> : null}
+                      {prompt ? (
+                        <div
+                          style={{ marginTop: 6, fontSize: 16, fontWeight: 600, whiteSpace: "pre-wrap" }}
+                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(prompt) }}
+                        />
+                      ) : null}
                       {question.type === "daily" && stemExtra ? (
-                        <div style={{ marginTop: 6, fontSize: 13, color: "#333333", whiteSpace: "pre-wrap" }}>
-                          {stemExtra}
-                        </div>
+                        <div
+                          style={{ marginTop: 6, fontSize: 13, color: "#333333", whiteSpace: "pre-wrap" }}
+                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(stemExtra) }}
+                        />
                       ) : null}
                       {stemText && !useSpeakerLayout ? (
                         <div
@@ -1922,9 +1946,11 @@ export default function SuperTestsImportPage() {
                       ) : null}
                       {choices.length ? (
                         <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                          {choices.map((choice, optionIndex) => {
+                          {getPreviewChoiceOrder(question, choices).map(({ choice, index: optionIndex }) => {
                             const optionUrl = resolveMediaUrl(choice);
-                            const isCorrect = question.answerIndex === optionIndex;
+                            const isCorrect = Array.isArray(question.answerIndices)
+                              ? question.answerIndices.map((value) => Number(value)).includes(optionIndex)
+                              : question.answerIndex === optionIndex;
                             return (
                               <div
                                 key={`${question.id}-option-${optionIndex}`}
