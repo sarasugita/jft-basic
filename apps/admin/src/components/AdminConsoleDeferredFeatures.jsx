@@ -178,6 +178,7 @@ export default function AdminConsoleDeferredFeatures({
       && typeof openAttemptDetail === "function"
       && attemptCanOpenDetail(attempt)
   );
+  const [attemptDetailDeletingId, setAttemptDetailDeletingId] = useState("");
   const resolveAttemptScoreSummary = (attempt) => {
     if (typeof getVisibleAttemptScoreSummary === "function") {
       return getVisibleAttemptScoreSummary(attempt);
@@ -1105,6 +1106,7 @@ export default function AdminConsoleDeferredFeatures({
           label: row.section,
           value: row.total ? row.correct / row.total : 0,
         }));
+        const isDeletingThisAttempt = attemptDetailDeletingId === selectedAttempt.id;
         const closeAttemptDetail = () => {
           setAttemptDetailOpen(false);
           setSelectedAttemptObj(null);
@@ -1172,19 +1174,40 @@ export default function AdminConsoleDeferredFeatures({
                   <button
                     className="attempt-detail-action-button attempt-detail-action-button-danger"
                     type="button"
+                    disabled={isDeletingThisAttempt}
                     onClick={async () => {
-                      void deleteAttempt(selectedAttempt.id, {
-                        sessionId: selectedAttempt?.test_session_id ?? null,
-                      });
+                      if (isDeletingThisAttempt) return;
+                      const confirmed = window.confirm(`Delete attempt for ${attemptTitle} and ${attemptStudentName}?`);
+                      if (!confirmed) return;
+                      setAttemptDetailDeletingId(selectedAttempt.id);
+                      try {
+                        const deleted = await deleteAttempt(selectedAttempt.id, {
+                          confirmDelete: false,
+                          closeDetail: false,
+                          sessionId: selectedAttempt?.test_session_id ?? null,
+                          messageLabel: `${attemptTitle} ${attemptStudentName}`.trim(),
+                        });
+                        if (deleted) {
+                          closeAttemptDetail();
+                        }
+                      } finally {
+                        setAttemptDetailDeletingId("");
+                      }
                     }}
                   >
-                    <span className="attempt-detail-action-icon" aria-hidden="true">
-                      <svg viewBox="0 0 20 20" focusable="false">
-                        <path d="M5 5 15 15" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-                        <path d="M15 5 5 15" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-                      </svg>
-                    </span>
-                    <span>Delete Attempt</span>
+                    {isDeletingThisAttempt ? (
+                      <span className="attempt-detail-action-icon" aria-hidden="true">
+                        <span className="attendance-import-status-spinner admin-loading-spinner attempt-detail-delete-spinner" />
+                      </span>
+                    ) : (
+                      <span className="attempt-detail-action-icon" aria-hidden="true">
+                        <svg viewBox="0 0 20 20" focusable="false">
+                          <path d="M5 5 15 15" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                          <path d="M15 5 5 15" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                        </svg>
+                      </span>
+                    )}
+                    <span>{isDeletingThisAttempt ? "Deleting..." : "Delete Attempt"}</span>
                   </button>
                 </div>
               </div>

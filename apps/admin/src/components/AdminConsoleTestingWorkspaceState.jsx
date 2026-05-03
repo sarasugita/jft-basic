@@ -112,6 +112,14 @@ function compareSetIds(left, right) {
   return SET_ID_COLLATOR.compare(String(left ?? "").trim(), String(right ?? "").trim());
 }
 
+function getVocabularyTypeLabel(code) {
+  const normalized = String(code ?? "").trim().toLowerCase();
+  if (normalized === "verb") return "Verb";
+  if (normalized === "adj") return "Adjective";
+  if (normalized === "adv") return "Adverb";
+  return "Noun";
+}
+
 function getSessionSortTime(session) {
   return new Date(session?.starts_at || session?.created_at || 0).getTime();
 }
@@ -985,12 +993,14 @@ function parseDailySessionSetId(setId) {
       raw,
     };
   }
-  match = raw.match(/^(\d+)-Noun(\d+)$/i);
+  match = raw.match(/^(\d+)-(Noun|Verb|Adj|Adv)(\d+)$/i);
   if (match) {
     return {
       kind: "vocab",
       setNumber: Number(match[1]),
-      nounNumber: Number(match[2]),
+      vocabType: String(match[2] ?? "").trim(),
+      vocabLabel: getVocabularyTypeLabel(match[2]),
+      vocabNumber: Number(match[3]),
       raw,
     };
   }
@@ -1042,10 +1052,11 @@ function buildDailySessionTitleLabel(setIds) {
         kind: parsed.kind,
         bookNumber: parsed.bookNumber ?? null,
         setNumber: parsed.setNumber ?? null,
+        vocabLabel: parsed.vocabLabel ?? "Noun",
         numbers: [],
       });
     }
-    grouped.get(key).numbers.push(parsed.kind === "vocab" ? parsed.nounNumber : parsed.chapterNumber);
+    grouped.get(key).numbers.push(parsed.kind === "vocab" ? parsed.vocabNumber : parsed.chapterNumber);
   });
 
   const groupedLabels = Array.from(grouped.values())
@@ -1066,7 +1077,7 @@ function buildDailySessionTitleLabel(setIds) {
       const numberRange = formatDailySessionNumberRanges(group.numbers);
       if (!numberRange) return "";
       if (group.kind === "vocab") {
-        return `Vocabulary Set ${group.setNumber} (Noun ${numberRange})`;
+        return `Vocabulary Set ${group.setNumber} (${group.vocabLabel} ${numberRange})`;
       }
       if (group.kind === "grammar") {
         return `Grammar Book ${group.bookNumber} Chapter ${numberRange}`;
@@ -1112,7 +1123,7 @@ function buildDailySessionTitle({ category, setIds }) {
       return `${normalizedCategory} ${normalizedSetIds[0]}`.trim();
     }
     if (parsed.kind === "vocab") {
-      return `Vocabulary Set ${parsed.setNumber} (Noun ${parsed.nounNumber})`;
+      return `Vocabulary Set ${parsed.setNumber} (${parsed.vocabLabel} ${parsed.vocabNumber})`;
     }
     if (parsed.kind === "grammar") {
       return `Grammar Book ${parsed.bookNumber} Chapter ${parsed.chapterNumber}`;
@@ -4246,18 +4257,35 @@ export function useTestingWorkspaceState({
     fetchTests();
   }, [supabase, fetchTests]);
 
-  const deleteAttempt = useCallback(async (attemptId) => {
-    if (!attemptId || !supabase) return;
-    const ok = window.confirm(`Delete attempt ${attemptId}?`);
-    if (!ok) return;
+  const deleteAttempt = useCallback(async (attemptId, options = {}) => {
+    if (!attemptId || !supabase) return false;
+    const {
+      confirmDelete = true,
+      messageLabel = "",
+      sessionId = null,
+    } = options;
+    if (confirmDelete) {
+      const ok = window.confirm(`Delete attempt ${attemptId}?`);
+      if (!ok) return false;
+    }
     const { error } = await supabase.from("attempts").delete().eq("id", attemptId);
     if (error) {
       console.error("delete attempt error:", error);
       setQuizMsg(`Delete failed: ${error.message}`);
-      return;
+      setAttemptsMsg(`Delete failed: ${error.message}`);
+      setSessionDetailMsg(`Delete failed: ${error.message}`);
+      return false;
     }
-    setQuizMsg(`Deleted: ${attemptId}`);
-  }, [supabase]);
+    setAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
+    setSessionDetailAttempts((prev) => prev.filter((attempt) => attempt.id !== attemptId));
+    const label = String(messageLabel ?? "").trim() || attemptId;
+    setQuizMsg(`Deleted: ${label}`);
+    setAttemptsMsg(`Deleted: ${label}`);
+    if (!sessionId || String(sessionDetail.sessionId ?? "") === String(sessionId)) {
+      setSessionDetailMsg(`Deleted: ${label}`);
+    }
+    return true;
+  }, [supabase, sessionDetail.sessionId]);
 
   const getAttemptTitle = useCallback((attempt) => {
     if (!attempt) return "";
