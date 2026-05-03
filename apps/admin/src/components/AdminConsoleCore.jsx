@@ -497,6 +497,7 @@ function getEmptyDailyRecordPlanDraft() {
   return {
     mini_test_1: "",
     mini_test_2: "",
+    mini_test_3: "",
     special_test_1: "",
     special_test_2: "",
   };
@@ -742,6 +743,7 @@ function buildDailyRecordPlanDrafts(records) {
     drafts[record.record_date] = {
       mini_test_1: record.mini_test_1 ?? "",
       mini_test_2: record.mini_test_2 ?? "",
+      mini_test_3: record.mini_test_3 ?? "",
       special_test_1: record.special_test_1 ?? "",
       special_test_2: record.special_test_2 ?? "",
     };
@@ -7298,6 +7300,7 @@ export default function AdminConsole({
         todays_content,
         mini_test_1,
         mini_test_2,
+        mini_test_3,
         special_test_1,
         special_test_2,
         created_at,
@@ -7307,6 +7310,27 @@ export default function AdminConsole({
       .eq("school_id", activeSchoolId)
       .order("record_date", { ascending: false })
       .limit(180);
+    if (result.error && isMissingColumnError(result.error, "mini_test_3")) {
+      result = await supabase
+        .from("daily_records")
+        .select(`
+          id,
+          school_id,
+          record_date,
+          is_holiday,
+          todays_content,
+          mini_test_1,
+          mini_test_2,
+          special_test_1,
+          special_test_2,
+          created_at,
+          updated_at,
+          daily_record_student_comments(${DAILY_RECORD_COMMENT_FIELDS})
+        `)
+        .eq("school_id", activeSchoolId)
+        .order("record_date", { ascending: false })
+        .limit(180);
+    }
     if (result.error && isMissingColumnError(result.error, "is_holiday")) {
       result = await supabase
         .from("daily_records")
@@ -7317,6 +7341,7 @@ export default function AdminConsole({
           todays_content,
           mini_test_1,
           mini_test_2,
+          mini_test_3,
           special_test_1,
           special_test_2,
           created_at,
@@ -7694,8 +7719,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
       record_date: recordDate,
       mini_test_1: draft.mini_test_1.trim() || null,
       mini_test_2: draft.mini_test_2.trim() || null,
+      mini_test_3: draft.mini_test_3.trim() || null,
       special_test_1: draft.special_test_1.trim() || null,
-      special_test_2: null,
+      special_test_2: draft.special_test_2.trim() || null,
       updated_at: new Date().toISOString(),
       created_by: session?.user?.id ?? null,
     };
@@ -7716,6 +7742,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
         .insert({
           ...payload,
           todays_content: null,
+          mini_test_1: null,
+          mini_test_2: null,
+          mini_test_3: null,
+          special_test_1: null,
+          special_test_2: null,
         });
       if (error) {
         console.error("daily record plan insert error:", error);
@@ -7765,6 +7796,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
           todays_content: null,
           mini_test_1: null,
           mini_test_2: null,
+          mini_test_3: null,
           special_test_1: null,
           special_test_2: null,
         });

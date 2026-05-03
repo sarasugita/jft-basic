@@ -212,6 +212,7 @@ create table if not exists public.daily_records (
   todays_content text,
   mini_test_1 text,
   mini_test_2 text,
+  mini_test_3 text,
   special_test_1 text,
   special_test_2 text,
   created_by uuid references public.profiles(id) on delete set null,

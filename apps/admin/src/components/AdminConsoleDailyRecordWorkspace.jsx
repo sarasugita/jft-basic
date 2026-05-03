@@ -401,7 +401,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
       </div>
 
       <div className="admin-table-wrap" style={{ marginTop: 8, maxHeight: "70vh" }} ref={dailyRecordTableWrapRef}>
-        <table className="admin-table daily-record-table" style={{ minWidth: 1360 }}>
+        <table className="admin-table daily-record-table" style={{ minWidth: 1480 }}>
           <thead>
             <tr>
               <th>Date</th>
@@ -410,6 +410,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
               <th>Student Comments</th>
               <th>Daily Test 1</th>
               <th>Daily Test 2</th>
+              <th>Daily Test 3</th>
               <th>Model Test 1</th>
               <th>Model Test 2</th>
               <th>Save Plan</th>
@@ -425,16 +426,19 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
                 mini_test_1: draft.mini_test_1,
                 mini_test_2: draft.mini_test_2,
+                mini_test_3: draft.mini_test_3,
                 special_test_1: draft.special_test_1,
                 special_test_2: draft.special_test_2,
                 lockedMiniTest1: false,
                 lockedMiniTest2: false,
+                lockedMiniTest3: false,
                 lockedSpecialTest1: false,
                 lockedSpecialTest2: false,
               };
               const hasPlanContent = [
                 display.mini_test_1,
                 display.mini_test_2,
+                display.mini_test_3,
                 display.special_test_1,
                 display.special_test_2,
               ].some((value) => String(value ?? "").trim());
@@ -470,7 +474,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                   </td>
                   {collapseHolidayRow ? (
                     <>
-                      <td colSpan={6} className="daily-record-holiday-summary">
+                      <td colSpan={7} className="daily-record-holiday-summary">
                         {dailyRecordHolidaySavingDate === recordDate ? "Saving..." : "Holiday"}
                       </td>
                       <td className="daily-record-holiday-action-cell">
@@ -515,6 +519,17 @@ export default function AdminConsoleDailyRecordWorkspace() {
                           <DailyRecordPlanTextarea
                             value={display.mini_test_2}
                             onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_2", e.target.value)}
+                            placeholder="Plan"
+                          />
+                        )}
+                      </td>
+                      <td>
+                        {rowIsLocked || display.lockedMiniTest3 ? (
+                          <span className="daily-record-plan-text">{display.mini_test_3}</span>
+                        ) : (
+                          <DailyRecordPlanTextarea
+                            value={display.mini_test_3}
+                            onChange={(e) => updateDailyRecordPlanDraft(recordDate, "mini_test_3", e.target.value)}
                             placeholder="Plan"
                           />
                         )}

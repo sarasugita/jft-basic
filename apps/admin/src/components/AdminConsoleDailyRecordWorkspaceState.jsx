@@ -119,6 +119,7 @@ function getEmptyDailyRecordPlanDraft() {
   return {
     mini_test_1: "",
     mini_test_2: "",
+    mini_test_3: "",
     special_test_1: "",
     special_test_2: "",
   };
@@ -272,6 +273,7 @@ function getDailyRecordForm(record) {
     comments,
     mini_test_1: record.mini_test_1 ?? "",
     mini_test_2: record.mini_test_2 ?? "",
+    mini_test_3: record.mini_test_3 ?? "",
     special_test_1: record.special_test_1 ?? "",
     special_test_2: record.special_test_2 ?? "",
   };
@@ -284,6 +286,7 @@ function buildDailyRecordPlanDrafts(records) {
     drafts[record.record_date] = {
       mini_test_1: record.mini_test_1 ?? "",
       mini_test_2: record.mini_test_2 ?? "",
+      mini_test_3: record.mini_test_3 ?? "",
       special_test_1: record.special_test_1 ?? "",
       special_test_2: record.special_test_2 ?? "",
     };
@@ -367,6 +370,7 @@ function resolveDailyRecordPlanDraft(draft, scheduledTests) {
   return {
     mini_test_1: (nextDraft.mini_test_1 ?? "") || scheduledTests?.dailyTests?.[0] || "",
     mini_test_2: (nextDraft.mini_test_2 ?? "") || scheduledTests?.dailyTests?.[1] || "",
+    mini_test_3: (nextDraft.mini_test_3 ?? "") || scheduledTests?.dailyTests?.[2] || "",
     special_test_1: (nextDraft.special_test_1 ?? "") || scheduledTests?.modelTests?.[0] || "",
     special_test_2: (nextDraft.special_test_2 ?? "") || scheduledTests?.modelTests?.[1] || "",
   };
@@ -482,6 +486,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         todays_content,
         mini_test_1,
         mini_test_2,
+        mini_test_3,
         special_test_1,
         special_test_2,
         created_at,
@@ -491,6 +496,27 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       .eq("school_id", schoolIdSnapshot)
       .order("record_date", { ascending: false })
       .limit(180);
+    if (result.error && isMissingColumnError(result.error, "mini_test_3")) {
+      result = await supabase
+        .from("daily_records")
+        .select(`
+          id,
+          school_id,
+          record_date,
+          is_holiday,
+          todays_content,
+          mini_test_1,
+          mini_test_2,
+          special_test_1,
+          special_test_2,
+          created_at,
+          updated_at,
+          daily_record_student_comments(${DAILY_RECORD_COMMENT_FIELDS})
+        `)
+        .eq("school_id", schoolIdSnapshot)
+        .order("record_date", { ascending: false })
+        .limit(180);
+    }
     if (result.error && isMissingColumnError(result.error, "is_holiday")) {
       result = await supabase
         .from("daily_records")
@@ -501,6 +527,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
           todays_content,
           mini_test_1,
           mini_test_2,
+          mini_test_3,
           special_test_1,
           special_test_2,
           created_at,
@@ -876,6 +903,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       record_date: recordDate,
       mini_test_1: draft.mini_test_1.trim() || null,
       mini_test_2: draft.mini_test_2.trim() || null,
+      mini_test_3: draft.mini_test_3.trim() || null,
       special_test_1: draft.special_test_1.trim() || null,
       special_test_2: draft.special_test_2.trim() || null,
       updated_at: new Date().toISOString(),
@@ -887,6 +915,24 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         .update(payload)
         .eq("id", existingRecord.id);
       if (error) {
+        if (isMissingColumnError(error, "mini_test_3")) {
+          const legacyPayload = { ...payload };
+          delete legacyPayload.mini_test_3;
+          const { error: legacyError } = await supabase
+            .from("daily_records")
+            .update(legacyPayload)
+            .eq("id", existingRecord.id);
+          if (!legacyError) {
+            setDailyRecordPlanSavingDate("");
+            setDailyRecordsMsg(`Saved plan for ${recordDate}.`);
+            await fetchDailyRecords();
+            return;
+          }
+          console.error("daily record plan update legacy fallback error:", legacyError);
+          setDailyRecordsMsg(`Save failed: ${legacyError.message}`);
+          setDailyRecordPlanSavingDate("");
+          return;
+        }
         console.error("daily record plan update error:", error);
         setDailyRecordsMsg(`Save failed: ${error.message}`);
         setDailyRecordPlanSavingDate("");
@@ -900,6 +946,23 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
           todays_content: null,
         });
       if (error) {
+        if (isMissingColumnError(error, "mini_test_3")) {
+          const legacyPayload = { ...payload, todays_content: null };
+          delete legacyPayload.mini_test_3;
+          const { error: legacyError } = await supabase
+            .from("daily_records")
+            .insert(legacyPayload);
+          if (!legacyError) {
+            setDailyRecordPlanSavingDate("");
+            setDailyRecordsMsg(`Saved plan for ${recordDate}.`);
+            await fetchDailyRecords();
+            return;
+          }
+          console.error("daily record plan insert legacy fallback error:", legacyError);
+          setDailyRecordsMsg(`Save failed: ${legacyError.message}`);
+          setDailyRecordPlanSavingDate("");
+          return;
+        }
         console.error("daily record plan insert error:", error);
         setDailyRecordsMsg(`Save failed: ${error.message}`);
         setDailyRecordPlanSavingDate("");
@@ -957,8 +1020,37 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         .insert({
           ...payload,
           todays_content: null,
+          mini_test_1: null,
+          mini_test_2: null,
+          mini_test_3: null,
+          special_test_1: null,
+          special_test_2: null,
         });
       if (error) {
+        if (isMissingColumnError(error, "mini_test_3")) {
+          const legacyPayload = {
+            ...payload,
+            todays_content: null,
+            mini_test_1: null,
+            mini_test_2: null,
+            special_test_1: null,
+            special_test_2: null,
+          };
+          delete legacyPayload.mini_test_3;
+          const { error: legacyError } = await supabase
+            .from("daily_records")
+            .insert(legacyPayload);
+          if (!legacyError) {
+            setDailyRecordHolidaySavingDate("");
+            setDailyRecordsMsg(`Holiday flag updated for ${recordDate}.`);
+            await fetchDailyRecords();
+            return;
+          }
+          console.error("daily record holiday insert legacy fallback error:", legacyError);
+          setDailyRecordsMsg(`Save failed: ${legacyError.message}`);
+          setDailyRecordHolidaySavingDate("");
+          return;
+        }
         console.error("daily record holiday insert error:", error);
         setDailyRecordsMsg(`Save failed: ${error.message}`);
         setDailyRecordHolidaySavingDate("");
@@ -1058,9 +1150,10 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       const resolvedDraft = resolveDailyRecordPlanDraft(draft, scheduledTests);
       const lockedMiniTest1 = Boolean(scheduledTests.dailyTests[0]);
       const lockedMiniTest2 = Boolean(scheduledTests.dailyTests[1]);
+      const lockedMiniTest3 = Boolean(scheduledTests.dailyTests[2]);
       const lockedSpecialTest1 = Boolean(scheduledTests.modelTests[0]);
       const lockedSpecialTest2 = Boolean(scheduledTests.modelTests[1]);
-      const isFullyLocked = lockedMiniTest1 && lockedMiniTest2 && lockedSpecialTest1 && lockedSpecialTest2;
+      const isFullyLocked = lockedMiniTest1 && lockedMiniTest2 && lockedMiniTest3 && lockedSpecialTest1 && lockedSpecialTest2;
       displayData[recordDate] = {
         hasRecord: Boolean(record),
         isConfirmed: confirmedSet.has(recordDate),
@@ -1068,10 +1161,12 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         isHoliday: resolveDailyRecordHoliday(recordDate, record?.is_holiday),
         mini_test_1: lockedMiniTest1 ? (scheduledTests.dailyTests[0] ?? resolvedDraft.mini_test_1) : resolvedDraft.mini_test_1,
         mini_test_2: lockedMiniTest2 ? (scheduledTests.dailyTests[1] ?? resolvedDraft.mini_test_2) : resolvedDraft.mini_test_2,
+        mini_test_3: lockedMiniTest3 ? (scheduledTests.dailyTests[2] ?? resolvedDraft.mini_test_3) : resolvedDraft.mini_test_3,
         special_test_1: lockedSpecialTest1 ? (scheduledTests.modelTests[0] ?? resolvedDraft.special_test_1) : resolvedDraft.special_test_1,
         special_test_2: lockedSpecialTest2 ? (scheduledTests.modelTests[1] ?? resolvedDraft.special_test_2) : resolvedDraft.special_test_2,
         lockedMiniTest1,
         lockedMiniTest2,
+        lockedMiniTest3,
         lockedSpecialTest1,
         lockedSpecialTest2,
       };
@@ -1095,6 +1190,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         if (
           resolvedDraft.mini_test_1 !== (currentDraft.mini_test_1 ?? "")
           || resolvedDraft.mini_test_2 !== (currentDraft.mini_test_2 ?? "")
+          || resolvedDraft.mini_test_3 !== (currentDraft.mini_test_3 ?? "")
           || resolvedDraft.special_test_1 !== (currentDraft.special_test_1 ?? "")
           || resolvedDraft.special_test_2 !== (currentDraft.special_test_2 ?? "")
         ) {
@@ -1277,13 +1373,17 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
       const updated = { ...prev };
       let changed = false;
 
-      // Fill daily test columns (mini_test_1, mini_test_2)
+      // Fill daily test columns (mini_test_1, mini_test_2, mini_test_3)
       if (!(updated.mini_test_1 || "").trim() && dailyRecordTodaySessions.dailyTests?.[0]) {
         updated.mini_test_1 = dailyRecordTodaySessions.dailyTests[0];
         changed = true;
       }
       if (!(updated.mini_test_2 || "").trim() && dailyRecordTodaySessions.dailyTests?.[1]) {
         updated.mini_test_2 = dailyRecordTodaySessions.dailyTests[1];
+        changed = true;
+      }
+      if (!(updated.mini_test_3 || "").trim() && dailyRecordTodaySessions.dailyTests?.[2]) {
+        updated.mini_test_3 = dailyRecordTodaySessions.dailyTests[2];
         changed = true;
       }
 
@@ -1299,7 +1399,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
       return changed ? updated : prev;
     });
-  }, [dailyRecordTodaySessions, dailyRecordForm.mini_test_1, dailyRecordForm.mini_test_2, dailyRecordForm.special_test_1, dailyRecordForm.special_test_2]);
+  }, [dailyRecordTodaySessions, dailyRecordForm.mini_test_1, dailyRecordForm.mini_test_2, dailyRecordForm.mini_test_3, dailyRecordForm.special_test_1, dailyRecordForm.special_test_2]);
 
   // Effects for date/calendar sync
   useEffect(() => {
