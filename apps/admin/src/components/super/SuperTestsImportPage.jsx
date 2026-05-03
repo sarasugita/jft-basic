@@ -697,37 +697,12 @@ function ValidationReport({ validation }) {
   );
 }
 
-function SchoolSelector({ schools, selected, onChange }) {
-  return (
-    <div className="super-school-selector">
-      {schools.map((school) => {
-        const checked = selected.includes(school.id);
-        return (
-          <label key={school.id} className="super-school-option">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(event) => {
-                if (event.target.checked) onChange([...selected, school.id]);
-                else onChange(selected.filter((item) => item !== school.id));
-              }}
-            />
-            <span>{school.name}</span>
-          </label>
-        );
-      })}
-      {schools.length === 0 ? <div className="admin-help">No schools available.</div> : null}
-    </div>
-  );
-}
-
 export default function SuperTestsImportPage() {
   const { supabase, invokeWithAuth } = useSuperAdmin();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [testType, setTestType] = useState("daily");
-  const [visibility, setVisibility] = useState("all");
   const [questionSets, setQuestionSets] = useState([]);
   const [schools, setSchools] = useState([]);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -749,6 +724,10 @@ export default function SuperTestsImportPage() {
   const [previewQuestions, setPreviewQuestions] = useState([]);
   const [previewMsg, setPreviewMsg] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [selectedCategoryByTestType, setSelectedCategoryByTestType] = useState({
+    daily: "__all__",
+    model: "__all__",
+  });
   const [uploadConflict, setUploadConflict] = useState({
     open: false,
     duplicateSetIds: [],
@@ -862,12 +841,8 @@ export default function SuperTestsImportPage() {
         if (idCompare !== 0) return idCompare;
         return String(right.updated_at ?? right.created_at ?? "").localeCompare(String(left.updated_at ?? left.created_at ?? ""));
       })
-      .filter((item) => {
-        const matchesType = item.test_type === testType;
-        const matchesVisibility = visibility === "all" || item.visibility_scope === visibility;
-        return matchesType && matchesVisibility;
-      });
-  }, [questionSets, testType, visibility]);
+      .filter((item) => item.test_type === testType);
+  }, [questionSets, testType]);
 
   const groupedQuestionSets = useMemo(() => {
     const groups = new Map();
@@ -880,6 +855,17 @@ export default function SuperTestsImportPage() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([category, items]) => ({ category, items }));
   }, [filteredQuestionSets]);
+  const activeCategoryKey = testType === "model" ? "model" : "daily";
+  const activeCategoryName = selectedCategoryByTestType[activeCategoryKey] === "__all__"
+    || groupedQuestionSets.some((group) => group.category === selectedCategoryByTestType[activeCategoryKey])
+      ? selectedCategoryByTestType[activeCategoryKey]
+      : "__all__";
+  const activeCategoryGroup = groupedQuestionSets.find((group) => group.category === activeCategoryName) ?? null;
+  const visibleCategoryGroups = activeCategoryName === "__all__"
+    ? groupedQuestionSets
+    : activeCategoryGroup
+      ? [activeCategoryGroup]
+      : [];
   const previewSectionBreaks = useMemo(() => {
     let previousSectionTitle = "";
     return previewQuestions.map((question, index) => {
@@ -1429,31 +1415,56 @@ export default function SuperTestsImportPage() {
           </div>
         </div>
 
-        <div className="super-library-tabs" style={{ marginTop: 10 }}>
-          <button
-            className={`super-library-tab ${testType === "daily" ? "active" : ""}`}
-            type="button"
-            onClick={() => setTestType("daily")}
-          >
-            Daily Test
-          </button>
-          <button
-            className={`super-library-tab ${testType === "model" ? "active" : ""}`}
-            type="button"
-            onClick={() => setTestType("model")}
-          >
-            Model Test
-          </button>
-        </div>
-
-        <div className="admin-form" style={{ marginTop: 12 }}>
-          <div className="field small">
-            <label>Visibility</label>
-            <select value={visibility} onChange={(event) => setVisibility(event.target.value)}>
-              <option value="all">All</option>
-              <option value="global">All schools</option>
-              <option value="restricted">Restricted</option>
-            </select>
+        <div className="super-library-choice-card" style={{ marginTop: 10 }}>
+          <div className="super-library-choice-row">
+            <div className="super-library-choice-label">Test type</div>
+            <div className="super-library-mode-tabs">
+              <button
+                className={`super-library-mode-tab ${testType === "daily" ? "active" : ""}`}
+                type="button"
+                onClick={() => setTestType("daily")}
+              >
+                Daily Test
+              </button>
+              <button
+                className={`super-library-mode-tab ${testType === "model" ? "active" : ""}`}
+                type="button"
+                onClick={() => setTestType("model")}
+              >
+                Model Test
+              </button>
+            </div>
+          </div>
+          <div className="super-library-choice-row">
+            <div className="super-library-choice-label">Category</div>
+            {groupedQuestionSets.length > 0 ? (
+              <div className="admin-mini-tabs results-category-tabs super-library-category-tabs">
+                <button
+                  key={`${testType}-all`}
+                  type="button"
+                  className={`admin-mini-tab results-category-tab ${activeCategoryName === "__all__" ? "active" : ""}`}
+                  onClick={() => setSelectedCategoryByTestType((current) => ({
+                    ...current,
+                    [activeCategoryKey]: "__all__",
+                  }))}
+                >
+                  All Categories
+                </button>
+                {groupedQuestionSets.map((group) => (
+                  <button
+                    key={`${testType}-${group.category}`}
+                    type="button"
+                    className={`admin-mini-tab results-category-tab ${group.category === activeCategoryName ? "active" : ""}`}
+                    onClick={() => setSelectedCategoryByTestType((current) => ({
+                      ...current,
+                      [activeCategoryKey]: group.category,
+                    }))}
+                  >
+                    {group.category}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -1464,17 +1475,19 @@ export default function SuperTestsImportPage() {
           <div className="admin-help" style={{ marginTop: 12 }}>No sets to show yet.</div>
         ) : null}
         {!loading ? (
-          <div className="super-library-sections">
-            {groupedQuestionSets.map((group) => (
-              <section key={group.category} className="super-library-section">
-                <div className="super-library-section-head">
-                  <div className="super-library-section-title">{group.category}</div>
-                  <div className="admin-help">{group.items.length} set{group.items.length === 1 ? "" : "s"}</div>
-                </div>
-                {renderQuestionSetTable(group.items)}
-              </section>
-            ))}
-          </div>
+          <>
+            <div className="super-library-sections">
+              {visibleCategoryGroups.map((group) => (
+                <section key={group.category} className="super-library-section">
+                  <div className="super-library-section-head">
+                    <div className="super-library-section-title">{group.category}</div>
+                    <div className="admin-help">{group.items.length} set{group.items.length === 1 ? "" : "s"}</div>
+                  </div>
+                  {renderQuestionSetTable(group.items)}
+                </section>
+              ))}
+            </div>
+          </>
         ) : null}
       </div>
 
@@ -1555,26 +1568,6 @@ export default function SuperTestsImportPage() {
                   </div>
                 ) : null}
               </div>
-              <div className="field">
-                <label>Visibility</label>
-                <select
-                  value={uploadForm.visibility_scope}
-                  onChange={(event) => setUploadForm((prev) => ({ ...prev, visibility_scope: event.target.value }))}
-                >
-                  <option value="global">All schools</option>
-                  <option value="restricted">Restricted</option>
-                </select>
-              </div>
-              {uploadForm.visibility_scope === "restricted" ? (
-                <div className="field">
-                  <label>Visible Schools</label>
-                  <SchoolSelector
-                    schools={schools}
-                    selected={uploadForm.school_ids}
-                    onChange={(nextSchoolIds) => setUploadForm((prev) => ({ ...prev, school_ids: nextSchoolIds }))}
-                  />
-                </div>
-              ) : null}
               <div className="upload-question-actions">
                 <button className="btn btn-primary upload-question-submit-btn" onClick={saveUpload} disabled={saving}>
                   {saving ? (
@@ -1713,26 +1706,6 @@ export default function SuperTestsImportPage() {
                   </div>
                 ) : null}
               </div>
-              <div className="field">
-                <label>Visibility</label>
-                <select
-                  value={metaForm.visibility_scope}
-                  onChange={(event) => setMetaForm((prev) => ({ ...prev, visibility_scope: event.target.value }))}
-                >
-                  <option value="global">All schools</option>
-                  <option value="restricted">Restricted</option>
-                </select>
-              </div>
-              {metaForm.visibility_scope === "restricted" ? (
-                <div className="field">
-                  <label>Visible Schools</label>
-                  <SchoolSelector
-                    schools={schools}
-                    selected={metaForm.school_ids}
-                    onChange={(nextSchoolIds) => setMetaForm((prev) => ({ ...prev, school_ids: nextSchoolIds }))}
-                  />
-                </div>
-              ) : null}
               <div className="upload-question-actions">
                 <button className="btn btn-primary" onClick={saveMetadata} disabled={saving}>
                   {saving ? "Saving..." : metaCsvFile ? "Upload New Version" : "Save Changes"}

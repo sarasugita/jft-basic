@@ -6037,16 +6037,6 @@ body { padding: 0; }
   flex-wrap: wrap;
 }
 
-.super-library-tabs {
-  display: inline-flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  padding: 4px;
-  border: 1px solid #c5cfdb;
-  border-radius: 7px;
-  background: #e7edf4;
-}
-
 .admin-upload-cta-btn {
   padding: 10px 16px;
   font-size: 14px;
@@ -6057,24 +6047,80 @@ body { padding: 0; }
   height: 15px;
 }
 
-
-.super-library-tab {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: #445061;
-  font-weight: 800;
-  font-size: 12px;
-  padding: 7px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+.super-library-mode-tabs {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
 }
 
-.super-library-tab.active {
+.super-library-choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #d8e0e7;
+  border-radius: 12px;
   background: #ffffff;
-  color: #1f2937;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+.super-library-choice-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.super-library-choice-label {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #48611c;
+}
+
+.super-library-mode-tab {
+  appearance: none;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 900;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: transform 0.16s ease, background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.super-library-mode-tab.active {
+  background: #3f6b0f;
+  color: #ffffff;
+  border-color: #2f520b;
+  box-shadow: none;
+}
+
+.super-library-mode-tab:hover,
+.super-library-mode-tab:focus-visible {
+  transform: translateY(-1px);
+  border-color: #9fb3c8;
+}
+
+.super-library-mode-tab.active:hover,
+.super-library-mode-tab.active:focus-visible {
+  border-color: #2f520b;
+}
+
+.super-library-tabs {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 4px;
+  border: 1px solid #c5cfdb;
+  border-radius: 7px;
+  background: #e7edf4;
 }
 
 .super-library-sections {
