@@ -39,6 +39,8 @@ export function renderSetPassword(app) {
   const msgEl = app.querySelector("#msg");
   const toggleNew = app.querySelector("#toggleNewPass");
   const toggleConfirm = app.querySelector("#toggleConfirmPass");
+  const updateBtn = app.querySelector("#updateBtn");
+  let submitting = false;
 
   toggleNew?.addEventListener("click", () => {
     const next = passEl.type === "password" ? "text" : "password";
@@ -50,7 +52,8 @@ export function renderSetPassword(app) {
     confirmEl.type = next;
     toggleConfirm.innerHTML = next === "text" ? eyeIcon() : eyeOffIcon();
   });
-  app.querySelector("#updateBtn").addEventListener("click", async () => {
+  updateBtn?.addEventListener("click", async () => {
+    if (submitting) return;
     msgEl.textContent = "";
     const password = passEl.value;
     const confirm = confirmEl.value;
@@ -62,23 +65,35 @@ export function renderSetPassword(app) {
       msgEl.textContent = "パスワードが一致しません。";
       return;
     }
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) {
-      msgEl.textContent = error.message;
-      return;
+    submitting = true;
+    updateBtn.disabled = true;
+    updateBtn.textContent = "Updating...";
+    try {
+      const { data, error } = await supabase.functions.invoke("set-student-password", {
+        body: { password },
+      });
+      if (error || data?.error) {
+        msgEl.textContent = error?.message ?? data?.error ?? "Failed to update password.";
+        return;
+      }
+
+      try {
+        await supabase.auth.signOut({ scope: "local" });
+      } catch {
+        // Ignore sign-out failures here; the next auth refresh will clear the stale session.
+      }
+
+      authState.mustChangePassword = false;
+      authState.recoveryMode = false;
+      if (authState.profile) authState.profile.force_password_change = false;
+      state.phase = "login";
+      state.requireLogin = true;
+      saveState();
+      triggerRender();
+    } finally {
+      submitting = false;
+      updateBtn.disabled = false;
+      updateBtn.textContent = "Update password";
     }
-    const { error: profileError } = await supabase
-      .from("profiles")
-      .update({ force_password_change: false })
-      .eq("id", authState.session?.user?.id ?? "");
-    if (profileError) {
-      msgEl.textContent = profileError.message;
-      return;
-    }
-    authState.mustChangePassword = false;
-    if (authState.profile) authState.profile.force_password_change = false;
-    state.phase = "intro";
-    saveState();
-    triggerRender();
   });
 }
