@@ -3062,6 +3062,21 @@ button.student-application-view {
   min-height: 22px;
   margin-bottom: 6px;
 }
+.save-status.saving{
+  color: #6b5b19;
+}
+.save-status.error{
+  color: #9f1239;
+}
+.save-status.saved{
+  color: #1a7f37;
+}
+.result-save-actions{
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin: 8px 0 4px;
+}
 .score-correct{ font-size: 64px; font-weight: 900; }
 .score-slash{ font-size: 44px; font-weight: 900; opacity: .6; }
 .score-total{ font-size: 44px; font-weight: 900; opacity: .85; }
