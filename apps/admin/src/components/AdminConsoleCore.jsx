@@ -8173,46 +8173,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setTestsMsg("Loading...");
     const { data, error } = await supabase
       .from("tests")
-      .select("id, version, title, type, pass_rate, is_public, created_at, questions(count)")
+      .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
       .eq("is_public", true)
+      .order("updated_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
-      const msg = String(error.message ?? "");
-      if (msg.includes("relationship") || msg.includes("questions")) {
-        const fallback = await supabase
-          .from("tests")
-          .select("id, version, title, type, pass_rate, is_public, created_at")
-          .eq("is_public", true)
-          .order("created_at", { ascending: false })
-          .limit(200);
-        if (fallback.error) {
-          console.error("tests fetch error:", fallback.error);
-          setTests([]);
-          setTestsMsg(`Load failed: ${fallback.error.message}`);
-          setTestsLoaded(false);
-          return;
-        }
-        const list = fallback.data ?? [];
-        const counts = await fetchQuestionCounts(supabase, list.map((t) => t.version));
-        const withCounts = list.map((t) => ({
-          ...t,
-          question_count: counts[t.version] ?? 0
-        }));
-        const seeded = await seedModelCategory(withCounts);
-        const hydrated = await attachGeneratedDailySourceSetIds(seeded);
-        setTests(hydrated);
-        setTestsLoaded(true);
-        if (hydrated.length && !testSessionForm.problem_set_id) {
-          setTestSessionForm((s) => ({ ...s, problem_set_id: hydrated[0].version }));
-        }
-        const firstDaily = hydrated.find((t) => t.type === "daily" && !isGeneratedDailySessionVersion(t.version));
-        if (firstDaily && !dailySessionForm.problem_set_id) {
-          setDailySessionForm((s) => ({ ...s, problem_set_id: firstDaily.version }));
-        }
-        setTestsMsg(list.length ? "" : "No tests.");
-        return;
-      }
       console.error("tests fetch error:", error);
       setTests([]);
       setTestsMsg(`Load failed: ${error.message}`);
@@ -8220,31 +8186,10 @@ function openDailyRecordModal(record = null, recordDate = "") {
       return;
     }
     const list = data ?? [];
-    const hasRelation = list.some((t) => Array.isArray(t.questions));
-    if (!hasRelation) {
-      const counts = await fetchQuestionCounts(supabase, list.map((t) => t.version));
-      const withCounts = list.map((t) => ({
-        ...t,
-        question_count: counts[t.version] ?? 0
-      }));
-      const seeded = await seedModelCategory(withCounts);
-      const hydrated = await attachGeneratedDailySourceSetIds(seeded);
-      setTests(hydrated);
-      setTestsLoaded(true);
-      const firstModel = hydrated.find((t) => t.type === "mock");
-      const firstDaily = hydrated.find((t) => t.type === "daily" && !isGeneratedDailySessionVersion(t.version));
-      if (firstModel && !testSessionForm.problem_set_id) {
-        setTestSessionForm((s) => ({ ...s, problem_set_id: firstModel.version }));
-      }
-      if (firstDaily && !dailySessionForm.problem_set_id) {
-        setDailySessionForm((s) => ({ ...s, problem_set_id: firstDaily.version }));
-      }
-      setTestsMsg(list.length ? "" : "No tests.");
-      return;
-    }
+    const counts = await fetchQuestionCounts(supabase, list.map((t) => t.version));
     const withCounts = list.map((t) => ({
       ...t,
-      question_count: t.questions?.[0]?.count ?? 0
+      question_count: counts[t.version] ?? 0
     }));
     const seeded = await seedModelCategory(withCounts);
     const hydrated = await attachGeneratedDailySourceSetIds(seeded);

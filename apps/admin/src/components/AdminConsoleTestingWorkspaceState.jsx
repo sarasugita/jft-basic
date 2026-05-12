@@ -3163,42 +3163,12 @@ export function useTestingWorkspaceState({
     }
     const { data, error } = await supabase
       .from("tests")
-      .select("id, version, title, type, is_public, pass_rate, created_at, updated_at, questions(count)")
+      .select("id, version, title, type, is_public, pass_rate, created_at, updated_at")
       .eq("is_public", true)
       .order("updated_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
-      const msg = String(error.message ?? "");
-      if (msg.includes("relationship") || msg.includes("questions")) {
-        // Fallback: try without relationship query
-        const fallback = await supabase
-          .from("tests")
-          .select("id, version, title, type, pass_rate, is_public, created_at, updated_at")
-          .eq("is_public", true)
-          .order("updated_at", { ascending: false, nullsFirst: false })
-          .order("created_at", { ascending: false })
-          .limit(200);
-        if (fallback.error) {
-          console.error("tests fetch error:", fallback.error);
-          setTests([]);
-          setTestsMsg(`Load failed: ${fallback.error.message}`);
-          setTestsLoaded(false);
-          return;
-        }
-        const list = fallback.data ?? [];
-        const counts = await fetchQuestionCounts(list.map((t) => t.version));
-        const withCounts = list.map((t) => ({
-          ...t,
-          question_count: counts[t.version] ?? 0
-        }));
-        const seeded = await seedModelCategory(withCounts);
-        const hydrated = await attachGeneratedDailySourceSetIds(seeded);
-        setTests(hydrated);
-        setTestsLoaded(true);
-        setTestsMsg(list.length ? "" : "No tests.");
-        return;
-      }
       console.error("tests fetch error:", error);
       setTests([]);
       setTestsMsg(`Load failed: ${error.message}`);
@@ -3206,25 +3176,10 @@ export function useTestingWorkspaceState({
       return;
     }
     const list = data ?? [];
-    const hasRelation = list.some((t) => Array.isArray(t.questions));
-    if (!hasRelation) {
-      // No relationship data, fetch counts separately
-      const counts = await fetchQuestionCounts(list.map((t) => t.version));
-      const withCounts = list.map((t) => ({
-        ...t,
-        question_count: counts[t.version] ?? 0
-      }));
-      const seeded = await seedModelCategory(withCounts);
-      const hydrated = await attachGeneratedDailySourceSetIds(seeded);
-      setTests(hydrated);
-      setTestsLoaded(true);
-      setTestsMsg(list.length ? "" : "No tests.");
-      return;
-    }
-    // Relationship data is available, use it
+    const counts = await fetchQuestionCounts(list.map((t) => t.version));
     const withCounts = list.map((t) => ({
       ...t,
-      question_count: t.questions?.[0]?.count ?? 0
+      question_count: counts[t.version] ?? 0
     }));
     const seeded = await seedModelCategory(withCounts);
     const hydrated = await attachGeneratedDailySourceSetIds(seeded);
