@@ -165,6 +165,8 @@ export default function AdminConsoleDeferredFeatures({
   hasNextMonthAttempts,
   attemptsRefreshing,
   attemptsMsg,
+  testsLoaded,
+  testSessionsLoaded,
 }) {
   const isImportedSummaryAttemptFn = typeof isImportedSummaryAttempt === "function"
     ? isImportedSummaryAttempt
@@ -180,11 +182,25 @@ export default function AdminConsoleDeferredFeatures({
       && attemptCanOpenDetail(attempt)
   );
   const activeResultsMatrix = resultContext.type === "daily" ? dailyResultsMatrix : modelResultsMatrix;
+  const activeResultCategories = resultContext.type === "daily" ? dailyResultCategories : modelResultCategories;
+  const initialTestingDataReady = Boolean(testsLoaded) && Boolean(testSessionsLoaded);
+  const shouldShowCategoriesLoading = Boolean(
+    resultContext.type
+    && (resultContext.type === "daily" || resultContext.type === "mock")
+    && !initialTestingDataReady
+    && (activeResultCategories?.length ?? 0) === 0
+  );
+  const shouldShowNoCategoriesMsg = Boolean(
+    resultContext.type
+    && (resultContext.type === "daily" || resultContext.type === "mock")
+    && initialTestingDataReady
+    && (activeResultCategories?.length ?? 0) === 0
+  );
   const shouldShowResultsEmptyState = Boolean(
     resultContext.type
     && !attemptsRefreshing
     && !attemptsMsg
-    && ((resultContext.type === "daily" ? dailyResultCategories : modelResultCategories).length > 0)
+    && (activeResultCategories?.length ?? 0) > 0
     && (activeResultsMatrix?.sessions?.length ?? 0) === 0
   );
   const [attemptDetailDeletingId, setAttemptDetailDeletingId] = useState("");
@@ -347,7 +363,10 @@ export default function AdminConsoleDeferredFeatures({
 
               {resultContext.type === "daily" || resultContext.type === "mock" ? (
                 <>
-                  {!(resultContext.type === "daily" ? dailyResultCategories : modelResultCategories).length ? (
+                  {shouldShowCategoriesLoading ? (
+                    <AdminLoadingState centered label="Loading test categories..." />
+                  ) : null}
+                  {shouldShowNoCategoriesMsg ? (
                     <div className="admin-msg">No test categories yet.</div>
                   ) : null}
 
