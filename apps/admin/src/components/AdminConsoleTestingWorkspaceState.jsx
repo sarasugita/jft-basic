@@ -1356,6 +1356,9 @@ export function useTestingWorkspaceState({
   useEffect(() => {
     attemptsViewMonthIsoRef.current = attemptsViewMonthIso;
   }, [attemptsViewMonthIso]);
+  const fetchTestsRequestRef = useRef(0);
+  const fetchTestSessionsRequestRef = useRef(0);
+  const fetchAttemptsRequestRef = useRef(0);
   const [attemptsRefreshing, setAttemptsRefreshing] = useState(false);
   const [hasNextMonthAttempts, setHasNextMonthAttempts] = useState(false);
   const [examLinks, setExamLinks] = useState([]);
@@ -2325,6 +2328,16 @@ export function useTestingWorkspaceState({
     }
   }, [dailySessionCategories, dailySessionCategory]);
 
+  useEffect(() => {
+    if (!dailyResultCategories.length) {
+      if (dailyResultsCategory) setDailyResultsCategory("");
+      return;
+    }
+    if (!dailyResultsCategory || !dailyResultCategories.some((category) => category.name === dailyResultsCategory)) {
+      setDailyResultsCategory(dailyResultCategories[0].name);
+    }
+  }, [dailyResultCategories, dailyResultsCategory]);
+
   const selectedDailyCategory = useMemo(() => {
     if (!dailyResultCategories.length) return null;
     return dailyResultCategories.find((c) => c.name === dailyResultsCategory) ?? dailyResultCategories[0];
@@ -3156,6 +3169,8 @@ export function useTestingWorkspaceState({
   // ========================================================================
 
   const fetchTests = useCallback(async () => {
+    const requestId = fetchTestsRequestRef.current + 1;
+    fetchTestsRequestRef.current = requestId;
     setTestsMsg("Loading...");
     if (!supabase) {
       setTestsMsg("Supabase not initialized.");
@@ -3170,6 +3185,7 @@ export function useTestingWorkspaceState({
       .limit(200);
     if (error) {
       console.error("tests fetch error:", error);
+      if (fetchTestsRequestRef.current !== requestId) return;
       setTests([]);
       setTestsMsg(`Load failed: ${error.message}`);
       setTestsLoaded(false);
@@ -3183,12 +3199,15 @@ export function useTestingWorkspaceState({
     }));
     const seeded = await seedModelCategory(withCounts);
     const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+    if (fetchTestsRequestRef.current !== requestId) return;
     setTests(hydrated);
     setTestsLoaded(true);
     setTestsMsg(list.length ? "" : "No tests.");
   }, [supabase, fetchQuestionCounts, seedModelCategory, attachGeneratedDailySourceSetIds]);
 
   const fetchTestSessions = useCallback(async () => {
+    const requestId = fetchTestSessionsRequestRef.current + 1;
+    fetchTestSessionsRequestRef.current = requestId;
     if (!supabase) return;
     const { data, error } = await fetchAllPages((offset, pageSize) => {
       let query = supabase
@@ -3204,10 +3223,12 @@ export function useTestingWorkspaceState({
     });
     if (error) {
       console.error("test_sessions fetch error:", error);
+      if (fetchTestSessionsRequestRef.current !== requestId) return;
       setTestSessionsLoaded(false);
       return;
     }
     const hydrated = await attachGeneratedDailySourceSetIdsToSessions(data ?? []);
+    if (fetchTestSessionsRequestRef.current !== requestId) return;
     setTestSessions((hydrated ?? []).map((session) => ({
       audience_mode: "all",
       audience_student_ids: [],
@@ -3269,13 +3290,18 @@ export function useTestingWorkspaceState({
       searchLatestForCategory = false,
       preferredCategoryName = "",
     } = options;
-    const preferredName = String(preferredCategoryName ?? "").trim();
+    const requestId = fetchAttemptsRequestRef.current + 1;
+    fetchAttemptsRequestRef.current = requestId;
+    const preferredName = String(preferredCategoryName ?? "").trim()
+      || (activeTab === "daily"
+        ? String(selectedDailyCategory?.name ?? "").trim()
+        : String(selectedModelCategory?.name ?? "").trim());
     const startMonthIso = explicitViewMonthIso !== undefined
       ? explicitViewMonthIso
-      : (() => {
+      : (attemptsViewMonthIsoRef.current ?? (() => {
           const now = new Date();
           return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-        })();
+        })());
 
     const getPreviousMonthIso = (monthIso) => {
       if (!monthIso) return "";
@@ -3358,53 +3384,74 @@ export function useTestingWorkspaceState({
     setAttemptsRefreshing(true);
     setAttemptsMsg("Loading results...");
 
-    let currentMonthIso = startMonthIso;
-    let loaded = null;
-    let safety = 0;
-    while (safety < 240) {
-      safety += 1;
-      loaded = await loadMonth(currentMonthIso);
-      if (!searchLatestForCategory || loaded.hasResultsForPreferredCategory) break;
-      const previousMonthIso = getPreviousMonthIso(currentMonthIso);
-      if (!previousMonthIso || previousMonthIso === currentMonthIso) break;
-      currentMonthIso = previousMonthIso;
-    }
+    try {
+      let currentMonthIso = startMonthIso;
+      let loaded = null;
+      let safety = 0;
+      while (safety < 240) {
+        safety += 1;
+        loaded = await loadMonth(currentMonthIso);
+        if (fetchAttemptsRequestRef.current !== requestId) return;
+        if (!searchLatestForCategory || loaded.hasResultsForPreferredCategory) break;
+        const previousMonthIso = getPreviousMonthIso(currentMonthIso);
+        if (!previousMonthIso || previousMonthIso === currentMonthIso) break;
+        currentMonthIso = previousMonthIso;
+      }
 
-    if (!loaded) {
-      setAttempts([]);
-      setAttemptsMsg("No results.");
+      if (!loaded) {
+        setAttempts([]);
+        setAttemptsMsg("No results.");
+        setAttemptsLoaded(true);
+        setAttemptsRefreshing(false);
+        setHasNextMonthAttempts(false);
+        return;
+      }
+
+      const { attemptsData, viewMonthIso, nextMonthIso, monthDate } = loaded;
+      if (fetchAttemptsRequestRef.current !== requestId) return;
+      setAttempts(attemptsData);
+      setAttemptsViewMonthIso(viewMonthIso ?? null);
+      attemptsViewMonthIsoRef.current = viewMonthIso ?? null;
+      setAttemptsMsg("");
       setAttemptsLoaded(true);
       setAttemptsRefreshing(false);
-      setHasNextMonthAttempts(false);
-      return;
-    }
 
-    const { attemptsData, viewMonthIso, nextMonthIso, monthDate } = loaded;
-    setAttempts(attemptsData);
-    setAttemptsViewMonthIso(viewMonthIso ?? null);
-    attemptsViewMonthIsoRef.current = viewMonthIso ?? null;
-    setAttemptsMsg("");
-    setAttemptsLoaded(true);
-    setAttemptsRefreshing(false);
-
-    if (nextMonthIso) {
-      const monthAfterNext = new Date(Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth() + 2, 1)).toISOString();
-      const { count: nextCount, error: nextError } = await supabase
-        .from("test_sessions")
-        .select("id", { head: true, count: "exact" })
-        .eq("school_id", activeSchoolId)
-        .or(
-          `and(starts_at.gte.${nextMonthIso},starts_at.lt.${monthAfterNext}),`
-          + `and(starts_at.is.null,created_at.gte.${nextMonthIso},created_at.lt.${monthAfterNext})`
-        )
-        .limit(1);
-      if (!nextError) {
-        setHasNextMonthAttempts((nextCount ?? 0) > 0);
+      if (nextMonthIso) {
+        const monthAfterNext = new Date(Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth() + 2, 1)).toISOString();
+        const { count: nextCount, error: nextError } = await supabase
+          .from("test_sessions")
+          .select("id", { head: true, count: "exact" })
+          .eq("school_id", activeSchoolId)
+          .or(
+            `and(starts_at.gte.${nextMonthIso},starts_at.lt.${monthAfterNext}),`
+            + `and(starts_at.is.null,created_at.gte.${nextMonthIso},created_at.lt.${monthAfterNext})`
+          )
+          .limit(1);
+        if (fetchAttemptsRequestRef.current !== requestId) return;
+        if (!nextError) {
+          setHasNextMonthAttempts((nextCount ?? 0) > 0);
+        }
+      } else {
+        setHasNextMonthAttempts(false);
       }
-    } else {
+    } catch (error) {
+      console.error("results fetch error:", error);
+      setAttempts([]);
+      setAttemptsLoaded(false);
+      setAttemptsRefreshing(false);
       setHasNextMonthAttempts(false);
+      setAttemptsMsg(`Load failed: ${error?.message ?? "Unknown error"}`);
     }
-  }, [activeTab, activeSchoolId, fetchAllPages, getDailySessionCategoryName, supabase, testMetaByVersion]);
+  }, [
+    activeTab,
+    activeSchoolId,
+    fetchAllPages,
+    getDailySessionCategoryName,
+    selectedDailyCategory?.name,
+    selectedModelCategory?.name,
+    supabase,
+    testMetaByVersion,
+  ]);
 
   const goToPreviousAttemptsMonth = useCallback(async () => {
     const current = attemptsViewMonthIsoRef.current;
@@ -6022,14 +6069,25 @@ export function useTestingWorkspaceState({
     const now = new Date();
     const currentMonthStartIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
     const preferredCategoryName = activeTab === "daily"
-      ? String(dailyResultsCategory ?? "").trim()
-      : String(modelResultsCategory ?? "").trim();
+      ? String(selectedDailyCategory?.name ?? dailyResultsCategory ?? "").trim()
+      : String(selectedModelCategory?.name ?? modelResultsCategory ?? "").trim();
     void fetchAttempts({
       viewMonthIso: currentMonthStartIso,
       searchLatestForCategory: true,
       preferredCategoryName,
     });
-  }, [activeTab, activeSchoolId, dailyResultsCategory, dailySubTab, fetchAttempts, modelResultsCategory, modelSubTab, supabase]);
+  }, [
+    activeTab,
+    activeSchoolId,
+    dailyResultsCategory,
+    dailySubTab,
+    fetchAttempts,
+    modelResultsCategory,
+    modelSubTab,
+    selectedDailyCategory?.name,
+    selectedModelCategory?.name,
+    supabase,
+  ]);
 
   // Note: questions for attempts are loaded on-demand — when the user opens an
   // attempt detail modal (see AdminConsoleCore attempt-detail effect) or triggers

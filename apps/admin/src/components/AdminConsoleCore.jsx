@@ -3211,9 +3211,11 @@ export default function AdminConsole({
   const [profileLoading, setProfileLoading] = useState(false);
   const [schoolAssignments, setSchoolAssignments] = useState([]);
   const [schoolScopeId, setSchoolScopeId] = useState(null);
-  const [attempts, setAttempts] = useState(() => storedRegularAdminData?.attempts ?? []);
-  const [attemptsLoaded, setAttemptsLoaded] = useState(() => Boolean(storedRegularAdminData?.attemptsLoaded && storedRegularAdminData?.attemptsHydrated));
-  const [examLinks, setExamLinks] = useState(() => storedRegularAdminData?.examLinks ?? []);
+  // Keep testing data live-loaded so school admins do not bootstrap stale
+  // result/session state from a previous scoped console visit.
+  const [attempts, setAttempts] = useState([]);
+  const [attemptsLoaded, setAttemptsLoaded] = useState(false);
+  const [examLinks, setExamLinks] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedAttemptObj, setSelectedAttemptObj] = useState(null);
   const [attemptDetailOpen, setAttemptDetailOpen] = useState(false);
@@ -3344,15 +3346,15 @@ export default function AdminConsole({
   });
   const [csvMsg, setCsvMsg] = useState("");
   const [inviteResults, setInviteResults] = useState([]);
-  const [tests, setTests] = useState(() => storedRegularAdminData?.tests ?? []);
-  const [testsMsg, setTestsMsg] = useState(() => storedRegularAdminData?.testsMsg ?? "");
-  const [testSessions, setTestSessions] = useState(() => storedRegularAdminData?.testSessions ?? []);
-  const [testSessionsMsg, setTestSessionsMsg] = useState(() => storedRegularAdminData?.testSessionsMsg ?? "");
-  const [linkMsg, setLinkMsg] = useState(() => storedRegularAdminData?.linkMsg ?? "");
+  const [tests, setTests] = useState([]);
+  const [testsMsg, setTestsMsg] = useState("");
+  const [testSessions, setTestSessions] = useState([]);
+  const [testSessionsMsg, setTestSessionsMsg] = useState("");
+  const [linkMsg, setLinkMsg] = useState("");
   const [studentsLoaded, setStudentsLoaded] = useState(() => Boolean(storedRegularAdminData?.studentsLoaded && storedRegularAdminData?.studentsHydrated));
-  const [testsLoaded, setTestsLoaded] = useState(() => Boolean(storedRegularAdminData?.testsLoaded && storedRegularAdminData?.testsHydrated));
-  const [testSessionsLoaded, setTestSessionsLoaded] = useState(() => Boolean(storedRegularAdminData?.testSessionsLoaded && storedRegularAdminData?.testSessionsHydrated));
-  const [examLinksLoaded, setExamLinksLoaded] = useState(() => Boolean(storedRegularAdminData?.examLinksLoaded && storedRegularAdminData?.examLinksHydrated));
+  const [testsLoaded, setTestsLoaded] = useState(false);
+  const [testSessionsLoaded, setTestSessionsLoaded] = useState(false);
+  const [examLinksLoaded, setExamLinksLoaded] = useState(false);
   const [modelConductOpen, setModelConductOpen] = useState(false);
   const [modelUploadOpen, setModelUploadOpen] = useState(false);
   const [dailyConductOpen, setDailyConductOpen] = useState(false);
@@ -3402,9 +3404,9 @@ export default function AdminConsole({
     pass_rate: "0.8",
     retake_release_scope: "all"
   });
-  const [assets, setAssets] = useState(() => storedRegularAdminData?.assets ?? []);
-  const [assetsMsg, setAssetsMsg] = useState(() => storedRegularAdminData?.assetsMsg ?? "");
-  const [assetsLoaded, setAssetsLoaded] = useState(() => Boolean(storedRegularAdminData?.assetsLoaded && storedRegularAdminData?.assetsHydrated));
+  const [assets, setAssets] = useState([]);
+  const [assetsMsg, setAssetsMsg] = useState("");
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [quizMsg, setQuizMsg] = useState("");
   const [resultsImportStatus, setResultsImportStatus] = useState(null);
   const [dailyManualEntryMode, setDailyManualEntryMode] = useState(false);
@@ -3580,6 +3582,10 @@ export default function AdminConsole({
         cancelled = true;
       };
     }
+
+    // Clear the previous scoped client immediately so child workspaces do not
+    // issue requests with a stale school scope while the next client is loading.
+    setSupabase(null);
 
     void loadAdminSupabaseModule()
       .then(({ createAdminSupabaseClient }) => {

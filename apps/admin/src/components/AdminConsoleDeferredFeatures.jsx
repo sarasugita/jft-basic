@@ -164,6 +164,7 @@ export default function AdminConsoleDeferredFeatures({
   attemptsViewMonthLabel,
   hasNextMonthAttempts,
   attemptsRefreshing,
+  attemptsMsg,
 }) {
   const isImportedSummaryAttemptFn = typeof isImportedSummaryAttempt === "function"
     ? isImportedSummaryAttempt
@@ -177,6 +178,14 @@ export default function AdminConsoleDeferredFeatures({
     typeof attemptCanOpenDetail === "function"
       && typeof openAttemptDetail === "function"
       && attemptCanOpenDetail(attempt)
+  );
+  const activeResultsMatrix = resultContext.type === "daily" ? dailyResultsMatrix : modelResultsMatrix;
+  const shouldShowResultsEmptyState = Boolean(
+    resultContext.type
+    && !attemptsRefreshing
+    && !attemptsMsg
+    && ((resultContext.type === "daily" ? dailyResultCategories : modelResultCategories).length > 0)
+    && (activeResultsMatrix?.sessions?.length ?? 0) === 0
   );
   const [attemptDetailDeletingId, setAttemptDetailDeletingId] = useState("");
   const resolveAttemptScoreSummary = (attempt) => {
@@ -376,6 +385,15 @@ export default function AdminConsoleDeferredFeatures({
                       <div style={{ width: 40 }} aria-hidden="true" />
                     )}
                   </div>
+
+                  {attemptsMsg ? (
+                    <div className="admin-msg">{attemptsMsg}</div>
+                  ) : null}
+                  {shouldShowResultsEmptyState ? (
+                    <div className="admin-msg">
+                      No results were found for this category in {attemptsViewMonthLabel || "the selected month"}.
+                    </div>
+                  ) : null}
 
                   <div className="admin-table-wrap results-matrix-table-wrap" style={{ marginTop: 10 }}>
                     <table
