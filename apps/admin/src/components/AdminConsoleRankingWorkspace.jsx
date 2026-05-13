@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useRankingWorkspaceState } from "./AdminConsoleRankingWorkspaceState";
 import AdminLoadingState from "./AdminLoadingState";
+import AdminStatusMessage from "./AdminStatusMessage";
 
 const bangladeshDateTimeOptions = {
   timeZone: "Asia/Dhaka",
@@ -245,7 +246,7 @@ export default function AdminConsoleRankingWorkspace() {
           </tbody>
         </table>
       </div>
-      <div className="admin-msg">{rankingMsg}</div>
+      <AdminStatusMessage message={rankingMsg} />
       {rankingDetailModal.open ? (
         <div className="admin-modal-overlay" onClick={closeRankingEntryDetail}>
           <div className="admin-modal ranking-detail-modal" onClick={(event) => event.stopPropagation()}>

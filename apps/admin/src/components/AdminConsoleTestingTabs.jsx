@@ -3,6 +3,7 @@
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useState } from "react";
 import AdminLoadingState from "./AdminLoadingState";
+import AdminStatusMessage from "./AdminStatusMessage";
 import QuestionSetUploadConflictModal from "./QuestionSetUploadConflictModal";
 
 const STUDENT_CODE_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
@@ -646,8 +647,8 @@ export default function AdminConsoleTestingTabs({
                       </tbody>
                     </table>
                   </div>
-                  <div className="admin-msg">{testSessionsMsg}</div>
-                  <div className="admin-msg">{linkMsg}</div>
+                  <AdminStatusMessage message={testSessionsMsg} />
+                  <AdminStatusMessage message={linkMsg} />
                 </>
               )}
 
@@ -921,7 +922,7 @@ export default function AdminConsoleTestingTabs({
                               Create Session
                             </button>
                           </div>
-                          {testSessionsMsg ? <div className="admin-msg">{testSessionsMsg}</div> : null}
+                          <AdminStatusMessage message={testSessionsMsg} />
                         </div>
                       ) : (
                         <div className="daily-session-create-layout">
@@ -1184,7 +1185,7 @@ export default function AdminConsoleTestingTabs({
                               Create Session
                             </button>
                           </div>
-                          {testSessionsMsg ? <div className="admin-msg">{testSessionsMsg}</div> : null}
+                          <AdminStatusMessage message={testSessionsMsg} />
                         </div>
                       )}
 
@@ -1334,15 +1335,15 @@ export default function AdminConsoleTestingTabs({
                     </div>
                   ))}
                 </div>
-                {groupedModelUploadTests.length === 0 ? <div className="admin-msg">{testsMsg || "No sets found."}</div> : null}
-                {!modelUploadOpen && assetUploadMsg ? <div className="admin-msg">{assetUploadMsg}</div> : null}
+                {groupedModelUploadTests.length === 0 ? <AdminStatusMessage message={testsMsg || "No sets found."} /> : null}
+                {!modelUploadOpen ? <AdminStatusMessage message={assetUploadMsg} /> : null}
                 {!modelUploadOpen && assetImportMsg ? (
                   <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
                     {assetImportMsg}
                   </pre>
                 ) : null}
-                <div className="admin-msg">{assetsMsg}</div>
-                {groupedModelUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
+                <AdminStatusMessage message={assetsMsg} />
+                {groupedModelUploadTests.length ? <AdminStatusMessage message={testsMsg} /> : null}
 
                 {modelUploadOpen && typeof document !== "undefined" ? createPortal((
                   <div className="admin-modal-overlay" onClick={() => setModelUploadOpen(false)}>
@@ -1353,7 +1354,7 @@ export default function AdminConsoleTestingTabs({
                           &times;
                         </button>
                       </div>
-                      {assetUploadMsg ? <div className="admin-msg" style={{ marginTop: 10 }}>{assetUploadMsg}</div> : null}
+                      <AdminStatusMessage message={assetUploadMsg} style={{ marginTop: 10 }} />
                       {assetImportMsg ? (
                         <pre className="admin-msg" style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
                           {assetImportMsg}
@@ -1701,8 +1702,8 @@ export default function AdminConsoleTestingTabs({
                       </tbody>
                     </table>
                   </div>
-                  <div className="admin-msg">{dailySessionsMsg}</div>
-                  <div className="admin-msg">{linkMsg}</div>
+                  <AdminStatusMessage message={dailySessionsMsg} />
+                  <AdminStatusMessage message={linkMsg} />
                 </>
               )}
 
@@ -2014,7 +2015,7 @@ export default function AdminConsoleTestingTabs({
                               Create Session
                             </button>
                           </div>
-                          {dailySessionsMsg ? <div className="admin-msg">{dailySessionsMsg}</div> : null}
+                          <AdminStatusMessage message={dailySessionsMsg} />
                         </div>
                       ) : (
                         <div className="daily-session-create-layout">
@@ -2571,7 +2572,7 @@ export default function AdminConsoleTestingTabs({
                               Create Session
                             </button>
                           </div>
-                          {dailySessionsMsg ? <div className="admin-msg">{dailySessionsMsg}</div> : null}
+                          <AdminStatusMessage message={dailySessionsMsg} />
                         </div>
                       )}
                     </div>
@@ -2724,14 +2725,14 @@ export default function AdminConsoleTestingTabs({
                     </div>
                   ))}
                 </div>
-                {groupedDailyUploadTests.length === 0 ? <div className="admin-msg">{testsMsg || "No daily tests found."}</div> : null}
-                {!dailyUploadOpen && dailyUploadMsg ? <div className="admin-msg">{dailyUploadMsg}</div> : null}
+                {groupedDailyUploadTests.length === 0 ? <AdminStatusMessage message={testsMsg || "No daily tests found."} /> : null}
+                {!dailyUploadOpen ? <AdminStatusMessage message={dailyUploadMsg} /> : null}
                 {!dailyUploadOpen && dailyImportMsg ? (
                   <pre className="admin-msg" style={{ whiteSpace: "pre-wrap" }}>
                     {dailyImportMsg}
                   </pre>
                 ) : null}
-                {groupedDailyUploadTests.length ? <div className="admin-msg">{testsMsg}</div> : null}
+                {groupedDailyUploadTests.length ? <AdminStatusMessage message={testsMsg} /> : null}
 
                 {dailyUploadOpen && typeof document !== "undefined" ? createPortal((
                   <div className="admin-modal-overlay" onClick={() => setDailyUploadOpen(false)}>
@@ -2742,7 +2743,7 @@ export default function AdminConsoleTestingTabs({
                           &times;
                         </button>
                       </div>
-                      {dailyUploadMsg ? <div className="admin-msg" style={{ marginTop: 10 }}>{dailyUploadMsg}</div> : null}
+                      <AdminStatusMessage message={dailyUploadMsg} style={{ marginTop: 10 }} />
                       {dailyImportMsg ? (
                         <pre className="admin-msg" style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>
                           {dailyImportMsg}
@@ -2928,7 +2929,7 @@ export default function AdminConsoleTestingTabs({
                           &times;
                         </button>
                       </div>
-                      {editingSessionMsg ? <div className="admin-msg" style={{ margin: "0 16px 8px" }}>{editingSessionMsg}</div> : null}
+                      <AdminStatusMessage message={editingSessionMsg} style={{ margin: "0 16px 8px" }} />
                       <div className="admin-form upload-question-form" style={{ padding: "0 16px 16px" }}>
                         <div className="field">
                           <label>Test Title</label>
@@ -3101,7 +3102,7 @@ export default function AdminConsoleTestingTabs({
                           &times;
                         </button>
                       </div>
-                      {editingTestMsg ? <div className="admin-msg" style={{ margin: "0 16px 8px" }}>{editingTestMsg}</div> : null}
+                      <AdminStatusMessage message={editingTestMsg} style={{ margin: "0 16px 8px" }} />
                       <div className="admin-form upload-question-form" style={{ padding: "0 16px 16px" }}>
                         <div className="field">
                           <label>Category</label>
@@ -3169,7 +3170,7 @@ export default function AdminConsoleTestingTabs({
                 &times;
               </button>
             </div>
-            {editingSessionMsg ? <div className="admin-msg" style={{ margin: "0 16px 8px" }}>{editingSessionMsg}</div> : null}
+            <AdminStatusMessage message={editingSessionMsg} style={{ margin: "0 16px 8px" }} />
             <div className="admin-form upload-question-form" style={{ padding: "0 16px 16px" }}>
               <div className="field">
                 <label>Test Title</label>
@@ -3338,7 +3339,7 @@ export default function AdminConsoleTestingTabs({
                 &times;
               </button>
             </div>
-            {editingTestMsg ? <div className="admin-msg" style={{ margin: "0 16px 8px" }}>{editingTestMsg}</div> : null}
+            <AdminStatusMessage message={editingTestMsg} style={{ margin: "0 16px 8px" }} />
             <div className="admin-form upload-question-form" style={{ padding: "0 16px 16px" }}>
               <div className="field">
                 <label>Category</label>

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useAnnouncementsWorkspaceState } from "./AdminConsoleAnnouncementsWorkspaceState";
+import AdminStatusMessage from "./AdminStatusMessage";
 import { formatDateTime } from "../lib/adminFormatters";
 
 export default function AdminConsoleAnnouncementsWorkspace() {
@@ -132,7 +133,7 @@ export default function AdminConsoleAnnouncementsWorkspace() {
           </tbody>
         </table>
       </div>
-      <div className="admin-msg">{announcementMsg}</div>
+      <AdminStatusMessage message={announcementMsg} />
 
       {announcementCreateOpen ? (
         <div className="admin-modal-overlay" onClick={closeCreateAnnouncementModal}>

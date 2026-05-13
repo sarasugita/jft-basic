@@ -29,6 +29,8 @@ import {
   normalizeYmdDate,
 } from "../lib/studentWithdrawal";
 import LoadableAdminWorkspace from "./LoadableAdminWorkspace";
+import AdminLoadingState from "./AdminLoadingState";
+import AdminStatusMessage from "./AdminStatusMessage";
 import { AdminConsoleWorkspaceProvider } from "./AdminConsoleWorkspaceContext";
 import { readAttendanceSheetCache } from "./adminAttendanceSheetCache";
 import {
@@ -2883,6 +2885,13 @@ function formatDateFull(value) {
   });
 }
 
+function formatPendingAttendanceApplicationLabel(application) {
+  if (!application) return "";
+  if (application.type === "excused") return "Pending Excused Absence";
+  if (application.type === "late") return "Pending Late/Leave Early";
+  return "Pending Application";
+}
+
 function formatMonthYear(value) {
   if (!value) return "";
   const match = String(value).match(/^(\d{4})-(\d{2})/);
@@ -3552,6 +3561,7 @@ export default function AdminConsole({
   const modelResultsImportChoiceResolverRef = useRef(null);
   const [modelResultsImportConflict, setModelResultsImportConflict] = useState(null);
   const [approvedAbsenceByStudent, setApprovedAbsenceByStudent] = useState({});
+  const [pendingAbsenceByStudent, setPendingAbsenceByStudent] = useState({});
   const [attendanceFilter, setAttendanceFilter] = useState(() => (
     storedRegularAdminViewState?.attendanceFilter
       ? {
@@ -3569,6 +3579,7 @@ export default function AdminConsole({
   ));
   const [absenceApplications, setAbsenceApplications] = useState([]);
   const [absenceApplicationsMsg, setAbsenceApplicationsMsg] = useState("");
+  const [attendancePendingApplicationCount, setAttendancePendingApplicationCount] = useState(0);
   const activeSchoolId = forcedSchoolId ?? schoolScopeId ?? profile?.school_id ?? null;
   const previousStudentListFilterRangeRef = useRef({
     activeSchoolId,
@@ -8559,6 +8570,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setAttendanceModalOpen(true);
     setAttendanceSaving(false);
     setApprovedAbsenceByStudent({});
+    setPendingAbsenceByStudent({});
     let day = existingDay;
     if (!day) {
       day = {
@@ -8569,21 +8581,31 @@ function openDailyRecordModal(record = null, recordDate = "") {
         isDraft: true,
       };
     }
-    const { data: approvedApps, error: appsError } = await supabase
+    const { data: dayApplications, error: appsError } = await supabase
       .from("absence_applications")
-      .select("id, student_id, type, late_type, time_value, reason, catch_up")
+      .select("id, student_id, type, late_type, time_value, reason, catch_up, status, created_at")
       .eq("school_id", activeSchoolId)
       .eq("day_date", day.day_date)
-      .eq("status", "approved");
+      .in("status", ["approved", "pending"]);
     if (appsError) {
-      console.error("approved applications fetch error:", appsError);
+      console.error("day applications fetch error:", appsError);
       setApprovedAbsenceByStudent({});
+      setPendingAbsenceByStudent({});
     } else {
-      const map = {};
-      (approvedApps ?? []).forEach((a) => {
-        map[a.student_id] = a;
+      const approvedMap = {};
+      const pendingMap = {};
+      (dayApplications ?? []).forEach((application) => {
+        if (!application?.student_id) return;
+        const targetMap = application.status === "approved" ? approvedMap : pendingMap;
+        const current = targetMap[application.student_id];
+        const currentTime = new Date(current?.created_at || 0).getTime();
+        const nextTime = new Date(application.created_at || 0).getTime();
+        if (!current || nextTime >= currentTime) {
+          targetMap[application.student_id] = application;
+        }
       });
-      setApprovedAbsenceByStudent(map);
+      setApprovedAbsenceByStudent(approvedMap);
+      setPendingAbsenceByStudent(pendingMap);
     }
     setAttendanceModalDay(day);
     let existing = {};
@@ -12237,7 +12259,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
   if (!authReady) {
     return (
       <div className="admin-login">
-        <h2>Loading...</h2>
+        <AdminLoadingState centered label="Loading..." />
       </div>
     );
   }
@@ -12301,7 +12323,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
   if (profileLoading) {
     return (
       <div className="admin-login">
-        <h2>Loading...</h2>
+        <AdminLoadingState centered label="Loading..." />
       </div>
     );
   }
@@ -12309,8 +12331,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
   if (!profile) {
     return (
       <div className="admin-login">
-        <h2>{loginMsg ? "Startup Error" : "Loading..."}</h2>
-        {loginMsg ? <div className="admin-msg">{loginMsg}</div> : null}
+        {loginMsg ? (
+          <>
+            <h2>Startup Error</h2>
+            <AdminStatusMessage message={loginMsg} />
+          </>
+        ) : (
+          <AdminLoadingState centered label="Loading..." />
+        )}
       </div>
     );
   }
@@ -12720,6 +12748,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
     absenceApplications,
     decideAbsenceApplication,
     absenceApplicationsMsg,
+    attendancePendingApplicationCount,
+    setAttendancePendingApplicationCount,
     parseQuestionCsv,
     parseDailyCsv,
     recordAdminAuditEvent,
@@ -12805,7 +12835,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   className={`admin-subnav-item ${attendanceSubTab === "absence" ? "active" : ""}`}
                   onClick={() => handleSidebarMenuClick(() => selectAttendanceTab("absence"))}
                 >
-                  Absence Applications
+                  <span>Absence Applications</span>
+                  {attendancePendingApplicationCount > 0 ? (
+                    <span className="admin-subnav-count-badge" aria-label={`${attendancePendingApplicationCount} pending absence applications`}>
+                      {attendancePendingApplicationCount}
+                    </span>
+                  ) : null}
                 </button>
               </div>
             ) : null}
@@ -13268,7 +13303,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 })}
               </div>
 
-              {studentInfoMsg ? <div className="admin-msg">{studentInfoMsg}</div> : null}
+              <AdminStatusMessage message={studentInfoMsg} />
 
               <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <button
@@ -13330,7 +13365,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 </div>
               </div>
 
-              {reissueMsg ? <div className="admin-msg">{reissueMsg}</div> : null}
+              <AdminStatusMessage message={reissueMsg} />
 
               {reissueIssuedPassword ? (
                 <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -13477,7 +13512,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   />
                 </div>
               </div>
-              {studentMsg ? <div className="admin-msg">{studentMsg}</div> : null}
+              <AdminStatusMessage message={studentMsg} />
               {inviteResults.length ? (
                 <div className="admin-table-wrap" style={{ marginTop: 10 }}>
                   <table className="admin-table" style={{ minWidth: 0 }}>
@@ -13977,6 +14012,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
               setAttendanceModalDay(null);
               setAttendanceDraft({});
               setAttendanceSaving(false);
+              setApprovedAbsenceByStudent({});
+              setPendingAbsenceByStudent({});
             }}
           >
             <div className="admin-modal attendance-modal" onClick={(e) => e.stopPropagation()}>
@@ -13992,6 +14029,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     setAttendanceModalDay(null);
                     setAttendanceDraft({});
                     setAttendanceSaving(false);
+                    setApprovedAbsenceByStudent({});
+                    setPendingAbsenceByStudent({});
                   }}
                 >
                   ×
@@ -14009,6 +14048,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                       <th>Excused Absence</th>
                       <th>Unexcused Absence</th>
                       <th>N/A</th>
+                      <th>Absence/Late Reason</th>
                       <th>Comment</th>
                     </tr>
                   </thead>
@@ -14016,6 +14056,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                     {activeStudents.map((s) => {
                       const entry = attendanceDraft?.[s.id] || { status: "", comment: "" };
                       const approved = approvedAbsenceByStudent?.[s.id];
+                      const pending = pendingAbsenceByStudent?.[s.id];
                       return (
                         <tr key={`att-${s.id}`}>
                           <td>{s.student_code ?? ""}</td>
@@ -14025,6 +14066,40 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               <div className={`admin-help att-approved-note ${approved.type === "excused" ? "excused" : "late"}`} style={{ marginTop: 4 }}>
                                 Approved {approved.type === "excused" ? "Excused Absence" : "Late/Leave Early"}
                                 {approved.time_value ? ` (${approved.time_value})` : ""}
+                              </div>
+                            ) : null}
+                            {pending ? (
+                              <div
+                                className="admin-help"
+                                style={{
+                                  marginTop: 4,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 6,
+                                  color: "#b91c1c",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: "999px",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    border: "1px solid #dc2626",
+                                    color: "#dc2626",
+                                    fontSize: 12,
+                                    fontWeight: 800,
+                                    lineHeight: 1,
+                                    flex: "0 0 auto",
+                                  }}
+                                >
+                                  !
+                                </span>
+                                <span>{formatPendingAttendanceApplicationLabel(pending)}</span>
                               </div>
                             ) : null}
                           </td>
@@ -14044,6 +14119,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                               </button>
                             </td>
                           ))}
+                          <td>{approved?.reason ? approved.reason : "-"}</td>
                           <td>
                             <input
                               value={entry.comment || ""}

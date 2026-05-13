@@ -4,29 +4,10 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { sections } from "../../../../packages/shared/questions.js";
 import AdminConsoleDeferredFeatures from "./AdminConsoleDeferredFeatures";
 import AdminLoadingState from "./AdminLoadingState";
+import AdminStatusMessage from "./AdminStatusMessage";
+import { renderUnderlinesHtml } from "../lib/adminQuestionText";
 
 const ADMIN_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function renderBlankBoxHtml() {
-  return '<span style="display:inline-block;width:3.6em;height:0.82lh;border:0.14em solid #ef4444;box-sizing:border-box;vertical-align:-0.02em;margin:0 0.25em;"></span>';
-}
-
-function renderUnderlinesHtml(text) {
-  const escaped = escapeHtml(text ?? "");
-  return escaped
-    .replace(/【(.*?)】/g, (_, inner) => (String(inner ?? "").replace(/[\s\u3000]/g, "").length
-      ? `<span class="u">${inner}</span>`
-      : renderBlankBoxHtml()));
-}
 
 function splitStemLines(text) {
   return String(text ?? "")
@@ -2667,7 +2648,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                 {isImage ? (
                   <img src={choiceValue} alt="choice" style={{ maxWidth: "100%" }} />
                 ) : (
-                  choice
+                  <span dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(choice) }} />
                 )}
                 {isSelected && hasMultipleAnswers && (
                   <span style={{
@@ -2753,7 +2734,12 @@ export default function AdminConsoleResultsWorkspace(props) {
             </div>
           ) : null}
         </div>
-        {prompt ? <div style={{ marginTop: 6, whiteSpace: question.type === "daily" ? "pre-wrap" : "normal" }}>{prompt}</div> : null}
+        {prompt ? (
+          <div
+            style={{ marginTop: 6, whiteSpace: question.type === "daily" ? "pre-wrap" : "normal" }}
+            dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(prompt) }}
+          />
+        ) : null}
         {question.type === "daily" && stemExtra ? (
           <div
             style={{ marginTop: 6, fontSize: 13, color: "#333333", whiteSpace: "pre-wrap" }}
@@ -3181,7 +3167,9 @@ export default function AdminConsoleResultsWorkspace(props) {
                     {sessionDetailBestQuestions.map((row) => (
                       <tr key={`session-export-best-${row.qid}`}>
                         <td>{sessionExportQuestionDisplayIdByQid.get(String(row.qid)) || formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}</td>
-                        <td>{formatCompactExportText(row.prompt)}</td>
+                        <td
+                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(formatCompactExportText(row.prompt)) }}
+                        />
                         <td>{(row.rate * 100).toFixed(1)}%</td>
                       </tr>
                     ))}
@@ -3209,7 +3197,9 @@ export default function AdminConsoleResultsWorkspace(props) {
                     {sessionDetailWorstQuestions.map((row) => (
                       <tr key={`session-export-worst-${row.qid}`}>
                         <td>{sessionExportQuestionDisplayIdByQid.get(String(row.qid)) || formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}</td>
-                        <td>{formatCompactExportText(row.prompt)}</td>
+                        <td
+                          dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(formatCompactExportText(row.prompt)) }}
+                        />
                         <td>{(row.rate * 100).toFixed(1)}%</td>
                       </tr>
                     ))}
@@ -3470,7 +3460,7 @@ export default function AdminConsoleResultsWorkspace(props) {
         </div>
 
         {sessionDetailLoading ? <AdminLoadingState compact label="Loading..." /> : null}
-        {!sessionDetailLoading && sessionDetailMsg ? <div className="admin-msg">{sessionDetailMsg}</div> : null}
+        {!sessionDetailLoading ? <AdminStatusMessage message={sessionDetailMsg} /> : null}
 
         {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "questions" ? (
           <div className="session-detail-section">
@@ -3538,7 +3528,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                 This session already allows multiple attempts for everyone.
               </div>
             ) : null}
-            {sessionDetailAllowMsg ? <div className="admin-msg">{sessionDetailAllowMsg}</div> : null}
+            <AdminStatusMessage message={sessionDetailAllowMsg} />
 
             <div className="admin-table-wrap" style={{ marginTop: 12 }}>
                       <table className="admin-table session-detail-attempts-table" style={{ minWidth: 980 }}>
@@ -3871,7 +3861,10 @@ export default function AdminConsoleResultsWorkspace(props) {
                         <div key={`best-${row.qid}`} className="session-analysis-item">
                           <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
                           <div>
-                            <div className="session-analysis-question-prompt">{row.prompt || "Question"}</div>
+                            <div
+                              className="session-analysis-question-prompt"
+                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "Question") }}
+                            />
                             <div className="session-analysis-question-id">
                               {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
                             </div>
@@ -3889,7 +3882,10 @@ export default function AdminConsoleResultsWorkspace(props) {
                         <div key={`worst-${row.qid}`} className="session-analysis-item">
                           <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
                           <div>
-                            <div className="session-analysis-question-prompt">{row.prompt || "Question"}</div>
+                            <div
+                              className="session-analysis-question-prompt"
+                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "Question") }}
+                            />
                             <div className="session-analysis-question-id">
                               {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
                             </div>
@@ -3935,7 +3931,10 @@ export default function AdminConsoleResultsWorkspace(props) {
                               <div style={{ fontWeight: 800 }}>
                                 {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
                               </div>
-                              <div className="admin-help">{row.prompt}</div>
+                              <div
+                                className="admin-help"
+                                dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "") }}
+                              />
                             </td>
                             <td>{(row.rate * 100).toFixed(1)}%</td>
                             {sessionDetailQuestionStudents.map((student) => {

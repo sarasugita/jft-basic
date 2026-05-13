@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceState";
+import AdminStatusMessage from "./AdminStatusMessage";
+import AdminLoadingState from "./AdminLoadingState";
 
 function formatDateShortFn(d) {
   if (!d) return "";
@@ -28,7 +30,22 @@ function formatWeekdayFn(d) {
 }
 
 export default function AdminConsoleAttendanceWorkspace() {
-  const { activeSchoolId, supabase, session, students, fetchStudents, exportAttendanceGoogleSheetsCsv, importAttendanceGoogleSheetsCsv, formatRatePercent, formatDateTime, isAnalyticsExcludedStudent, attendanceSubTab, setAttendanceSubTab, openAttendanceDay: openAttendanceDayCtx } = useAdminConsoleWorkspaceContext();
+  const {
+    activeSchoolId,
+    supabase,
+    session,
+    students,
+    fetchStudents,
+    exportAttendanceGoogleSheetsCsv,
+    importAttendanceGoogleSheetsCsv,
+    formatRatePercent,
+    formatDateTime,
+    isAnalyticsExcludedStudent,
+    attendanceSubTab,
+    setAttendanceSubTab,
+    openAttendanceDay: openAttendanceDayCtx,
+    setAttendancePendingApplicationCount,
+  } = useAdminConsoleWorkspaceContext();
   const [absenceApplicationFilter, setAbsenceApplicationFilter] = useState({
     studentId: "all",
     type: "all",
@@ -119,6 +136,14 @@ export default function AdminConsoleAttendanceWorkspace() {
       return true;
     });
   }, [absenceApplications, absenceApplicationFilter.dayDate, absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
+
+  useEffect(() => {
+    if (typeof setAttendancePendingApplicationCount !== "function") return;
+    const pendingCount = (absenceApplications ?? []).filter(
+      (application) => String(application?.status ?? "").toLowerCase() === "pending"
+    ).length;
+    setAttendancePendingApplicationCount(pendingCount);
+  }, [absenceApplications, setAttendancePendingApplicationCount]);
 
   const hasAttendanceFilterValue = useMemo(() => (
     Boolean(
@@ -360,7 +385,7 @@ export default function AdminConsoleAttendanceWorkspace() {
             </tbody>
           </table>
         </div>
-        <div className="admin-msg">{absenceApplicationsMsg}</div>
+        <AdminStatusMessage message={absenceApplicationsMsg} />
         {denyApplicationModal.open && typeof document !== "undefined"
           ? createPortal(
             <div
@@ -419,9 +444,7 @@ export default function AdminConsoleAttendanceWorkspace() {
                       disabled={denyApplicationModal.saving}
                     />
                   </label>
-                  {denyApplicationModal.msg ? (
-                    <div className="admin-msg">{denyApplicationModal.msg}</div>
-                  ) : null}
+                  <AdminStatusMessage message={denyApplicationModal.msg} />
                 </div>
                 <div className="admin-modal-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
                   <button className="btn" type="button" onClick={closeDenyAbsenceApplication} disabled={denyApplicationModal.saving}>
@@ -637,7 +660,7 @@ export default function AdminConsoleAttendanceWorkspace() {
                 <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.9s" repeatCount="indefinite" />
               </circle>
             </svg>
-            <span style={{ fontWeight: 600 }}>Loading...</span>
+            <AdminLoadingState compact label="Loading..." className="admin-loading-state-inline-left" />
           </div>
         ) : null}
         <button
@@ -672,9 +695,10 @@ export default function AdminConsoleAttendanceWorkspace() {
       </div>
 
       {!attendanceSheetRefreshing && attendanceMsg ? (
-        <div className="admin-msg" style={{ textAlign: "center", marginTop: 4, marginBottom: 8 }}>
-          {attendanceMsg}
-        </div>
+        <AdminStatusMessage
+          message={attendanceMsg}
+          style={{ textAlign: "center", marginTop: 4, marginBottom: 8 }}
+        />
       ) : null}
 
       <div className="attendance-table-header">

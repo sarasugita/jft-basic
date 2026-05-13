@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
+import AdminStatusMessage from "./AdminStatusMessage";
 import {
   IRODORI_BOOK_OPTIONS,
   useDailyRecordWorkspaceState,
@@ -580,7 +581,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
           </tbody>
         </table>
       </div>
-      <div className="admin-msg">{dailyRecordsMsg}</div>
+      <AdminStatusMessage message={dailyRecordsMsg} />
 
       {dailyRecordModalOpen && typeof document !== "undefined" ? createPortal((
         <div

@@ -6,6 +6,7 @@ import { getStudentWithdrawalDate, getTodayYmd } from "../lib/studentWithdrawal"
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
 import { useStudentsWorkspaceState } from "./AdminConsoleStudentsWorkspaceState";
 import AdminLoadingState from "./AdminLoadingState";
+import AdminStatusMessage from "./AdminStatusMessage";
 
 const LazyAdminConsoleResultsWorkspace = dynamic(() => import("./AdminConsoleResultsWorkspace"));
 
@@ -585,7 +586,7 @@ export default function AdminConsoleStudentsWorkspace() {
           ) : null}
           {studentListLoading ? <AdminLoadingState compact label="Loading metrics..." /> : null}
           {studentWarningsLoading ? <AdminLoadingState compact label="Loading warnings..." /> : null}
-          <div className="admin-msg">{studentMsg}</div>
+          <AdminStatusMessage message={studentMsg} />
 
           <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div className="admin-help">
@@ -705,7 +706,7 @@ export default function AdminConsoleStudentsWorkspace() {
                 </button>
               </div>
               {studentDetailLoading ? <AdminLoadingState compact label="Loading full student details..." /> : null}
-              {studentDetailMsg ? <div className="admin-msg">{studentDetailMsg}</div> : null}
+              <AdminStatusMessage message={studentDetailMsg} />
               <div className="student-info-grid admin-student-info-grid">
                 {[
                   { label: "Full Name", value: selectedStudent?.display_name || "-" },
@@ -823,7 +824,7 @@ export default function AdminConsoleStudentsWorkspace() {
                   </tbody>
                 </table>
               </div>
-              <div className="admin-msg">{studentAttemptsMsg}</div>
+              <AdminStatusMessage message={studentAttemptsMsg} />
             </>
           ) : null}
 
@@ -892,7 +893,7 @@ export default function AdminConsoleStudentsWorkspace() {
                   </div>
                 </div>
               ))}
-              <div className="admin-msg">{studentAttemptsMsg}</div>
+              <AdminStatusMessage message={studentAttemptsMsg} />
             </>
           ) : null}
 
@@ -1053,7 +1054,7 @@ export default function AdminConsoleStudentsWorkspace() {
                   </tbody>
                 </table>
               </div>
-              <div className="admin-msg">{studentAttendanceMsg}</div>
+              <AdminStatusMessage message={studentAttendanceMsg} />
             </>
           ) : null}
 
@@ -1239,7 +1240,7 @@ export default function AdminConsoleStudentsWorkspace() {
                   <div className="admin-help">No warnings issued yet.</div>
                 ) : null}
               </div>
-              {studentWarningsMsg ? <div className="admin-msg">{studentWarningsMsg}</div> : null}
+              <AdminStatusMessage message={studentWarningsMsg} />
             </div>
             <div className="admin-form student-warning-form" style={{ marginTop: 10 }}>
               <div className="field student-warning-form-title">
@@ -1310,7 +1311,7 @@ export default function AdminConsoleStudentsWorkspace() {
             <div className="admin-help" style={{ marginTop: 10 }}>
               Students are included if they match any selected warning threshold.
             </div>
-            {studentWarningIssueMsg ? <div className="admin-msg">{studentWarningIssueMsg}</div> : null}
+            <AdminStatusMessage message={studentWarningIssueMsg} />
             <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button className="btn btn-primary" onClick={issueStudentWarningCtx} disabled={studentWarningIssueSaving}>
                 {studentWarningIssueSaving ? "Issuing..." : "Issue Warning"}

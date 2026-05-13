@@ -3359,16 +3359,24 @@ export function useTestingWorkspaceState({
 
       let attemptsData = [];
       if (sessionIds.length) {
-        const { data, error } = await fetchAllPages((offset, pageSize) => (
+        const buildAttemptsQuery = (fields) => fetchAllPages((offset, pageSize) => (
           supabase
             .from("attempts")
-            .select("id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json")
+            .select(fields)
             .eq("school_id", activeSchoolId)
             .in("test_session_id", sessionIds)
             .order("created_at", { ascending: false })
             .order("id", { ascending: false })
             .range(offset, offset + pageSize - 1)
         ));
+        let { data, error } = await buildAttemptsQuery(
+          "id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json, tab_left_count"
+        );
+        if (error && isMissingTabLeftCountError(error)) {
+          ({ data, error } = await buildAttemptsQuery(
+            "id, student_id, test_session_id, test_version, correct, total, score_rate, started_at, ended_at, created_at, answers_json"
+          ));
+        }
         if (error) throw error;
         attemptsData = data ?? [];
       }

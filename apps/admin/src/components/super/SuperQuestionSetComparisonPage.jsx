@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSuperAdmin } from "./SuperAdminShell";
+import { renderUnderlinesHtml } from "../../lib/adminQuestionText";
 import AdminLoadingState from "../AdminLoadingState";
 
 function toDateInput(date) {
@@ -501,7 +502,10 @@ export default function SuperQuestionSetComparisonPage({ questionSetId }) {
                   <td style={{ whiteSpace: "nowrap", fontWeight: 700 }}>{row.qid}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{row.section}</td>
                   <td style={{ minWidth: 150, whiteSpace: "pre-line", lineHeight: 1.25 }}>{row.subSectionMultiline || row.subSection}</td>
-                  <td style={{ minWidth: 280 }}>{row.prompt}</td>
+                  <td
+                    style={{ minWidth: 280 }}
+                    dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "") }}
+                  />
                   {schoolRows.map((schoolRow) => {
                     const cell = row.bySchool[schoolRow.school_id] ?? { correct: 0, total: 0 };
                     const rate = cell.total ? cell.correct / cell.total : null;

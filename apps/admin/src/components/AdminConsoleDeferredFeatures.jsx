@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import { createPortal } from "react-dom";
 import AdminLoadingState from "./AdminLoadingState";
+import AdminStatusMessage from "./AdminStatusMessage";
 
 function formatAttemptDetailDateTime(value) {
   if (!value) return "";
@@ -406,9 +407,7 @@ export default function AdminConsoleDeferredFeatures({
                     )}
                   </div>
 
-                  {attemptsMsg ? (
-                    <div className="admin-msg">{attemptsMsg}</div>
-                  ) : null}
+                  <AdminStatusMessage message={attemptsMsg} />
                   {shouldShowResultsEmptyState ? (
                     <div className="admin-msg">
                       No results were found for this category in {attemptsViewMonthLabel || "the selected month"}.
@@ -1045,8 +1044,8 @@ export default function AdminConsoleDeferredFeatures({
               <div className="admin-help">
                 Total: <b>{previewQuestions.length}</b> questions
               </div>
-              {previewMsg ? <div className="admin-msg">{previewMsg}</div> : null}
-              {previewReplacementMsg ? <div className="admin-msg">{previewReplacementMsg}</div> : null}
+              <AdminStatusMessage message={previewMsg} />
+              <AdminStatusMessage message={previewReplacementMsg} />
               {!previewMsg && previewQuestions.length === 0 ? (
                 <div className="admin-help" style={{ marginTop: 6 }}>
                   No questions. Upload & Register SetでCSVを取り込むか、CSVの`test_version`がこのセットと一致しているか確認してください。

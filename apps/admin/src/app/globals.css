@@ -423,6 +423,10 @@ body { padding: 0; }
   border-radius: 4px;
   text-align: left;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .admin-subnav-item.active {
@@ -430,6 +434,27 @@ body { padding: 0; }
   border-color: #1f6f2a;
   color: #ffffff;
   position: relative;
+}
+
+.admin-subnav-count-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #b45309;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.admin-subnav-item.active .admin-subnav-count-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
 }
 
 .admin-nav-item {
