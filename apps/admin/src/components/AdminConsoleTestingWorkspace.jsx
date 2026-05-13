@@ -80,7 +80,7 @@ export default function AdminConsoleTestingWorkspace() {
     recordAuditEvent: memoizedRecordAuditEvent,
     isAnalyticsExcludedStudent,
     getScoreRate,
-    getTabLeftCount,
+    externalGetTabLeftCount: getTabLeftCount,
     formatDateTime,
     formatDateShort,
     getStudentBaseUrl,
