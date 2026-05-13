@@ -205,6 +205,36 @@ export default function AdminConsoleTestingTabs({
     );
   }
 
+  const testsByVersion = useMemo(() => new Map((tests ?? []).map((test) => [test.version, test])), [tests]);
+
+  function getProblemSetDescriptions(problemSetId, sourceSetIds = []) {
+    const ids = Array.isArray(sourceSetIds) && sourceSetIds.length
+      ? sourceSetIds
+      : [problemSetId];
+    return ids
+      .map((setId) => {
+        const normalizedSetId = String(setId ?? "").trim();
+        const description = String(testsByVersion.get(normalizedSetId)?.description ?? "").trim();
+        return description ? { setId: normalizedSetId, description } : null;
+      })
+      .filter(Boolean);
+  }
+
+  function renderProblemSetDescription(problemSetId, sourceSetIds = []) {
+    const descriptions = getProblemSetDescriptions(problemSetId, sourceSetIds);
+    if (!descriptions.length) return "—";
+    return (
+      <div className="daily-code" style={{ whiteSpace: "pre-wrap", maxWidth: 260 }}>
+        {descriptions.map((item) => (
+          <div key={`set-description-${item.setId}`}>
+            {descriptions.length > 1 ? <b>{item.setId}: </b> : null}
+            {item.description}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   function getSessionRowProps(sessionItem, sessionType) {
     const isEditing = editingSessionId === sessionItem?.id;
     if (isEditing) return {};
@@ -584,6 +614,7 @@ export default function AdminConsoleTestingTabs({
                         <col style={{ minWidth: 120 }} />
                         <col style={{ minWidth: 88 }} />
                         <col />
+                        <col style={{ minWidth: 180 }} />
                         <col />
                         <col />
                         <col />
@@ -599,6 +630,7 @@ export default function AdminConsoleTestingTabs({
                           <th>Test Title</th>
                           <th>Category</th>
                           <th>SetID</th>
+                          <th>Description</th>
                           <th style={{ minWidth: 100, textAlign: "left" }}>Start</th>
                           <th style={{ minWidth: 120, textAlign: "left" }}>End</th>
                           <th>Questions</th>
@@ -620,6 +652,7 @@ export default function AdminConsoleTestingTabs({
                             <td>{t.title ?? ""}</td>
                             <td>{testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids, t)}</td>
+                            <td>{renderProblemSetDescription(t.problem_set_id, t.source_set_ids)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
                             <td style={{ textAlign: "center" }}>
@@ -996,6 +1029,11 @@ export default function AdminConsoleTestingTabs({
                                 <option value="">No problem sets</option>
                               )}
                             </select>
+                            {testSessionForm.problem_set_id ? (
+                              <div className="admin-help" style={{ marginTop: 4 }}>
+                                {renderProblemSetDescription(testSessionForm.problem_set_id)}
+                              </div>
+                            ) : null}
                             {modelConductCategory && !modelConductTests.length ? (
                               <div className="admin-help" style={{ marginTop: 4 }}>
                                 No SetIDs have been uploaded yet for this category.
@@ -1300,11 +1338,12 @@ export default function AdminConsoleTestingTabs({
                         <div className="admin-subtitle" style={{ fontWeight: 900 }}>{group.name}</div>
                       ) : null}
                       <div className="admin-table-wrap" style={{ marginTop: !modelUploadCategory ? 8 : 0 }}>
-                        <table className="admin-table" style={{ minWidth: 860 }}>
+                        <table className="admin-table" style={{ minWidth: 1040 }}>
                           <thead>
                             <tr>
                               <th>Category</th>
                               <th>SetID</th>
+                              <th>Description</th>
                               <th>Ver.</th>
                               <th style={compactDateColumnStyle}>Created</th>
                               <th style={{ width: 72, textAlign: "center" }}>Questions</th>
@@ -1321,6 +1360,7 @@ export default function AdminConsoleTestingTabs({
                               >
                                 <td>{t.title ?? ""}</td>
                                 <td>{t.version ?? ""}</td>
+                                <td>{renderProblemSetDescription(t.version)}</td>
                                 <td>{formatUploadVersionLabel(t)}</td>
                                 <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td style={{ width: 72, textAlign: "center" }}>{renderQuestionCountContent(t)}</td>
@@ -1641,6 +1681,7 @@ export default function AdminConsoleTestingTabs({
                         <col style={{ minWidth: 180 }} />
                         {showDailySessionCategories ? <col /> : null}
                         <col className="daily-sessions-col-setid" style={{ minWidth: 150 }} />
+                        <col style={{ minWidth: 180 }} />
                         <col style={{ minWidth: 100 }} />
                         <col style={{ minWidth: 88 }} />
                         <col />
@@ -1659,6 +1700,7 @@ export default function AdminConsoleTestingTabs({
                           <th>Test Title</th>
                           {showDailySessionCategories ? <th>Category</th> : null}
                           <th>SetID</th>
+                          <th>Description</th>
                           <th style={{ minWidth: 100, textAlign: "left" }}>Start</th>
                           <th style={{ minWidth: 120, textAlign: "left" }}>End</th>
                           <th>Questions</th>
@@ -1682,6 +1724,7 @@ export default function AdminConsoleTestingTabs({
                               <td>{String(t.session_category ?? "").trim() || testMetaByVersion[t.problem_set_id]?.category || "Uncategorized"}</td>
                             ) : null}
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids, t)}</td>
+                            <td>{renderProblemSetDescription(t.problem_set_id, t.source_set_ids)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
                             <td style={{ textAlign: "center" }}>
@@ -2232,6 +2275,11 @@ export default function AdminConsoleTestingTabs({
                                                       </span>
                                                     </span>
                                                     <span className="daily-session-create-set-meta">{renderQuestionCountContent(test, "Q")}</span>
+                                                    {String(test.description ?? "").trim() ? (
+                                                      <span className="daily-session-create-set-option-description">
+                                                        {test.description}
+                                                      </span>
+                                                    ) : null}
                                                   </label>
                                                 );
                                               })}
@@ -2245,33 +2293,40 @@ export default function AdminConsoleTestingTabs({
                                 ) : null}
                               </div>
                             ) : (
-                              <select
-                                value={dailySessionForm.problem_set_id}
-                                onChange={(e) =>
-                                  setDailySessionForm((s) => {
-                                    const nextId = e.target.value;
-                                    const sourceCategory = tests.find((test) => test.version === nextId)?.title?.trim() || "";
-                                    return {
-                                      ...s,
-                                      problem_set_id: nextId,
-                                      problem_set_ids: nextId ? [nextId] : [],
-                                      session_category: sourceCategory || s.session_category,
-                                      session_category_auto_generated: Boolean(sourceCategory),
-                                    };
-                                  })
-                                }
-                              >
-                                <option value="">Select Set ID</option>
-                                {dailySingleModeTests.length ? (
-                                  dailySingleModeTests.map((t) => (
-                                    <option key={`daily-ps-${t.version}`} value={t.version}>
-                                      {t.version}
-                                    </option>
-                                  ))
-                                ) : (
-                                  <option value="">No daily tests</option>
-                                )}
-                              </select>
+                              <>
+                                <select
+                                  value={dailySessionForm.problem_set_id}
+                                  onChange={(e) =>
+                                    setDailySessionForm((s) => {
+                                      const nextId = e.target.value;
+                                      const sourceCategory = tests.find((test) => test.version === nextId)?.title?.trim() || "";
+                                      return {
+                                        ...s,
+                                        problem_set_id: nextId,
+                                        problem_set_ids: nextId ? [nextId] : [],
+                                        session_category: sourceCategory || s.session_category,
+                                        session_category_auto_generated: Boolean(sourceCategory),
+                                      };
+                                    })
+                                  }
+                                >
+                                  <option value="">Select Set ID</option>
+                                  {dailySingleModeTests.length ? (
+                                    dailySingleModeTests.map((t) => (
+                                      <option key={`daily-ps-${t.version}`} value={t.version}>
+                                        {t.version}
+                                      </option>
+                                    ))
+                                  ) : (
+                                    <option value="">No daily tests</option>
+                                  )}
+                                </select>
+                                {dailySessionForm.problem_set_id ? (
+                                  <div className="admin-help" style={{ marginTop: 4 }}>
+                                    {renderProblemSetDescription(dailySessionForm.problem_set_id)}
+                                  </div>
+                                ) : null}
+                              </>
                             )}
                           </div>
                           <div className="daily-session-create-field">
@@ -2702,11 +2757,12 @@ export default function AdminConsoleTestingTabs({
                         <div className="admin-subtitle" style={{ fontWeight: 900 }}>{group.name}</div>
                       ) : null}
                       <div className="admin-table-wrap" style={{ marginTop: !dailyUploadCategory ? 8 : 0 }}>
-                        <table className="admin-table" style={{ minWidth: 860 }}>
+                        <table className="admin-table" style={{ minWidth: 1040 }}>
                           <thead>
                             <tr>
                               <th>Category</th>
                               <th>SetID</th>
+                              <th>Description</th>
                               <th>Ver.</th>
                               <th style={compactDateColumnStyle}>Created</th>
                               <th style={{ width: 72, textAlign: "center" }}>Questions</th>
@@ -2723,6 +2779,7 @@ export default function AdminConsoleTestingTabs({
                               >
                                 <td>{t.title ?? ""}</td>
                                 <td>{t.version ?? ""}</td>
+                                <td>{renderProblemSetDescription(t.version)}</td>
                                 <td>{formatUploadVersionLabel(t)}</td>
                                 <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
                                 <td style={{ width: 72, textAlign: "center" }}>{renderQuestionCountContent(t)}</td>

@@ -2990,9 +2990,11 @@ function getScoreRate(attempt) {
 function getTabLeftCount(attempt) {
   const directCount = Number(attempt?.tab_left_count);
   const metaCount = Number(attempt?.answers_json?.__meta?.tab_left_count);
+  const metaFocusWarnings = Number(attempt?.answers_json?.__meta?.focus_warnings ?? attempt?.answers_json?.__meta?.focusWarnings);
   const normalizedDirect = Number.isFinite(directCount) && directCount >= 0 ? Math.floor(directCount) : 0;
   const normalizedMeta = Number.isFinite(metaCount) && metaCount >= 0 ? Math.floor(metaCount) : 0;
-  return Math.max(normalizedDirect, normalizedMeta);
+  const normalizedMetaFocusWarnings = Number.isFinite(metaFocusWarnings) && metaFocusWarnings >= 0 ? Math.floor(metaFocusWarnings) : 0;
+  return Math.max(normalizedDirect, normalizedMeta, normalizedMetaFocusWarnings);
 }
 
 function isMissingTabLeftCountError(error) {
@@ -3989,7 +3991,8 @@ export default function AdminConsole({
       if (!t?.version) return;
       map[t.version] = {
         type: t.type,
-        category: String(t.title ?? "").trim()
+        category: String(t.title ?? "").trim(),
+        description: String(t.description ?? "").trim()
       };
     });
     return map;
@@ -8318,6 +8321,45 @@ function openDailyRecordModal(record = null, recordDate = "") {
     ));
   }
 
+  async function attachQuestionSetDescriptions(list) {
+    const safeList = sanitizeTestList(list);
+    const versions = Array.from(new Set(safeList.map((test) => String(test.version ?? "").trim()).filter(Boolean)));
+    if (!versions.length) return safeList;
+
+    const { data, error } = await supabase
+      .from("question_sets")
+      .select("title, description, test_type, version, updated_at, created_at, status")
+      .in("title", versions)
+      .neq("status", "archived");
+
+    if (error) {
+      console.error("question set description lookup error:", error);
+      return safeList;
+    }
+
+    const descriptionByLegacyKey = new Map();
+    (data ?? []).forEach((row) => {
+      const title = String(row?.title ?? "").trim();
+      if (!title) return;
+      const legacyType = row?.test_type === "model" ? "mock" : "daily";
+      const key = `${legacyType}::${title}`;
+      const current = descriptionByLegacyKey.get(key);
+      const currentRank = Number(current?.version ?? 0);
+      const nextRank = Number(row?.version ?? 0);
+      const currentTime = new Date(current?.updated_at || current?.created_at || 0).getTime();
+      const nextTime = new Date(row?.updated_at || row?.created_at || 0).getTime();
+      if (!current || nextRank > currentRank || (nextRank === currentRank && nextTime > currentTime)) {
+        descriptionByLegacyKey.set(key, row);
+      }
+    });
+
+    return safeList.map((test) => {
+      const key = `${test.type === "mock" ? "mock" : "daily"}::${String(test.version ?? "").trim()}`;
+      const description = String(descriptionByLegacyKey.get(key)?.description ?? "").trim();
+      return description ? { ...test, description } : test;
+    });
+  }
+
   async function attachGeneratedDailySourceSetIdsToSessions(list) {
     const generatedVersions = (list ?? [])
       .filter((session) => isGeneratedDailySessionVersion(session.problem_set_id))
@@ -8391,7 +8433,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
       question_count: null,
     }));
     const seeded = await seedModelCategory(withCounts);
-    const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+    const withDescriptions = await attachQuestionSetDescriptions(seeded);
+    const hydrated = await attachGeneratedDailySourceSetIds(withDescriptions);
     setTests(hydrated);
     setTestsLoaded(true);
     const firstModel = hydrated.find((t) => t.type === "mock");

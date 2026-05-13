@@ -1,6 +1,6 @@
 import { escapeHtml } from "./escapeHtml";
 import { formatTime } from "./formatters";
-import { state, saveState } from "../state/appState";
+import { state, saveState, getCurrentTabLeftCount } from "../state/appState";
 import { resultDetailState, fetchStudentResults, studentResultsState } from "../state/resultsState";
 import { studentAttendanceState, fetchStudentAttendance } from "../state/attendanceState";
 import { rankingState, fetchStudentRanking } from "../state/rankingState";
@@ -63,7 +63,7 @@ export function renderAndSync(fn, app) {
 }
 
 export function focusWarningHTML() {
-  const count = Math.max(0, Number(state.tabLeftCount ?? state.focusWarnings ?? 0));
+  const count = getCurrentTabLeftCount();
   if (!count) return "";
   return `<div class="focus-warning"><b>Warning:</b> You left the exam tab. Count: ${count}</div>`;
 }

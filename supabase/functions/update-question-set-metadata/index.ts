@@ -23,6 +23,7 @@ serve(async (req) => {
   const title = normalizeText(body.title);
   const testType = normalizeText(body.test_type);
   const category = normalizeText(body.category);
+  const description = normalizeText(body.description);
   const visibilityScope = normalizeText(body.visibility_scope);
   const status = normalizeText(body.status);
   const schoolIds = Array.isArray(body.school_ids)
@@ -141,6 +142,7 @@ serve(async (req) => {
     .from("question_sets")
     .update({
       title,
+      description,
       test_type: testType,
       visibility_scope: visibilityScope,
       status,
@@ -160,6 +162,7 @@ serve(async (req) => {
     entityId: questionSetId,
     metadata: {
       title,
+      description,
       category: nextCategory,
       test_type: testType,
       status,

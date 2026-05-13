@@ -220,7 +220,7 @@ export function promptBoxHTML(question, opts = {}) {
   const main = question.promptEn ?? "";
   const sub = question.promptBn ?? "";
   const lines = [];
-  if (showPrompt && main) lines.push(`<div class="prompt preserve-lines">${escapeHtml(main)}</div>`);
+  if (showPrompt && main) lines.push(`<div class="prompt preserve-lines">${renderUnderlines(main)}</div>`);
   if (showPrompt && state.showBangla && sub) lines.push(`<div class="prompt-sub preserve-lines">${escapeHtml(sub)}</div>`);
   if (includeStemInPrompt) {
     const stemLines = splitStemLines(question.stemText || question.stemExtra || "");

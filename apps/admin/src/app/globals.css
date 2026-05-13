@@ -4003,6 +4003,14 @@ body { padding: 0; }
   text-align: right;
 }
 
+.daily-session-create-set-option-description {
+  grid-column: 1 / -1;
+  color: #5f6b63;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
 .daily-session-create-selected-list {
   display: flex;
   flex-wrap: wrap;

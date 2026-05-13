@@ -30,6 +30,7 @@ function emptyUploadForm() {
     source_question_set_id: "",
     test_type: "daily",
     category: DEFAULT_DAILY_CATEGORY,
+    description: "",
     version_label: "v1",
     status: "draft",
     visibility_scope: "global",
@@ -43,6 +44,7 @@ function emptyMetaForm() {
     title: "",
     test_type: "daily",
     category: DEFAULT_DAILY_CATEGORY,
+    description: "",
     version_label: "",
     status: "draft",
     visibility_scope: "global",
@@ -916,6 +918,7 @@ export default function SuperTestsImportPage() {
       title: questionSet.title ?? "",
       test_type: questionSet.test_type ?? "daily",
       category: questionSet.category || getDefaultCategoryForTestType(questionSet.test_type ?? "daily"),
+      description: questionSet.description ?? "",
       version_label: `v${Number(questionSet.version ?? 0) + 1}`,
       status: questionSet.status ?? "draft",
       visibility_scope: questionSet.visibility_scope ?? "global",
@@ -1295,10 +1298,11 @@ export default function SuperTestsImportPage() {
   function renderQuestionSetTable(items) {
     return (
       <div className="admin-table-wrap super-library-table-wrap">
-        <table className="admin-table" style={{ minWidth: 1180 }}>
+        <table className="admin-table" style={{ minWidth: 1320 }}>
           <thead>
             <tr>
               <th>SetID</th>
+              <th>Description</th>
               <th>Ver.</th>
               <th>Questions</th>
               <th>Visibility</th>
@@ -1324,6 +1328,11 @@ export default function SuperTestsImportPage() {
                           {statusBadge(item.status)}
                         </div>
                       ) : null}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="daily-code" style={{ whiteSpace: "pre-wrap", maxWidth: 280 }}>
+                      {String(item.description ?? "").trim() || "—"}
                     </div>
                   </td>
                   <td>{formatVersionLabel(item)}</td>
@@ -1515,6 +1524,18 @@ export default function SuperTestsImportPage() {
                 ) : null}
               </div>
               <div className="field">
+                <label>Description</label>
+                <textarea
+                  value={uploadForm.description}
+                  onChange={(event) => setUploadForm((prev) => ({ ...prev, description: event.target.value }))}
+                  rows={3}
+                  placeholder="Optional description for the uploaded SetID"
+                />
+                <div className="admin-help" style={{ marginTop: 4 }}>
+                  If this CSV contains multiple SetIDs, this description is applied to all of them.
+                </div>
+              </div>
+              <div className="field">
                 <label>CSV File (required)</label>
                 <input
                   type="file"
@@ -1651,6 +1672,15 @@ export default function SuperTestsImportPage() {
                     style={{ marginTop: 6 }}
                   />
                 ) : null}
+              </div>
+              <div className="field">
+                <label>{metaCsvFile ? "Description for New Version" : "Description"}</label>
+                <textarea
+                  value={metaForm.description}
+                  onChange={(event) => setMetaForm((prev) => ({ ...prev, description: event.target.value }))}
+                  rows={3}
+                  placeholder="Optional SetID description"
+                />
               </div>
               <div className="field">
                 <label>CSV File</label>

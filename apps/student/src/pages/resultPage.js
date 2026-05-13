@@ -3,7 +3,7 @@ import { topbarHTML } from "../lib/uiHelpers";
 import { scoreAll } from "../lib/quizControls";
 import { getActiveTestVersion, getActivePassRate, getActiveTestSession, getActiveTestTitle } from "../lib/sessionHelpers";
 import { isMissingTabLeftCountError } from "../lib/errorHelpers";
-import { state, saveState, exitToHome } from "../state/appState";
+import { state, saveState, exitToHome, getCurrentTabLeftCount } from "../state/appState";
 import { authState } from "../state/authState";
 import { studentResultsState } from "../state/resultsState";
 import { testsState, testSessionsState } from "../state/testsState";
@@ -48,10 +48,7 @@ function buildAttemptPayload() {
   const { correct, total } = scoreAll();
   const activeSessionId = state.linkTestSessionId || state.selectedTestSessionId || null;
   const activeSession = getActiveTestSession();
-  const tabLeftCount = Math.max(
-    0,
-    Number(state.tabLeftCount ?? state.focusWarnings ?? 0)
-  );
+  const tabLeftCount = getCurrentTabLeftCount();
   return {
     student_id: authState.session?.user?.id ?? null,
     display_name: state.user?.name?.trim() || null,
@@ -66,6 +63,7 @@ function buildAttemptPayload() {
       ...(state.answers ?? {}),
       __meta: {
         tab_left_count: tabLeftCount,
+        focus_warnings: tabLeftCount,
         session_title: activeSession?.title ?? getActiveTestTitle(),
         session_date: activeSession?.starts_at || activeSession?.ends_at || null,
       },

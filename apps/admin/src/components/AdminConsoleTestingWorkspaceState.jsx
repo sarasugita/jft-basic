@@ -1810,6 +1810,45 @@ export function useTestingWorkspaceState({
     ));
   }, [supabase]);
 
+  const attachQuestionSetDescriptions = useCallback(async (list) => {
+    const safeList = sanitizeTestList(list);
+    const versions = Array.from(new Set(safeList.map((test) => String(test.version ?? "").trim()).filter(Boolean)));
+    if (!versions.length || !supabase) return safeList;
+
+    const { data, error } = await supabase
+      .from("question_sets")
+      .select("title, description, test_type, version, updated_at, created_at, status")
+      .in("title", versions)
+      .neq("status", "archived");
+
+    if (error) {
+      console.error("question set description lookup error:", error);
+      return safeList;
+    }
+
+    const descriptionByLegacyKey = new Map();
+    (data ?? []).forEach((row) => {
+      const title = String(row?.title ?? "").trim();
+      if (!title) return;
+      const legacyType = row?.test_type === "model" ? "mock" : "daily";
+      const key = `${legacyType}::${title}`;
+      const current = descriptionByLegacyKey.get(key);
+      const currentRank = Number(current?.version ?? 0);
+      const nextRank = Number(row?.version ?? 0);
+      const currentTime = new Date(current?.updated_at || current?.created_at || 0).getTime();
+      const nextTime = new Date(row?.updated_at || row?.created_at || 0).getTime();
+      if (!current || nextRank > currentRank || (nextRank === currentRank && nextTime > currentTime)) {
+        descriptionByLegacyKey.set(key, row);
+      }
+    });
+
+    return safeList.map((test) => {
+      const key = `${test.type === "mock" ? "mock" : "daily"}::${String(test.version ?? "").trim()}`;
+      const description = String(descriptionByLegacyKey.get(key)?.description ?? "").trim();
+      return description ? { ...test, description } : test;
+    });
+  }, [supabase]);
+
   const attachGeneratedDailySourceSetIdsToSessions = useCallback(async (list) => {
     if (!supabase) return list;
     const generatedVersions = (list ?? [])
@@ -2057,6 +2096,7 @@ export function useTestingWorkspaceState({
       map[test.version] = {
         title: test.title || test.version,
         category: String(test.title ?? "").trim() || DEFAULT_MODEL_CATEGORY,
+        description: String(test.description ?? "").trim(),
         type: test.type,
         pass_rate: normalizePassRate(test.pass_rate),
       };
@@ -3312,13 +3352,14 @@ export function useTestingWorkspaceState({
       question_count: hasResolvedQuestionCountValue(t?.question_count) ? Number(t.question_count) : null,
     }));
     const seeded = await seedModelCategory(withCounts);
-    const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+    const withDescriptions = await attachQuestionSetDescriptions(seeded);
+    const hydrated = await attachGeneratedDailySourceSetIds(withDescriptions);
     testsRef.current = hydrated;
     if (fetchTestsRequestRef.current !== requestId) return;
     setTests(hydrated);
     setTestsLoaded(true);
     setTestsMsg(list.length ? "" : "No tests.");
-  }, [supabase, seedModelCategory, attachGeneratedDailySourceSetIds]);
+  }, [supabase, seedModelCategory, attachQuestionSetDescriptions, attachGeneratedDailySourceSetIds]);
 
   const fetchTestSessions = useCallback(async () => {
     const requestId = fetchTestSessionsRequestRef.current + 1;

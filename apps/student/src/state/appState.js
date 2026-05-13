@@ -65,6 +65,28 @@ export function loadState() {
   }
 }
 
+function normalizeTabLeftCountValue(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+export function getCurrentTabLeftCount() {
+  const stateCount = Math.max(
+    normalizeTabLeftCountValue(state.tabLeftCount),
+    normalizeTabLeftCountValue(state.focusWarnings)
+  );
+  try {
+    const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    return Math.max(
+      stateCount,
+      normalizeTabLeftCountValue(persisted?.tabLeftCount),
+      normalizeTabLeftCountValue(persisted?.focusWarnings)
+    );
+  } catch {
+    return stateCount;
+  }
+}
+
 export function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
