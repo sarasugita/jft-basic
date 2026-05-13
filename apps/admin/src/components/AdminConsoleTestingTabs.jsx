@@ -95,6 +95,7 @@ export default function AdminConsoleTestingTabs({
   startEditTest,
   deleteTest,
   testsMsg,
+  questionCountLoadingVersions,
   assetUploadMsg,
   assetImportMsg,
   assetsMsg,
@@ -182,6 +183,28 @@ export default function AdminConsoleTestingTabs({
   setDailyFiles,
   uploadDailyAssets,
 }) {
+  function hasResolvedQuestionCount(item) {
+    if (!item) return false;
+    const value = item.question_count;
+    if (value == null || value === "") return false;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0;
+  }
+
+  function renderQuestionCountContent(item, suffix = "") {
+    if (hasResolvedQuestionCount(item)) {
+      return `${Number(item.question_count)}${suffix}`;
+    }
+    return (
+      <span
+        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+        aria-label={questionCountLoadingVersions?.[item?.version] ? "Loading question count" : "Question count pending"}
+      >
+        <span className="attendance-import-status-spinner admin-loading-spinner" aria-hidden="true" />
+      </span>
+    );
+  }
+
   function getSessionRowProps(sessionItem, sessionType) {
     const isEditing = editingSessionId === sessionItem?.id;
     if (isEditing) return {};
@@ -429,7 +452,7 @@ export default function AdminConsoleTestingTabs({
 
   function getQuestionCount(problemSetId) {
     const item = (tests ?? []).find((test) => test.version === problemSetId);
-    return Number(item?.question_count ?? 0);
+    return hasResolvedQuestionCount(item) ? Number(item.question_count) : null;
   }
 
   function formatUploadVersionLabel(test) {
@@ -599,7 +622,14 @@ export default function AdminConsoleTestingTabs({
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids, t)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
-                            <td style={{ textAlign: "center" }}>{getQuestionCount(t.problem_set_id)}</td>
+                            <td style={{ textAlign: "center" }}>
+                              {(() => {
+                                const count = getQuestionCount(t.problem_set_id);
+                                if (count != null) return count;
+                                const linkedTest = (tests ?? []).find((test) => test.version === t.problem_set_id);
+                                return renderQuestionCountContent(linkedTest ?? { version: t.problem_set_id });
+                              })()}
+                            </td>
                             <td>{t.time_limit_min ?? ""}</td>
                             <td>{`${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`}</td>
                             <td>{t.show_answers ? "Yes" : "No"}</td>
@@ -1293,7 +1323,7 @@ export default function AdminConsoleTestingTabs({
                                 <td>{t.version ?? ""}</td>
                                 <td>{formatUploadVersionLabel(t)}</td>
                                 <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                                <td style={{ width: 72, textAlign: "center" }}>{t.question_count ?? 0}</td>
+                                <td style={{ width: 72, textAlign: "center" }}>{renderQuestionCountContent(t)}</td>
                                 <td>
                                   <button
                                     className="btn"
@@ -1654,7 +1684,14 @@ export default function AdminConsoleTestingTabs({
                             <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids, t)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
                             <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
-                            <td style={{ textAlign: "center" }}>{getQuestionCount(t.problem_set_id)}</td>
+                            <td style={{ textAlign: "center" }}>
+                              {(() => {
+                                const count = getQuestionCount(t.problem_set_id);
+                                if (count != null) return count;
+                                const linkedTest = (tests ?? []).find((test) => test.version === t.problem_set_id);
+                                return renderQuestionCountContent(linkedTest ?? { version: t.problem_set_id });
+                              })()}
+                            </td>
                             <td>{t.time_limit_min ?? ""}</td>
                             <td>{`${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`}</td>
                             <td>{t.show_answers ? "Yes" : "No"}</td>
@@ -2194,7 +2231,7 @@ export default function AdminConsoleTestingTabs({
                                                         {category.name}
                                                       </span>
                                                     </span>
-                                                    <span className="daily-session-create-set-meta">{Number(test.question_count ?? 0)}Q</span>
+                                                    <span className="daily-session-create-set-meta">{renderQuestionCountContent(test, "Q")}</span>
                                                   </label>
                                                 );
                                               })}
@@ -2345,8 +2382,13 @@ export default function AdminConsoleTestingTabs({
                                 />
                               </div>
                             </div>
-                            <div className="daily-session-create-help">
-                              Available questions: {selectedDailyQuestionCount || 0}
+                            <div className="daily-session-create-help" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              <span>Available questions:</span>
+                              {selectedDailyQuestionCount == null ? (
+                                <AdminLoadingState compact label="Loading..." />
+                              ) : (
+                                <span>{selectedDailyQuestionCount}</span>
+                              )}
                             </div>
                           </div>
                           <div className="daily-session-create-split-row">
@@ -2683,7 +2725,7 @@ export default function AdminConsoleTestingTabs({
                                 <td>{t.version ?? ""}</td>
                                 <td>{formatUploadVersionLabel(t)}</td>
                                 <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                                <td style={{ width: 72, textAlign: "center" }}>{t.question_count ?? 0}</td>
+                                <td style={{ width: 72, textAlign: "center" }}>{renderQuestionCountContent(t)}</td>
                                 <td>
                                   <button
                                     className="btn"

@@ -26,6 +26,8 @@ const QUESTION_SELECT_BASE = "id, test_version, question_id, section_key, type, 
 const QUESTION_SELECT_WITH_MEDIA = QUESTION_SELECT_BASE;
 const SET_ID_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const SUPABASE_SAFE_PAGE_SIZE = 500;
+const QUESTION_COUNT_BATCH_SIZE = 20;
+const QUESTION_COUNT_BACKGROUND_PREFETCH_LIMIT = 40;
 const IMPORTED_ATTEMPT_BATCH_SIZE = 250;
 const DEFAULT_RETAKE_RELEASE_SCOPE = "failed_and_absent";
 
@@ -113,6 +115,16 @@ function compareSetIds(left, right) {
 
 function sanitizeTestList(list) {
   return (Array.isArray(list) ? list : []).filter((test) => test && typeof test === "object");
+}
+
+function hasResolvedQuestionCountValue(value) {
+  if (value == null || value === "") return false;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0;
+}
+
+function normalizeVersionList(values) {
+  return Array.from(new Set((values ?? []).map((value) => String(value ?? "").trim()).filter(Boolean)));
 }
 
 function getVocabularyTypeLabel(code) {
@@ -1345,6 +1357,7 @@ export function useTestingWorkspaceState({
   const [tests, setTests] = useState(sanitizeTestList(externalTests));
   const [testsLoaded, setTestsLoaded] = useState(Boolean(externalTestsLoaded));
   const [testsMsg, setTestsMsg] = useState("");
+  const [questionCountLoadingVersions, setQuestionCountLoadingVersions] = useState({});
   const [testSessions, setTestSessions] = useState(externalTestSessions ?? []);
   const [testSessionsLoaded, setTestSessionsLoaded] = useState(Boolean(externalTestSessionsLoaded));
   const [testSessionsMsg, setTestSessionsMsg] = useState("");
@@ -1571,28 +1584,116 @@ export function useTestingWorkspaceState({
   const resultsImportInputRef = useRef(null);
   const modelCategorySeededRef = useRef(false);
   const previewSectionRefs = useRef({});
+  const testsRef = useRef(sanitizeTestList(externalTests));
+  const questionCountPromiseRef = useRef(new Map());
 
   // ============================================================================
   // Data enrichment & processing callbacks
   // ============================================================================
 
   const fetchQuestionCounts = useCallback(async (versions) => {
-    if (!Array.isArray(versions) || versions.length === 0) return {};
-    const { data, error } = await supabase
-      .from("questions")
-      .select("test_version")
-      .in("test_version", versions);
+    const normalizedVersions = normalizeVersionList(versions);
+    if (!normalizedVersions.length) return {};
+    const { data, error } = await fetchAllPages((offset, pageSize) => (
+      supabase
+        .from("questions")
+        .select("test_version")
+        .in("test_version", normalizedVersions)
+        .order("test_version", { ascending: true })
+        .range(offset, offset + pageSize - 1)
+    ));
     if (error) {
       console.error("question count fetch error:", error);
       return {};
     }
-    const counts = {};
+    const counts = Object.fromEntries(normalizedVersions.map((version) => [version, 0]));
     for (const row of data ?? []) {
       if (!row?.test_version) continue;
       counts[row.test_version] = (counts[row.test_version] ?? 0) + 1;
     }
     return counts;
   }, [supabase]);
+
+  const ensureQuestionCounts = useCallback(async (versions) => {
+    const normalizedVersions = normalizeVersionList(versions);
+    if (!normalizedVersions.length || !supabase) return {};
+
+    const currentTests = sanitizeTestList(testsRef.current);
+    const currentCountByVersion = new Map(
+      currentTests.map((test) => [String(test?.version ?? "").trim(), test?.question_count])
+    );
+
+    const promises = [];
+    const nextVersions = [];
+    normalizedVersions.forEach((version) => {
+      if (hasResolvedQuestionCountValue(currentCountByVersion.get(version))) return;
+      const existingPromise = questionCountPromiseRef.current.get(version);
+      if (existingPromise) {
+        promises.push(existingPromise);
+        return;
+      }
+      nextVersions.push(version);
+    });
+
+    for (let index = 0; index < nextVersions.length; index += QUESTION_COUNT_BATCH_SIZE) {
+      const batch = nextVersions.slice(index, index + QUESTION_COUNT_BATCH_SIZE);
+      if (!batch.length) continue;
+
+      setQuestionCountLoadingVersions((current) => {
+        const next = { ...current };
+        batch.forEach((version) => {
+          next[version] = true;
+        });
+        return next;
+      });
+
+      const batchPromise = fetchQuestionCounts(batch)
+        .then((counts) => {
+          setTests((current) => {
+            const next = sanitizeTestList(current).map((test) => {
+              const version = String(test?.version ?? "").trim();
+              if (!Object.prototype.hasOwnProperty.call(counts, version)) return test;
+              return {
+                ...test,
+                question_count: counts[version],
+              };
+            });
+            testsRef.current = next;
+            return next;
+          });
+          return counts;
+        })
+        .finally(() => {
+          batch.forEach((version) => {
+            questionCountPromiseRef.current.delete(version);
+          });
+          setQuestionCountLoadingVersions((current) => {
+            const next = { ...current };
+            batch.forEach((version) => {
+              delete next[version];
+            });
+            return next;
+          });
+        });
+
+      batch.forEach((version) => {
+        questionCountPromiseRef.current.set(version, batchPromise);
+      });
+      promises.push(batchPromise);
+    }
+
+    if (promises.length) {
+      await Promise.all(promises);
+    }
+
+    const resolvedCounts = {};
+    sanitizeTestList(testsRef.current).forEach((test) => {
+      const version = String(test?.version ?? "").trim();
+      if (!normalizedVersions.includes(version) || !hasResolvedQuestionCountValue(test?.question_count)) return;
+      resolvedCounts[version] = Number(test.question_count);
+    });
+    return resolvedCounts;
+  }, [fetchQuestionCounts, supabase]);
 
   const mergeRegisteredTestsIntoState = useCallback((versions, { title, type, questionCountsByVersion = {} }) => {
     const normalizedVersions = Array.from(new Set((versions ?? []).map((value) => String(value ?? "").trim()).filter(Boolean)));
@@ -1617,7 +1718,7 @@ export function useTestingWorkspaceState({
           school_id: existing?.school_id ?? activeSchoolId ?? null,
           question_count: Number.isFinite(questionCountsByVersion?.[version])
             ? questionCountsByVersion[version]
-            : (existing?.question_count ?? 0),
+            : (hasResolvedQuestionCountValue(existing?.question_count) ? Number(existing.question_count) : null),
           created_at: existing?.created_at ?? nowIso,
           updated_at: nowIso,
         });
@@ -2114,7 +2215,10 @@ export function useTestingWorkspaceState({
   const selectedDailyQuestionCount = useMemo(() => {
     const selectedIds = selectedDailyProblemSetIds;
     const questions = dailyQuestionSets.filter((t) => selectedIds.includes(t.version));
-    return questions.reduce((sum, test) => sum + (Number(test.question_count) || 0), 0);
+    if (!selectedIds.length) return 0;
+    if (questions.length !== selectedIds.length) return null;
+    if (questions.some((test) => !hasResolvedQuestionCountValue(test?.question_count))) return null;
+    return questions.reduce((sum, test) => sum + Number(test.question_count), 0);
   }, [selectedDailyProblemSetIds, dailyQuestionSets]);
 
   const generatedDailySessionTitle = useMemo(() => {
@@ -3199,19 +3303,22 @@ export function useTestingWorkspaceState({
       setTestsLoaded(false);
       return;
     }
-    const list = sanitizeTestList(data);
-    const counts = await fetchQuestionCounts(list.map((t) => t.version));
+    const list = sanitizeTestList(data).map((test) => ({
+      ...test,
+      question_count: hasResolvedQuestionCountValue(test?.question_count) ? Number(test.question_count) : null,
+    }));
     const withCounts = list.map((t) => ({
       ...t,
-      question_count: counts[t.version] ?? 0
+      question_count: hasResolvedQuestionCountValue(t?.question_count) ? Number(t.question_count) : null,
     }));
     const seeded = await seedModelCategory(withCounts);
     const hydrated = await attachGeneratedDailySourceSetIds(seeded);
+    testsRef.current = hydrated;
     if (fetchTestsRequestRef.current !== requestId) return;
     setTests(hydrated);
     setTestsLoaded(true);
     setTestsMsg(list.length ? "" : "No tests.");
-  }, [supabase, fetchQuestionCounts, seedModelCategory, attachGeneratedDailySourceSetIds]);
+  }, [supabase, seedModelCategory, attachGeneratedDailySourceSetIds]);
 
   const fetchTestSessions = useCallback(async () => {
     const requestId = fetchTestSessionsRequestRef.current + 1;
@@ -3924,8 +4031,13 @@ export function useTestingWorkspaceState({
         setDailyConductError("Specify a valid number of questions.");
         return;
       }
-      if (requestedQuestionCount > selectedDailyQuestionCount) {
-        setDailyConductError(`Only ${selectedDailyQuestionCount} questions are available for the selected SetID.`);
+      const ensuredCounts = await ensureQuestionCounts(selectedSetIds);
+      const availableQuestionCount = selectedSetIds.reduce(
+        (sum, version) => sum + Number(ensuredCounts[String(version ?? "").trim()] ?? 0),
+        0
+      );
+      if (requestedQuestionCount > availableQuestionCount) {
+        setDailyConductError(`Only ${availableQuestionCount} questions are available for the selected SetID.`);
         return;
       }
     }
@@ -4074,7 +4186,7 @@ export function useTestingWorkspaceState({
     });
     fetchTests();
     fetchTestSessions();
-  }, [supabase, activeSchoolId, dailyConductMode, dailyRetakeSourceId, dailySessionForm, selectedDailyProblemSetIds, selectedDailySourceCategoryNames, selectedDailyQuestionCount, dailyConductCategory, materializeDailyProblemSet, hasDuplicateSessionTitle, fetchTests, fetchTestSessions, recordAuditEvent]);
+  }, [supabase, activeSchoolId, dailyConductMode, dailyRetakeSourceId, dailySessionForm, selectedDailyProblemSetIds, selectedDailySourceCategoryNames, selectedDailyQuestionCount, dailyConductCategory, materializeDailyProblemSet, hasDuplicateSessionTitle, fetchTests, fetchTestSessions, recordAuditEvent, ensureQuestionCounts]);
 
   const startEditSession = useCallback((session) => {
     if (!session?.id) return;
@@ -6010,6 +6122,20 @@ export function useTestingWorkspaceState({
   }, [supabase, activeSchoolId, fetchTests, tests.length, testsLoaded]);
 
   useEffect(() => {
+    testsRef.current = sanitizeTestList(tests);
+  }, [tests]);
+
+  useEffect(() => {
+    if (!testsLoaded) return;
+    const unresolvedVersions = sanitizeTestList(tests)
+      .filter((test) => !hasResolvedQuestionCountValue(test?.question_count))
+      .map((test) => String(test?.version ?? "").trim())
+      .filter(Boolean);
+    if (!unresolvedVersions.length) return;
+    void ensureQuestionCounts(unresolvedVersions.slice(0, QUESTION_COUNT_BACKGROUND_PREFETCH_LIMIT));
+  }, [ensureQuestionCounts, tests, testsLoaded]);
+
+  useEffect(() => {
     if (!supabase || !activeSchoolId || !testsLoaded || testSessionsLoaded) return;
     void fetchTestSessions();
   }, [supabase, activeSchoolId, fetchTestSessions, testSessionsLoaded, testsLoaded]);
@@ -6161,6 +6287,11 @@ export function useTestingWorkspaceState({
   }, [dailyCategories, dailyForm.category]);
 
   useEffect(() => {
+    if (!dailyConductOpen || dailyConductMode === "retake" || !selectedDailyProblemSetIds.length) return;
+    void ensureQuestionCounts(selectedDailyProblemSetIds);
+  }, [dailyConductMode, dailyConductOpen, ensureQuestionCounts, selectedDailyProblemSetIds]);
+
+  useEffect(() => {
     if (!groupedModelUploadTests.length) {
       setAssetCategorySelect(DEFAULT_MODEL_CATEGORY);
       if (!assetForm.category) {
@@ -6236,6 +6367,7 @@ export function useTestingWorkspaceState({
     testsLoaded,
     testsMsg,
     setTestsMsg,
+    questionCountLoadingVersions,
     testSessions,
     setTestSessions,
     testSessionsLoaded,
@@ -6493,6 +6625,7 @@ export function useTestingWorkspaceState({
 
     // Callback functions
     fetchTests,
+    ensureQuestionCounts,
     fetchTestSessions,
     fetchAssets,
     fetchExamLinks,

@@ -3170,10 +3170,14 @@ async function buildProfileEmailMap(supabase, attemptsList) {
 
 async function fetchQuestionCounts(supabase, versions, schoolId = "") {
   if (!Array.isArray(versions) || versions.length === 0) return {};
-  const { data, error } = await supabase
-    .from("questions")
-    .select("test_version")
-    .in("test_version", versions);
+  const { data, error } = await fetchAllPages((offset, pageSize) => (
+    supabase
+      .from("questions")
+      .select("test_version")
+      .in("test_version", versions)
+      .order("test_version", { ascending: true })
+      .range(offset, offset + pageSize - 1)
+  ));
   if (error) {
     console.error("question count fetch error:", error);
     return {};
@@ -8378,11 +8382,13 @@ function openDailyRecordModal(record = null, recordDate = "") {
       setTestsLoaded(false);
       return;
     }
-    const list = sanitizeTestList(data);
-    const counts = await fetchQuestionCounts(supabase, list.map((t) => t.version));
+    const list = sanitizeTestList(data).map((test) => ({
+      ...test,
+      question_count: null,
+    }));
     const withCounts = list.map((t) => ({
       ...t,
-      question_count: counts[t.version] ?? 0
+      question_count: null,
     }));
     const seeded = await seedModelCategory(withCounts);
     const hydrated = await attachGeneratedDailySourceSetIds(seeded);
