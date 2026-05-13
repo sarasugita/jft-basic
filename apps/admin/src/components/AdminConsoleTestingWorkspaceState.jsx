@@ -123,6 +123,47 @@ function hasResolvedQuestionCountValue(value) {
   return Number.isFinite(parsed) && parsed >= 0;
 }
 
+const questionCountCacheByVersion = new Map();
+
+function rememberQuestionCount(version, value) {
+  const normalizedVersion = String(version ?? "").trim();
+  if (!normalizedVersion || !hasResolvedQuestionCountValue(value)) return;
+  questionCountCacheByVersion.set(normalizedVersion, Number(value));
+}
+
+function getRememberedQuestionCount(version) {
+  const normalizedVersion = String(version ?? "").trim();
+  if (!normalizedVersion) return null;
+  const cached = questionCountCacheByVersion.get(normalizedVersion);
+  return hasResolvedQuestionCountValue(cached) ? Number(cached) : null;
+}
+
+function rememberQuestionCountsFromTests(list) {
+  sanitizeTestList(list).forEach((test) => {
+    rememberQuestionCount(test?.version, test?.question_count);
+  });
+}
+
+function hydrateTestsWithRememberedQuestionCounts(list) {
+  return sanitizeTestList(list).map((test) => {
+    const normalizedCount = hasResolvedQuestionCountValue(test?.question_count)
+      ? Number(test.question_count)
+      : null;
+    if (normalizedCount != null) {
+      rememberQuestionCount(test?.version, normalizedCount);
+      return {
+        ...test,
+        question_count: normalizedCount,
+      };
+    }
+    const rememberedCount = getRememberedQuestionCount(test?.version);
+    return {
+      ...test,
+      question_count: rememberedCount,
+    };
+  });
+}
+
 function normalizeVersionList(values) {
   return Array.from(new Set((values ?? []).map((value) => String(value ?? "").trim()).filter(Boolean)));
 }
@@ -1354,7 +1395,7 @@ export function useTestingWorkspaceState({
   // useState declarations (55+ variables)
   // ========================================================================
 
-  const [tests, setTests] = useState(sanitizeTestList(externalTests));
+  const [tests, setTests] = useState(() => hydrateTestsWithRememberedQuestionCounts(externalTests));
   const [testsLoaded, setTestsLoaded] = useState(Boolean(externalTestsLoaded));
   const [testsMsg, setTestsMsg] = useState("");
   const [questionCountLoadingVersions, setQuestionCountLoadingVersions] = useState({});
@@ -1584,7 +1625,7 @@ export function useTestingWorkspaceState({
   const resultsImportInputRef = useRef(null);
   const modelCategorySeededRef = useRef(false);
   const previewSectionRefs = useRef({});
-  const testsRef = useRef(sanitizeTestList(externalTests));
+  const testsRef = useRef(hydrateTestsWithRememberedQuestionCounts(externalTests));
   const questionCountPromiseRef = useRef(new Map());
 
   // ============================================================================
@@ -1611,6 +1652,9 @@ export function useTestingWorkspaceState({
       if (!row?.test_version) continue;
       counts[row.test_version] = (counts[row.test_version] ?? 0) + 1;
     }
+    Object.entries(counts).forEach(([version, count]) => {
+      rememberQuestionCount(version, count);
+    });
     return counts;
   }, [supabase]);
 
@@ -1624,9 +1668,15 @@ export function useTestingWorkspaceState({
     );
 
     const promises = [];
+    const rememberedCounts = {};
     const nextVersions = [];
     normalizedVersions.forEach((version) => {
       if (hasResolvedQuestionCountValue(currentCountByVersion.get(version))) return;
+      const rememberedCount = getRememberedQuestionCount(version);
+      if (hasResolvedQuestionCountValue(rememberedCount)) {
+        rememberedCounts[version] = rememberedCount;
+        return;
+      }
       const existingPromise = questionCountPromiseRef.current.get(version);
       if (existingPromise) {
         promises.push(existingPromise);
@@ -1634,6 +1684,29 @@ export function useTestingWorkspaceState({
       }
       nextVersions.push(version);
     });
+
+    if (Object.keys(rememberedCounts).length) {
+      setTests((current) => {
+        let changed = false;
+        const next = sanitizeTestList(current).map((test) => {
+          const version = String(test?.version ?? "").trim();
+          if (!Object.prototype.hasOwnProperty.call(rememberedCounts, version)) return test;
+          const nextCount = rememberedCounts[version];
+          if (hasResolvedQuestionCountValue(test?.question_count) && Number(test.question_count) === nextCount) {
+            return test;
+          }
+          changed = true;
+          return {
+            ...test,
+            question_count: nextCount,
+          };
+        });
+        const finalList = changed ? next : current;
+        testsRef.current = finalList;
+        rememberQuestionCountsFromTests(finalList);
+        return finalList;
+      });
+    }
 
     for (let index = 0; index < nextVersions.length; index += QUESTION_COUNT_BATCH_SIZE) {
       const batch = nextVersions.slice(index, index + QUESTION_COUNT_BATCH_SIZE);
@@ -1659,6 +1732,7 @@ export function useTestingWorkspaceState({
               };
             });
             testsRef.current = next;
+            rememberQuestionCountsFromTests(next);
             return next;
           });
           return counts;
@@ -3343,20 +3417,14 @@ export function useTestingWorkspaceState({
       setTestsLoaded(false);
       return;
     }
-    const list = sanitizeTestList(data).map((test) => ({
-      ...test,
-      question_count: hasResolvedQuestionCountValue(test?.question_count) ? Number(test.question_count) : null,
-    }));
-    const withCounts = list.map((t) => ({
-      ...t,
-      question_count: hasResolvedQuestionCountValue(t?.question_count) ? Number(t.question_count) : null,
-    }));
-    const seeded = await seedModelCategory(withCounts);
+    const list = hydrateTestsWithRememberedQuestionCounts(data);
+    const seeded = await seedModelCategory(list);
     const withDescriptions = await attachQuestionSetDescriptions(seeded);
     const hydrated = await attachGeneratedDailySourceSetIds(withDescriptions);
-    testsRef.current = hydrated;
+    const withRememberedCounts = hydrateTestsWithRememberedQuestionCounts(hydrated);
+    testsRef.current = withRememberedCounts;
     if (fetchTestsRequestRef.current !== requestId) return;
-    setTests(hydrated);
+    setTests(withRememberedCounts);
     setTestsLoaded(true);
     setTestsMsg(list.length ? "" : "No tests.");
   }, [supabase, seedModelCategory, attachQuestionSetDescriptions, attachGeneratedDailySourceSetIds]);
@@ -6163,7 +6231,9 @@ export function useTestingWorkspaceState({
   }, [supabase, activeSchoolId, fetchTests, tests.length, testsLoaded]);
 
   useEffect(() => {
-    testsRef.current = sanitizeTestList(tests);
+    const normalizedTests = sanitizeTestList(tests);
+    testsRef.current = normalizedTests;
+    rememberQuestionCountsFromTests(normalizedTests);
   }, [tests]);
 
   useEffect(() => {
