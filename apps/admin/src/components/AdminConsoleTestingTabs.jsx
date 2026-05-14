@@ -672,34 +672,34 @@ export default function AdminConsoleTestingTabs({
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredModelSessions.map((t) => (
-                          <tr key={t.id} {...getSessionRowProps(t, "mock")}>
-                            <td>{t.title ?? ""}</td>
-                            <td>{testMetaByVersion[t.problem_set_id]?.category || t("Uncategorized")}</td>
-                            <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids, t)}</td>
-                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
-                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
+                        {filteredModelSessions.map((session) => (
+                          <tr key={session.id} {...getSessionRowProps(session, "mock")}>
+                            <td>{session.title ?? ""}</td>
+                            <td>{testMetaByVersion[session.problem_set_id]?.category || t("Uncategorized")}</td>
+                            <td>{getProblemSetDisplayId(session.problem_set_id, tests, session.source_set_ids, session)}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(session.starts_at)}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(session.ends_at)}</td>
                             <td style={{ textAlign: "center" }}>
                               {(() => {
-                                const count = getQuestionCount(t.problem_set_id);
+                                const count = getQuestionCount(session.problem_set_id);
                                 if (count != null) return count;
-                                const linkedTest = (tests ?? []).find((test) => test.version === t.problem_set_id);
-                                return renderQuestionCountContent(linkedTest ?? { version: t.problem_set_id });
+                                const linkedTest = (tests ?? []).find((test) => test.version === session.problem_set_id);
+                                return renderQuestionCountContent(linkedTest ?? { version: session.problem_set_id });
                               })()}
                             </td>
-                            <td>{t.time_limit_min ?? ""}</td>
-                            <td>{`${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`}</td>
-                            <td>{t.show_answers ? t("Yes") : t("No")}</td>
-                            <td>{t.allow_multiple_attempts === false ? t("Only once") : t("Allow multiple")}</td>
-                            <td>{getSessionAudienceSummary(t)}</td>
-                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.created_at)}</td>
+                            <td>{session.time_limit_min ?? ""}</td>
+                            <td>{`${(getSessionEffectivePassRate(session) * 100).toFixed(0)}%`}</td>
+                            <td>{session.show_answers ? t("Yes") : t("No")}</td>
+                            <td>{session.allow_multiple_attempts === false ? t("Only once") : t("Allow multiple")}</td>
+                            <td>{getSessionAudienceSummary(session)}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(session.created_at)}</td>
                             <td style={{ textAlign: "center" }}>
-                              {linkBySession[t.id]?.id ? (
+                              {linkBySession[session.id]?.id ? (
                                 <button
                                   className="btn"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    copyLink(linkBySession[t.id].id);
+                                    copyLink(linkBySession[session.id].id);
                                   }}
                                 >
                                   {t("Copy URL")}
@@ -713,19 +713,19 @@ export default function AdminConsoleTestingTabs({
                                 className="btn"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  openSessionPreview(t);
+                                  openSessionPreview(session);
                                 }}
                               >
                                 {t("Preview")}
                               </button>
                             </td>
                             <td style={{ textAlign: "center" }}>
-                              <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
+                              <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(session); }}>
                                 {t("Edit")}
                               </button>
                             </td>
                             <td style={{ textAlign: "center" }}>
-                              <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
+                              <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(session.id); }}>
                                 {t("Delete")}
                               </button>
                             </td>
@@ -1044,9 +1044,9 @@ export default function AdminConsoleTestingTabs({
                             >
                               <option value="">{t("Select SetID")}</option>
                               {modelConductTests.length ? (
-                                modelConductTests.map((t) => (
-                                  <option key={`ps-${t.version}`} value={t.version}>
-                                    {t.version}
+                                modelConductTests.map((test) => (
+                                  <option key={`ps-${test.version}`} value={test.version}>
+                                    {test.version}
                                   </option>
                                 ))
                               ) : (
@@ -1414,23 +1414,23 @@ export default function AdminConsoleTestingTabs({
                             </tr>
                           </thead>
                           <tbody>
-                            {group.tests.map((t) => (
+                            {group.tests.map((test) => (
                               <tr
-                                key={t.id}
-                                onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
+                                key={test.id}
+                                onClick={editingTestId === test.id ? undefined : () => openPreview(test.version)}
                               >
-                                <td>{t.title ?? ""}</td>
-                                <td>{t.version ?? ""}</td>
-                                <td>{renderProblemSetDescription(t.version)}</td>
-                                <td>{formatUploadVersionLabel(t)}</td>
-                                <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                                <td style={{ width: 72, textAlign: "center" }}>{renderQuestionCountContent(t)}</td>
+                                <td>{test.title ?? ""}</td>
+                                <td>{test.version ?? ""}</td>
+                                <td>{renderProblemSetDescription(test.version)}</td>
+                                <td>{formatUploadVersionLabel(test)}</td>
+                                <td style={compactDateColumnStyle}>{formatCompactDateTime(test.created_at)}</td>
+                                <td style={{ width: 72, textAlign: "center" }}>{renderQuestionCountContent(test)}</td>
                                 <td>
                                   <button
                                     className="btn"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      openPreview(t.version);
+                                      openPreview(test.version);
                                     }}
                                   >
                                     {t("Preview")}
@@ -1441,7 +1441,7 @@ export default function AdminConsoleTestingTabs({
                                     className="btn"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      startEditTest(t, modelCategories);
+                                      startEditTest(test, modelCategories);
                                     }}
                                   >
                                     {t("Edit")}
@@ -1452,7 +1452,7 @@ export default function AdminConsoleTestingTabs({
                                     className="btn btn-danger"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      deleteTest(t.version);
+                                      deleteTest(test.version);
                                     }}
                                   >
                                     {t("Delete")}
@@ -1776,36 +1776,36 @@ export default function AdminConsoleTestingTabs({
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredDailySessions.map((t) => (
-                          <tr key={t.id} {...getSessionRowProps(t, "daily")}>
-                            <td>{t.title ?? ""}</td>
+                        {filteredDailySessions.map((session) => (
+                          <tr key={session.id} {...getSessionRowProps(session, "daily")}>
+                            <td>{session.title ?? ""}</td>
                             {showDailySessionCategories ? (
-                              <td>{String(t.session_category ?? "").trim() || testMetaByVersion[t.problem_set_id]?.category || t("Uncategorized")}</td>
+                              <td>{String(session.session_category ?? "").trim() || testMetaByVersion[session.problem_set_id]?.category || t("Uncategorized")}</td>
                             ) : null}
-                            <td>{getProblemSetDisplayId(t.problem_set_id, tests, t.source_set_ids, t)}</td>
-                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.starts_at)}</td>
-                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.ends_at)}</td>
+                            <td>{getProblemSetDisplayId(session.problem_set_id, tests, session.source_set_ids, session)}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(session.starts_at)}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(session.ends_at)}</td>
                             <td style={{ textAlign: "center" }}>
                               {(() => {
-                                const count = getQuestionCount(t.problem_set_id);
+                                const count = getQuestionCount(session.problem_set_id);
                                 if (count != null) return count;
-                                const linkedTest = (tests ?? []).find((test) => test.version === t.problem_set_id);
-                                return renderQuestionCountContent(linkedTest ?? { version: t.problem_set_id });
+                                const linkedTest = (tests ?? []).find((test) => test.version === session.problem_set_id);
+                                return renderQuestionCountContent(linkedTest ?? { version: session.problem_set_id });
                               })()}
                             </td>
-                            <td>{t.time_limit_min ?? ""}</td>
-                            <td>{`${(getSessionEffectivePassRate(t) * 100).toFixed(0)}%`}</td>
-                            <td>{t.show_answers ? t("Yes") : t("No")}</td>
-                            <td>{t.allow_multiple_attempts === false ? t("Only once") : t("Allow multiple")}</td>
-                            <td>{getSessionAudienceSummary(t)}</td>
-                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(t.created_at)}</td>
+                            <td>{session.time_limit_min ?? ""}</td>
+                            <td>{`${(getSessionEffectivePassRate(session) * 100).toFixed(0)}%`}</td>
+                            <td>{session.show_answers ? t("Yes") : t("No")}</td>
+                            <td>{session.allow_multiple_attempts === false ? t("Only once") : t("Allow multiple")}</td>
+                            <td>{getSessionAudienceSummary(session)}</td>
+                            <td style={{ textAlign: "left" }}>{renderCompactDateTime(session.created_at)}</td>
                             <td style={{ textAlign: "center" }}>
-                              {linkBySession[t.id]?.id ? (
+                              {linkBySession[session.id]?.id ? (
                                 <button
                                   className="btn"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    copyLink(linkBySession[t.id].id);
+                                    copyLink(linkBySession[session.id].id);
                                   }}
                                 >
                                   {t("Copy URL")}
@@ -1819,19 +1819,19 @@ export default function AdminConsoleTestingTabs({
                                 className="btn"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  openSessionPreview(t);
+                                  openSessionPreview(session);
                                 }}
                               >
                                 {t("Preview")}
                               </button>
                             </td>
                             <td style={{ textAlign: "center" }}>
-                              <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(t); }}>
+                              <button className="btn" onClick={(e) => { e.stopPropagation(); startEditSession(session); }}>
                                 {t("Edit")}
                               </button>
                             </td>
                             <td style={{ textAlign: "center" }}>
-                              <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(t.id); }}>
+                              <button className="btn btn-danger" onClick={(e) => { e.stopPropagation(); deleteTestSession(session.id); }}>
                                 {t("Delete")}
                               </button>
                             </td>
@@ -2370,9 +2370,9 @@ export default function AdminConsoleTestingTabs({
                                 >
                                   <option value="">{t("Select Set ID")}</option>
                                   {dailySingleModeTests.length ? (
-                                    dailySingleModeTests.map((t) => (
-                                      <option key={`daily-ps-${t.version}`} value={t.version}>
-                                        {t.version}
+                                    dailySingleModeTests.map((test) => (
+                                      <option key={`daily-ps-${test.version}`} value={test.version}>
+                                        {test.version}
                                       </option>
                                     ))
                                   ) : (
@@ -2912,23 +2912,23 @@ export default function AdminConsoleTestingTabs({
                             </tr>
                           </thead>
                           <tbody>
-                            {group.tests.map((t) => (
+                            {group.tests.map((test) => (
                               <tr
-                                key={t.id}
-                                onClick={editingTestId === t.id ? undefined : () => openPreview(t.version)}
+                                key={test.id}
+                                onClick={editingTestId === test.id ? undefined : () => openPreview(test.version)}
                               >
-                                <td>{t.title ?? ""}</td>
-                                <td>{t.version ?? ""}</td>
-                                <td>{renderProblemSetDescription(t.version)}</td>
-                                <td>{formatUploadVersionLabel(t)}</td>
-                                <td style={compactDateColumnStyle}>{formatCompactDateTime(t.created_at)}</td>
-                                <td style={{ width: 72, textAlign: "center" }}>{renderQuestionCountContent(t)}</td>
+                                <td>{test.title ?? ""}</td>
+                                <td>{test.version ?? ""}</td>
+                                <td>{renderProblemSetDescription(test.version)}</td>
+                                <td>{formatUploadVersionLabel(test)}</td>
+                                <td style={compactDateColumnStyle}>{formatCompactDateTime(test.created_at)}</td>
+                                <td style={{ width: 72, textAlign: "center" }}>{renderQuestionCountContent(test)}</td>
                                 <td>
                                   <button
                                     className="btn"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      openPreview(t.version);
+                                      openPreview(test.version);
                                     }}
                                   >
                                     {t("Preview")}
@@ -2939,7 +2939,7 @@ export default function AdminConsoleTestingTabs({
                                     className="btn"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      startEditTest(t, dailyCategories);
+                                      startEditTest(test, dailyCategories);
                                     }}
                                   >
                                     {t("Edit")}
@@ -2950,7 +2950,7 @@ export default function AdminConsoleTestingTabs({
                                     className="btn btn-danger"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      deleteTest(t.version);
+                                      deleteTest(test.version);
                                     }}
                                   >
                                     {t("Delete")}
