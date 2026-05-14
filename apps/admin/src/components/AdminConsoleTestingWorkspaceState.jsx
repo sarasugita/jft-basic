@@ -1238,6 +1238,30 @@ function isImportedSummaryAttempt(attempt) {
   return Boolean(attempt?.answers_json?.__meta?.imported_summary);
 }
 
+function hasImportedAttemptMetadata(attempt) {
+  const meta = attempt?.answers_json?.__meta;
+  if (!meta || typeof meta !== "object") return false;
+  if (Boolean(meta.imported_summary)) return true;
+  if (String(meta.imported_source ?? "").trim()) return true;
+  if (String(meta.imported_test_title ?? "").trim()) return true;
+  if (String(meta.imported_test_date ?? "").trim()) return true;
+  if (String(meta.imported_date_iso ?? "").trim()) return true;
+  if (String(meta.imported_csv_index ?? "").trim()) return true;
+  if (String(meta.imported_rate ?? "").trim()) return true;
+  if (Array.isArray(meta.main_section_summary) && meta.main_section_summary.length > 0) return true;
+  return false;
+}
+
+function hasStoredZeroScore(attempt) {
+  const storedCorrect = Number(attempt?.correct ?? 0);
+  const storedTotal = Number(attempt?.total ?? 0);
+  const storedScoreRate = Number(attempt?.score_rate ?? 0);
+  const normalizedCorrect = Number.isFinite(storedCorrect) ? storedCorrect : 0;
+  const normalizedTotal = Number.isFinite(storedTotal) ? storedTotal : 0;
+  const normalizedScoreRate = Number.isFinite(storedScoreRate) ? storedScoreRate : 0;
+  return normalizedCorrect <= 0 && normalizedTotal <= 0 && normalizedScoreRate <= 0;
+}
+
 function attemptHasDetailData(attempt) {
   if (!attempt || isImportedSummaryAttempt(attempt)) return false;
   if (!attempt.answers_json || typeof attempt.answers_json !== "object") return false;
@@ -1246,6 +1270,30 @@ function attemptHasDetailData(attempt) {
 
 function attemptCanOpenDetail(attempt) {
   return attemptHasDetailData(attempt) || isImportedSummaryAttempt(attempt);
+}
+
+function isStoredScoreRepairCandidate(attempt) {
+  if (!attempt || !attempt?.id) return false;
+  if (hasImportedAttemptMetadata(attempt)) return false;
+  if (!attemptHasDetailData(attempt)) return false;
+  return hasStoredZeroScore(attempt);
+}
+
+function computeAttemptScoreFromQuestions(attempt, questionsList) {
+  if (!attempt || !questionsList?.length) return null;
+  const rows = buildAttemptDetailRowsFromListForExport(
+    attempt?.answers_json,
+    questionsList,
+    () => ""
+  );
+  const total = rows.length;
+  if (total <= 0) return null;
+  const correct = rows.reduce((sum, row) => sum + (row?.isCorrect ? 1 : 0), 0);
+  return {
+    correct,
+    total,
+    scoreRate: correct / total,
+  };
 }
 
 function buildSessionDetailAvailability(matrix) {
@@ -3740,7 +3788,127 @@ export function useTestingWorkspaceState({
 
       const { attemptsData, viewMonthIso, nextMonthIso, monthDate } = loaded;
       if (fetchAttemptsRequestRef.current !== requestId) return;
-      setAttempts(attemptsData);
+      let nextAttemptsData = attemptsData;
+
+      // Repair corrupted non-imported attempts where stored score fields are zero
+      // but answers exist and can be recomputed from the question set.
+      const repairCandidates = (attemptsData ?? []).filter((attempt) => (
+        isStoredScoreRepairCandidate(attempt)
+      ));
+      if (repairCandidates.length) {
+        try {
+          const candidateVersions = Array.from(new Set(
+            repairCandidates
+              .map((attempt) => String(attempt?.test_version ?? "").trim())
+              .filter(Boolean)
+          ));
+          const questionFetchResults = await Promise.all(
+            candidateVersions.map(async (version) => {
+              const { data, error } = await fetchQuestionsForVersionWithFallback(supabase, version, activeSchoolId);
+              return {
+                version,
+                data: data ?? [],
+                error: error ?? null,
+              };
+            })
+          );
+          if (fetchAttemptsRequestRef.current !== requestId) return;
+
+          const versionQuestions = new Map();
+          let questionFetchError = null;
+          questionFetchResults.forEach((result) => {
+            if (result.error) {
+              questionFetchError = result.error;
+              return;
+            }
+            versionQuestions.set(result.version, result.data.map(mapQuestion));
+          });
+
+          if (questionFetchError) {
+            console.error("results score repair question fetch failed:", questionFetchError);
+          } else {
+            const repairUpdates = [];
+            repairCandidates.forEach((attempt) => {
+              const version = String(attempt?.test_version ?? "").trim();
+              const questionsList = versionQuestions.get(version) ?? [];
+              const recomputedScore = computeAttemptScoreFromQuestions(attempt, questionsList);
+              if (!recomputedScore || recomputedScore.total <= 0) return;
+
+              const storedCorrect = Number(attempt?.correct ?? 0);
+              const storedTotal = Number(attempt?.total ?? 0);
+              const storedScoreRate = Number(attempt?.score_rate ?? 0);
+              const normalizedStoredCorrect = Number.isFinite(storedCorrect) ? storedCorrect : 0;
+              const normalizedStoredTotal = Number.isFinite(storedTotal) ? storedTotal : 0;
+              const normalizedStoredRate = Number.isFinite(storedScoreRate) ? storedScoreRate : 0;
+              const scoreRateChanged = Math.abs(recomputedScore.scoreRate - normalizedStoredRate) > 0.000001;
+
+              if (
+                recomputedScore.correct === normalizedStoredCorrect
+                && recomputedScore.total === normalizedStoredTotal
+                && !scoreRateChanged
+              ) {
+                return;
+              }
+
+              repairUpdates.push({
+                id: attempt.id,
+                correct: recomputedScore.correct,
+                total: recomputedScore.total,
+                score_rate: recomputedScore.scoreRate,
+              });
+            });
+
+            if (repairUpdates.length) {
+              const successfulUpdates = [];
+              for (let index = 0; index < repairUpdates.length; index += 25) {
+                const chunk = repairUpdates.slice(index, index + 25);
+                const chunkResults = await Promise.all(chunk.map(async (attemptUpdate) => {
+                  let result = await supabase
+                    .from("attempts")
+                    .update({
+                      correct: attemptUpdate.correct,
+                      total: attemptUpdate.total,
+                      score_rate: attemptUpdate.score_rate,
+                    })
+                    .eq("id", attemptUpdate.id);
+                  if (result.error && isGeneratedScoreRateInsertError(result.error)) {
+                    result = await supabase
+                      .from("attempts")
+                      .update({
+                        correct: attemptUpdate.correct,
+                        total: attemptUpdate.total,
+                      })
+                      .eq("id", attemptUpdate.id);
+                  }
+                  return result;
+                }));
+                if (fetchAttemptsRequestRef.current !== requestId) return;
+
+                chunkResults.forEach((result, chunkIndex) => {
+                  if (result?.error) {
+                    console.error("results score repair update failed:", result.error);
+                    return;
+                  }
+                  successfulUpdates.push(chunk[chunkIndex]);
+                });
+              }
+
+              if (successfulUpdates.length) {
+                const updatesById = new Map(successfulUpdates.map((entry) => [entry.id, entry]));
+                nextAttemptsData = (attemptsData ?? []).map((attempt) => (
+                  updatesById.has(attempt.id)
+                    ? { ...attempt, ...updatesById.get(attempt.id) }
+                    : attempt
+                ));
+              }
+            }
+          }
+        } catch (repairError) {
+          console.error("results score repair failed:", repairError);
+        }
+      }
+
+      setAttempts(nextAttemptsData);
       setAttemptsViewMonthIso(viewMonthIso ?? null);
       attemptsViewMonthIsoRef.current = viewMonthIso ?? null;
       setAttemptsMsg("");
