@@ -32,7 +32,8 @@ function formatDateTime(value) {
   if (!value) return "N/A";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "N/A";
-  return date.toLocaleString("en-GB", { timeZone: "Asia/Dhaka" });
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
+  return date.toLocaleString(uiLang === "ja" ? "ja-JP" : "en-GB", { timeZone: "Asia/Dhaka" });
 }
 
 export default function SchoolAdminsPage({ schoolId }) {

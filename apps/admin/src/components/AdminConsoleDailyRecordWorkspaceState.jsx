@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
 import { getBangladeshDateInput } from "../lib/adminFormatters";
+import { useLanguage } from "../lib/i18n";
 import {
   readAdminConsoleDataCache,
   writeAdminConsoleDataCache,
@@ -378,6 +379,7 @@ function resolveDailyRecordPlanDraft(draft, scheduledTests) {
 
 // Main hook
 export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session, testSessions = [], tests = [] }) {
+  const { lang } = useLanguage();
   const activeSchoolIdRef = useRef(activeSchoolId);
   const cacheUserId = session?.user?.id ?? "";
   const cachedState = cacheUserId && activeSchoolId
@@ -1233,7 +1235,9 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
 
       // Create label for the month
       const date = new Date(yearNum, monthNum - 1, 1);
-      const label = date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", year: "numeric", month: "long" });
+      const label = lang === "ja"
+        ? date.toLocaleDateString("ja-JP", { timeZone: "Asia/Dhaka", year: "numeric", month: "numeric" })
+        : date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", year: "numeric", month: "long" });
 
       // Build the calendar weeks properly
       const weeks = [];
@@ -1300,7 +1304,7 @@ export function useDailyRecordWorkspaceState({ supabase, activeSchoolId, session
         weeks,
       };
     });
-  }, [scheduleRecordRows, dailyRecordSelectableDateSet]);
+  }, [lang, scheduleRecordRows, dailyRecordSelectableDateSet]);
 
   const dailyRecordCalendarMonthKeys = useMemo(
     () => dailyRecordCalendarMonths.map((month) => month.monthKey),

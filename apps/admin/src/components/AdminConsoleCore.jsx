@@ -910,8 +910,15 @@ function buildAttendanceSummary(list) {
     const monthRows = rows.filter((item) => String(item.day_date || "").startsWith(key));
     const stats = calc(monthRows);
     const parts = key.split("-");
+    const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
     const labelMonth = parts.length === 2
-      ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "short" })
+      ? (() => {
+        const date = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+        if (uiLang === "ja") {
+          return `${date.getFullYear()}/${date.getMonth() + 1}`;
+        }
+        return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "short" });
+      })()
       : key;
     return {
       key,
@@ -928,27 +935,27 @@ function isMissingStudentWarningsTableError(error) {
   return /(student_warnings|student_warning_recipients)/i.test(text) && /does not exist/i.test(text);
 }
 
-function summarizeWarningCriteria(criteria) {
+function summarizeWarningCriteria(criteria, t = (value) => value) {
   const items = [];
   if (criteria?.period === "specified" && (criteria?.from || criteria?.to)) {
-    items.push(`Period: ${criteria.from || "Any"} to ${criteria.to || "Any"}`);
+    items.push(`${t("Period:")} ${criteria.from || t("Any")} ${t("to")} ${criteria.to || t("Any")}`);
   }
   if (criteria?.maxAttendance !== "" && criteria?.maxAttendance != null) {
-    items.push(`Attendance Rate (%) <= ${criteria.maxAttendance}%`);
+    items.push(`${t("Attendance Rate")} (%) <= ${criteria.maxAttendance}%`);
   }
   if (criteria?.minUnexcused !== "" && criteria?.minUnexcused != null) {
-    items.push(`Unexcused Absences >= ${criteria.minUnexcused}`);
+    items.push(`${t("Unexcused Absences")} >= ${criteria.minUnexcused}`);
   }
   if (criteria?.maxModelAvg !== "" && criteria?.maxModelAvg != null) {
-    items.push(`Model Test Average (%) <= ${criteria.maxModelAvg}%`);
+    items.push(`${t("Model Test Average")} (%) <= ${criteria.maxModelAvg}%`);
   }
   if (criteria?.maxDailyAvg !== "" && criteria?.maxDailyAvg != null) {
-    items.push(`Daily Test Average (%) <= ${criteria.maxDailyAvg}%`);
+    items.push(`${t("Daily Test Average")} (%) <= ${criteria.maxDailyAvg}%`);
   }
   return items;
 }
 
-function getStudentWarningIssues(row, criteria) {
+function getStudentWarningIssues(row, criteria, t = (value) => value) {
   const issues = [];
   const maxAttendance = criteria.maxAttendance === "" ? null : Number(criteria.maxAttendance);
   const minUnexcused = criteria.minUnexcused === "" ? null : Number(criteria.minUnexcused);
@@ -960,15 +967,15 @@ function getStudentWarningIssues(row, criteria) {
     if (rate != null && rate <= maxAttendance) issues.push(`Attendance Rate (${rate.toFixed(1)}%) <= ${maxAttendance}%`);
   }
   if (minUnexcused != null && (row.unexcused ?? 0) >= minUnexcused) {
-    issues.push(`Unexcused Absences ${row.unexcused ?? 0} >= ${minUnexcused}`);
+    issues.push(`${t("Unexcused Absences")} ${row.unexcused ?? 0} >= ${minUnexcused}`);
   }
   if (maxModelAvg != null) {
     const value = row.modelAvg ?? 0;
-    if (value <= maxModelAvg) issues.push(`Model Test Average (${value.toFixed(1)}%) <= ${maxModelAvg}%`);
+    if (value <= maxModelAvg) issues.push(`${t("Model Test Average")} (${value.toFixed(1)}%) <= ${maxModelAvg}%`);
   }
   if (maxDailyAvg != null) {
     const value = row.dailyAvg ?? 0;
-    if (value <= maxDailyAvg) issues.push(`Daily Test Average (${value.toFixed(1)}%) <= ${maxDailyAvg}%`);
+    if (value <= maxDailyAvg) issues.push(`${t("Daily Test Average")} (${value.toFixed(1)}%) <= ${maxDailyAvg}%`);
   }
   return issues;
 }
@@ -1072,12 +1079,16 @@ function formatScoreFraction(correct, total, digits = 0) {
 
 function formatSlashDateShortYear(value) {
   if (!value) return "";
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
   if (typeof value === "string") {
     const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) return `${match[2]}/${match[3]}/${match[1].slice(-2)}`;
+    if (match) return uiLang === "ja" ? `${Number(match[1])}/${Number(match[2])}/${Number(match[3])}` : `${match[2]}/${match[3]}/${match[1].slice(-2)}`;
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
+  if (uiLang === "ja") {
+    return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+  }
   return date.toLocaleDateString("en-GB", {
     timeZone: "Asia/Dhaka",
     month: "2-digit",
@@ -1088,15 +1099,20 @@ function formatSlashDateShortYear(value) {
 
 function formatMonthDayCompact(value) {
   if (!value) return "";
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
   if (typeof value === "string") {
     const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (match) {
-      return `${Number(match[2])}/${Number(match[3])}`;
+      return uiLang === "ja"
+        ? `${Number(match[1])}/${Number(match[2])}/${Number(match[3])}`
+        : `${Number(match[2])}/${Number(match[3])}`;
     }
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return `${date.getMonth() + 1}/${date.getDate()}`;
+  return uiLang === "ja"
+    ? `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
+    : `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function formatBooleanCsv(value) {
@@ -1497,14 +1513,14 @@ function isImportedModelResultsTestVersion(version) {
   return String(version ?? "").startsWith("imported-");
 }
 
-function formatImportedResultSessionTitle(session) {
+function formatImportedResultSessionTitle(session, importedResultLabel = "Imported Result") {
   const title = String(session?.title ?? "").trim();
   const titleIsSynthetic = title.startsWith("imported-") || title.startsWith("daily_session_");
   if (title && !titleIsSynthetic) return title;
   const version = String(session?.problem_set_id ?? "").trim();
-  if (!version) return "Imported Result";
+  if (!version) return importedResultLabel;
   if (version.startsWith("imported-") || version.startsWith("daily_session_")) {
-    return "Imported Result";
+    return importedResultLabel;
   }
   return version;
 }
@@ -1842,8 +1858,8 @@ function buildVocabularySessionTitle(setIds) {
   return setRange ? `Vocabulary Set ${setRange}` : "";
 }
 
-function buildDailySessionTitle({ category, setIds }) {
-  const normalizedCategory = String(category ?? "").trim() || "Daily Test";
+function buildDailySessionTitle({ category, setIds, defaultLabel = "Daily Test" }) {
+  const normalizedCategory = String(category ?? "").trim() || defaultLabel;
   if (normalizedCategory.toLowerCase() === "weekly review") {
     return buildWeeklyReviewTitle();
   }
@@ -2697,7 +2713,8 @@ function formatDateTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleString("en-GB", {
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
+  return d.toLocaleString(uiLang === "ja" ? "ja-JP" : "en-GB", {
     timeZone: "Asia/Dhaka",
     year: "numeric",
     month: "2-digit",
@@ -2830,12 +2847,16 @@ const MERIDIEM_OPTIONS = ["AM", "PM"];
 
 function formatDateShort(value) {
   if (!value) return "";
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
   if (typeof value === "string") {
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return `${m[2]}/${m[3]}`;
+    if (m) return uiLang === "ja" ? `${Number(m[1])}/${Number(m[2])}/${Number(m[3])}` : `${m[2]}/${m[3]}`;
   }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
+  if (uiLang === "ja") {
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+  }
   return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "2-digit", day: "2-digit" });
 }
 
@@ -2872,12 +2893,16 @@ function normalizeLegacyTestErrorMessage(error, action = "update") {
 
 function formatDateFull(value) {
   if (!value) return "";
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
   if (typeof value === "string") {
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+    if (m) return uiLang === "ja" ? `${m[1]}/${Number(m[2])}/${Number(m[3])}` : `${m[3]}/${m[2]}/${m[1]}`;
   }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
+  if (uiLang === "ja") {
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+  }
   return d.toLocaleDateString("en-GB", {
     timeZone: "Asia/Dhaka",
     year: "numeric",
@@ -2886,19 +2911,23 @@ function formatDateFull(value) {
   });
 }
 
-function formatPendingAttendanceApplicationLabel(application) {
+function formatPendingAttendanceApplicationLabel(application, t = (value) => value) {
   if (!application) return "";
-  if (application.type === "excused") return "Pending Excused Absence";
-  if (application.type === "late") return "Pending Late/Leave Early";
-  return "Pending Application";
+  if (application.type === "excused") return t("Pending Excused Absence");
+  if (application.type === "late") return t("Pending Late/Leave Early");
+  return t("Pending Application");
 }
 
 function formatMonthYear(value) {
   if (!value) return "";
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
   const match = String(value).match(/^(\d{4})-(\d{2})/);
   if (!match) return String(value);
   const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
   if (Number.isNaN(date.getTime())) return String(value);
+  if (uiLang === "ja") {
+    return `${date.getFullYear()}/${date.getMonth() + 1}`;
+  }
   return date.toLocaleDateString("en-GB", {
     timeZone: "Asia/Dhaka",
     year: "numeric",
@@ -2959,15 +2988,22 @@ function getSessionScheduleSource(session) {
 
 function formatWeekday(value) {
   if (!value) return "";
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
   if (typeof value === "string") {
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) {
       const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      if (uiLang === "ja") {
+        return d.toLocaleDateString("ja-JP", { timeZone: "Asia/Dhaka", weekday: "short" });
+      }
       return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
     }
   }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
+  if (uiLang === "ja") {
+    return d.toLocaleDateString("ja-JP", { timeZone: "Asia/Dhaka", weekday: "short" });
+  }
   return d.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
 }
 
@@ -3228,6 +3264,25 @@ export default function AdminConsole({
 }) {
   const router = useRouter();
   const { lang, setLang, t } = useLanguage();
+  const formatLocalizedDate = (value) => {
+    if (!value) return "";
+    const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return String(value);
+    if (lang === "ja") {
+      return date.toLocaleDateString("ja-JP", {
+        timeZone: "Asia/Dhaka",
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+      });
+    }
+    return date.toLocaleDateString("en-GB", {
+      timeZone: "Asia/Dhaka",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  };
   const routerRef = useRef(router);
   const renderTraceLoggedRef = useRef(false);
   const forcedSchoolId = forcedSchoolScope?.id ?? null;
@@ -4590,10 +4645,11 @@ export default function AdminConsole({
     const category = String(dailySessionForm.session_category ?? "").trim()
       || dailyConductCategory
       || selectedDailySourceCategoryNames[0]
-      || "Daily Test";
+      || t("Daily Test");
     return buildDailySessionTitle({
       category,
       setIds: selectedDailyProblemSetIds,
+      defaultLabel: t("Daily Test"),
     });
   }, [
     dailyConductMode,
@@ -4601,6 +4657,7 @@ export default function AdminConsole({
     dailySessionForm.session_category,
     selectedDailyProblemSetIds,
     selectedDailySourceCategoryNames,
+    t,
   ]);
 
   const selectedDailySourceCategoryName = useMemo(
@@ -5011,10 +5068,10 @@ export default function AdminConsole({
 
   const resultContext = useMemo(() => {
     if (activeTab === "model" && modelSubTab === "results") {
-      return { type: "mock", title: "Model Test Results", tests: modelTests };
+      return { type: "mock", title: t("Model Test Results"), tests: modelTests };
     }
     if (activeTab === "daily" && dailySubTab === "results") {
-      return { type: "daily", title: "Daily Test Results", tests: dailyTests };
+      return { type: "daily", title: t("Daily Test Results"), tests: dailyTests };
     }
     return null;
   }, [activeTab, modelSubTab, dailySubTab, modelTests, dailyTests]);
@@ -5115,12 +5172,19 @@ export default function AdminConsole({
   const studentAttendanceMonthOptions = useMemo(() => {
     const months = attendanceSummary.months.map((month) => {
       const parts = month.key.split("-");
+      const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
       const label = parts.length === 2
-        ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString("en-GB", {
+        ? (() => {
+          const date = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+          if (uiLang === "ja") {
+            return `${date.getFullYear()}/${date.getMonth() + 1}`;
+          }
+          return date.toLocaleDateString("en-GB", {
             timeZone: "Asia/Dhaka",
             year: "numeric",
             month: "long",
-          })
+          });
+        })()
         : month.label;
       return {
         key: month.key,
@@ -5381,7 +5445,7 @@ export default function AdminConsole({
       type,
       loading: false,
       tone: "info",
-      title: type === "daily" ? "Import Daily Results CSV" : "Import Model Results CSV",
+      title: type === "daily" ? t("Import Daily Results CSV") : t("Import Model Results CSV"),
       message: "Select a category and CSV file to import.",
       categorySelect: "",
       categoryDraft: "",
@@ -5395,7 +5459,7 @@ export default function AdminConsole({
       type,
       loading: true,
       tone: "info",
-      title: type === "daily" ? "Importing Daily Results CSV" : "Importing Model Results CSV",
+      title: type === "daily" ? t("Importing Daily Results CSV") : t("Importing Model Results CSV"),
       message,
     });
   }, []);
@@ -5408,15 +5472,15 @@ export default function AdminConsole({
       tone,
       title: title || (type === "daily"
         ? tone === "success"
-          ? "Daily Results Import Complete"
+          ? t("Daily Results Import Complete")
           : tone === "error"
-            ? "Daily Results Import Failed"
-            : "Daily Results Import Status"
+            ? t("Daily Results Import Failed")
+            : t("Daily Results Import Status")
         : tone === "success"
-          ? "Model Results Import Complete"
+          ? t("Model Results Import Complete")
           : tone === "error"
-            ? "Model Results Import Failed"
-            : "Model Results Import Status"),
+            ? t("Model Results Import Failed")
+            : t("Model Results Import Status")),
       message,
     });
   }, []);
@@ -7214,19 +7278,23 @@ export default function AdminConsole({
       const rows = await loadStudentWarningMetrics(criteria);
       const matched = rows
         .filter((row) => !isAnalyticsExcludedStudent(row.student))
-        .map((row) => ({ row, issues: getStudentWarningIssues(row, criteria) }))
+        .map((row) => ({ row, issues: getStudentWarningIssues(row, criteria, t) }))
         .filter((item) => item.issues.length > 0);
       if (!matched.length) {
         setStudentWarningIssueMsg("No students matched the selected warning criteria.");
         setStudentWarningIssueSaving(false);
         return;
       }
-      const criteriaSummary = summarizeWarningCriteria(criteria);
+      const criteriaSummary = summarizeWarningCriteria(criteria, t);
       const title =
         criteria.title ||
         (criteriaSummary.length
           ? `Warning: ${criteriaSummary[0]}`
-          : `Warning issued on ${new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka" })}`);
+          : (() => {
+            const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
+            const warningDate = new Date().toLocaleDateString(uiLang === "ja" ? "ja-JP" : "en-GB", { timeZone: "Asia/Dhaka" });
+            return `Warning issued on ${warningDate}`;
+          })());
       const { data: warningRow, error: warningError } = await supabase
         .from("student_warnings")
         .insert({
@@ -9117,8 +9185,8 @@ function openDailyRecordModal(record = null, recordDate = "") {
   }
 
   const buildGeneratedDailySessionTitle = useCallback(({ category, setIds }) => (
-    buildDailySessionTitle({ category, setIds })
-  ), []);
+    buildDailySessionTitle({ category, setIds, defaultLabel: t("Daily Test") })
+  ), [t]);
 
   async function materializeDailyProblemSet({
     sourceSetIds,
@@ -9420,7 +9488,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     const sessionCategory = String(dailySessionForm.session_category ?? "").trim()
       || dailyConductCategory
       || selectedDailySourceCategoryNames[0]
-      || "Daily Test";
+      || t("Daily Test");
     const generatedTitle = buildGeneratedDailySessionTitle({
       category: sessionCategory,
       setIds: selectedSetIds,
@@ -10012,7 +10080,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         const session = testSessionsById.get(attempt.test_session_id);
         if (session?.title) return session.title;
       }
-      return "Imported Result";
+      return t("Imported Result");
     }
     if (attempt.test_session_id) {
       const session = testSessionsById.get(attempt.test_session_id);
@@ -10477,7 +10545,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
         { emptyText: "No model test records." }
       );
 
-      const reportTitle = `${selectedStudent.display_name || selectedStudent.email || "Student"} - Student Report`;
+      const reportTitle = `${selectedStudent.display_name || selectedStudent.email || "Student"} - ${t("Student Report")}`;
       const html = `
         <!doctype html>
         <html>
@@ -10517,35 +10585,35 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <div class="report-title">${escapeHtml(reportTitle)}</div>
                 <div class="report-meta">Student No.: ${escapeHtml(selectedStudent.student_code || "-")}</div>
                 <div class="report-meta">Email: ${escapeHtml(selectedStudent.email || "-")}</div>
-                <div class="report-meta">Generated: ${escapeHtml(new Date().toLocaleString("en-GB", { timeZone: "Asia/Dhaka" }))}</div>
+                <div class="report-meta">${t("Generated:")} ${escapeHtml(new Date().toLocaleString(typeof document !== "undefined" && document.documentElement.lang === "ja" ? "ja-JP" : "en-GB", { timeZone: "Asia/Dhaka" }))}</div>
               </div>
 
               <section class="report-section">
-                <h2>Personal Information</h2>
+                <h2>${t("Personal Information")}</h2>
                 ${personalInfoTable}
               </section>
 
               <section class="report-section">
-                <h2>Attendance Summary</h2>
+                <h2>${t("Attendance Summary")}</h2>
                 ${attendanceSummaryTable}
               </section>
 
               <section class="report-section">
-                <h2>Daily Test Results</h2>
+                <h2>${t("Daily Test Results")}</h2>
                 ${dailySummaryTable}
                 <div style="height: 10px;"></div>
                 ${dailyResultsHtml}
               </section>
 
               <section class="report-section">
-                <h2>Model Test Results</h2>
+                <h2>${t("Model Test Results")}</h2>
                 ${modelSummaryTable}
                 <div style="height: 10px;"></div>
                 ${modelResultsHtml}
               </section>
 
               <section class="report-section page-break">
-                <h2>Attendance Details</h2>
+                <h2>${t("Attendance Details")}</h2>
                 ${attendanceDetailTable}
               </section>
             </div>
@@ -12606,14 +12674,14 @@ function openDailyRecordModal(record = null, recordDate = "") {
     if (activeTab === "model") {
       if (sessionDetail.type === "mock" && sessionDetail.sessionId) return t("Test Session Detail");
       if (modelSubTab === "results") return t("Model Test Results");
-      if (modelSubTab === "upload") return t("Upload Question Set");
+      if (modelSubTab === "upload") return t("Question Set List");
       if (modelSubTab === "sets") return t("Sets");
-      return t("Test Sessions");
+      return t("Model Test Sessions");
     }
     if (activeTab === "daily") {
       if (sessionDetail.type === "daily" && sessionDetail.sessionId) return t("Daily Test Session Detail");
       if (dailySubTab === "results") return t("Daily Test Results");
-      if (dailySubTab === "upload") return t("Upload Question Set");
+      if (dailySubTab === "upload") return t("Question Set List");
       if (dailySubTab === "conduct") return t("Daily Test Sessions");
       return t("Daily Test Sessions");
     }
@@ -12762,7 +12830,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
     setStudentWarningIssueOpen,
     studentWarnings,
     formatDateTime,
-    summarizeWarningCriteria,
+    summarizeWarningCriteria: (criteria) => summarizeWarningCriteria(criteria, t),
     studentWarningsMsg,
     studentWarningForm,
     setStudentWarningForm,
@@ -13805,7 +13873,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                   <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
                     <label>Test Session</label>
                     <div className="form-input readonly">
-                      {formatImportedResultSessionTitle(dailyManualEntrySession)}
+                      {formatImportedResultSessionTitle(dailyManualEntrySession, t("Imported Result"))}
                     </div>
                   </div>
                   <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
@@ -13903,7 +13971,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <div className="attendance-import-modal-date-list">
                   {attendanceImportConflict.previewDates.map((dayDate) => (
                     <span key={`attendance-import-conflict-${dayDate}`} className="attendance-import-modal-date-pill">
-                      {formatDateFull(dayDate)}
+                      {formatLocalizedDate(dayDate)}
                     </span>
                   ))}
                   {attendanceImportConflict.dayDates.length > attendanceImportConflict.previewDates.length ? (
@@ -14096,7 +14164,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
             <div className="admin-modal attendance-modal" onClick={(e) => e.stopPropagation()}>
               <div className="admin-modal-header">
                 <div className="admin-title">
-                  {`Attendance - ${formatDateFull(attendanceModalDay.day_date)}`}
+                  {`${t("Open Day")} - ${formatLocalizedDate(attendanceModalDay.day_date)}`}
                 </div>
                 <button
                   className="admin-modal-close"
@@ -14118,15 +14186,15 @@ function openDailyRecordModal(record = null, recordDate = "") {
                 <table className="admin-table attendance-modal-table">
                   <thead>
                     <tr>
-                      <th>Student<br />No.</th>
-                      <th>Student</th>
-                      <th>Present</th>
-                      <th>Late/Leave Early</th>
-                      <th>Excused Absence</th>
-                      <th>Unexcused Absence</th>
+                      <th>{t("Student No.")}</th>
+                      <th>{t("Student")}</th>
+                      <th>{t("Present")}</th>
+                      <th>{t("Late/Leave Early")}</th>
+                      <th>{t("Excused Absence")}</th>
+                      <th>{t("Unexcused Absence")}</th>
                       <th>N/A</th>
-                      <th>Absence/Late Reason</th>
-                      <th>Comment</th>
+                      <th>{t("Absence/Late Reason")}</th>
+                      <th>{t("Comment")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -14141,7 +14209,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                             {s.display_name ?? s.email ?? s.id}
                             {approved ? (
                               <div className={`admin-help att-approved-note ${approved.type === "excused" ? "excused" : "late"}`} style={{ marginTop: 4 }}>
-                                Approved {approved.type === "excused" ? "Excused Absence" : "Late/Leave Early"}
+                                {t("Approved")} {approved.type === "excused" ? t("Excused Absence") : t("Late/Leave Early")}
                                 {approved.time_value ? ` (${approved.time_value})` : ""}
                               </div>
                             ) : null}
@@ -14176,7 +14244,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                 >
                                   !
                                 </span>
-                                <span>{formatPendingAttendanceApplicationLabel(pending)}</span>
+                                <span>{formatPendingAttendanceApplicationLabel(pending, t)}</span>
                               </div>
                             ) : null}
                           </td>
@@ -14206,7 +14274,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
                                   [s.id]: { ...entry, comment: e.target.value }
                                 }))
                               }
-                              placeholder="(optional)"
+                              placeholder={lang === "ja" ? "（任意）" : "(optional)"}
                             />
                           </td>
                         </tr>
@@ -14218,11 +14286,11 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
               <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button className="btn btn-primary" onClick={saveAttendanceDay} disabled={attendanceSaving}>
-                  {attendanceSaving ? "Saving..." : "Save Attendance"}
+                  {attendanceSaving ? t("Saving...") : t("Save Attendance")}
                 </button>
                 {attendanceModalDay.id ? (
                   <button className="btn btn-danger" onClick={() => deleteAttendanceDay(attendanceModalDay)}>
-                    Delete Day
+                    {t("Delete Day")}
                   </button>
                 ) : null}
               </div>

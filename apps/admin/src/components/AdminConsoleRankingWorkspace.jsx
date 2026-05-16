@@ -288,7 +288,7 @@ export default function AdminConsoleRankingWorkspace() {
                       const completedAtRaw = attempt.ended_at || attempt.created_at || "";
                       const completedAt = attempt.absent
                         ? "-"
-                        : (completedAtRaw ? new Date(completedAtRaw).toLocaleString("en-GB", bangladeshDateTimeOptions) : "-");
+                        : (completedAtRaw ? new Date(completedAtRaw).toLocaleString(typeof document !== "undefined" && document.documentElement.lang === "ja" ? "ja-JP" : "en-GB", bangladeshDateTimeOptions) : "-");
                       return (
                         <tr key={attempt.id}>
                           <td>{scopeLabel}</td>

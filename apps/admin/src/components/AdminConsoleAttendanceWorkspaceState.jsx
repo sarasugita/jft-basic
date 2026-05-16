@@ -151,7 +151,14 @@ function buildAttendanceSummary(list) {
     const stats = calc(monthRows);
     const parts = key.split("-");
     const labelMonth = parts.length === 2
-      ? new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "short" })
+      ? (() => {
+        const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
+        const date = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+        if (uiLang === "ja") {
+          return `${date.getFullYear()}/${date.getMonth() + 1}`;
+        }
+        return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", month: "short" });
+      })()
       : key;
     return {
       key,

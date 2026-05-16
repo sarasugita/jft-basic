@@ -195,7 +195,7 @@ export default function AdminConsoleTestingTabs({
   setDailyFiles,
   uploadDailyAssets,
 }) {
-  const { t } = useLanguage();
+  const { lang, t } = useLanguage();
 
   function hasResolvedQuestionCount(item) {
     if (!item) return false;
@@ -257,7 +257,7 @@ export default function AdminConsoleTestingTabs({
       ?? question?.data?.prompt
       ?? ""
     ).replace(/\s+/g, " ").trim();
-    if (!raw) return "No prompt preview";
+    if (!raw) return t("No prompt preview");
     if (raw.length <= 120) return raw;
     return `${raw.slice(0, 120)}...`;
   }
@@ -282,6 +282,17 @@ export default function AdminConsoleTestingTabs({
     if (!value) return "";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
+    if (lang === "ja") {
+      return date.toLocaleString("ja-JP", {
+        timeZone: "Asia/Dhaka",
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    }
     return date.toLocaleString("en-GB", {
       timeZone: "Asia/Dhaka",
       year: "numeric",
@@ -296,6 +307,22 @@ export default function AdminConsoleTestingTabs({
     if (!value) return { date: "", time: "" };
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return { date: "", time: "" };
+    if (lang === "ja") {
+      return {
+        date: date.toLocaleDateString("ja-JP", {
+          timeZone: "Asia/Dhaka",
+          year: "numeric",
+          month: "numeric",
+          day: "numeric"
+        }),
+        time: date.toLocaleTimeString("ja-JP", {
+          timeZone: "Asia/Dhaka",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        }),
+      };
+    }
     return {
       date: date.toLocaleDateString("en-GB", {
         timeZone: "Asia/Dhaka",
@@ -533,7 +560,7 @@ export default function AdminConsoleTestingTabs({
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      <div className="admin-title">Test Sessions</div>
+                      <div className="admin-title">{t("Model Test Sessions")}</div>
                       <button className="btn btn-primary admin-compact-action-btn admin-upload-cta-btn" onClick={() => openModelConductModal("normal")}>
                         <svg viewBox="0 0 20 20" aria-hidden="true">
                           <path
@@ -792,7 +819,7 @@ export default function AdminConsoleTestingTabs({
                                     {getProblemSetDisplayId(session.problem_set_id, tests, session.source_set_ids, session)}
                                     {session.title ? ` · ${session.title}` : ""}
                                     {" "}
-                                    ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
+                                    ({formatCompactDateTime(session.ends_at || session.starts_at || session.created_at)})
                                   </option>
                                 ))
                               ) : (
@@ -1611,13 +1638,13 @@ export default function AdminConsoleTestingTabs({
                         </div>
                       </div>
                       <div className="admin-help" style={{ marginTop: 8 }}>
-                        SetID is read from the CSV `set_id` column. If the file contains multiple `set_id` values, each one is imported as a separate model test set.
+                        SetID は CSV の `set_id` 列から読み取ります。複数の `set_id` が含まれている場合は、それぞれ別の模擬テストセットとして取り込まれます。
                       </div>
                       <div className="admin-help" style={{ marginTop: 6, color: "#9a3412" }}>
-                        Use a new `set_id` for each new upload. If the `set_id` already exists, the upload will be blocked and you should change it in the CSV first.
+                        新しいアップロードごとに別の `set_id` を使ってください。`set_id` がすでに存在する場合はアップロードがブロックされるので、先に CSV で変更してください。
                       </div>
                       <div className="admin-help" style={{ marginTop: 8 }}>
-                        Template: <a href="/question_csv_template.csv" download>Model CSV template</a>
+                        <a href="/question_csv_template.csv" download>{t("Template: Model CSV template")}</a>
                       </div>
                     </div>
                   </div>
@@ -1922,7 +1949,7 @@ export default function AdminConsoleTestingTabs({
                                     {getProblemSetDisplayId(session.problem_set_id, tests, session.source_set_ids, session)}
                                     {session.title ? ` · ${session.title}` : ""}
                                     {" "}
-                                    ({formatDateTime(session.ends_at || session.starts_at || session.created_at)})
+                                    ({formatCompactDateTime(session.ends_at || session.starts_at || session.created_at)})
                                   </option>
                                 ))
                               ) : (
@@ -2172,7 +2199,7 @@ export default function AdminConsoleTestingTabs({
                                   }));
                                 }}
                               />
-                              Single Question Set
+                              {t("Single Question Set")}
                             </label>
                             <label className="daily-session-create-choice">
                               <input
@@ -2187,7 +2214,7 @@ export default function AdminConsoleTestingTabs({
                                   }));
                                 }}
                               />
-                              Multiple Question Sets
+                              {t("Multiple Question Sets")}
                             </label>
                           </div>
                           <div className="daily-session-create-field">
@@ -3116,41 +3143,41 @@ export default function AdminConsoleTestingTabs({
                         </div>
                       </div>
                       <div className="admin-help" style={{ marginTop: 8 }}>
-                        SetID is read from the CSV `set_id` column. If the file contains multiple `set_id` values, each one is imported as a separate daily test set.
+                        SetID は CSV の `set_id` 列から読み取ります。複数の `set_id` が含まれている場合は、それぞれ別の小テストセットとして取り込まれます。
                       </div>
                       <div className="admin-help" style={{ marginTop: 6, color: "#9a3412" }}>
-                        Use a new `set_id` for each new upload. If the `set_id` already exists, the upload will be blocked and you should change it in the CSV first.
+                        新しいアップロードごとに別の `set_id` を使ってください。`set_id` がすでに存在する場合はアップロードがブロックされるので、先に CSV で変更してください。
                       </div>
                       <div className="admin-help" style={{ marginTop: 8 }}>
-                        Template: <a href="/daily_question_csv_template.csv" download>Daily CSV template</a>
+                        <a href="/daily_question_csv_template.csv" download>{t("Template: Daily CSV template")}</a>
                       </div>
                     </div>
                   </div>
                 ), document.body) : null}
                 <QuestionSetUploadConflictModal
                   open={Boolean(modelUploadConflict?.open && modelUploadOpen)}
-                  title="Existing Model SetIDs Found"
-                  description="Some model SetIDs already exist. Choose whether to update the existing sets or upload only the new SetIDs."
+                  title={t("Existing SetIDs Found")}
+                  description={t("Some SetIDs in this upload already exist. Choose whether to create new versions for them or upload only the new SetIDs.")}
                   duplicateSetIds={modelUploadConflict?.duplicateVersions ?? []}
                   allSetIds={modelUploadConflict?.versions ?? []}
-                  allActionLabel="Update All Existing Versions"
-                  newOnlyActionLabel="Only Upload New Sets"
-                  allActionHint="Existing SetIDs will be updated in place."
-                  newOnlyActionHint="Existing SetIDs will be skipped."
+                  allActionLabel={t("Update All Existing Versions")}
+                  newOnlyActionLabel={t("Only Upload New Sets")}
+                  allActionHint={t("Existing SetIDs will be updated in place.")}
+                  newOnlyActionHint={t("Existing SetIDs will be skipped.")}
                   onAll={() => resolveModelUploadConflict("all")}
                   onNewOnly={() => resolveModelUploadConflict("new_only")}
                   onCancel={() => resolveModelUploadConflict("cancel")}
                 />
                 <QuestionSetUploadConflictModal
                   open={Boolean(dailyUploadConflict?.open && dailyUploadOpen)}
-                  title="Existing Daily SetIDs Found"
-                  description="Some daily SetIDs already exist. Choose whether to update the existing sets or upload only the new SetIDs."
+                  title={t("Existing SetIDs Found")}
+                  description={t("Some SetIDs in this upload already exist. Choose whether to create new versions for them or upload only the new SetIDs.")}
                   duplicateSetIds={dailyUploadConflict?.duplicateVersions ?? []}
                   allSetIds={dailyUploadConflict?.versions ?? []}
-                  allActionLabel="Update All Existing Versions"
-                  newOnlyActionLabel="Only Upload New Sets"
-                  allActionHint="Existing SetIDs will be updated in place."
-                  newOnlyActionHint="Existing SetIDs will be skipped."
+                  allActionLabel={t("Update All Existing Versions")}
+                  newOnlyActionLabel={t("Only Upload New Sets")}
+                  allActionHint={t("Existing SetIDs will be updated in place.")}
+                  newOnlyActionHint={t("Existing SetIDs will be skipped.")}
                   onAll={() => resolveDailyUploadConflict("all")}
                   onNewOnly={() => resolveDailyUploadConflict("new_only")}
                   onCancel={() => resolveDailyUploadConflict("cancel")}

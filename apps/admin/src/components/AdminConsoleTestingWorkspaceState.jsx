@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { questions, sections } from "../../../../packages/shared/questions.js";
 import { recordAdminAuditEvent } from "../lib/adminAudit";
 import { buildWeeklyReviewTitle } from "../lib/adminFormatters";
+import { useLanguage } from "../lib/i18n";
 
 // ============================================================================
 // IMPORTS & CONSTANTS
@@ -370,12 +371,16 @@ function padCsvRow(row, length) {
 
 function formatSlashDateShortYear(value) {
   if (!value) return "";
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
   if (typeof value === "string") {
     const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) return `${match[2]}/${match[3]}/${match[1].slice(-2)}`;
+    if (match) return uiLang === "ja" ? `${Number(match[1])}/${Number(match[2])}/${Number(match[3])}` : `${match[2]}/${match[3]}/${match[1].slice(-2)}`;
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
+  if (uiLang === "ja") {
+    return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+  }
   return date.toLocaleDateString("en-GB", {
     timeZone: "Asia/Dhaka",
     month: "2-digit",
@@ -1195,8 +1200,8 @@ function buildVocabularySessionTitle(setIds) {
   return setRange ? `Vocabulary Set ${setRange}` : "";
 }
 
-function buildDailySessionTitle({ category, setIds }) {
-  const normalizedCategory = String(category ?? "").trim() || "Daily Test";
+function buildDailySessionTitle({ category, setIds, defaultLabel = "Daily Test" }) {
+  const normalizedCategory = String(category ?? "").trim() || defaultLabel;
   if (normalizedCategory.toLowerCase() === "weekly review") {
     return buildWeeklyReviewTitle();
   }
@@ -1448,6 +1453,7 @@ export function useTestingWorkspaceState({
   externalCopyLink = () => {},
   externalFormatRatePercent = (rate) => `${(rate * 100).toFixed(1)}%`,
 } = {}) {
+  const { t } = useLanguage();
   // Derived functions with fallbacks
   const recordAuditEvent = externalRecordAuditEvent
     ? externalRecordAuditEvent
@@ -2491,7 +2497,7 @@ export function useTestingWorkspaceState({
     const category = String(dailySessionForm.session_category ?? "").trim()
       || dailyConductCategory
       || selectedDailySourceCategoryNames[0]
-      || "Daily Test";
+      || t("Daily Test");
     return buildDailySessionTitle({
       category,
       setIds: selectedDailyProblemSetIds,
@@ -2502,6 +2508,7 @@ export function useTestingWorkspaceState({
     dailySessionForm.session_category,
     selectedDailyProblemSetIds,
     selectedDailySourceCategoryNames,
+    t,
   ]);
 
   const selectedDailySourceCategoryName = useMemo(
@@ -4051,8 +4058,8 @@ export function useTestingWorkspaceState({
   })();
 
   const buildGeneratedDailySessionTitle = useCallback(({ category, setIds }) => (
-    buildDailySessionTitle({ category, setIds })
-  ), []);
+    buildDailySessionTitle({ category, setIds, defaultLabel: t("Daily Test") })
+  ), [t]);
 
   const cloneQuestionsToDerivedSet = useCallback(async ({
     generatedVersion,
@@ -4579,7 +4586,7 @@ export function useTestingWorkspaceState({
     const sessionCategory = String(dailySessionForm.session_category ?? "").trim()
       || dailyConductCategory
       || selectedDailySourceCategoryNames[0]
-      || "Daily Test";
+      || t("Daily Test");
     const generatedTitle = buildGeneratedDailySessionTitle({
       category: sessionCategory,
       setIds: selectedSetIds,
@@ -5963,7 +5970,7 @@ export function useTestingWorkspaceState({
       setDailyImportMsg("School scope is required.");
       return { ok: false };
     }
-    const normalizedCategory = String(category ?? "").trim() || "Daily Test";
+    const normalizedCategory = String(category ?? "").trim() || t("Daily Test");
     const csvFile = file ?? null;
     const type = "daily";
 
@@ -6245,7 +6252,7 @@ export function useTestingWorkspaceState({
       (singleFile && isCsvLike(singleFile.name)) ||
       files.some((f) => isCsvLike(f.name));
     if (!hasCsv) {
-      setDailyUploadMsg("CSV file is required for Upload & Register Daily Test.");
+      setDailyUploadMsg(t("CSV file is required for Upload & Register Daily Test."));
       return;
     }
 

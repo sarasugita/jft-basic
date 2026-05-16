@@ -36,7 +36,7 @@ function buildSuperNav(t) {
       ),
     },
     {
-      label: t("Schools"),
+      label: t("Schools List"),
       href: "/super/schools",
       icon: (
         <svg viewBox="0 0 24 24" className="admin-nav-svg">
@@ -92,7 +92,7 @@ function getPageMeta(pathname, t) {
   }
   if (pathname === "/super/schools") {
     return {
-      title: t("Schools"),
+      title: t("Schools List"),
       description: t("Manage schools, review metrics, and enter school-scoped admin mode."),
     };
   }

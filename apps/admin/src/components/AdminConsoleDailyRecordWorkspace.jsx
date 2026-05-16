@@ -74,17 +74,28 @@ const IRODORI_CANDO_BY_BOOK = {
   },
 };
 
-function formatDateFull(value) {
+function formatDateFull(value, lang = "en") {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00`);
   if (isNaN(date.getTime())) return "";
+  if (lang === "ja") {
+    return date.toLocaleDateString("ja-JP", {
+      timeZone: "Asia/Dhaka",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+    });
+  }
   return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", year: "numeric", month: "long", day: "numeric" });
 }
 
-function formatWeekday(value) {
+function formatWeekday(value, lang = "en") {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00`);
   if (isNaN(date.getTime())) return "";
+  if (lang === "ja") {
+    return date.toLocaleDateString("ja-JP", { timeZone: "Asia/Dhaka", weekday: "short" });
+  }
   return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
 }
 
@@ -139,7 +150,7 @@ function getIrodoriCanDoOptions(book, lesson) {
 }
 
 export default function AdminConsoleDailyRecordWorkspace() {
-  const { t } = useLanguage();
+  const { lang, t } = useLanguage();
   const {
     activeSchoolId,
     supabase,
@@ -217,8 +228,10 @@ export default function AdminConsoleDailyRecordWorkspace() {
     if (regularSessions.length === 0 && retakeSessions.length === 0) return;
 
     const targetDate = dailyRecordTomorrowSessions.targetDate;
-    const formattedDate = formatDateFull(targetDate);
-    const title = `Exam Schedule (${targetDate})`;
+    const formattedDate = formatDateFull(targetDate, lang);
+    const title = lang === "ja"
+      ? `試験予定 (${formattedDate})`
+      : `Exam Schedule (${formattedDate})`;
 
     // Build announcement body with numbered test sessions
     let sessionsList = regularSessions.map((session, idx) => {
@@ -231,14 +244,16 @@ export default function AdminConsoleDailyRecordWorkspace() {
         const startTime = session.starts_at ? new Date(session.starts_at).toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false }) : "TBD";
         return `R${idx + 1}. ${session.title} - ${startTime}`;
       }).join("\n");
-      sessionsList += `\n\nRetakes:\n${retakeList}`;
+      sessionsList += lang === "ja" ? `\n\n再試験：\n${retakeList}` : `\n\nRetakes:\n${retakeList}`;
     }
 
-    const body = `The following tests are scheduled for ${formattedDate}:\n\n${sessionsList}`;
+    const body = lang === "ja"
+      ? `${formattedDate} に以下の試験が予定されています：\n\n${sessionsList}`
+      : `The following tests are scheduled for ${formattedDate}:\n\n${sessionsList}`;
 
     setDailyRecordAnnouncementTitleDraft(title);
     setDailyRecordAnnouncementDraft(body);
-  }, [dailyRecordModalOpen, dailyRecordTomorrowSessions]);
+  }, [dailyRecordModalOpen, dailyRecordTomorrowSessions, lang]);
 
   useEffect(() => {
     // Scroll to today's date in the table
@@ -272,7 +287,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                   >
                     <span>
                       {dailyRecordDate
-                        ? `${formatDateFull(dailyRecordDate)}${formatWeekday(dailyRecordDate) ? ` (${formatWeekday(dailyRecordDate)})` : ""}`
+                        ? `${formatDateFull(dailyRecordDate, lang)}${formatWeekday(dailyRecordDate, lang) ? ` (${formatWeekday(dailyRecordDate, lang)})` : ""}`
                         : t("Select date")}
                     </span>
                     <span aria-hidden="true">▾</span>
@@ -311,9 +326,13 @@ export default function AdminConsoleDailyRecordWorkspace() {
                             </button>
                           </div>
                           <div className="daily-record-date-picker-weekdays">
-                            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                              <span key={`daily-record-weekday-${label}`}>{label}</span>
-                            ))}
+                            {lang === "ja"
+                              ? ["日", "月", "火", "水", "木", "金", "土"].map((label) => (
+                                <span key={`daily-record-weekday-${label}`}>{label}</span>
+                              ))
+                              : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                                <span key={`daily-record-weekday-${label}`}>{label}</span>
+                              ))}
                           </div>
                           <div className="daily-record-date-picker-grid">
                             {dailyRecordActiveCalendarMonth.weeks.map((week, weekIndex) => (
@@ -342,7 +361,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                                           setDailyRecordDatePickerOpen(false);
                                         }
                                       }}
-                                      title={cell.isHoliday ? t("Holiday") : (cell.recordDate ? formatDateFull(cell.recordDate) : "")}
+                                      title={cell.isHoliday ? t("Holiday") : (cell.recordDate ? formatDateFull(cell.recordDate, lang) : "")}
                                     >
                                       {cell.dayNumber}
                                     </button>
@@ -449,7 +468,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                 && !hasPlanContent
                 && !dailyRecordPlanInputEnabledDates.has(recordDate);
               const rowIsLocked = Boolean(display.isFullyLocked);
-              const weekdayLabel = formatWeekday(recordDate);
+              const weekdayLabel = formatWeekday(recordDate, lang);
               return (
                 <tr
                   key={record?.id ?? recordDate}
@@ -462,7 +481,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
                   }}
                 >
                   <td className="daily-record-date-cell">
-                    {`${formatDateFull(recordDate)}${weekdayLabel ? ` (${weekdayLabel})` : ""}`}
+                    {`${formatDateFull(recordDate, lang)}${weekdayLabel ? ` (${weekdayLabel})` : ""}`}
                   </td>
                   <td className="daily-record-holiday-cell" onClick={(event) => event.stopPropagation()}>
                     <label className="daily-session-create-switch daily-record-holiday-switch" aria-label={`${t("Holiday")} ${recordDate}`}>
@@ -593,7 +612,7 @@ export default function AdminConsoleDailyRecordWorkspace() {
           <div className="admin-modal daily-record-modal daily-record-modal-shell" onClick={(e) => e.stopPropagation()}>
             <div className="admin-modal-header">
               <div className="admin-title">
-                {t("Daily Record - New Record")} {dailyRecordForm?.record_date ? `- ${formatDateFull(dailyRecordForm.record_date)}` : ""}
+                {t("Daily Record - New Record")} {dailyRecordForm?.record_date ? `- ${formatDateFull(dailyRecordForm.record_date, lang)}` : ""}
               </div>
               <button
                 className="admin-modal-close"

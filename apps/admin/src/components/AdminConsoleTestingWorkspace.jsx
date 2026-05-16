@@ -5,10 +5,12 @@ import { useCallback, useEffect } from "react";
 import AdminConsoleTestingTabs from "./AdminConsoleTestingTabs";
 import { useTestingWorkspaceState } from "./AdminConsoleTestingWorkspaceState";
 import { useAdminConsoleWorkspaceContext } from "./AdminConsoleWorkspaceContext";
+import { useLanguage } from "../lib/i18n";
 
 const LazyAdminConsoleResultsWorkspace = dynamic(() => import("./AdminConsoleResultsWorkspace"));
 
 export default function AdminConsoleTestingWorkspace() {
+  const { t } = useLanguage();
   const context = useAdminConsoleWorkspaceContext();
   const {
     activeTab,
@@ -123,22 +125,22 @@ export default function AdminConsoleTestingWorkspace() {
       : "";
 
     if (activeTab === "model" && modelSubTab === "results") {
-      return { type: "mock", title: "Model Test Results", tests: hookState.modelTests };
+      return { type: "mock", title: t("Model Test Results"), tests: hookState.modelTests };
     }
     if (activeTab === "daily" && dailySubTab === "results") {
-      return { type: "daily", title: "Daily Test Results", tests: hookState.dailyTests };
+      return { type: "daily", title: t("Daily Test Results"), tests: hookState.dailyTests };
     }
     if (hookState.sessionDetail?.type === "mock" && hookState.sessionDetail?.sessionId) {
-      return { type: "mock", title: "Model Test Results", tests: hookState.modelTests };
+      return { type: "mock", title: t("Model Test Results"), tests: hookState.modelTests };
     }
     if (hookState.sessionDetail?.type === "daily" && hookState.sessionDetail?.sessionId) {
-      return { type: "daily", title: "Daily Test Results", tests: hookState.dailyTests };
+      return { type: "daily", title: t("Daily Test Results"), tests: hookState.dailyTests };
     }
     if (hookState.previewOpen && previewType === "mock") {
-      return { type: "mock", title: "Model Test Results", tests: hookState.modelTests };
+      return { type: "mock", title: t("Model Test Results"), tests: hookState.modelTests };
     }
     if (hookState.previewOpen && previewType === "daily") {
-      return { type: "daily", title: "Daily Test Results", tests: hookState.dailyTests };
+      return { type: "daily", title: t("Daily Test Results"), tests: hookState.dailyTests };
     }
     return null;
   })();

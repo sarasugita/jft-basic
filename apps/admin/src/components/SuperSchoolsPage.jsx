@@ -109,7 +109,13 @@ function formatPercent(value) {
 
 function formatDate(value) {
   if (!value) return "N/A";
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? String(value) : "N/A";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return "N/A";
+  const uiLang = typeof document !== "undefined" ? document.documentElement.lang : "en";
+  if (uiLang === "ja") {
+    const [year, month, day] = String(value).split("-");
+    return `${Number(year)}/${Number(month)}/${Number(day)}`;
+  }
+  return String(value);
 }
 
 function computeSummary(schoolId, metrics) {
@@ -480,11 +486,13 @@ export default function SuperSchoolsPage() {
           </div>
           <div className="field small">
             <label>{t("Status")}</label>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="all">{t("All")}</option>
-              <option value="active">{t("Active")}</option>
-              <option value="inactive">{t("Inactive")}</option>
-            </select>
+            <div className="super-schools-filter-select-wrap">
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="all">{t("All")}</option>
+                <option value="active">{t("Active")}</option>
+                <option value="inactive">{t("Inactive")}</option>
+              </select>
+            </div>
           </div>
         </div>
         {msg ? <div className="admin-msg">{msg}</div> : null}
@@ -508,16 +516,16 @@ export default function SuperSchoolsPage() {
           <table className="admin-table super-schools-table" style={{ minWidth: 1200 }}>
             <thead>
               <tr>
-                <th>{t("Enter")}</th>
+                <th>{t("Select")}</th>
                 <th>{t("School Name")}</th>
                 <th>{t("Start Date")}</th>
                 <th>{t("End Date")}</th>
-                <th style={{ width: 92 }}>{t("Student No.")}</th>
-                <th>{t("Attendance")}</th>
+                <th style={{ width: 92 }}>{t("Student Count")}</th>
+                <th>{t("Attendance Rate")}</th>
                 <th>{t("Model Test Avg.")}</th>
                 <th>{t("Daily Test Avg.")}</th>
                 <th>{t("Status")}</th>
-                <th>{t("Actions")}</th>
+                <th aria-label={t("Actions")} />
               </tr>
             </thead>
             <tbody>
@@ -531,8 +539,8 @@ export default function SuperSchoolsPage() {
                         href={`/super/schools/${school.id}/admin`}
                         onMouseEnter={() => prefetchSchoolAdmin(school.id)}
                         onFocus={() => prefetchSchoolAdmin(school.id)}
-                        aria-label={`Enter ${school.name}`}
-                        title={`Enter ${school.name}`}
+                        aria-label={`Select ${school.name}`}
+                        title={`Select ${school.name}`}
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path

@@ -6433,6 +6433,31 @@ body { padding: 0; }
   box-shadow: none;
 }
 
+.super-schools-filter-select-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.super-schools-filter-select-wrap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid #666666;
+  border-bottom: 1.5px solid #666666;
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
+}
+
+.super-schools-filter-select-wrap select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding-right: 34px;
+}
+
 .super-schools-list-head {
   display: flex;
   align-items: center;

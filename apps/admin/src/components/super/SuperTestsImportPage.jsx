@@ -1596,7 +1596,7 @@ export default function SuperTestsImportPage() {
             {validationMsg ? <div className="admin-msg">{validationMsg}</div> : null}
             <ValidationReport validation={validation} />
             <div className="admin-help" style={{ marginTop: 8 }}>
-              SetID is read from the CSV `set_id` column. If the file is missing `set_id`, the upload will fail. If the file contains multiple `set_id` values, each one is imported as a separate question set.
+              SetID は CSV の `set_id` 列から読み取ります。`set_id` がない場合はアップロードに失敗します。複数の `set_id` が含まれている場合は、それぞれ別の問題セットとして取り込まれます。
             </div>
             <div className="admin-help" style={{ marginTop: 8 }}>
               {t("Template:")} <a href="/daily_question_csv_template.csv" download>{t("Daily CSV template")}</a>

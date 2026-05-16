@@ -8,7 +8,7 @@ import { useAttendanceWorkspaceState } from "./AdminConsoleAttendanceWorkspaceSt
 import AdminStatusMessage from "./AdminStatusMessage";
 import AdminLoadingState from "./AdminLoadingState";
 
-function formatDateShortFn(d) {
+function formatDateShortFn(d, lang = "en") {
   if (!d) return "";
   const parts = d.split("-");
   if (parts.length === 3) {
@@ -18,20 +18,26 @@ function formatDateShortFn(d) {
     if (month < 1 || month > 12 || day < 1 || day > 31) {
       return `INVALID: ${month}/${day}`;
     }
+    if (lang === "ja") {
+      return `${month}/${day}`;
+    }
     return `${month}/${day}`;
   }
   return "";
 }
 
-function formatWeekdayFn(d) {
+function formatWeekdayFn(d, lang = "en") {
   if (!d) return "";
   const date = new Date(`${d}T00:00:00`);
   if (isNaN(date.getTime())) return "";
+  if (lang === "ja") {
+    return date.toLocaleDateString("ja-JP", { timeZone: "Asia/Dhaka", weekday: "short" });
+  }
   return date.toLocaleDateString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short" });
 }
 
 export default function AdminConsoleAttendanceWorkspace() {
-  const { t } = useLanguage();
+  const { lang, t } = useLanguage();
   const {
     activeSchoolId,
     supabase,
@@ -93,7 +99,18 @@ export default function AdminConsoleAttendanceWorkspace() {
     attendanceDayRates,
     attendanceStudentRowsById,
     attendanceSheetHydrated,
-  } = useAttendanceWorkspaceState({ supabase, activeSchoolId, session, students, attendanceSubTab, setAttendanceSubTab, isAnalyticsExcludedStudent, formatDateShort: formatDateShortFn, formatWeekday: formatWeekdayFn, openAttendanceDayCtx });
+  } = useAttendanceWorkspaceState({
+    supabase,
+    activeSchoolId,
+    session,
+    students,
+    attendanceSubTab,
+    setAttendanceSubTab,
+    isAnalyticsExcludedStudent,
+    formatDateShort: (d) => formatDateShortFn(d, lang),
+    formatWeekday: (d) => formatWeekdayFn(d, lang),
+    openAttendanceDayCtx,
+  });
 
   useEffect(() => {
     setAbsenceApplicationFilter({
@@ -163,6 +180,13 @@ export default function AdminConsoleAttendanceWorkspace() {
       || absenceApplicationFilter.dayDate
     )
   ), [absenceApplicationFilter.dayDate, absenceApplicationFilter.studentId, absenceApplicationFilter.type]);
+
+  const displayedAttendanceViewMonthLabel = useMemo(() => {
+    if (lang !== "ja") return attendanceViewMonthLabel;
+    const match = String(attendanceViewMonthLabel ?? "").match(/^(\d{4})-(\d{2})$/);
+    if (!match) return attendanceViewMonthLabel;
+    return `${match[1]}/${Number(match[2])}`;
+  }, [attendanceViewMonthLabel, lang]);
 
   useEffect(() => {
     if (!activeSchoolId) return;
@@ -677,7 +701,7 @@ export default function AdminConsoleAttendanceWorkspace() {
           ◀
         </button>
         <div className="results-month-label">
-          {attendanceViewMonthLabel || "—"}
+          {displayedAttendanceViewMonthLabel || "—"}
         </div>
         {hasNextMonthAttendance ? (
           <button

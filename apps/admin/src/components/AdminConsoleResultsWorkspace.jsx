@@ -331,10 +331,21 @@ function isSyntheticImportedSessionLabel(value) {
   return text.startsWith("imported-") || text.startsWith("daily_session_");
 }
 
-function formatCompactDateTime(value) {
+function formatCompactDateTime(value, lang = "en") {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
+  if (lang === "ja") {
+    return date.toLocaleString("ja-JP", {
+      timeZone: "Asia/Dhaka",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -1123,7 +1134,7 @@ export default function AdminConsoleResultsWorkspace(props) {
     fetchSessionDetail = null,
   } = props;
 
-  const { t } = useLanguage();
+  const { lang, t } = useLanguage();
 
   const sessionStudents = Array.isArray(students) ? students : [];
   const studentsById = new Map(sessionStudents.map((student) => [student.id, student]));
@@ -2474,7 +2485,7 @@ export default function AdminConsoleResultsWorkspace(props) {
     }));
     setPreviewReplacementDrafts((current) => ({ ...current, [targetDbId]: "" }));
     setPreviewReplacementSavingId("");
-    setPreviewReplacementMsg("Question replaced.");
+    setPreviewReplacementMsg(t("Question replaced."));
     fetchTests();
   }
 
@@ -2684,7 +2695,7 @@ export default function AdminConsoleResultsWorkspace(props) {
               minWidth: 140,
             }}
           >
-            No answer
+            {t("No answer")}
             {hasBlankAnswer && hasMultipleAnswers && (
               <span style={{
                 position: "absolute", top: 2, right: 2, fontSize: 14, fontWeight: "bold", color: "#d97706",
@@ -2696,7 +2707,7 @@ export default function AdminConsoleResultsWorkspace(props) {
           <div style={{
             marginTop: 8, padding: 8, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 4, fontSize: 12, color: "#92400e",
           }}>
-            ⚠ {hasBlankAnswer && hasMultipleAnswers ? "Blank/no answer is selected too." : hasBlankAnswer ? "Blank/no answer is selected as correct." : "Multiple answers selected."} Keep Multiple mode on to add or remove options before saving.
+            ⚠ {hasBlankAnswer && hasMultipleAnswers ? t("Blank/no answer is selected too.") : hasBlankAnswer ? t("Blank/no answer is selected as correct.") : t("Multiple answers selected.")} {t("Keep Multiple mode on to add or remove options before saving.")}
           </div>
         )}
       </div>
@@ -2719,8 +2730,8 @@ export default function AdminConsoleResultsWorkspace(props) {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               {isEditMode ? (
                 <div className="daily-session-create-toggle-row" style={{ minHeight: 20, gap: 8, justifyContent: "flex-end", width: "auto" }}>
-                  <span>Multiple</span>
-                  <label className="daily-session-create-switch" aria-label="Multiple answer mode">
+                  <span>{t("Multiple")}</span>
+                  <label className="daily-session-create-switch" aria-label={t("Multiple answer mode")}>
                     <input
                       type="checkbox"
                       checked={isMultiSelect}
@@ -2897,7 +2908,7 @@ export default function AdminConsoleResultsWorkspace(props) {
               }}
               style={{ minWidth: 260 }}
             >
-              <option value="">Replace with...</option>
+              <option value="">{t("Replace with...")}</option>
               {replacementOptions.map((candidate) => {
                 const candidateKey = buildSourceQuestionKey(
                   candidate.sourceVersion || candidate.testVersion,
@@ -2924,7 +2935,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                 void preservePreviewScrollPositionAsync(() => replacePreviewQuestion(question.dbId));
               }}
             >
-              {previewReplacementSavingId === question.dbId ? "Replacing..." : "Replace Question"}
+              {previewReplacementSavingId === question.dbId ? t("Replacing...") : t("Replace Question")}
             </button>
           </div>
         ) : null}
@@ -2988,7 +2999,7 @@ export default function AdminConsoleResultsWorkspace(props) {
     const sessionDetailDisplayTitle = isImportedSummarySession
       ? (selectedSessionDetailTitle && !isSyntheticImportedSessionLabel(selectedSessionDetailTitle)
         ? selectedSessionDetailTitle
-        : "Imported Result")
+        : t("Imported Result"))
       : (selectedSessionDetail.title || selectedSessionDetail.problem_set_id);
 
     return (
@@ -3002,9 +3013,9 @@ export default function AdminConsoleResultsWorkspace(props) {
                 {" · "}
               </>
             ) : null}
-            {t("Start:")} <b>{formatCompactDateTime(selectedSessionDetail.starts_at) || "—"}</b>
+            {t("Start:")} <b>{formatCompactDateTime(selectedSessionDetail.starts_at, lang) || "—"}</b>
             {" · "}
-            {t("End:")} <b>{formatCompactDateTime(selectedSessionDetail.ends_at) || "—"}</b>
+            {t("End:")} <b>{formatCompactDateTime(selectedSessionDetail.ends_at, lang) || "—"}</b>
           </div>
         </div>
 
@@ -3147,7 +3158,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     })),
                     { showValueLabels: true }
                   ) : (
-                    <div className="admin-help">No section average data yet.</div>
+                        <div className="admin-help">{t("No section average data yet.")}</div>
                   )}
                 </div>
               </section>
@@ -3156,15 +3167,15 @@ export default function AdminConsoleResultsWorkspace(props) {
             {!isImportedSummarySession ? (
               <div className="session-export-question-stack">
                 <div className="session-export-panel-header">
-                  <div className="session-export-panel-title">Top 5 Best Questions</div>
-                  <div className="session-export-panel-description">Highest accuracy questions in this session</div>
+                  <div className="session-export-panel-title">{t("Top 5 Best Questions")}</div>
+                  <div className="session-export-panel-description">{t("Highest accuracy questions in this session")}</div>
                 </div>
                 <table className="session-export-table session-export-mini-table">
                   <thead>
                     <tr>
                       <th>ID</th>
-                      <th>Question</th>
-                      <th>Accuracy</th>
+                      <th>{t("Question")}</th>
+                      <th>{t("Accuracy")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3179,22 +3190,22 @@ export default function AdminConsoleResultsWorkspace(props) {
                     ))}
                     {!sessionDetailBestQuestions.length ? (
                       <tr>
-                        <td colSpan={3}>No question data yet.</td>
+                        <td colSpan={3}>{t("No question data yet.")}</td>
                       </tr>
                     ) : null}
                   </tbody>
                 </table>
 
                 <div className="session-export-panel-header">
-                  <div className="session-export-panel-title">Top 5 Worst Questions</div>
-                  <div className="session-export-panel-description">Lowest accuracy questions in this session</div>
+                  <div className="session-export-panel-title">{t("Top 5 Worst Questions")}</div>
+                  <div className="session-export-panel-description">{t("Lowest accuracy questions in this session")}</div>
                 </div>
                 <table className="session-export-table session-export-mini-table">
                   <thead>
                     <tr>
                       <th>ID</th>
-                      <th>Question</th>
-                      <th>Accuracy</th>
+                      <th>{t("Question")}</th>
+                      <th>{t("Accuracy")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3209,7 +3220,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     ))}
                     {!sessionDetailWorstQuestions.length ? (
                       <tr>
-                        <td colSpan={3}>No question data yet.</td>
+                        <td colSpan={3}>{t("No question data yet.")}</td>
                       </tr>
                     ) : null}
                   </tbody>
@@ -3221,14 +3232,14 @@ export default function AdminConsoleResultsWorkspace(props) {
 
         {sessionExportOptions.questions ? (
           <section className="session-export-section session-export-section-page-break">
-            {renderSessionExportSectionHeading(sessionExportSectionOrder.questions, "Questions", "Question, answer, and class accuracy")}
+            {renderSessionExportSectionHeading(sessionExportSectionOrder.questions, t("Questions Section"), t("Question, answer, and class accuracy"))}
             <table className="session-export-table session-export-question-table">
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Question</th>
-                  <th>Correct Answer</th>
-                  <th>Correct %</th>
+                  <th>{t("Question")}</th>
+                  <th>{t("Correct Answer")}</th>
+                  <th>{t("Correct %")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -3238,7 +3249,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     <td>
                       <div
                         className="session-export-question-text"
-                        dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "Question") }}
+                        dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || t("Question")) }}
                       />
                       {row.stemImages?.length ? (
                         <div className="session-export-image-strip">
@@ -3246,7 +3257,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                             <img
                               key={`session-export-question-image-${row.qid}-${index}`}
                               src={imageSrc}
-                              alt={`Question ${row.qid}`}
+                              alt={`${t("Question")} ${row.qid}`}
                               className="session-export-inline-image"
                             />
                           ))}
@@ -3270,7 +3281,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                 ))}
                 {!sessionQuestionExportRows.length ? (
                   <tr>
-                    <td colSpan={4}>No question data available.</td>
+                    <td colSpan={4}>{t("No question data available.")}</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -3280,16 +3291,16 @@ export default function AdminConsoleResultsWorkspace(props) {
 
         {sessionExportOptions.studentRanking ? (
           <section className="session-export-section session-export-section-page-break">
-            {renderSessionExportSectionHeading(sessionExportSectionOrder.studentRanking, "Student Ranking", "Ranked by total score")}
+            {renderSessionExportSectionHeading(sessionExportSectionOrder.studentRanking, t("Student Ranking Section"), t("Ranked by total score"))}
             <table className="session-export-table session-export-ranking-table">
               <thead>
                 <tr>
-                  <th>Rank</th>
-                  <th>Student</th>
-                  <th>Student No.</th>
-                  <th>Attempt Date &amp; Time</th>
-                  <th>Total Score</th>
-                  <th>Total %</th>
+                  <th>{t("Rank")}</th>
+                  <th>{t("Student")}</th>
+                  <th>{t("Student No.")}</th>
+                  <th>{t("Attempt Date & Time")}</th>
+                  <th>{t("Total Score")}</th>
+                  <th>{t("Total %")}</th>
                   {sessionExportRankingSections.map((section) => (
                     <th key={`session-export-ranking-head-${section.section}`}>
                       {isMockSessionDetailForExport
@@ -3310,7 +3321,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                       <td>{formatOrdinal(row.rank)}</td>
                       <td>{row.display_name}</td>
                       <td>{row.student_code || "—"}</td>
-                      <td style={{ whiteSpace: "nowrap" }}>{formatCompactDateTime(row.attempt?.created_at) || "—"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{formatCompactDateTime(row.attempt?.created_at, lang) || "—"}</td>
                       <td>{isImportedAttempt ? "—" : `${row.totalCorrect}/${row.totalQuestions}`}</td>
                       <td className={row.totalRate < sessionDetailPassRate ? "attempt-score-detail-below-pass" : ""}>
                         {(row.totalRate * 100).toFixed(1)}%
@@ -3325,7 +3336,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                 })}
                 {!sessionDetailStudentRankingRows.length ? (
                   <tr>
-                    <td colSpan={Math.max(6, 6 + sessionExportRankingSections.length)}>No ranking data available.</td>
+                    <td colSpan={Math.max(6, 6 + sessionExportRankingSections.length)}>{t("No ranking data available.")}</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -3345,21 +3356,21 @@ export default function AdminConsoleResultsWorkspace(props) {
     const sessionDetailDisplayTitle = isImportedSummarySession
       ? (selectedSessionDetailTitle && !isSyntheticImportedSessionLabel(selectedSessionDetailTitle)
         ? selectedSessionDetailTitle
-        : "Imported Result")
+        : t("Imported Result"))
       : (selectedSessionDetail.title || selectedSessionDetail.problem_set_id);
     const analysisPopupQuestions = Array.isArray(sessionDetailAnalysisPopup.questions)
       ? sessionDetailAnalysisPopup.questions
       : [];
-    const sessionDetailTabs = isImportedSummarySession
+  const sessionDetailTabs = isImportedSummarySession
       ? [
-        ["analysis", "Result Analysis"],
-        ["studentRanking", "Student Ranking"],
+        ["analysis", t("Result Analysis")],
+        ["studentRanking", t("Student Ranking Tab")],
       ]
       : [
-        ["analysis", "Result Analysis"],
-        ["questions", "Questions"],
-        ["attempts", "Attempts"],
-        ["studentRanking", "Student Ranking"],
+        ["analysis", t("Result Analysis")],
+        ["questions", t("Questions Tab")],
+        ["attempts", t("Attempts Tab")],
+        ["studentRanking", t("Student Ranking Tab")],
       ];
     const analysisRadarData = sessionDetailMainSectionAverages.map((row) => ({
       label: row.section,
@@ -3418,7 +3429,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                       />
                     </svg>
                   </span>
-                  <span>Export PDF</span>
+                  <span>{t("Export PDF")}</span>
                 </button>
                 <button
                   className="btn btn-danger"
@@ -3430,7 +3441,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     surface: "results",
                   })}
                 >
-                  Delete test
+                  {t("Delete test")}
                 </button>
               </div>
             </div>
@@ -3444,9 +3455,9 @@ export default function AdminConsoleResultsWorkspace(props) {
                   {" · "}
                 </>
               ) : null}
-              Start: <b>{formatCompactDateTime(selectedSessionDetail.starts_at) || "—"}</b>
+              {t("Start:")} <b>{formatCompactDateTime(selectedSessionDetail.starts_at, lang) || "—"}</b>
               {" · "}
-              End: <b>{formatCompactDateTime(selectedSessionDetail.ends_at) || "—"}</b>
+              {t("End:")} <b>{formatCompactDateTime(selectedSessionDetail.ends_at, lang) || "—"}</b>
             </div>
             <div className="admin-top-tabs session-detail-tabs">
               {sessionDetailTabs.map(([key, label]) => (
@@ -3469,10 +3480,10 @@ export default function AdminConsoleResultsWorkspace(props) {
         {!sessionDetailLoading && !sessionDetailMsg && sessionDetailTab === "questions" ? (
           <div className="session-detail-section">
             <div className="admin-help">
-              Total: <b>{sessionDetailQuestions.length}</b>
+              {t("Total")}: <b>{sessionDetailQuestions.length}</b>
             </div>
             {!sessionDetailQuestions.length ? (
-              <div className="admin-help" style={{ marginTop: 8 }}>No questions found for this session.</div>
+              <div className="admin-help" style={{ marginTop: 8 }}>{t("No questions found for this session.")}</div>
             ) : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
                 {sessionDetailQuestions.map((question, index) => (
@@ -3491,7 +3502,7 @@ export default function AdminConsoleResultsWorkspace(props) {
           <div className="session-detail-section">
             <div className="session-detail-actions">
               <div>
-                <div className="admin-title" style={{ fontSize: 18 }}>Allow another attempt</div>
+                <div className="admin-title" style={{ fontSize: 18 }}>{t("Allow another attempt")}</div>
                 <div className="admin-help">
                   Select a student who already submitted this test and add one more allowed attempt.
                 </div>
@@ -3523,13 +3534,13 @@ export default function AdminConsoleResultsWorkspace(props) {
                   onClick={allowSessionAnotherAttempt}
                   disabled={!sessionDetailAllowStudentId || selectedSessionDetail.allow_multiple_attempts !== false}
                 >
-                  Allow another attempt
+                  {t("Allow another attempt")}
                 </button>
               </div>
             </div>
             {selectedSessionDetail.allow_multiple_attempts !== false ? (
               <div className="admin-help" style={{ marginTop: 10 }}>
-                This session already allows multiple attempts for everyone.
+                {t("This session already allows multiple attempts for everyone.")}
               </div>
             ) : null}
             <AdminStatusMessage message={sessionDetailAllowMsg} />
@@ -3560,7 +3571,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                         onClick={() => openAttemptDetail(attempt)}
                       >
                         <td>{index + 1}</td>
-                        <td>{attempt.created_at ? new Date(attempt.created_at).toLocaleString("en-CA", { timeZone: "Asia/Dhaka", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(/,/, "") : ""}</td>
+                        <td>{formatCompactDateTime(attempt.created_at, lang) || ""}</td>
                         <td>{attempt.display_name ?? ""}</td>
                         <td>{attempt.student_code ?? ""}</td>
                         <td>{isImportedAttempt ? "—" : `${attempt.correct}/${attempt.total}`}</td>
@@ -3572,7 +3583,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                   })}
                   {!sessionDetailDisplayAttempts.length ? (
                     <tr>
-                      <td colSpan={8}>No attempts yet.</td>
+                      <td colSpan={8}>{t("No attempts yet.")}</td>
                     </tr>
                   ) : null}
                 </tbody>
@@ -3587,11 +3598,11 @@ export default function AdminConsoleResultsWorkspace(props) {
               <table className="admin-table session-student-ranking-table" style={{ minWidth: Math.max(900, 420 + sessionDetailRankingSections.length * 120) }}>
                 <thead>
                   <tr>
-                    <th>Rank</th>
-                    <th>Student</th>
-                    <th>Student<br />No.</th>
-                    <th>Total Score</th>
-                    <th>Total %</th>
+                    <th>{t("Rank")}</th>
+                    <th>{t("Student")}</th>
+                    <th>{t("Student No.")}</th>
+                    <th>{t("Total Score")}</th>
+                    <th>{t("Total %")}</th>
                     {sessionDetailRankingSections.map((section) => (
                       <th key={`student-ranking-col-${section.section}`}>
                         <span className="session-ranking-section-header">
@@ -3623,7 +3634,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                   })}
                   {!sessionDetailStudentRankingRows.length ? (
                     <tr>
-                      <td colSpan={Math.max(5, 5 + sessionDetailRankingSections.length)}>No ranking data available.</td>
+                      <td colSpan={Math.max(5, 5 + sessionDetailRankingSections.length)}>{t("No ranking data available.")}</td>
                     </tr>
                   ) : null}
                 </tbody>
@@ -3637,26 +3648,26 @@ export default function AdminConsoleResultsWorkspace(props) {
             <div className="session-detail-analysis-summary">
               <div className="session-analysis-top-grid">
                 <div className="session-analysis-top-card">
-                  <div className="session-analysis-top-heading">Class Score</div>
+                  <div className="session-analysis-top-heading">{t("Class Score")}</div>
                   <div className="session-analysis-score-table-wrap">
                     <table className="session-analysis-score-table">
                       <tbody>
                         <tr>
-                          <th className="pass">No. of Pass</th>
+                          <th className="pass">{t("No. of Pass")}</th>
                           <td>
                             <span className="session-analysis-score-main pass">{sessionDetailAnalysisSummary.passCount}</span>
                             <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.attendedCount}</span>
                           </td>
                         </tr>
                         <tr>
-                          <th className="fail">No. of Fail</th>
+                          <th className="fail">{t("No. of Fail")}</th>
                           <td>
                             <span className="session-analysis-score-main fail">{sessionDetailAnalysisSummary.failCount}</span>
                             <span className="session-analysis-score-sub">/{sessionDetailAnalysisSummary.attendedCount}</span>
                           </td>
                         </tr>
                         <tr>
-                          <th>Average score</th>
+                          <th>{t("Average score")}</th>
                           <td>
                             {sessionDetailUsesImportedResultsSummaryRaw ? (
                               <span className="session-analysis-score-main">—</span>
@@ -3669,7 +3680,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                           </td>
                         </tr>
                         <tr>
-                          <th>Average %</th>
+                          <th>{t("Average %")}</th>
                           <td>
                             <span className={`session-analysis-score-main ${sessionDetailOverview.averageScore < sessionDetailPassRate ? "fail" : ""}`}>
                               {(sessionDetailAnalysisSummary.averageRate * 100).toFixed(2)}%
@@ -3677,7 +3688,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                           </td>
                         </tr>
                         <tr>
-                          <th>Absent</th>
+                          <th>{t("Absent")}</th>
                           <td>
                             <span className="session-analysis-score-main">{sessionDetailAnalysisSummary.absentCount}</span>
                           </td>
@@ -3688,7 +3699,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                 </div>
 
                 <div className="session-analysis-top-card">
-                  <div className="session-analysis-top-heading">Grade Distribution</div>
+                  <div className="session-analysis-top-heading">{t("Grade Distribution")}</div>
                   <div className="session-analysis-distribution-chart">
                     <div className="session-analysis-distribution-yaxis">
                       {sessionDetailDistributionTicks.map((value) => (
@@ -3730,13 +3741,13 @@ export default function AdminConsoleResultsWorkspace(props) {
 
               {isMockSessionDetail && (isImportedModelSummarySession || sessionDetailNestedSectionAverages.length) ? (
                 <div className="admin-panel session-analysis-performance-panel">
-                  <div className="admin-title" style={{ fontSize: 18 }}>Average Section Performance</div>
+                  <div className="admin-title" style={{ fontSize: 18 }}>{t("Average Section Performance")}</div>
                   <div className="session-analysis-summary-grid">
                     <div className="session-radar-wrap">
                       {analysisRadarData.length ? (
                         buildSectionRadarSvg(analysisRadarData)
                       ) : (
-                        <div className="admin-help">No section average data yet.</div>
+                        <div className="admin-help">{t("No section average data yet.")}</div>
                       )}
                     </div>
                     <div className="admin-table-wrap">
@@ -3744,10 +3755,10 @@ export default function AdminConsoleResultsWorkspace(props) {
                         <table className="admin-table session-section-average-table" style={{ minWidth: 520 }}>
                           <thead>
                             <tr>
-                              <th>Section</th>
-                              <th>Total</th>
-                              <th>Average</th>
-                              <th>Average %</th>
+                              <th>{t("Section")}</th>
+                              <th>{t("Total")}</th>
+                              <th>{t("Average")}</th>
+                              <th>{t("Average %")}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -3768,7 +3779,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                             })}
                             {!sessionDetailMainSectionAverages.length ? (
                               <tr>
-                                <td colSpan={4}>No section average data yet.</td>
+                                <td colSpan={4}>{t("No section average data yet.")}</td>
                               </tr>
                             ) : null}
                           </tbody>
@@ -3784,11 +3795,11 @@ export default function AdminConsoleResultsWorkspace(props) {
                           </colgroup>
                           <thead>
                             <tr>
-                              <th className="session-section-average-head-section">Section</th>
-                              <th className="session-section-average-head-subsection">Sub-section</th>
-                              <th className="session-section-average-head-total">Total</th>
-                              <th className="session-section-average-head-correct">Average</th>
-                              <th className="session-section-average-head-rate">Average %</th>
+                              <th className="session-section-average-head-section">{t("Section")}</th>
+                              <th className="session-section-average-head-subsection">{t("Sub-section")}</th>
+                              <th className="session-section-average-head-total">{t("Total")}</th>
+                              <th className="session-section-average-head-correct">{t("Average")}</th>
+                              <th className="session-section-average-head-rate">{t("Average %")}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -3813,7 +3824,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                                         className="session-section-average-trigger session-section-average-total-trigger"
                                         onClick={() => openSessionDetailAnalysisPopupFor("section", group.mainSection)}
                                       >
-                                        <span className="attempt-score-detail-total-label">Total</span>
+                                        <span className="attempt-score-detail-total-label">{t("Total")}</span>
                                       </button>
                                     </td>
                                     <td className="session-section-average-cell-total">{group.total}</td>
@@ -3862,7 +3873,7 @@ export default function AdminConsoleResultsWorkspace(props) {
               <>
                 <div className="session-detail-analysis-grid">
                   <div className="admin-panel">
-                    <div className="session-analysis-heading">Top 5 Best Questions</div>
+                    <div className="session-analysis-heading">{t("Top 5 Best Questions")}</div>
                     <div className="session-analysis-list">
                       {sessionDetailBestQuestions.map((row) => (
                         <div key={`best-${row.qid}`} className="session-analysis-item">
@@ -3870,7 +3881,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                           <div>
                             <div
                               className="session-analysis-question-prompt"
-                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "Question") }}
+                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || t("Question")) }}
                             />
                             <div className="session-analysis-question-id">
                               {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
@@ -3878,12 +3889,12 @@ export default function AdminConsoleResultsWorkspace(props) {
                           </div>
                         </div>
                       ))}
-                      {!sessionDetailBestQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
+                      {!sessionDetailBestQuestions.length ? <div className="admin-help">{t("No question data yet.")}</div> : null}
                     </div>
                   </div>
 
                   <div className="admin-panel">
-                    <div className="session-analysis-heading">Top 5 Worst Questions</div>
+                    <div className="session-analysis-heading">{t("Top 5 Worst Questions")}</div>
                     <div className="session-analysis-list">
                       {sessionDetailWorstQuestions.map((row) => (
                         <div key={`worst-${row.qid}`} className="session-analysis-item">
@@ -3891,7 +3902,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                           <div>
                             <div
                               className="session-analysis-question-prompt"
-                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || "Question") }}
+                              dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || t("Question")) }}
                             />
                             <div className="session-analysis-question-id">
                               {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
@@ -3899,7 +3910,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                           </div>
                         </div>
                       ))}
-                      {!sessionDetailWorstQuestions.length ? <div className="admin-help">No question data yet.</div> : null}
+                      {!sessionDetailWorstQuestions.length ? <div className="admin-help">{t("No question data yet.")}</div> : null}
                     </div>
                   </div>
                 </div>
@@ -3910,7 +3921,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     type="button"
                     onClick={() => setSessionDetailShowAllAnalysis((current) => !current)}
                   >
-                    {sessionDetailShowAllAnalysis ? "Hide all v" : "View all ->"}
+                    {sessionDetailShowAllAnalysis ? t("Hide all v") : t("View all ->")}
                   </button>
                 </div>
 
@@ -3919,7 +3930,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     <table className="admin-table session-analysis-table" style={{ minWidth: 1100 }}>
                       <thead>
                         <tr>
-                          <th>Question</th>
+                          <th>{t("Question")}</th>
                           <th>Accuracy</th>
                           {sessionDetailQuestionStudents.map((student) => (
                             <th key={`analysis-student-${student.id}`}>
@@ -3976,8 +3987,8 @@ export default function AdminConsoleResultsWorkspace(props) {
             <div className="admin-modal session-export-modal" onClick={(event) => event.stopPropagation()}>
               <div className="admin-modal-header">
                 <div>
-                  <div className="admin-title">Export PDF</div>
-                  <div className="admin-help">Select which sections to include in the PDF.</div>
+                  <div className="admin-title">{t("Export PDF")}</div>
+                  <div className="admin-help">{t("Select which sections to include in the PDF.")}</div>
                 </div>
                 <button className="admin-modal-close" onClick={closeSessionExportModal} aria-label="Close">
                   ×
@@ -3990,7 +4001,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     checked={sessionExportOptions.resultsSummary}
                     onChange={() => toggleSessionExportOption("resultsSummary")}
                   />
-                  <span>Results summary</span>
+                  <span>{t("Results Summary")}</span>
                 </label>
                 <label className={`session-export-option ${sessionExportQuestionsDisabled ? "disabled" : ""}`}>
                   <input
@@ -3999,7 +4010,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     onChange={() => toggleSessionExportOption("questions")}
                     disabled={sessionExportQuestionsDisabled}
                   />
-                  <span>Questions</span>
+                  <span>{t("Questions Section")}</span>
                 </label>
                 <label className={`session-export-option ${sessionExportRankingDisabled ? "disabled" : ""}`}>
                   <input
@@ -4008,24 +4019,24 @@ export default function AdminConsoleResultsWorkspace(props) {
                     onChange={() => toggleSessionExportOption("studentRanking")}
                     disabled={sessionExportRankingDisabled}
                   />
-                  <span>Student Ranking and Result</span>
+                  <span>{t("Student Ranking and Result")}</span>
                 </label>
                 {sessionExportQuestionsDisabled ? (
-                  <div className="admin-help">Questions export is unavailable because no question data is loaded for this session.</div>
+                  <div className="admin-help">{t("Questions export is unavailable because no question data is loaded for this session.")}</div>
                 ) : null}
                 {sessionExportRankingDisabled ? (
-                  <div className="admin-help">Student ranking export is unavailable because there is no ranking data yet.</div>
+                  <div className="admin-help">{t("Student ranking export is unavailable because there is no ranking data yet.")}</div>
                 ) : null}
               </div>
               <div className="session-export-modal-actions">
-                <button className="btn" type="button" onClick={closeSessionExportModal}>Cancel</button>
+                <button className="btn" type="button" onClick={closeSessionExportModal}>{t("Cancel")}</button>
                 <button
                   className="btn btn-primary"
                   type="button"
                   onClick={exportSessionDetailPdf}
                   disabled={!sessionExportHasSelections}
                 >
-                  Continue to PDF
+                  {t("Continue to PDF")}
                 </button>
               </div>
             </div>
@@ -4037,9 +4048,9 @@ export default function AdminConsoleResultsWorkspace(props) {
             <div className="admin-modal admin-modal-wide session-analysis-popup-modal" onClick={(event) => event.stopPropagation()}>
               <div className="admin-modal-header">
                 <div>
-                  <div className="admin-title">{sessionDetailAnalysisPopup.title || "Questions"}</div>
+                  <div className="admin-title">{sessionDetailAnalysisPopup.title || t("Question")}</div>
                   <div className="admin-help">
-                    Total: <b>{analysisPopupQuestions.length}</b>
+                    {t("Total")}: <b>{analysisPopupQuestions.length}</b>
                   </div>
                 </div>
                 <button className="admin-modal-close" onClick={closeSessionDetailAnalysisPopup} aria-label="Close">
@@ -4056,7 +4067,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                     />
                   ))
                 ) : (
-                  <div className="admin-help">No questions found for this selection.</div>
+                  <div className="admin-help">{t("No questions found for this selection.")}</div>
                 )}
               </div>
             </div>
