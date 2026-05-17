@@ -190,18 +190,11 @@ function formatCompactExportText(value, maxLength = 110) {
 }
 
 function formatSessionExportQuestionId(questionId, setId = "") {
-  const raw = String(questionId ?? "").trim();
-  if (!raw) return "";
-  const prefix = String(setId ?? "").trim();
-  let withoutPrefix = raw;
-  if (prefix) {
-    const prefixIndex = raw.indexOf(prefix);
-    if (prefixIndex >= 0) {
-      withoutPrefix = raw.slice(prefixIndex + prefix.length).replace(/^[-_]+/, "");
-    }
-  }
-  const match = withoutPrefix.match(/(\d+)/);
-  return match ? match[1] : raw;
+  const reference = resolveQuestionReference({
+    questionId,
+    fallbackSetId: setId,
+  });
+  return reference.qid || String(questionId ?? "").trim();
 }
 
 function buildDistributionChartSvg({
@@ -303,6 +296,118 @@ function formatSourceQuestionLabel(sourceVersion, sourceQuestionId) {
   const questionNumber = getSourceQuestionNumber(sourceQuestionId);
   if (version && questionNumber) return `${version}-${questionNumber}`;
   return version || questionNumber || "";
+}
+
+function parseCompositeQuestionId(questionId) {
+  const raw = String(questionId ?? "").trim();
+  if (!raw) {
+    return { sourceVersion: "", sourceQuestionId: "", orderToken: "" };
+  }
+  const parts = raw.split("__").map((value) => String(value ?? "").trim()).filter(Boolean);
+  if (parts.length >= 3) {
+    return {
+      sourceVersion: parts.slice(0, -2).join("__"),
+      sourceQuestionId: parts[parts.length - 2],
+      orderToken: parts[parts.length - 1],
+    };
+  }
+  if (parts.length === 2) {
+    return {
+      sourceVersion: parts[0],
+      sourceQuestionId: parts[1],
+      orderToken: "",
+    };
+  }
+  return { sourceVersion: "", sourceQuestionId: "", orderToken: "" };
+}
+
+function resolveQuestionReference({
+  sourceVersion = "",
+  sourceQuestionId = "",
+  questionId = "",
+  fallbackSetId = "",
+} = {}) {
+  const fallback = String(fallbackSetId ?? "").trim();
+  const originalQuestionId = String(questionId ?? "").trim();
+  let normalizedQuestionId = originalQuestionId;
+  const hasFallbackPrefix = fallback
+    && (normalizedQuestionId.startsWith(`${fallback}-`) || normalizedQuestionId.startsWith(`${fallback}_`));
+  if (hasFallbackPrefix) {
+    normalizedQuestionId = normalizedQuestionId
+      .slice(fallback.length)
+      .replace(/^[-_]+/, "");
+  }
+
+  const composite = parseCompositeQuestionId(normalizedQuestionId);
+  const resolvedSetId = String(sourceVersion ?? "").trim()
+    || composite.sourceVersion
+    || fallback;
+  const resolvedQid = String(sourceQuestionId ?? "").trim()
+    || composite.sourceQuestionId
+    || (() => {
+      const numberMatch = normalizedQuestionId.match(/(\d+)(?!.*\d)/);
+      return numberMatch ? numberMatch[1] : normalizedQuestionId;
+    })();
+
+  return {
+    setId: resolvedSetId,
+    qid: String(resolvedQid ?? "").trim(),
+    rawQuestionId: originalQuestionId,
+  };
+}
+
+function compareQuestionReference(leftRef, rightRef) {
+  const setCompare = sessionExportNaturalCollator.compare(
+    String(leftRef?.setId ?? ""),
+    String(rightRef?.setId ?? "")
+  );
+  if (setCompare !== 0) return setCompare;
+
+  const qidCompare = sessionExportNaturalCollator.compare(
+    String(leftRef?.qid ?? ""),
+    String(rightRef?.qid ?? "")
+  );
+  if (qidCompare !== 0) return qidCompare;
+
+  return sessionExportNaturalCollator.compare(
+    String(leftRef?.rawQuestionId ?? ""),
+    String(rightRef?.rawQuestionId ?? "")
+  );
+}
+
+function formatQuestionAnalysisDisplayId(row, fallbackSetId = "", includeSetId = false) {
+  const reference = resolveQuestionReference({
+    sourceVersion: row?.sourceVersion,
+    sourceQuestionId: row?.sourceQuestionId,
+    questionId: row?.qid,
+    fallbackSetId,
+  });
+  if (!includeSetId) return reference.qid || formatSessionExportQuestionId(row?.qid, fallbackSetId);
+  if (reference.setId && reference.qid) return `${reference.setId} • QID ${reference.qid}`;
+  return reference.qid || reference.setId || formatSessionExportQuestionId(row?.qid, fallbackSetId);
+}
+
+function formatQuestionAnalysisRankLabel(row, rank, fallbackSetId = "") {
+  const reference = resolveQuestionReference({
+    sourceVersion: row?.sourceVersion,
+    sourceQuestionId: row?.sourceQuestionId,
+    questionId: row?.qid,
+    fallbackSetId,
+  });
+  const compositeId = reference.setId && reference.qid
+    ? `${reference.setId}-${reference.qid}`
+    : reference.qid || reference.setId || formatSessionExportQuestionId(row?.qid, fallbackSetId);
+  const rankNumber = Number(rank);
+  const rankLabel = Number.isFinite(rankNumber) && rankNumber > 0 ? `#${rankNumber}` : "#-";
+  return `${rankLabel} (${compositeId})`;
+}
+
+function formatSessionExportQuestionNumberLabel(questionMeta, includeSetId = false) {
+  const number = Number(questionMeta?.questionNumberInSet);
+  const base = Number.isFinite(number) && number > 0 ? `#${number}` : "#-";
+  if (!includeSetId) return base;
+  const setId = String(questionMeta?.sourceVersion ?? "").trim();
+  return setId ? `${base} (${setId})` : base;
 }
 
 function orderPreviewChoices(choices, effectiveAnswers) {
@@ -532,6 +637,16 @@ function mapDbQuestion(row) {
     normalizedData.stemImage,
     normalizedData.stem_image,
   ].filter(Boolean).join("|") || null;
+  const compositeReference = parseCompositeQuestionId(row?.question_id);
+  const sourceVersion = normalizedData.sourceVersion
+    ?? normalizedData.source_version
+    ?? compositeReference.sourceVersion
+    ?? null;
+  const sourceQuestionId = normalizedData.sourceQuestionId
+    ?? normalizedData.source_question_id
+    ?? normalizedData.qid
+    ?? compositeReference.sourceQuestionId
+    ?? null;
   return {
     dbId: row?.id ?? null,
     id: row?.question_id ?? row?.id ?? "",
@@ -547,8 +662,8 @@ function mapDbQuestion(row) {
     orderIndex: row?.order_index ?? 0,
     rawData: normalizedData,
     data: normalizedData,
-    sourceVersion: normalizedData.sourceVersion ?? null,
-    sourceQuestionId: normalizedData.sourceQuestionId ?? null,
+    sourceVersion,
+    sourceQuestionId,
     stemAsset,
     choices: normalizedData.choices ?? normalizedData.choicesJa ?? normalizedData.choicesEn ?? [],
     choicesJa: normalizedData.choicesJa ?? normalizedData.choices ?? [],
@@ -668,6 +783,12 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList, getQuestionS
     const question = mergeQuestionData(rawQuestion);
     const answerKey = question.questionId ?? question.id;
     const section = getQuestionSectionLabel(question);
+    const reference = resolveQuestionReference({
+      sourceVersion: question.sourceVersion ?? question.testVersion,
+      sourceQuestionId: question.sourceQuestionId,
+      questionId: answerKey,
+      fallbackSetId: question.testVersion,
+    });
     if (Array.isArray(question.parts) && question.parts.length) {
       const answer = answers[answerKey];
       question.parts.forEach((part, index) => {
@@ -675,6 +796,8 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList, getQuestionS
         const correctIndices = getEffectiveAnswerIndices(part);
         rows.push({
           qid: `${answerKey}-${index + 1}`,
+          sourceVersion: reference.setId,
+          sourceQuestionId: reference.qid,
           sectionKey: question.sectionKey || "",
           section,
           prompt: `${question.promptEn ?? question.promptBn ?? ""} ${part?.partLabel ?? ""} ${part?.questionJa ?? part?.promptEn ?? ""}`.trim(),
@@ -687,6 +810,8 @@ function buildAttemptDetailRowsFromList(answersJson, questionsList, getQuestionS
     const correctIndices = getEffectiveAnswerIndices(question);
     rows.push({
       qid: String(answerKey),
+      sourceVersion: reference.setId,
+      sourceQuestionId: reference.qid,
       sectionKey: question.sectionKey || "",
       section,
       prompt: getQuestionPrompt(question),
@@ -796,12 +921,16 @@ function buildQuestionAnalysisRows(attemptsList, questionsList, getQuestionSecti
     for (const row of rows) {
       const current = stats.get(row.qid) || {
         qid: row.qid,
+        sourceVersion: row.sourceVersion || "",
+        sourceQuestionId: row.sourceQuestionId || "",
         section: row.section,
         prompt: row.prompt,
         correct: 0,
         total: 0,
         byStudent: {},
       };
+      if (!current.sourceVersion && row.sourceVersion) current.sourceVersion = row.sourceVersion;
+      if (!current.sourceQuestionId && row.sourceQuestionId) current.sourceQuestionId = row.sourceQuestionId;
       current.total += 1;
       if (row.isCorrect) current.correct += 1;
       if (attempt?.student_id) current.byStudent[attempt.student_id] = row.isCorrect;
@@ -1302,7 +1431,18 @@ export default function AdminConsoleResultsWorkspace(props) {
           : buildQuestionAnalysisRows(sessionDetailLatestAttempts, sessionDetailQuestions, getQuestionSectionLabel)
             .sort((a, b) => {
               if (b.rate !== a.rate) return b.rate - a.rate;
-              return String(a.qid).localeCompare(String(b.qid));
+              return compareQuestionReference(
+                {
+                  setId: a.sourceVersion,
+                  qid: a.sourceQuestionId || a.qid,
+                  rawQuestionId: a.qid,
+                },
+                {
+                  setId: b.sourceVersion,
+                  qid: b.sourceQuestionId || b.qid,
+                  rawQuestionId: b.qid,
+                }
+              );
             })
       );
     const distributionStep = getDistributionTickStep(analysisSummary.maxBucketCount);
@@ -1420,11 +1560,61 @@ export default function AdminConsoleResultsWorkspace(props) {
     () => [...sessionDetailQuestionAnalysis]
       .sort((a, b) => {
         if (a.rate !== b.rate) return a.rate - b.rate;
-        return String(a.qid).localeCompare(String(b.qid));
+        return compareQuestionReference(
+          {
+            setId: a.sourceVersion,
+            qid: a.sourceQuestionId || a.qid,
+            rawQuestionId: a.qid,
+          },
+          {
+            setId: b.sourceVersion,
+            qid: b.sourceQuestionId || b.qid,
+            rawQuestionId: b.qid,
+          }
+        );
       })
       .slice(0, 5),
     [sessionDetailQuestionAnalysis]
   );
+  const sessionDetailQuestionsForDisplay = useMemo(
+    () => [...(sessionDetailQuestions ?? [])].sort((left, right) => {
+      const leftRef = resolveQuestionReference({
+        sourceVersion: left?.sourceVersion ?? left?.testVersion,
+        sourceQuestionId: left?.sourceQuestionId,
+        questionId: left?.questionId ?? left?.id,
+        fallbackSetId: selectedSessionDetail?.problem_set_id,
+      });
+      const rightRef = resolveQuestionReference({
+        sourceVersion: right?.sourceVersion ?? right?.testVersion,
+        sourceQuestionId: right?.sourceQuestionId,
+        questionId: right?.questionId ?? right?.id,
+        fallbackSetId: selectedSessionDetail?.problem_set_id,
+      });
+      const byReference = compareQuestionReference(leftRef, rightRef);
+      if (byReference !== 0) return byReference;
+      const leftOrder = Number(left?.orderIndex ?? 0);
+      const rightOrder = Number(right?.orderIndex ?? 0);
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return sessionExportNaturalCollator.compare(
+        String(left?.questionId ?? left?.id ?? ""),
+        String(right?.questionId ?? right?.id ?? "")
+      );
+    }),
+    [selectedSessionDetail?.problem_set_id, sessionDetailQuestions]
+  );
+  const sessionDetailHasMultipleSourceSets = useMemo(() => {
+    const setIds = new Set(
+      sessionDetailQuestionsForDisplay
+        .map((question) => resolveQuestionReference({
+          sourceVersion: question?.sourceVersion ?? question?.testVersion,
+          sourceQuestionId: question?.sourceQuestionId,
+          questionId: question?.questionId ?? question?.id,
+          fallbackSetId: selectedSessionDetail?.problem_set_id,
+        }).setId)
+        .filter(Boolean)
+    );
+    return setIds.size > 1;
+  }, [selectedSessionDetail?.problem_set_id, sessionDetailQuestionsForDisplay]);
   const [sessionExportModalOpen, setSessionExportModalOpen] = useState(false);
   const [sessionExportOptions, setSessionExportOptions] = useState(DEFAULT_SESSION_EXPORT_OPTIONS);
   const sessionQuestionExportRows = useMemo(() => {
@@ -1444,6 +1634,12 @@ export default function AdminConsoleResultsWorkspace(props) {
     const rows = (sessionDetailQuestions ?? []).flatMap((rawQuestion) => {
       const question = mergeQuestionData(rawQuestion);
       const answerKey = question.questionId ?? question.id;
+      const reference = resolveQuestionReference({
+        sourceVersion: question.sourceVersion ?? question.testVersion,
+        sourceQuestionId: question.sourceQuestionId,
+        questionId: answerKey,
+        fallbackSetId: selectedSessionDetail?.problem_set_id,
+      });
       const sourceQuestionKey = question.sourceQuestionId || answerKey;
       const stemAsset = [
         question.stemAsset,
@@ -1475,6 +1671,8 @@ export default function AdminConsoleResultsWorkspace(props) {
           return {
             qid,
             displayId,
+            sourceVersion: reference.setId,
+            sourceQuestionId: reference.qid,
             prompt: `${question.promptEn ?? question.promptBn ?? ""} ${part?.partLabel ?? ""} ${part?.questionJa ?? part?.promptEn ?? ""}`.trim(),
             stemImages,
             correct: correctIndices.map((value) => formatAnswerChoiceLabel(part, value)).filter(Boolean).join(" / ") || "—",
@@ -1493,6 +1691,8 @@ export default function AdminConsoleResultsWorkspace(props) {
       return [{
         qid: String(answerKey),
         displayId,
+        sourceVersion: reference.setId,
+        sourceQuestionId: reference.qid,
         prompt: getQuestionPrompt(question),
         stemImages,
         correct: correctIndices.map((value) => formatAnswerChoiceLabel(question, value)).filter(Boolean).join(" / ") || "—",
@@ -1500,14 +1700,33 @@ export default function AdminConsoleResultsWorkspace(props) {
         rate: Number(accuracy?.rate ?? 0),
       }];
     });
-    return rows.sort((left, right) => {
-      const leftKey = String(left.displayId || left.qid || "");
-      const rightKey = String(right.displayId || right.qid || "");
-      const primary = sessionExportNaturalCollator.compare(leftKey, rightKey);
+    const sortedRows = [...rows].sort((left, right) => {
+      const primary = compareQuestionReference(
+        {
+          setId: left.sourceVersion,
+          qid: left.sourceQuestionId || left.displayId || left.qid,
+          rawQuestionId: left.qid,
+        },
+        {
+          setId: right.sourceVersion,
+          qid: right.sourceQuestionId || right.displayId || right.qid,
+          rawQuestionId: right.qid,
+        }
+      );
       if (primary !== 0) return primary;
       return sessionExportNaturalCollator.compare(String(left.qid), String(right.qid));
     });
-  }, [isDailySessionDetail, isImageAsset, sessionDetailQuestionAnalysis, sessionDetailQuestions, splitAssetValues]);
+    const countsBySet = new Map();
+    return sortedRows.map((row) => {
+      const setKey = String(row.sourceVersion || selectedSessionDetail?.problem_set_id || "").trim();
+      const nextNumber = (countsBySet.get(setKey) ?? 0) + 1;
+      countsBySet.set(setKey, nextNumber);
+      return {
+        ...row,
+        questionNumberInSet: nextNumber,
+      };
+    });
+  }, [isDailySessionDetail, isImageAsset, sessionDetailQuestionAnalysis, sessionDetailQuestions, selectedSessionDetail?.problem_set_id, splitAssetValues]);
   const sessionExportHasSelections = Object.values(sessionExportOptions).some(Boolean);
   const sessionExportQuestionsDisabled = !sessionQuestionExportRows.length;
   const sessionExportRankingDisabled = !sessionDetailStudentRankingRows.length;
@@ -1521,9 +1740,24 @@ export default function AdminConsoleResultsWorkspace(props) {
         ? sessionDetailMainSectionAverages.map((row) => ({ section: row.section }))
       : sessionDetailRankingSections
   ), [isDailySessionDetail, isMockSessionDetailForExport, sessionDetailMainSectionAverages, sessionDetailRankingSections]);
-  const sessionExportQuestionDisplayIdByQid = useMemo(() => (
-    new Map(sessionQuestionExportRows.map((row) => [String(row.qid), String(row.displayId ?? "")]))
+  const sessionExportQuestionMetaByQid = useMemo(() => (
+    new Map(sessionQuestionExportRows.map((row) => [
+      String(row.qid),
+      {
+        sourceVersion: row.sourceVersion,
+        sourceQuestionId: row.sourceQuestionId,
+        questionNumberInSet: row.questionNumberInSet,
+      },
+    ]))
   ), [sessionQuestionExportRows]);
+  const sessionExportHasMultipleSourceSets = useMemo(() => {
+    const setIds = new Set(
+      sessionQuestionExportRows
+        .map((row) => String(row.sourceVersion ?? "").trim())
+        .filter(Boolean)
+    );
+    return setIds.size > 1;
+  }, [sessionQuestionExportRows]);
   const sessionExportSectionOrder = useMemo(() => {
     const hasSummary = Boolean(sessionExportOptions.resultsSummary);
     const hasQuestions = Boolean(sessionExportOptions.questions);
@@ -2585,7 +2819,7 @@ export default function AdminConsoleResultsWorkspace(props) {
 
   function QuestionPreviewCard({
     question,
-    index,
+    orderNumber = null,
     children,
     isEditMode = false,
     pendingAnswer = null,
@@ -2612,18 +2846,23 @@ export default function AdminConsoleResultsWorkspace(props) {
     const useSpeakerLayout = shouldUseSpeakerLayout(question, stemSourceText);
     const speakerLines = useSpeakerLayout ? splitTextBoxStemLines(stemSourceText) : [];
     const sectionLabel = getQuestionSectionLabel(question) || question.sectionKey;
-    const displayQuestionId = formatSessionExportQuestionId(
-      question.sourceQuestionId || question.questionId || question.id,
-      question.sourceVersion || question.testVersion || selectedSessionDetail?.problem_set_id
-    ) || formatSourceQuestionLabel(
-      question.sourceVersion || question.testVersion,
-      question.sourceQuestionId || question.questionId
-    ) || String(question.sourceQuestionId ?? "").trim()
+    const questionReference = resolveQuestionReference({
+      sourceVersion: question.sourceVersion || question.testVersion,
+      sourceQuestionId: question.sourceQuestionId,
+      questionId: question.questionId || question.id,
+      fallbackSetId: selectedSessionDetail?.problem_set_id,
+    });
+    const displayQuestionId = questionReference.qid
+      || formatSessionExportQuestionId(question.questionId || question.id, selectedSessionDetail?.problem_set_id)
       || String(question.id ?? "").split("__").filter(Boolean)[1]
       || String(question.id ?? "").trim();
-    const sourceCategory = String(
-      testMetaByVersion[question.sourceVersion || question.testVersion]?.category ?? ""
-    ).trim();
+    const combinedQidLabel = questionReference.setId
+      ? `${questionReference.setId}-${displayQuestionId}`
+      : displayQuestionId;
+    const headlinePrefix = Number.isFinite(Number(orderNumber)) && Number(orderNumber) > 0
+      ? `#${Number(orderNumber)} `
+      : "";
+    const headline = `${headlinePrefix}QID: ${combinedQidLabel}${sectionLabel ? ` ${sectionLabel}` : ""}`;
 
     const effectiveAnswers = pendingAnswer !== null
       ? pendingAnswer
@@ -2717,14 +2956,7 @@ export default function AdminConsoleResultsWorkspace(props) {
       <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 700, display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 6 }}>
-            <span>{displayQuestionId}</span>
-            {sourceCategory ? (
-              <span style={{ fontWeight: 400, fontSize: 12, color: "#6b7280" }}>
-                {sourceCategory}
-              </span>
-            ) : null}
-            {sectionLabel ? <span>{`(${sectionLabel})`}</span> : null}
-            {index != null ? <span>{`#${index + 1}`}</span> : null}
+            <span>{headline}</span>
           </div>
           {isEditMode || children ? (
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -2852,7 +3084,6 @@ export default function AdminConsoleResultsWorkspace(props) {
       <QuestionPreviewCard
         key={`${question.id}-${index}`}
         question={question}
-        index={index}
         isEditMode={previewEditMode}
         pendingAnswer={pendingAnswerEdits[question.dbId] ?? null}
         multiSelectMode={pendingAnswerEditModes[question.dbId] ?? false}
@@ -3181,7 +3412,10 @@ export default function AdminConsoleResultsWorkspace(props) {
                   <tbody>
                     {sessionDetailBestQuestions.map((row) => (
                       <tr key={`session-export-best-${row.qid}`}>
-                        <td>{sessionExportQuestionDisplayIdByQid.get(String(row.qid)) || formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}</td>
+                        <td>{formatSessionExportQuestionNumberLabel(
+                          sessionExportQuestionMetaByQid.get(String(row.qid)),
+                          sessionExportHasMultipleSourceSets
+                        )}</td>
                         <td
                           dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(formatCompactExportText(row.prompt)) }}
                         />
@@ -3211,7 +3445,10 @@ export default function AdminConsoleResultsWorkspace(props) {
                   <tbody>
                     {sessionDetailWorstQuestions.map((row) => (
                       <tr key={`session-export-worst-${row.qid}`}>
-                        <td>{sessionExportQuestionDisplayIdByQid.get(String(row.qid)) || formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}</td>
+                        <td>{formatSessionExportQuestionNumberLabel(
+                          sessionExportQuestionMetaByQid.get(String(row.qid)),
+                          sessionExportHasMultipleSourceSets
+                        )}</td>
                         <td
                           dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(formatCompactExportText(row.prompt)) }}
                         />
@@ -3245,7 +3482,10 @@ export default function AdminConsoleResultsWorkspace(props) {
               <tbody>
                     {sessionQuestionExportRows.map((row) => (
                       <tr key={`session-export-question-${row.qid}`}>
-                        <td>{row.displayId || formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}</td>
+                        <td>{formatSessionExportQuestionNumberLabel(
+                          row,
+                          sessionExportHasMultipleSourceSets
+                        )}</td>
                     <td>
                       <div
                         className="session-export-question-text"
@@ -3486,11 +3726,11 @@ export default function AdminConsoleResultsWorkspace(props) {
               <div className="admin-help" style={{ marginTop: 8 }}>{t("No questions found for this session.")}</div>
             ) : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
-                {sessionDetailQuestions.map((question, index) => (
+                {sessionDetailQuestionsForDisplay.map((question, index) => (
                   <QuestionPreviewCard
                     key={`session-detail-question-${question.id}-${index}`}
                     question={question}
-                    index={index}
+                    orderNumber={index + 1}
                   />
                 ))}
               </div>
@@ -3875,7 +4115,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                   <div className="admin-panel">
                     <div className="session-analysis-heading">{t("Top 5 Best Questions")}</div>
                     <div className="session-analysis-list">
-                      {sessionDetailBestQuestions.map((row) => (
+                      {sessionDetailBestQuestions.map((row, index) => (
                         <div key={`best-${row.qid}`} className="session-analysis-item">
                           <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
                           <div>
@@ -3884,7 +4124,11 @@ export default function AdminConsoleResultsWorkspace(props) {
                               dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || t("Question")) }}
                             />
                             <div className="session-analysis-question-id">
-                              {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
+                              {formatQuestionAnalysisRankLabel(
+                                row,
+                                index + 1,
+                                selectedSessionDetail.problem_set_id
+                              )}
                             </div>
                           </div>
                         </div>
@@ -3896,7 +4140,7 @@ export default function AdminConsoleResultsWorkspace(props) {
                   <div className="admin-panel">
                     <div className="session-analysis-heading">{t("Top 5 Worst Questions")}</div>
                     <div className="session-analysis-list">
-                      {sessionDetailWorstQuestions.map((row) => (
+                      {sessionDetailWorstQuestions.map((row, index) => (
                         <div key={`worst-${row.qid}`} className="session-analysis-item">
                           <div className="session-analysis-rate">{(row.rate * 100).toFixed(1)}%</div>
                           <div>
@@ -3905,7 +4149,11 @@ export default function AdminConsoleResultsWorkspace(props) {
                               dangerouslySetInnerHTML={{ __html: renderUnderlinesHtml(row.prompt || t("Question")) }}
                             />
                             <div className="session-analysis-question-id">
-                              {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
+                              {formatQuestionAnalysisRankLabel(
+                                row,
+                                index + 1,
+                                selectedSessionDetail.problem_set_id
+                              )}
                             </div>
                           </div>
                         </div>
@@ -3947,7 +4195,11 @@ export default function AdminConsoleResultsWorkspace(props) {
                           <tr key={`analysis-row-${row.qid}`}>
                             <td>
                               <div style={{ fontWeight: 800 }}>
-                                {formatSessionExportQuestionId(row.qid, selectedSessionDetail.problem_set_id)}
+                                {formatQuestionAnalysisDisplayId(
+                                  row,
+                                  selectedSessionDetail.problem_set_id,
+                                  sessionDetailHasMultipleSourceSets
+                                )}
                               </div>
                               <div
                                 className="admin-help"
@@ -4063,7 +4315,6 @@ export default function AdminConsoleResultsWorkspace(props) {
                     <QuestionPreviewCard
                       key={`session-analysis-popup-${question.id}-${index}`}
                       question={question}
-                      index={index}
                     />
                   ))
                 ) : (
