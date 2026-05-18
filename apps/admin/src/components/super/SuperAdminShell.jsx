@@ -16,6 +16,7 @@ import { useLanguage } from "../../lib/i18n";
 
 const SuperAdminContext = createContext(null);
 const ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY = "jft_admin_sidebar_collapsed_v1";
+const MOBILE_SIDEBAR_BREAKPOINT_PX = 900;
 const PROFILE_LOOKUP_RETRY_DELAYS_MS = [400, 1200];
 
 function waitForRetry(delayMs) {
@@ -165,7 +166,17 @@ function buildOpenGroups(pathname, superNav) {
   return groups;
 }
 
-function SuperSidebar({ pathname, email, onNavigate, onSignOut, sidebarCollapsed, onToggleSidebar }) {
+function SuperSidebar({
+  pathname,
+  email,
+  onNavigate,
+  onSignOut,
+  sidebarCollapsed,
+  onToggleSidebar,
+  isMobileViewport,
+  mobileSidebarOpen,
+  onCloseMobileSidebar,
+}) {
   const { lang, setLang, t } = useLanguage();
   const superNav = buildSuperNav(t);
   const [openGroups, setOpenGroups] = useState(() => buildOpenGroups(pathname, superNav));
@@ -174,19 +185,29 @@ function SuperSidebar({ pathname, email, onNavigate, onSignOut, sidebarCollapsed
     setOpenGroups(buildOpenGroups(pathname, superNav));
   }, [pathname, lang]);
 
+  const sidebarToggleLabel = isMobileViewport
+    ? t("Close menu")
+    : sidebarCollapsed
+      ? t("Expand menu")
+      : t("Collapse menu");
+
   return (
-    <aside className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+    <aside
+      id="super-admin-sidebar"
+      className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""} ${mobileSidebarOpen ? "mobile-open" : ""}`}
+      aria-hidden={isMobileViewport ? !mobileSidebarOpen : undefined}
+    >
       <div className="admin-sidebar-head">
         <Brand />
         <button
           className="admin-sidebar-toggle"
           type="button"
-          aria-label={sidebarCollapsed ? t("Expand menu") : t("Collapse menu")}
-          aria-expanded={!sidebarCollapsed}
-          onClick={onToggleSidebar}
+          aria-label={sidebarToggleLabel}
+          aria-expanded={isMobileViewport ? mobileSidebarOpen : !sidebarCollapsed}
+          onClick={isMobileViewport ? onCloseMobileSidebar : onToggleSidebar}
         >
           <svg viewBox="0 0 24 24" className="admin-sidebar-toggle-icon" aria-hidden="true">
-            {sidebarCollapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
+            {isMobileViewport ? <path d="M6 6l12 12M18 6 6 18" /> : sidebarCollapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
           </svg>
         </button>
       </div>
@@ -317,6 +338,8 @@ export default function SuperAdminShell({ children }) {
     routerRef.current = router;
   }, [router]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -328,6 +351,46 @@ export default function SuperAdminShell({ children }) {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_SIDEBAR_BREAKPOINT_PX}px)`);
+    const syncViewport = () => {
+      const mobile = mediaQuery.matches;
+      setIsMobileViewport(mobile);
+      if (!mobile) {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    syncViewport();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", syncViewport);
+      return () => mediaQuery.removeEventListener("change", syncViewport);
+    }
+
+    mediaQuery.addListener(syncViewport);
+    return () => mediaQuery.removeListener(syncViewport);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileViewport) return;
+    setMobileSidebarOpen(false);
+  }, [isMobileViewport, pathname]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (isMobileViewport && mobileSidebarOpen) {
+      document.body.classList.add("admin-mobile-menu-open");
+      return () => {
+        document.body.classList.remove("admin-mobile-menu-open");
+      };
+    }
+    document.body.classList.remove("admin-mobile-menu-open");
+    return undefined;
+  }, [isMobileViewport, mobileSidebarOpen]);
 
   async function getAccessToken(forceRefresh = false) {
     if (!supabase) {
@@ -822,11 +885,14 @@ export default function SuperAdminShell({ children }) {
       if (sidebarCollapsed) {
         setSidebarCollapsed(false);
       }
+      if (isMobileViewport) {
+        setMobileSidebarOpen(false);
+      }
       router.push(href);
     }
 
     content = (
-      <div className="admin-shell">
+      <div className={`admin-shell ${mobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
         <SuperSidebar
           pathname={pathname}
           email={session.user.email}
@@ -834,11 +900,34 @@ export default function SuperAdminShell({ children }) {
           onSignOut={() => supabase.auth.signOut()}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          isMobileViewport={isMobileViewport}
+          mobileSidebarOpen={mobileSidebarOpen}
+          onCloseMobileSidebar={() => setMobileSidebarOpen(false)}
+        />
+        <button
+          type="button"
+          className={`admin-mobile-sidebar-backdrop ${mobileSidebarOpen ? "visible" : ""}`}
+          aria-label={t("Close menu")}
+          onClick={() => setMobileSidebarOpen(false)}
         />
         <div className="admin-main">
           <div className="admin-wrap">
             <div className="super-page-topbar">
-              <div className="super-page-topbar-title">{pageMeta.title}</div>
+              <div className="super-page-topbar-title-row">
+                <button
+                  type="button"
+                  className="admin-mobile-menu-toggle"
+                  aria-label={mobileSidebarOpen ? t("Close menu") : t("Open menu")}
+                  aria-controls="super-admin-sidebar"
+                  aria-expanded={mobileSidebarOpen}
+                  onClick={() => setMobileSidebarOpen((current) => !current)}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    {mobileSidebarOpen ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+                  </svg>
+                </button>
+                <div className="super-page-topbar-title">{pageMeta.title}</div>
+              </div>
               <div className="super-page-topbar-meta">
                 <div className="super-page-topbar-console">{t("Superadmin Console")}</div>
                 <div className="super-page-topbar-user">

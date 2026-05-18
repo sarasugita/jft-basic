@@ -741,10 +741,19 @@ export default function AdminConsoleAttendanceWorkspace() {
         <table className="admin-table attendance-table">
           <thead>
             <tr>
-              <th className="att-col-code att-sticky-1">{t("Student No.")}</th>
+              <th className="att-col-code att-sticky-1">
+                <span className="att-col-head-main">{t("Student No.")}</span>
+                <span className="att-col-head-sub">{t("School ID")}</span>
+              </th>
               <th className="att-col-name att-sticky-2">{t("Student Name")}</th>
-              <th className="att-col-rate att-sticky-3">{t("Attendance Rate")}</th>
-              <th className="att-col-absent att-sticky-4">{t("Unexcused Absence")}</th>
+              <th className="att-col-rate att-sticky-3">
+                <span className="att-col-head-main">{t("Attendance Rate")}</span>
+                <span className="att-col-head-sub">{t("P+L / Counted Days")}</span>
+              </th>
+              <th className="att-col-absent att-sticky-4">
+                <span className="att-col-head-main">{t("Unexcused Absence")}</span>
+                <span className="att-col-head-sub">{t("Count (A)")}</span>
+              </th>
               {attendanceDayColumns.map((d) => (
                 <th key={d.id}>
                   <button className="link-btn" type="button" onClick={() => openAttendanceDay(d.day_date)}>

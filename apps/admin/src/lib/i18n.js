@@ -193,8 +193,11 @@ const ja = {
   "A: Unexcused Absence": "A：無断欠席",
   "N/A: Not Counted": "N/A：対象外",
   "Student No.": "学生番号",
+  "School ID": "学校内ID",
   "Attendance Rate": "出席率",
+  "P+L / Counted Days": "（P+L）/ 対象日",
   "Unexcused Absence": "無断欠席",
+  "Count (A)": "件数（A）",
 
   // --- Students ---
   "Add New Student": "学生を追加",

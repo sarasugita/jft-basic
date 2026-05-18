@@ -646,6 +646,13 @@ body { padding: 0; }
   box-sizing: border-box;
 }
 
+.admin-page-topbar-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .admin-page-topbar-title {
   font-size: 30px;
   font-weight: 800;
@@ -5326,6 +5333,26 @@ body { padding: 0; }
 .att-col-rate { width: var(--att-rate-w); min-width: var(--att-rate-w); max-width: var(--att-rate-w); }
 .att-col-absent { width: var(--att-abs-w); min-width: var(--att-abs-w); max-width: var(--att-abs-w); }
 
+.attendance-table th.att-col-code,
+.attendance-table th.att-col-rate,
+.attendance-table th.att-col-absent {
+  white-space: normal;
+  line-height: 1.15;
+}
+
+.att-col-head-main {
+  display: block;
+  font-weight: 900;
+}
+
+.att-col-head-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
 .attendance-table .att-sticky-1,
 .attendance-table .att-sticky-2,
 .attendance-table .att-sticky-3,
@@ -7010,5 +7037,165 @@ body { padding: 0; }
 @media (max-width: 860px) {
   .super-school-selector {
     grid-template-columns: 1fr;
+  }
+}
+
+.super-page-topbar-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.admin-mobile-menu-toggle {
+  display: none;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(17, 24, 39, 0.18);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.admin-mobile-menu-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.admin-mobile-sidebar-backdrop {
+  display: none;
+}
+
+/* Keep super admin layout operable on mobile without changing desktop behavior. */
+@media (max-width: 900px) {
+  body.admin-mobile-menu-open {
+    overflow: hidden;
+  }
+
+  .admin-shell {
+    flex-direction: column;
+    position: relative;
+  }
+
+  .admin-main {
+    width: 100%;
+  }
+
+  .admin-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    align-self: auto;
+    width: min(84vw, 320px);
+    min-width: min(84vw, 320px);
+    max-width: 320px;
+    height: 100dvh;
+    border-right: 1px solid #edf0f5;
+    border-bottom: 0;
+    padding: 16px 12px;
+    gap: 12px;
+    box-shadow: 8px 0 20px rgba(15, 23, 42, 0.22);
+    overflow-y: auto;
+    transform: translateX(-110%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.2s ease;
+    z-index: 1300;
+  }
+
+  .admin-shell.mobile-sidebar-open .admin-sidebar,
+  .admin-sidebar.mobile-open {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .admin-sidebar.collapsed {
+    width: min(84vw, 320px);
+    min-width: min(84vw, 320px);
+    max-width: 320px;
+    padding: 16px 12px;
+  }
+
+  .admin-sidebar-head {
+    align-items: center;
+  }
+
+  .admin-sidebar-toggle {
+    display: inline-flex;
+  }
+
+  .admin-nav {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .admin-sidebar-footer {
+    margin-top: 8px;
+  }
+
+  .admin-sidebar.collapsed .admin-brand {
+    display: block;
+  }
+
+  .admin-sidebar.collapsed .admin-brand-logo {
+    display: block;
+    width: min(100%, 176px);
+  }
+
+  .admin-sidebar.collapsed .admin-brand-sub {
+    display: block;
+  }
+
+  .admin-sidebar.collapsed .admin-subnav {
+    display: flex;
+  }
+
+  .admin-sidebar.collapsed .admin-nav-item {
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    font-size: 15px;
+  }
+
+  .admin-sidebar.collapsed .admin-nav-arrow {
+    display: inline-flex;
+  }
+
+  .admin-sidebar.collapsed .admin-sidebar-footer {
+    display: flex;
+  }
+
+  .admin-mobile-menu-toggle {
+    display: inline-flex;
+  }
+
+  .admin-mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    display: block;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    background: rgba(15, 23, 42, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 1250;
+  }
+
+  .admin-mobile-sidebar-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
   }
 }

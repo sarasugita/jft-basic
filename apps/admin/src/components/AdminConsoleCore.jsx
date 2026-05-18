@@ -146,6 +146,7 @@ const ADMIN_SUPABASE_SAFE_PAGE_SIZE = 500;
 const DAILY_RECORD_COMMENT_FIELDS =
   "id, student_id, comment, profiles:student_id(display_name, student_code)";
 const ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY = "jft_admin_sidebar_collapsed_v1";
+const MOBILE_SIDEBAR_BREAKPOINT_PX = 900;
 
 const ADMIN_WORKSPACE_CONFIG = {
   students: {
@@ -3412,6 +3413,8 @@ export default function AdminConsole({
   const [showPasswordChangePassword, setShowPasswordChangePassword] = useState(false);
   const [showPasswordChangeConfirmPassword, setShowPasswordChangeConfirmPassword] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [passwordChangeForm, setPasswordChangeForm] = useState({
     password: "",
     confirmPassword: "",
@@ -5629,6 +5632,41 @@ export default function AdminConsole({
     if (typeof window === "undefined") return;
     window.localStorage.setItem(ADMIN_SIDEBAR_COLLAPSE_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_SIDEBAR_BREAKPOINT_PX}px)`);
+    const syncViewport = () => {
+      const mobile = mediaQuery.matches;
+      setIsMobileViewport(mobile);
+      if (!mobile) {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    syncViewport();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", syncViewport);
+      return () => mediaQuery.removeEventListener("change", syncViewport);
+    }
+
+    mediaQuery.addListener(syncViewport);
+    return () => mediaQuery.removeListener(syncViewport);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    if (isMobileViewport && mobileSidebarOpen) {
+      document.body.classList.add("admin-mobile-menu-open");
+      return () => {
+        document.body.classList.remove("admin-mobile-menu-open");
+      };
+    }
+    document.body.classList.remove("admin-mobile-menu-open");
+    return undefined;
+  }, [isMobileViewport, mobileSidebarOpen]);
 
   useEffect(() => {
     if (!shouldPersistRegularAdminViewState || !regularAdminDataUserId || !regularAdminDataSchoolId) return;
@@ -12429,6 +12467,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   function handleAdminSchoolScopeChange(nextSchoolId) {
     // Avoid a render where the previous scoped client runs queries for the new school.
+    if (isMobileViewport) setMobileSidebarOpen(false);
     setSupabase(null);
     setSupabaseScopeId(null);
     setSchoolScopeId(nextSchoolId || null);
@@ -12436,6 +12475,7 @@ function openDailyRecordModal(record = null, recordDate = "") {
 
   function handleForcedSchoolScopeChange(nextSchoolId) {
     if (!nextSchoolId || nextSchoolId === forcedSchoolId) return;
+    if (isMobileViewport) setMobileSidebarOpen(false);
     router.push(buildScopedAdminHref(nextSchoolId, {
       adminTab: activeTab,
       attendanceSubTab,
@@ -12658,6 +12698,9 @@ function openDailyRecordModal(record = null, recordDate = "") {
   function handleSidebarMenuClick(action) {
     if (sidebarCollapsed) {
       setSidebarCollapsed(false);
+    }
+    if (isMobileViewport) {
+      setMobileSidebarOpen(false);
     }
     action();
   }
@@ -12944,9 +12987,19 @@ function openDailyRecordModal(record = null, recordDate = "") {
     testMetaByVersion,
   };
 
+  const sidebarToggleLabel = isMobileViewport
+    ? t("Close menu")
+    : sidebarCollapsed
+      ? t("Expand menu")
+      : t("Collapse menu");
+
   return (
-    <div className="admin-shell">
-      <aside className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+    <div className={`admin-shell ${mobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
+      <aside
+        id="admin-console-sidebar"
+        className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""} ${mobileSidebarOpen ? "mobile-open" : ""}`}
+        aria-hidden={isMobileViewport ? !mobileSidebarOpen : undefined}
+      >
         <div className="admin-sidebar-head">
           <div className="admin-brand">
             <div className="admin-brand-text">
@@ -12959,12 +13012,12 @@ function openDailyRecordModal(record = null, recordDate = "") {
           <button
             className="admin-sidebar-toggle"
             type="button"
-            aria-label={sidebarCollapsed ? "Expand menu" : "Collapse menu"}
-            aria-expanded={!sidebarCollapsed}
-            onClick={() => setSidebarCollapsed((current) => !current)}
+            aria-label={sidebarToggleLabel}
+            aria-expanded={isMobileViewport ? mobileSidebarOpen : !sidebarCollapsed}
+            onClick={isMobileViewport ? () => setMobileSidebarOpen(false) : () => setSidebarCollapsed((current) => !current)}
           >
             <svg viewBox="0 0 24 24" className="admin-sidebar-toggle-icon" aria-hidden="true">
-              {sidebarCollapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
+              {isMobileViewport ? <path d="M6 6l12 12M18 6 6 18" /> : sidebarCollapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
             </svg>
           </button>
         </div>
@@ -13160,11 +13213,31 @@ function openDailyRecordModal(record = null, recordDate = "") {
           </button>
         </div>
       </aside>
+      <button
+        type="button"
+        className={`admin-mobile-sidebar-backdrop ${mobileSidebarOpen ? "visible" : ""}`}
+        aria-label={t("Close menu")}
+        onClick={() => setMobileSidebarOpen(false)}
+      />
 
       <div className="admin-main">
         <div className="admin-wrap">
           <div className="admin-page-topbar">
-            <div className="admin-page-topbar-title">{adminPageTitle}</div>
+            <div className="admin-page-topbar-title-row">
+              <button
+                type="button"
+                className="admin-mobile-menu-toggle"
+                aria-label={mobileSidebarOpen ? t("Close menu") : t("Open menu")}
+                aria-controls="admin-console-sidebar"
+                aria-expanded={mobileSidebarOpen}
+                onClick={() => setMobileSidebarOpen((current) => !current)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  {mobileSidebarOpen ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+                </svg>
+              </button>
+              <div className="admin-page-topbar-title">{adminPageTitle}</div>
+            </div>
             <div className="admin-page-topbar-meta">
               {forcedSchoolId && profile?.role === "super_admin" ? (
                 <div className="admin-school-switcher admin-topbar-school-switcher">
