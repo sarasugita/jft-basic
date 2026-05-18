@@ -385,6 +385,28 @@ function buildPersonalInfoPayload(values) {
   };
 }
 
+async function getEdgeFunctionErrorMessage(error) {
+  if (!error) return "";
+  let fallback = String(error?.message ?? "").trim();
+  if (!error?.context) return fallback;
+  try {
+    const body = await error.context.json();
+    const detail = String(body?.detail ?? "").trim();
+    const serverError = String(body?.error ?? body?.message ?? "").trim();
+    if (serverError && detail) return `${serverError}: ${detail}`;
+    if (serverError) return serverError;
+    if (detail) return detail;
+  } catch {
+    try {
+      const text = String(await error.context.text()).trim();
+      if (text) return text;
+    } catch {
+      // Ignore context parsing errors and fall back to the client error message.
+    }
+  }
+  return fallback;
+}
+
 function getPersonalInfoForm(student) {
   return {
     display_name: student?.display_name ?? "",
@@ -7556,6 +7578,12 @@ export default function AdminConsole({
     }
 
     if (shouldSyncAuthEmail) {
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        setStudentInfoMsg("Session expired. Please log in again.");
+        setStudentInfoSaving(false);
+        return;
+      }
       const { data: emailUpdateData, error: emailUpdateError } = await supabase.functions.invoke(
         "update-student-email",
         {
@@ -7564,10 +7592,15 @@ export default function AdminConsole({
             email: normalizedNextEmail,
             school_id: activeSchoolId,
           },
+          headers: { Authorization: `Bearer ${accessToken}` },
         }
       );
       if (emailUpdateError || emailUpdateData?.error) {
-        const message = emailUpdateError?.message || emailUpdateData?.error || "Failed to update student login email.";
+        const invokeMessage = await getEdgeFunctionErrorMessage(emailUpdateError);
+        const payloadMessage = emailUpdateData?.detail
+          ? `${emailUpdateData.error}: ${emailUpdateData.detail}`
+          : emailUpdateData?.error;
+        const message = invokeMessage || payloadMessage || "Failed to update student login email.";
         setStudentInfoMsg(`Profile saved, but login email update failed: ${message}`);
         setStudentInfoSaving(false);
         return;
